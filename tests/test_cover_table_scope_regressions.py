@@ -47,6 +47,16 @@ def _cell_border_values(cell, side: str) -> list[str]:
     )
 
 
+def _cell_border_sizes(cell, side: str) -> list[str]:
+    return cell._tc.xpath(
+        "./*[namespace-uri()='%s' and local-name()='tcPr']"
+        "/*[namespace-uri()='%s' and local-name()='tcBorders']"
+        f"/*[namespace-uri()='%s' and local-name()='{side}']"
+        "/@*[local-name()='sz']"
+        % (_W_NS, _W_NS, _W_NS)
+    )
+
+
 def _table_border_values(tbl, side: str) -> list[str]:
     return tbl._tbl.xpath(
         "./*[namespace-uri()='%s' and local-name()='tblPr']"
@@ -239,3 +249,31 @@ def test_table_format_applies_three_line_even_to_md_cleanup_marked_tables() -> N
     assert _cell_border_values(body_tbl.cell(0, 0), "top") == ["single"]
     assert _cell_border_values(body_tbl.cell(0, 0), "bottom") == ["single"]
     assert _cell_border_values(body_tbl.cell(2, 0), "bottom") == ["single"]
+
+
+def test_three_line_border_uses_outer_and_inner_width_semantics() -> None:
+    doc = Document()
+    doc.add_paragraph("硕士学位论文")
+    doc.add_paragraph("第一章 绪论")
+    doc.add_paragraph("这是正文内容。")
+
+    tbl = doc.add_table(rows=3, cols=2)
+    tbl.cell(0, 0).text = "项目"
+    tbl.cell(0, 1).text = "数值"
+    tbl.cell(1, 0).text = "A"
+    tbl.cell(1, 1).text = "1"
+    tbl.cell(2, 0).text = "B"
+    tbl.cell(2, 1).text = "2"
+
+    cfg = load_default_scene()
+    cfg.normal_table_border_mode = "three_line"
+    cfg.three_line_header_width_pt = 1.25
+    cfg.three_line_bottom_width_pt = 0.5
+
+    TableFormatRule().apply(doc, cfg, ChangeTracker(), {"doc_tree": _doc_tree(doc)})
+
+    assert _cell_border_sizes(tbl.cell(0, 0), "top") == ["10"]
+    assert _cell_border_sizes(tbl.cell(0, 0), "bottom") == ["4"]
+    assert _cell_border_sizes(tbl.cell(2, 0), "bottom") == ["10"]
+    assert _table_border_values(tbl, "insideH") == ["none"]
+    assert _table_border_values(tbl, "insideV") == ["none"]

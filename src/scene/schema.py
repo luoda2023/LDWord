@@ -690,9 +690,9 @@ class SceneConfig:
     normal_table_border_mode: str = "three_line"
     # 全框线线宽（磅）
     table_border_width_pt: float = 0.5
-    # 三线表：表头线宽（磅，首行上下均使用）
+    # 三线表：外边线线宽（磅；第一条与最后一条共用）
     three_line_header_width_pt: float = 1.0
-    # 三线表：表尾线宽（磅）
+    # 三线表：中间线线宽（磅；表头下分隔线）
     three_line_bottom_width_pt: float = 0.5
     # 常规表格内文字行距：single=单倍（默认）, one_half=1.5倍, double=双倍
     normal_table_line_spacing_mode: str = "single"

@@ -1681,10 +1681,11 @@ def _set_table_border_side(tbl_borders, side: str, val: str, sz: int, color: str
     border.set(_w("color"), color)
 
 
-def _set_three_line_borders(tbl_el, header_sz_eighth_pt: int = 8, bottom_sz_eighth_pt: int = 4) -> None:
+def _set_three_line_borders(tbl_el, outer_sz_eighth_pt: int = 8, inner_sz_eighth_pt: int = 4) -> None:
     """Apply strict three-line style:
-    - First row: top + bottom (thick)
-    - Last row: bottom (thin)
+    - First row top    = outer
+    - First row bottom = inner
+    - Last row bottom  = outer
     - No other borders
     """
     tblPr = tbl_el.find(_w("tblPr"))
@@ -1716,15 +1717,15 @@ def _set_three_line_borders(tbl_el, header_sz_eighth_pt: int = 8, bottom_sz_eigh
     if not rows:
         return
 
-    # First row: top + bottom thick.
+    # First row: top outer + bottom inner.
     for tc in rows[0].findall(_w("tc")):
-        _set_tc_side_border(tc, "top", "single", header_sz_eighth_pt)
-        _set_tc_side_border(tc, "bottom", "single", header_sz_eighth_pt)
+        _set_tc_side_border(tc, "top", "single", outer_sz_eighth_pt)
+        _set_tc_side_border(tc, "bottom", "single", inner_sz_eighth_pt)
 
-    # Last row: bottom thin.
+    # Last row: bottom outer.
     last_cells = rows[-1].findall(_w("tc"))
     for tc in last_cells:
-        _set_tc_side_border(tc, "bottom", "single", bottom_sz_eighth_pt)
+        _set_tc_side_border(tc, "bottom", "single", outer_sz_eighth_pt)
 
 
 def _format_cell_paragraphs(tbl_el, line_spacing_mode: str = "single"):
@@ -2300,16 +2301,16 @@ class TableFormatRule(BaseRule):
                 _set_table_borders(tbl_el, size_eighth_pt=max(1, grid_sz))
                 border_applied_count += 1
             elif table_border_mode == "three_line":
-                header_sz = int(
+                outer_sz = int(
                     getattr(config, "three_line_header_width_pt", 1.0) * 8
                 )
-                bottom_sz = int(
+                inner_sz = int(
                     getattr(config, "three_line_bottom_width_pt", 0.5) * 8
                 )
                 _set_three_line_borders(
                     tbl_el,
-                    header_sz_eighth_pt=max(1, header_sz),
-                    bottom_sz_eighth_pt=max(1, bottom_sz),
+                    outer_sz_eighth_pt=max(1, outer_sz),
+                    inner_sz_eighth_pt=max(1, inner_sz),
                 )
                 border_applied_count += 1
 

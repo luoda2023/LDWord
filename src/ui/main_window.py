@@ -4280,7 +4280,7 @@ class FormatConfigDialog(QDialog):
         )
         layout.addRow("全框线线宽:", self._grid_border_width_spin)
 
-        # 三线表表头线宽
+        # 三线表外边线线宽（首条与末条共用）
         self._three_line_header_spin = ScrollSafeDoubleSpinBox()
         self._three_line_header_spin.setRange(0.25, 3.0)
         self._three_line_header_spin.setSingleStep(0.25)
@@ -4288,9 +4288,10 @@ class FormatConfigDialog(QDialog):
         self._three_line_header_spin.setValue(
             getattr(cfg, "three_line_header_width_pt", 1.0)
         )
-        layout.addRow("三线表表头线宽:", self._three_line_header_spin)
+        self._three_line_header_spin.setToolTip("控制第一条和最后一条线宽。")
+        layout.addRow("三线表外边线线宽:", self._three_line_header_spin)
 
-        # 三线表表尾线宽
+        # 三线表中间线线宽（表头下分隔线）
         self._three_line_bottom_spin = ScrollSafeDoubleSpinBox()
         self._three_line_bottom_spin.setRange(0.25, 3.0)
         self._three_line_bottom_spin.setSingleStep(0.25)
@@ -4298,7 +4299,8 @@ class FormatConfigDialog(QDialog):
         self._three_line_bottom_spin.setValue(
             getattr(cfg, "three_line_bottom_width_pt", 0.5)
         )
-        layout.addRow("三线表表尾线宽:", self._three_line_bottom_spin)
+        self._three_line_bottom_spin.setToolTip("控制表头下分隔线线宽。")
+        layout.addRow("三线表中间线线宽:", self._three_line_bottom_spin)
 
         layout.addRow(self._build_section_divider("公式表格配置"))
 

@@ -51,6 +51,7 @@ def test_multiple_unit_exponents_are_detected() -> None:
         "(D1-D4)",
         "[200k-1.1M]",
         "(A-1)",
+        "g-1",
     ],
 )
 def test_non_unit_tokens_remain_plain_text(text: str) -> None:
@@ -82,6 +83,7 @@ def test_non_unit_tokens_remain_plain_text(text: str) -> None:
         "H1 标题",
         "h3c",
         "h3c.com",
+        "g-1",
     ],
 )
 def test_appendix_labels_and_gene_tokens_remain_plain_text(text: str) -> None:
@@ -210,6 +212,8 @@ def test_long_gap_index_like_span_remains_plain_text() -> None:
         "220 V??",
         "40 K???",
         "300 N??",
+        "g-1",
+        "g-1 catalyst",
     ],
 )
 def test_restore_reference_chem_typography_keeps_false_positive_tokens_plain(text: str) -> None:
@@ -236,3 +240,157 @@ def test_restore_reference_chem_typography_still_formats_real_formula() -> None:
         ("4", "subscript"),
         ("2-", "superscript"),
     ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Fe(IV)",
+        "Cu(II)",
+        "Co(III)",
+        "As(V)",
+        "U(VI)",
+        "Fe(IV) oxide",
+        "Fe (IV)",
+        "Fe（IV）",
+    ],
+)
+def test_roman_oxidation_state_tokens_remain_plain(text: str) -> None:
+    assert _superscript_positions(text) == []
+    assert _subscript_positions(text) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "superscripts", "subscripts"),
+    [
+        ("Fe(II)Cl2", [], [8]),
+        ("Fe(III)2O3", [], [7, 9]),
+        ("Mn(VII)O4-", [9], [8]),
+        ("Cr(VI)O4^2-", [9, 10], [7]),
+        ("U(VI)O2^2+", [8, 9], [6]),
+    ],
+)
+def test_roman_oxidation_state_compounds_keep_real_formula_marks(
+    text: str,
+    superscripts: list[int],
+    subscripts: list[int],
+) -> None:
+    assert _superscript_positions(text) == superscripts
+    assert _subscript_positions(text) == subscripts
+
+
+def test_restore_reference_chem_typography_keeps_roman_oxidation_plain() -> None:
+    doc = Document()
+    para = doc.add_paragraph("Fe(IV)")
+
+    font_changed, mark_changed = _restore_reference_chem_typography(para)
+
+    assert font_changed >= 0
+    assert mark_changed == 0
+    assert all(_run_vert_align(run) is None for run in para.runs)
+
+
+@pytest.mark.parametrize(
+    ("text", "subscripts"),
+    [
+        ("g-C3N4", [3, 5]),
+        ("p-C3N4", [3, 5]),
+        ("n-TiO2", [5]),
+        ("g-C3N4 catalyst", [3, 5]),
+    ],
+)
+def test_material_phase_prefix_formulas_keep_subscripts(
+    text: str,
+    subscripts: list[int],
+) -> None:
+    assert _superscript_positions(text) == []
+    assert _subscript_positions(text) == subscripts
+
+
+@pytest.mark.parametrize(
+    ("text", "subscripts"),
+    [
+        ("TiO2/In2S3", [3, 7, 9]),
+        ("Au/BiVO4", [7]),
+        ("g-C3N4/TiO2", [3, 5, 10]),
+        ("α-Fe3O4/TiO2", [4, 6, 11]),
+    ],
+)
+def test_slash_joined_formula_composites_keep_subscripts(
+    text: str,
+    subscripts: list[int],
+) -> None:
+    assert _superscript_positions(text) == []
+    assert _subscript_positions(text) == subscripts
+
+
+@pytest.mark.parametrize(
+    ("text", "subscripts"),
+    [
+        ("TiO2/In2s3", [3, 7, 9]),
+        ("TiO2 / In2s3", [3, 9, 11]),
+    ],
+)
+def test_formula_composite_context_can_recover_single_letter_case_drift(
+    text: str,
+    subscripts: list[int],
+) -> None:
+    assert _superscript_positions(text) == []
+    assert _subscript_positions(text) == subscripts
+
+
+@pytest.mark.parametrize(
+    ("text", "superscripts", "subscripts"),
+    [
+        ("WO3/N-CDs", [], [2]),
+        ("Ho/CQDs/AgInS2/In2S3", [], [13, 17, 19]),
+        ("g-C3N4/Fe2O3", [], [3, 5, 9, 11]),
+    ],
+)
+def test_mixed_material_chains_format_formula_segments_only(
+    text: str,
+    superscripts: list[int],
+    subscripts: list[int],
+) -> None:
+    assert _superscript_positions(text) == superscripts
+    assert _subscript_positions(text) == subscripts
+
+
+@pytest.mark.parametrize(
+    ("text", "subscripts"),
+    [
+        ("α-Fe3O4", [4, 6]),
+        ("ɑ-Fe3O4", [4, 6]),
+        ("𝛂-Fe3O4", [4, 6]),
+        ("𝛼-Fe3O4", [4, 6]),
+    ],
+)
+def test_alpha_like_formula_prefix_variants_are_normalized_conservatively(
+    text: str,
+    subscripts: list[int],
+) -> None:
+    assert _superscript_positions(text) == []
+    assert _subscript_positions(text) == subscripts
+
+
+def test_ascii_a_prefix_is_not_treated_as_greek_alpha_formula_prefix() -> None:
+    assert _marked_positions("a-Fe3O4") == []
+
+
+def test_reference_title_samples_keep_expected_formula_typography() -> None:
+    assert _subscript_positions("TiO2/In2S3 S-scheme photocatalyst") == [3, 7, 9]
+    assert _subscript_positions("Au/BiVO4") == [7]
+    assert _subscript_positions("Lu3NbO7") == [2, 6]
+    assert _subscript_positions("Ho/CQDs/AgInS2/In2S3") == [13, 17, 19]
+    assert _subscript_positions("WO3/N-CDs") == [2]
+    assert _subscript_positions("g-C3N4/Fe2O3") == [3, 5, 9, 11]
+
+
+def test_reference_title_samples_keep_existing_singlet_oxygen_behavior() -> None:
+    assert _superscript_positions("1 O2") == [0]
+    assert _subscript_positions("1 O2") == [3]
+
+
+def test_reference_title_samples_keep_ferryl_oxidation_state_on_baseline() -> None:
+    assert _superscript_positions("Fe(IV) = O") == []
+    assert _subscript_positions("Fe(IV) = O") == []

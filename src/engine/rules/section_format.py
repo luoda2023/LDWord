@@ -156,6 +156,14 @@ _INTERNAL_CHEM_CONFUSABLE_CHAR_MAP = {
     "ℎ": "h",
     "ℓ": "l",
     "K": "K",
+    # Greek/material-prefix display variants seen in OCR / copied equations.
+    "ɑ": "α",
+    "𝛂": "α",
+    "𝛼": "α",
+    "𝛃": "β",
+    "𝛽": "β",
+    "𝛄": "γ",
+    "𝛾": "γ",
 }
 _BRACKET_OPEN_TO_CLOSE = {"(": ")", "[": "]", "{": "}"}
 _RE_MASS_ADDUCT_CHARGE = re.compile(r"^\[[A-Za-z0-9+\-−＋－]+\](\d*[+\-−＋－])$")
@@ -278,6 +286,9 @@ _RE_SPACED_FORMULA_SPAN = re.compile(
     r"[A-Za-z0-9Ａ-Ｚａ-ｚ０-９µμα-ωΑ-ΩΩω\(\)\[\]\{\}（）［］｛｝"
     r"\+\-−＋－‐‑‒–—―=\^\.·•∙⋅≡/%％／<>→←↔"
     r"⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₙ\s]{4,}"
+)
+_RE_PHASE_PREFIX_TOKEN = re.compile(
+    r"^(?P<prefix>g|p|n|α|β|γ)(?P<sep>[\-−－‐‑‒–—―])(?P<rest>.+)$"
 )
 _RE_GREEK_PREFIX_TOKEN = re.compile(r"^(?P<prefix>[α-ωΑ-Ω])(?P<sep>[\-−－‐‑‒–—―])(?P<rest>.+)$")
 _RE_PLAIN_FORMULA_CHAIN = re.compile(r"^(?:\d{0,3})?(?:[A-Z][a-z]?\d*){2,}$")
@@ -1367,6 +1378,13 @@ def _iter_chem_token_candidates(
         normalized_token = _normalize_chem_token_key(token)
         if not normalized_token:
             continue
+        if _is_weak_single_unit_exponent_token_in_context(
+            text,
+            abs_start,
+            abs_end,
+            token,
+        ):
+            continue
         right_char = text[abs_end] if abs_end < len(text) else ""
         right_non_space_char = _first_non_space_char(text[abs_end:])
 
@@ -1580,6 +1598,84 @@ def _apply_isotope_prefix_marks(token: str, core_end: int, marks: list[str | Non
         _mark_style(marks, 0, i, "superscript")
         if metastable:
             _mark_style(marks, i, i + 1, "superscript")
+
+
+def _normalize_formula_case_drift_for_composite(token: str) -> str:
+    """Conservatively recover single-letter case drift inside slash composites."""
+    t = _normalize_formula_token_chars(token or "")
+    if not t:
+        return ""
+    if not any(ch.isdigit() for ch in t):
+        return t
+    if not any(_is_ascii_upper(ch) for ch in t):
+        return t
+
+    chars = list(t)
+    for i, ch in enumerate(chars):
+        if not _is_ascii_lower(ch):
+            continue
+        prev = chars[i - 1] if i > 0 else ""
+        next_ch = chars[i + 1] if (i + 1) < len(chars) else ""
+        if i > 0 and _is_ascii_upper(prev) and (prev + ch) in _ELEMENT_SYMBOLS:
+            continue
+        if prev.isdigit() and (next_ch.isdigit() or _is_ascii_upper(next_ch)):
+            chars[i] = ch.upper()
+    return "".join(chars)
+
+
+def _looks_like_material_plain_segment(token: str) -> bool:
+    """Allow non-formula material abbreviations inside slash-joined composites."""
+    t = _normalize_formula_token_chars((token or "").strip())
+    if not t:
+        return False
+    if _RE_SINGLE_ELEMENT_TOKEN.fullmatch(t):
+        return t in _ELEMENT_SYMBOLS
+    if _looks_like_plain_unit_token(t):
+        return True
+    if re.fullmatch(r"[A-Z]{2,6}[a-z]{0,2}", t):
+        return True
+    if re.fullmatch(r"[A-Z](?:-[A-Z]{1,6}[a-z]{0,2})+", t):
+        return True
+    return False
+
+
+def _build_slash_formula_marks(
+    token: str,
+    right_char: str = "",
+    right_non_space_char: str = "",
+) -> list[str | None]:
+    token = _normalize_formula_token_chars(token or "")
+    n = len(token)
+    if n <= 0 or "/" not in token:
+        return [None] * n
+
+    parts = token.split("/")
+    if len(parts) < 2 or any(not part for part in parts):
+        return [None] * n
+
+    out: list[str | None] = [None] * n
+    cursor = 0
+    strong_part_count = 0
+    for idx, part in enumerate(parts):
+        normalized_part = _normalize_formula_case_drift_for_composite(part)
+        nested = _build_token_formula_marks(
+            normalized_part,
+            right_char="/" if idx < len(parts) - 1 else right_char,
+            right_non_space_char="/" if idx < len(parts) - 1 else right_non_space_char,
+        )
+        if any(nested):
+            strong_part_count += 1
+        elif not _looks_like_material_plain_segment(part):
+            return [None] * n
+
+        for i, style in enumerate(nested):
+            if style and (cursor + i) < n:
+                out[cursor + i] = style
+        cursor += len(part)
+        if idx < len(parts) - 1:
+            cursor += 1
+
+    return out if strong_part_count > 0 else [None] * n
 
 
 def _build_token_chem_marks(
@@ -2004,6 +2100,89 @@ def _build_token_unit_formula_marks(token: str, right_char: str = "") -> list[st
     return token_marks if has_mark else [None] * n
 
 
+def _neighbor_unit_context_chunk(text: str, *, abs_start: int, abs_end: int, left: bool) -> str:
+    if left:
+        m = re.search(r"([A-Za-zµμΩω%\(\)\-^0-9]+)\s*$", text[:abs_start])
+    else:
+        m = re.match(r"\s*([A-Za-zµμΩω%\(\)\-^0-9]+)", text[abs_end:])
+    return m.group(1) if m else ""
+
+
+def _chunk_has_strong_unit_signal(chunk: str) -> bool:
+    t = _normalize_formula_token_chars((chunk or "").strip())
+    if not t:
+        return False
+    if _is_known_unit_segment(t):
+        return True
+    return any(_build_token_unit_formula_marks(t))
+
+
+def _is_weak_single_unit_exponent_token_in_context(
+    text: str,
+    abs_start: int,
+    abs_end: int,
+    token: str,
+) -> bool:
+    t = _normalize_formula_token_chars((token or "").strip())
+    if not re.fullmatch(r"[a-z]-\d+", t):
+        return False
+
+    left_slice = text[:abs_start].rstrip()
+    left_non_space = left_slice[-1] if left_slice else ""
+    right_non_space = _first_non_space_char(text[abs_end:])
+
+    if right_non_space and _is_cjk(right_non_space):
+        return False
+    if (
+        (left_non_space and left_non_space in _DOT_SEPARATORS + "/")
+        or (right_non_space and right_non_space in _DOT_SEPARATORS + "/")
+    ):
+        return False
+
+    left_chunk = _neighbor_unit_context_chunk(
+        text,
+        abs_start=abs_start,
+        abs_end=abs_end,
+        left=True,
+    )
+    right_chunk = _neighbor_unit_context_chunk(
+        text,
+        abs_start=abs_start,
+        abs_end=abs_end,
+        left=False,
+    )
+    if _chunk_has_strong_unit_signal(left_chunk):
+        return False
+    if _chunk_has_strong_unit_signal(right_chunk):
+        return False
+    return True
+
+
+def _is_weak_single_unit_exponent_leading_span(span_text: str) -> bool:
+    span = _normalize_formula_scan_text((span_text or "").strip())
+    if not span:
+        return False
+
+    m = re.match(r"(?P<token>[a-z]-\d+)\s+(?P<rest>.+)$", span)
+    if not m:
+        return False
+
+    rest = m.group("rest").lstrip()
+    if not rest:
+        return True
+
+    right_non_space = _first_non_space_char(rest)
+    if right_non_space and _is_cjk(right_non_space):
+        return False
+    if right_non_space and right_non_space in _DOT_SEPARATORS + "/":
+        return False
+
+    next_chunk = _neighbor_unit_context_chunk(rest, abs_start=0, abs_end=0, left=False)
+    if _chunk_has_strong_unit_signal(next_chunk):
+        return False
+    return True
+
+
 def _build_token_formula_marks(
     token: str,
     right_char: str = "",
@@ -2032,6 +2211,29 @@ def _build_token_formula_marks(
                     if style:
                         out[i] = style
                 return out
+
+    m_phase = _RE_PHASE_PREFIX_TOKEN.fullmatch(token)
+    if m_phase:
+        nested = _build_token_formula_marks(
+            m_phase.group("rest"),
+            right_char=right_char,
+            right_non_space_char=right_non_space_char,
+        )
+        if any(nested):
+            out: list[str | None] = [None] * n
+            offset = len(m_phase.group("prefix") + m_phase.group("sep"))
+            for i, style in enumerate(nested):
+                if style and (offset + i) < n:
+                    out[offset + i] = style
+            return out
+
+    slash_marks = _build_slash_formula_marks(
+        token,
+        right_char=right_char,
+        right_non_space_char=right_non_space_char,
+    )
+    if any(slash_marks):
+        return slash_marks
 
     # Balanced wrapper around a single token, e.g. "(cm-2)", "[cm-2]".
     wrapper_pairs = {"(": ")", "[": "]", "{": "}"}
@@ -2096,12 +2298,10 @@ def _build_token_formula_marks(
 
     m_roman = _RE_ROMAN_OX_STATE.fullmatch(token)
     if m_roman and m_roman.group("elem") in _ELEMENT_SYMBOLS:
-        roman_marks: list[str | None] = [None] * n
-        left = token.find("(")
-        right = token.rfind(")")
-        if left >= 0 and right > left + 1:
-            _mark_style(roman_marks, left + 1, right, "superscript")
-        return roman_marks
+        # Roman oxidation states are chemistry qualifiers, not charge marks.
+        # Keep them eligible for chemistry-token/font detection via the
+        # surrounding recognizer chain, but do not emit super/subscript here.
+        return [None] * n
 
     if _looks_like_isotope_label_token(token):
         m_iso = _RE_ISOTOPE_LABEL_TOKEN.fullmatch(token)
@@ -2342,6 +2542,8 @@ def _build_chem_style_marks(
     for span_start, span_end, span_text, compact_raw, compact_norm in _iter_compacted_formula_spans(text):
         if _looks_like_spaced_single_letter_isotope_noise(span_text, compact_raw):
             continue
+        if _is_weak_single_unit_exponent_leading_span(span_text):
+            continue
         right_char = text[span_end] if span_end < len(text) else ""
         right_non_space_char = _first_non_space_char(text[span_end:])
         use_span, manual_mask = _resolve_chem_token_policy(compact_raw, compact_norm, runtime)
@@ -2409,6 +2611,8 @@ def _build_chem_font_mask(
 
     for span_start, span_end, span_text, compact_raw, compact_norm in _iter_compacted_formula_spans(text):
         if _looks_like_spaced_single_letter_isotope_noise(span_text, compact_raw):
+            continue
+        if _is_weak_single_unit_exponent_leading_span(span_text):
             continue
         right_char = text[span_end] if span_end < len(text) else ""
         right_non_space_char = _first_non_space_char(text[span_end:])

@@ -564,6 +564,20 @@ def test_misc_format_controls_roundtrip_into_draft_config():
     assert draft.pipeline_critical_rules == draft.pipeline
 
 
+def test_format_config_dialog_uses_three_line_outer_inner_labels() -> None:
+    _app()
+    cfg = load_scene_from_data({})
+    dlg = FormatConfigDialog(cfg)
+    try:
+        texts = [label.text() for label in dlg.findChildren(QLabel)]
+        assert "三线表外边线线宽:" in texts
+        assert "三线表中间线线宽:" in texts
+        assert "三线表表头线宽:" not in texts
+        assert "三线表表尾线宽:" not in texts
+    finally:
+        dlg.close()
+
+
 def test_special_indent_mode_switches_cleanly_in_ui():
     _app()
     cfg = load_scene_from_data({})
