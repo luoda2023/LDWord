@@ -934,9 +934,9 @@
     "unify_spacing": true
   },
   "formula_table": {
-    "formula_font_name": "Times New Roman",
-    "formula_font_size_pt": 10.5,
-    "formula_font_size_display": "五号",
+    "formula_font_name": "Cambria Math",
+    "formula_font_size_pt": 12.0,
+    "formula_font_size_display": "",
     "formula_line_spacing": 1.0,
     "formula_space_before_pt": 0.0,
     "formula_space_after_pt": 0.0,
@@ -946,7 +946,7 @@
     "number_alignment": "right",
     "number_font_name": "Times New Roman",
     "number_font_size_pt": 10.5,
-    "number_font_size_display": "五号",
+    "number_font_size_display": "",
     "auto_shrink_number_column": true
   },
   "format_scope": {
