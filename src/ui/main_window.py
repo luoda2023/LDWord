@@ -1459,6 +1459,78 @@ PIPELINE_STEP_LABELS = {
     "validation": "校验",
 }
 
+_EXECUTION_LOG_RULE_LABELS = {
+    **PIPELINE_STEP_LABELS,
+    "pipeline": "执行流程",
+}
+
+_EXECUTION_LOG_TARGET_LABELS = {
+    "pipeline": "执行流程",
+    "range_scope": "范围外内容",
+    "mathtype_office_fallback": "MathType Office 兜底转换",
+    "final_doc_fields": "目录与页码域更新",
+    "post_refresh_toc_format": "目录刷新后格式校正",
+    "compare_doc": "对比稿生成",
+    "summary": "汇总",
+}
+
+_EXECUTION_LOG_CONTROL_STEPS = (
+    "md_cleanup",
+    "whitespace_normalize",
+    "formula_convert",
+    "formula_to_table",
+    "equation_table_format",
+    "formula_style",
+    "citation_link",
+)
+
+
+def _execution_log_rule_label(rule_name: str) -> str:
+    key = str(rule_name or "").strip()
+    if not key:
+        return ""
+    return _EXECUTION_LOG_RULE_LABELS.get(key, key)
+
+
+def _execution_log_target_label(target: str) -> str:
+    key = str(target or "").strip()
+    if not key:
+        return ""
+    if key in _EXECUTION_LOG_TARGET_LABELS:
+        return _EXECUTION_LOG_TARGET_LABELS[key]
+    if key in SECTION_LABELS:
+        return SECTION_LABELS[key]
+    if key in PIPELINE_STEP_LABELS:
+        return PIPELINE_STEP_LABELS[key]
+    return key
+
+
+def _execution_log_section_label(section_name: str) -> str:
+    key = str(section_name or "").strip()
+    if not key:
+        return ""
+    return SECTION_LABELS.get(key, key)
+
+
+def _format_execution_log_sections(section_names: list[str] | tuple[str, ...]) -> str:
+    labels = [
+        _execution_log_section_label(section_name)
+        for section_name in section_names
+        if str(section_name or "").strip()
+    ]
+    return "、".join(labels) if labels else "（无）"
+
+
+def _format_execution_log_pipeline_controls(pipeline: list[str] | tuple[str, ...] | None) -> str:
+    enabled_steps = set(pipeline or [])
+    parts = []
+    for step in _EXECUTION_LOG_CONTROL_STEPS:
+        parts.append(
+            f"{_execution_log_rule_label(step)}="
+            f"{'开启' if step in enabled_steps else '关闭'}"
+        )
+    return "流程控制: " + "，".join(parts) + "（以实验室开关为准）"
+
 PIPELINE_DEFAULT_ORDER = [
     "page_setup",
     "md_cleanup",
@@ -4534,7 +4606,7 @@ class FormatConfigDialog(QDialog):
         note = QLabel(
             "说明：md_cleanup 由主界面“实验室 - Markdown 文本修复”开关统一控制，"
             "whitespace_normalize 由主界面“实验室 - 空白清洗与中英文符号规范”开关统一控制，"
-            "formula_convert / formula_to_table / equation_table_format / formula_style 由主界面“实验室 - 公式表格管理（总开关）”统一控制，"
+            "formula_convert / formula_to_table / equation_table_format / formula_style 由主界面“实验室 - 公式表格管理”统一控制，"
             "citation_link 由主界面“实验室 - 正文参考文献域关联”开关统一控制，"
             "运行前会覆盖此页同名步骤状态。"
         )
@@ -4560,7 +4632,7 @@ class FormatConfigDialog(QDialog):
                 cb.setToolTip("由主界面“实验室 - 空白清洗与中英文符号规范”开关控制。")
             elif step in {"formula_convert", "formula_to_table", "equation_table_format", "formula_style"}:
                 cb.setEnabled(False)
-                cb.setToolTip("由主界面“实验室 - 公式表格管理（总开关）”控制。")
+                cb.setToolTip("由主界面“实验室 - 公式表格管理”控制。")
             elif step == "citation_link":
                 cb.setEnabled(False)
                 cb.setToolTip("由主界面“实验室 - 正文参考文献域关联”开关控制。")
@@ -5632,10 +5704,10 @@ class MainWindow(QMainWindow):
         formula_row = QHBoxLayout(self._formula_management_row)
         formula_row.setContentsMargins(0, 0, 0, 0)
         formula_row.setSpacing(0)
-        self._formula_management_check = QCheckBox("公式表格管理（总开关）")
+        self._formula_management_check = QCheckBox("公式表格管理")
         self._formula_management_check.setChecked(False)
         self._formula_management_check.setToolTip(
-            "该开关为公式相关子功能的父级开关；关闭时子项会隐藏且不执行。"
+            "统一控制公式编码统一、公式转公式表格、公式表格编号、公式格式统一；关闭时子项会隐藏且不执行。"
         )
         formula_row.addWidget(self._formula_management_check)
 
@@ -5885,10 +5957,10 @@ class MainWindow(QMainWindow):
                 "note": "注意事项：建议先在样本文档验证后再批量处理",
             },
             "formula_management": {
-                "title": "公式表格管理（总开关） 使用须知",
-                "status": "开发状态：父子开关已拆分，建议先小样本验证",
-                "feature": "实际功能：统一启停公式编码统一、公式转公式表格、公式表格编号、公式格式统一",
-                "note": "注意事项：关闭总开关时将隐藏子功能并禁用对应流程步骤",
+                "title": "公式表格管理 使用须知",
+                "status": "开发状态：已完成并通过回归测试",
+                "feature": "实际功能：统一控制公式编码统一、公式转公式表格、公式表格编号、公式格式统一的启停",
+                "note": "注意事项：关闭后会隐藏子功能，并跳过对应流程步骤",
             },
             "citation_link": {
                 "title": "正文参考文献域关联 使用须知",
@@ -7991,18 +8063,8 @@ class MainWindow(QMainWindow):
             enabled = []
         self._log(f"编号: {'重建' if mode == 'B' else '保留'}, "
                   f"场景: {self._config.name}")
-        self._log(f"范围: {scope_desc}, 分区: {', '.join(enabled)}")
-        self._log(
-            "流程控制: md_cleanup={}, whitespace_normalize={}, formula_convert={}, formula_to_table={}, equation_table_format={}, formula_style={}, citation_link={}（以实验室开关为准）".format(
-                "开启" if "md_cleanup" in (self._config.pipeline or []) else "关闭",
-                "开启" if "whitespace_normalize" in (self._config.pipeline or []) else "关闭",
-                "开启" if "formula_convert" in (self._config.pipeline or []) else "关闭",
-                "开启" if "formula_to_table" in (self._config.pipeline or []) else "关闭",
-                "开启" if "equation_table_format" in (self._config.pipeline or []) else "关闭",
-                "开启" if "formula_style" in (self._config.pipeline or []) else "关闭",
-                "开启" if "citation_link" in (self._config.pipeline or []) else "关闭",
-            )
-        )
+        self._log(f"范围: {scope_desc}, 分区: {_format_execution_log_sections(enabled)}")
+        self._log(_format_execution_log_pipeline_controls(self._config.pipeline or []))
         if "whitespace_normalize" in (self._config.pipeline or []) and ws_cfg is not None:
             ws_options = []
             if ws_cfg.normalize_space_variants:
@@ -8187,7 +8249,10 @@ class MainWindow(QMainWindow):
                 reason = "请手动更新页码。"
             else:
                 reason = reason_raw
-            self._log(f"  ✗ [{rule_name}] {target}: {reason}")
+            self._log(
+                f"  ✗ [{_execution_log_rule_label(rule_name)}] "
+                f"{_execution_log_target_label(target)}: {reason}"
+            )
 
         if status == "failed":
             self._log(f"严格模式命中关键步骤失败，未成功项: {len(failed_items)}")
