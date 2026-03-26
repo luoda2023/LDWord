@@ -62,7 +62,7 @@
 - `DOCX_FORMATTER_TEMPLATES_DIR`：强制指定模板读写目录。
 - `DOCX_PIPELINE_STRICT_MODE`：流水线严格模式（`1/true/on` 开启）。
 - `DOCX_DISABLE_FIELD_REFRESH=1`：禁用 Word 域刷新。
-- `DOCX_FIELD_REFRESH_TIMEOUT_SEC`：Word 域刷新超时秒数（默认 10）。
+- `DOCX_FIELD_REFRESH_TIMEOUT_SEC`：Word 域刷新超时秒数（默认 30）。
 
 ## 开发与测试
 ```powershell

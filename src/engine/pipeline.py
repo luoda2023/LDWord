@@ -527,7 +527,7 @@ class Pipeline:
             self._emit_progress(step_idx, total_steps, "正在更新目录与页码…")
             try:
                 refresh_timeout = int(
-                    os.environ.get("DOCX_FIELD_REFRESH_TIMEOUT_SEC", "10")
+                    os.environ.get("DOCX_FIELD_REFRESH_TIMEOUT_SEC", "30")
                 )
             except ValueError:
                 refresh_timeout = 10
@@ -839,7 +839,7 @@ class Pipeline:
             if final_path and not disable_refresh:
                 self._emit_progress(step_idx, total_steps, "正在更新目录与页码…")
                 try:
-                    refresh_timeout = int(os.environ.get("DOCX_FIELD_REFRESH_TIMEOUT_SEC", "10"))
+                    refresh_timeout = int(os.environ.get("DOCX_FIELD_REFRESH_TIMEOUT_SEC", "30"))
                 except ValueError:
                     refresh_timeout = 10
                 refresh_timeout = max(10, min(refresh_timeout, 600))
