@@ -66,11 +66,8 @@
 - `DOCX_DISABLE_FIELD_REFRESH=1`：禁用 Word 域刷新。
 - `DOCX_FIELD_REFRESH_TIMEOUT_SEC`：Word 域刷新超时秒数（默认 30）。
 
-## 开发与测试
+## 开发与验证
 ```powershell
-# 运行测试
-.\.venv\Scripts\python.exe -m pytest -q
-
 # 语法检查示例
 .\.venv\Scripts\python.exe -m py_compile src\scene\manager.py
 ```
@@ -84,7 +81,7 @@
 
 ## 开源发布与合规
 - 项目自身源码按 `MIT` 发布，第三方依赖仍保持各自许可证，见 `THIRD_PARTY_NOTICES.md`。
-- 公开仓库建议只保留源码、原创文档与可再分发的 synthetic / public fixtures。
+- 公开仓库建议只保留源码与原创文档；测试素材、样例文档与回归夹具仅本地保留。
 - 公开前可运行检查脚本：
 
 ```powershell
@@ -102,5 +99,4 @@
 - `docs/NOT_FOR_UPLOAD.md`
 - `THIRD_PARTY_NOTICES.md`
 - `CONTRIBUTING.md`
-- `tests/fixtures_public/README.md`
 - `使用说明.md`

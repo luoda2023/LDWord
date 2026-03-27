@@ -17,7 +17,6 @@
   - `src/utils/`：公共工具与元数据。
 - `scripts/windows/`：Windows 安装、启动、打包脚本。
 - `templates/`：源码模式下的用户可写模板目录。
-- `tests/`：自动化测试与部分回归样例。
 - `docs/`：项目文档。
 
 ## 当前发布入口

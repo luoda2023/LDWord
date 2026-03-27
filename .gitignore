@@ -9,6 +9,8 @@ venv/
 # Test/cache temp
 .pytest_cache/
 crash.log
+tests/
+*.docx
 
 # Build outputs
 build/
