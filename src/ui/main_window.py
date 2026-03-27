@@ -74,6 +74,7 @@ from src.ui.font_sizes import (
 from src.ui.font_search import font_matches_query
 from src.ui.theme_manager import ThemeManager
 from src.ui.wheel_guard import install_global_wheel_guard
+from src.utils.app_meta import APP_NAME, APP_VERSION_SHORT
 from src.utils.heading_numbering_template import (
     validate_heading_numbering_template,
 )
@@ -4946,7 +4947,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         install_global_wheel_guard(QApplication.instance())
-        self.setWindowTitle("Lark-Formatter V0.2")
+        self.setWindowTitle(f"{APP_NAME} V{APP_VERSION_SHORT}")
         self.setMinimumSize(960, 760)
         self._apply_initial_window_size()
         self.setAcceptDrops(True)
@@ -5061,7 +5062,7 @@ class MainWindow(QMainWindow):
 
     def _build_header_section(self):
         header_layout = QHBoxLayout()
-        title_label = QLabel("Lark-Formatter 论文一键排版工具V0.2")
+        title_label = QLabel(f"{APP_NAME} 论文一键排版工具V{APP_VERSION_SHORT}")
         title_label.setObjectName("SectionHeader")
         title_label.setStyleSheet("font-size: 18px;")
         header_layout.addWidget(title_label, stretch=1)

@@ -74,3 +74,15 @@ def test_ui_state_controls_do_not_override_citation_link_scene_config(monkeypatc
         assert window._citation_outer_page_sup_check.isChecked() is False
     finally:
         window.close()
+
+
+def test_main_window_uses_hotfix_version_title(monkeypatch):
+    _app()
+    monkeypatch.setattr(MainWindow, "_load_ui_state", lambda self: {})
+    monkeypatch.setattr(MainWindow, "_save_ui_state", lambda self: None)
+
+    window = MainWindow()
+    try:
+        assert window.windowTitle() == "Lark-Formatter V0.2.1"
+    finally:
+        window.close()

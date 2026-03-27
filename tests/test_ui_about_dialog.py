@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton
 
 from src.ui.about_dialog import AboutDialog
+from src.utils.app_meta import APP_VERSION
 
 
 def _app():
@@ -147,3 +148,14 @@ def test_about_dialog_with_unsignable_format_disables_signature_button():
     assert format_button is not None
     assert format_button.text() == "\u9ed8\u8ba4\u683c\u5f0f\u4e0d\u53ef\u7f72\u540d"
     assert format_button.isEnabled() is False
+
+
+def test_about_dialog_uses_hotfix_version_label():
+    _app()
+    dlg = AboutDialog()
+    try:
+        labels = [label.text() for label in dlg.findChildren(QLabel)]
+        assert APP_VERSION == "0.2.1 Hotfix"
+        assert f"Version {APP_VERSION}" in labels
+    finally:
+        dlg.close()
