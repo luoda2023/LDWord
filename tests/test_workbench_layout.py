@@ -348,6 +348,14 @@ def test_workbench_stylesheet_contains_expected_workbench_selectors():
     assert f"border-radius: {theme.radius_md}px;" in stylesheet
 
 
+def test_workbench_stylesheet_exposes_strategy_summary_roles():
+    stylesheet = build_workbench_stylesheet(get_theme())
+
+    assert "#wb_strategy_headline {" in stylesheet
+    assert "#wb_strategy_binding {" in stylesheet
+    assert "#wb_strategy_meta {" in stylesheet
+
+
 def test_workbench_ready_copy_uses_chinese_operational_language():
     _app()
     panel = WorkbenchPanel(PanelBridge())

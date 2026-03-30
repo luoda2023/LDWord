@@ -18,6 +18,28 @@ def _app():
     return QApplication.instance() or QApplication([])
 
 
+def test_strategy_card_exposes_summary_role_hooks():
+    _app()
+    card = StrategyCard()
+    state = StrategySummaryState(
+        name="论文标准",
+        source_type="scene",
+        template_label="thesis.yaml",
+        scene_label="结构优先",
+        strict_mode=False,
+        enabled_module_count=3,
+    )
+
+    card.set_state(state)
+
+    assert card._name_value.objectName() == "wb_strategy_headline"
+    assert card._template_value.objectName() == "wb_strategy_binding"
+    assert card._scene_value.objectName() == "wb_strategy_binding"
+    assert card._modules_value.objectName() == "wb_strategy_meta"
+    assert card._source_value.objectName() == "wb_strategy_meta"
+    assert card._strict_mode_value.objectName() == "wb_strategy_meta"
+
+
 def test_strategy_summary_state_exposes_homepage_safe_fields():
     state = StrategySummaryState()
 

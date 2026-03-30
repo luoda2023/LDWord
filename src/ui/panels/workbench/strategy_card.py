@@ -21,6 +21,12 @@ class StrategyCard(Card):
         self._modules_value = QLabel()
         self._source_value = QLabel()
         self._strict_mode_value = QLabel()
+        self._name_value.setObjectName("wb_strategy_headline")
+        self._template_value.setObjectName("wb_strategy_binding")
+        self._scene_value.setObjectName("wb_strategy_binding")
+        self._modules_value.setObjectName("wb_strategy_meta")
+        self._source_value.setObjectName("wb_strategy_meta")
+        self._strict_mode_value.setObjectName("wb_strategy_meta")
         for widget in (
             self._name_value,
             self._template_value,

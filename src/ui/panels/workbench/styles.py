@@ -42,6 +42,22 @@ def build_workbench_stylesheet(t: AppTheme) -> str:
             color: {t.text_secondary};
         }}
 
+        #wb_strategy_headline {{
+            color: {t.text_primary};
+            font-size: {t.font_size_lg}px;
+            font-weight: {t.font_weight_bold};
+        }}
+
+        #wb_strategy_binding {{
+            color: {t.text_secondary};
+            font-size: {t.font_size_md}px;
+        }}
+
+        #wb_strategy_meta {{
+            color: {t.text_hint};
+            font-size: {t.font_size_sm}px;
+        }}
+
         #wb_command_center_label,
         #wb_execution_title {{
             color: {t.text_primary};
