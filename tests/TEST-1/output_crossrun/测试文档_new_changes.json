@@ -1,0 +1,231 @@
+{
+  "input": "tests\\TEST-1\\测试文档_new.docx",
+  "output": "tests\\TEST-1\\output_crossrun\\测试文档_new_formatted.docx",
+  "status": "success",
+  "elapsed_seconds": 0.27,
+  "modules_enabled": 11,
+  "modules_total": 19,
+  "changes": [
+    {
+      "rule_name": "heading_recognition",
+      "target": "28 个标题",
+      "section": "global",
+      "change_type": "detect",
+      "before": "(未识别)",
+      "after": "H1=9, H2=19",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "caption",
+      "target": "1 个题注",
+      "section": "global",
+      "change_type": "format",
+      "before": "(mixed)",
+      "after": "mode=chapter",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "figure_table_center",
+      "target": "0 图片, 2 表格",
+      "section": "global",
+      "change_type": "format",
+      "before": "(mixed)",
+      "after": "居中对齐",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "header_footer",
+      "target": "12 个节",
+      "section": "global",
+      "change_type": "format",
+      "before": "(mixed)",
+      "after": "header=styleref, border=True, page_num=True",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "heading_numbering",
+      "target": "24 个标题",
+      "section": "global",
+      "change_type": "format",
+      "before": "(mixed/无编号)",
+      "after": "已添加编号",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 1",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 2",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 3",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 4",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 5",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 6",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 7",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 8",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 9",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 10",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 11",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "page_setup",
+      "target": "Section 12",
+      "section": "global",
+      "change_type": "format",
+      "before": "width=7772400, top=914400",
+      "after": "paper=A4, margin=(3.8/3.8/3.2/3.2)cm",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "paragraph_style",
+      "target": "137 个段落",
+      "section": "global",
+      "change_type": "format",
+      "before": "(mixed)",
+      "after": "已统一样式",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "paragraph_style",
+      "target": "8 个 Word 标题样式定义",
+      "section": "global",
+      "change_type": "format",
+      "before": "字号未同步",
+      "after": "已同步到样式定义",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "reference_format",
+      "target": "84 条参考文献",
+      "section": "references",
+      "change_type": "format",
+      "before": "(mixed)",
+      "after": "已统一格式+悬挂缩进",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "table_format",
+      "target": "2 个表格",
+      "section": "global",
+      "change_type": "format",
+      "before": "(mixed)",
+      "after": "border=three_line, layout=smart",
+      "paragraph_index": -1,
+      "success": true
+    },
+    {
+      "rule_name": "toc",
+      "target": "已有目录",
+      "section": "global",
+      "change_type": "format",
+      "before": "目录未更新",
+      "after": "已标记更新",
+      "paragraph_index": -1,
+      "success": true
+    }
+  ],
+  "failed_items": []
+}

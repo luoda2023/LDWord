@@ -1,0 +1,25 @@
+import sys
+from src.qt_api import QApplication
+
+def log(msg):
+    print(msg)
+    sys.stdout.flush()
+
+try:
+    log("1. Importing StyleGallery...")
+    from demo_style_gallery import StyleGallery
+    from src.shared.ui.theme import DARK
+    app = QApplication(sys.argv)
+    log("2. Creating gallery...")
+    gallery = StyleGallery()
+    log("3. Showing gallery...")
+    gallery.show()
+    log("4. Switching theme...")
+    gallery._switch_theme(DARK)
+    log("5. Switched successfully!")
+    app.processEvents()
+    log("6. Processed events successfully, entering main loop...")
+    sys.exit(app.exec())
+except Exception as e:
+    import traceback
+    traceback.print_exc()

@@ -7,6 +7,7 @@ cd /d "%REPO_ROOT%"
 set "BASE_PY_CMD="
 set "BASE_PY_LABEL="
 
+rem preferred probe order starts with: py -3.14 --version
 for %%V in (3.14 3.13 3.12 3.11 3.10) do (
     py -%%V --version >nul 2>&1
     if !errorlevel! == 0 (
@@ -21,23 +22,6 @@ if %errorlevel%==0 (
     set "BASE_PY_CMD=python"
     set "BASE_PY_LABEL=python"
     goto :found_base
-)
-
-for %%P in (
-    "%ProgramFiles%\QGIS 3.42.1\apps\Python312\python.exe"
-    "%ProgramFiles%\QGIS 3.42.1\bin\python.exe"
-    "%ProgramFiles%\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe"
-    "%ProgramFiles%\Blender Foundation\Blender 4.4\4.4\python\bin\python.exe"
-    "%ProgramFiles%\Blender Foundation\Blender 3.6\3.6\python\bin\python.exe"
-) do (
-    if exist %%~P (
-        "%%~P" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
-        if !errorlevel! == 0 (
-            set "BASE_PY_CMD=""%%~P"""
-            set "BASE_PY_LABEL=Fallback embedded Python: %%~P"
-            goto :found_base
-        )
-    )
 )
 
 :found_base

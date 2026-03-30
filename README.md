@@ -1,102 +1,91 @@
-# Lark-Formatter
+# Lark-Formatter V1.0
 
-毕业论文 `docx` 格式专项修订桌面工具（PySide6 + python-docx）。
+毕业论文 / 学位论文 `docx` 格式修订桌面工具（**PySide6 + python-docx**）。
 
-## 当前版本
-- `0.2.1 Hotfix`
-- 基于 `0.20 LTS` 的热修复同步版本
-- 当前版本**仅面向毕业论文格式调整场景**。
-- 其他场景（如更广义的通用文档 / 扩展模板体系）计划在 `1.00` 版本完成开发与发布。
+## 当前状态
 
-## 版本定位
-- `0.2.1 Hotfix`：在 `0.20 LTS` 基础上的缺陷修复同步版本，包含三线表语义、化学式上下角标、目录页码刷新超时等 hotfix。
-- `0.20 LTS`：毕业论文格式专项工具，聚焦论文排版修订、格式统一与审计输出。
-- `1.00`（规划中）：扩展到其余场景与更完整的多模板能力。
-
-## 核心能力
-- 毕业论文专项排版：支持论文模板加载、另存、重命名、删除。
-- 规则流水线：页面设置、样式统一、标题识别与编号、目录处理、图表题注、表格处理、分节格式化、页眉页脚、校验。
-- 实验室功能：Markdown 清理、空白与全半角规范（基础空白清洗 + 语境字符转换）、正文引用域关联、化学式上下角标恢复、公式表格识别调整。
-- 多产物输出：排版后文档、对比稿、JSON / Markdown 报告。
-- 模板克隆：可从参考 `docx` 克隆样式 / 页面 / 标题编号为新的**论文模板**。
-
-## 适用范围
-- 适用：毕业论文 / 学位论文格式修订与校对辅助。
-- 当前不建议作为：公文排版工具、通用文档排版工具、跨行业多场景模板平台。
+- 当前 GUI 绑定已统一迁移到 **PySide6**
+- 项目自身源码按 **MIT** 发布
+- 第三方依赖仍保留各自许可证，详见 `THIRD_PARTY_NOTICES.md`
 
 ## 环境要求
-- Windows（脚本为 `.bat`，封包目标为 Windows）
+
+- Windows（提供 `.bat` 启动与打包脚本）
 - Python 3.10+
 
 ## 快速开始
+
 ```powershell
-# 1) 首次安装依赖
+# 1) 安装依赖
 .\install_env.bat
 
 # 2) 启动 GUI
 .\start_app.bat
 
-# 3) 调试模式启动（有控制台输出）
+# 3) 带控制台启动
 .\start_app_debug.bat
 ```
 
+也可以直接运行：
+
+```powershell
+python main.py --gui
+```
+
 ## 打包发布
+
 ```powershell
 .\package_release.bat
 ```
 
-打包输出目录：
-- `dist/Lark-Formatter_v0.20_LTS/`
+默认输出目录：
 
-## 打包后的模板目录说明（重点）
-在封包运行时会同时看到两个 `templates`：
-- `dist/Lark-Formatter_v0.20_LTS/templates`：**用户可读写目录（实际读写路径）**
-- `dist/Lark-Formatter_v0.20_LTS/_internal/templates`：内置资源目录（只读种子）
+- `dist/Lark-Formatter_V1.0/`
 
-启动时会把内置模板补齐到可写目录（仅补缺，不覆盖用户文件）。
+打包脚本会：
 
-模板目录解析优先级：
-1. 若设置环境变量 `DOCX_FORMATTER_TEMPLATES_DIR`，优先使用该目录。
-2. 封包模式使用 `Lark-Formatter.exe` 同级的 `templates`。
-3. 源码模式优先使用独立 `templates` 目录（若存在），否则回退到 `src/scene/presets`。
+- 使用 `PyInstaller`
+- 从 `main.py` 构建桌面应用
+- 带上 `defaults/`
+- 带上 `LICENSE`
+- 带上 `THIRD_PARTY_NOTICES.md`
 
-## 常用环境变量
-- `DOCX_FORMATTER_TEMPLATES_DIR`：强制指定模板读写目录。
-- `DOCX_PIPELINE_STRICT_MODE`：流水线严格模式（`1/true/on` 开启）。
-- `DOCX_DISABLE_FIELD_REFRESH=1`：禁用 Word 域刷新。
-- `DOCX_FIELD_REFRESH_TIMEOUT_SEC`：Word 域刷新超时秒数（默认 30）。
+## MIT 开源发布口径
 
-## 开发与验证
-```powershell
-# 语法检查示例
-.\.venv\Scripts\python.exe -m py_compile src\scene\manager.py
-```
+本项目遵循与 `0.2 LTS` 一致的发布口径：
 
-## 项目结构
-- `app/main.py`：应用入口。
-- `src/`：核心代码（UI、规则引擎、场景配置、docx 读写、报告）。
-- `scripts/windows/`：Windows 启动、安装、打包脚本。
-- `docs/`：项目文档。
-- `main.py` 与根目录批处理：兼容入口。
+- **项目自身源码：MIT**
+- **第三方依赖：保持各自许可证**
+- **桌面二进制分发：仍需遵守 Qt / PySide6 的许可证要求**
 
-## 开源发布与合规
-- 项目自身源码按 `MIT` 发布，第三方依赖仍保持各自许可证，见 `THIRD_PARTY_NOTICES.md`。
-- 公开仓库建议只保留源码与原创文档；测试素材、样例文档与回归夹具仅本地保留。
-- 公开前可运行检查脚本：
+因此：
+
+- 可以说“本项目源码仓库按 MIT 发布”
+- 不能把整个桌面成品简单描述为“只有 MIT”
+
+## 公开发布自检
+
+公开仓库前可运行：
 
 ```powershell
+# 若刚执行过安装 / 打包 / 预览，先清理本地产物
+.\clean_public_release.bat
+
 # 普通扫描
 .\check_public_release.bat
 
-# 严格模式：发现阻塞项时返回非 0，适合发布前自检 / CI
+# 严格模式
 .\check_public_release.bat --strict
 ```
 
-## 相关文档
-- `docs/PROJECT_STRUCTURE.md`
-- `docs/RELEASE_NOTES_0.20_LTS.md`
+公开发布检查清单见：
+
 - `docs/OPEN_SOURCE_MIT_RELEASE_CHECKLIST.md`
-- `docs/NOT_FOR_UPLOAD.md`
-- `THIRD_PARTY_NOTICES.md`
-- `CONTRIBUTING.md`
-- `使用说明.md`
+
+## 关键文件
+
+- `main.py`：应用入口
+- `src/qt_api.py`：统一 Qt 绑定入口
+- `requirements.txt`：运行时依赖
+- `LICENSE`：项目源码许可证
+- `THIRD_PARTY_NOTICES.md`：第三方依赖许可证说明

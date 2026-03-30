@@ -1,0 +1,15 @@
+C:\Users\Administrator\Desktop\Lark-Formatter 1.0\Lark-Formatter V1.0\demo_style_gallery.py:28: DeprecationWarning: Enum value 'Qt::ApplicationAttribute.AA_EnableHighDpiScaling' is marked as deprecated, please check the documentation for more information.
+  QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+C:\Users\Administrator\Desktop\Lark-Formatter 1.0\Lark-Formatter V1.0\demo_style_gallery.py:29: DeprecationWarning: Enum value 'Qt::ApplicationAttribute.AA_UseHighDpiPixmaps' is marked as deprecated, please check the documentation for more information.
+  QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+QWidget: SearchInput (SearchInput) already in focus proxy chain
+QWidget: SearchInput (SearchInput) already in focus proxy chain
+QWidget: SearchInput (SearchInput) already in focus proxy chain
+C:\Users\Administrator\Desktop\Lark-Formatter 1.0\Lark-Formatter V1.0\src\shared\ui\theme.py:662: RuntimeWarning: Failed to disconnect (<built-in method update of ToggleSwitch object at 0x000002A054BD5C00>) from signal "theme_changed()".
+  self._notifier.theme_changed.disconnect(callback)
+C:\Users\Administrator\Desktop\Lark-Formatter 1.0\Lark-Formatter V1.0\src\shared\ui\theme.py:662: RuntimeWarning: Failed to disconnect (<built-in method update of ToggleSwitch object at 0x000002A054BD6200>) from signal "theme_changed()".
+  self._notifier.theme_changed.disconnect(callback)
+C:\Users\Administrator\Desktop\Lark-Formatter 1.0\Lark-Formatter V1.0\src\shared\ui\theme.py:662: RuntimeWarning: Failed to disconnect (<built-in method update of ToggleSwitch object at 0x000002A054BD6700>) from signal "theme_changed()".
+  self._notifier.theme_changed.disconnect(callback)
+C:\Users\Administrator\Desktop\Lark-Formatter 1.0\Lark-Formatter V1.0\src\shared\ui\theme.py:662: RuntimeWarning: Failed to disconnect (<built-in method update of ToggleSwitch object at 0x000002A054BDF500>) from signal "theme_changed()".
+  self._notifier.theme_changed.disconnect(callback)

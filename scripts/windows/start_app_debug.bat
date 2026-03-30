@@ -4,13 +4,10 @@ set "REPO_ROOT=%~dp0..\.."
 for %%I in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fI"
 cd /d "%REPO_ROOT%"
 
-if not exist ".venv\Scripts\python.exe" (
-    echo [ERROR] Missing virtual environment: .venv
-    echo Run "install_env.bat" first.
-    pause
-    exit /b 1
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" main.py --gui
+) else (
+    python main.py --gui
 )
-
-echo [INFO] Starting app in debug mode (console output enabled)...
-".venv\Scripts\python.exe" main.py
+pause
 exit /b %errorlevel%
