@@ -293,8 +293,10 @@ class WorkbenchPanel(BasePanel):
         self._strategy_card.setObjectName("wb_strategy_card")
         self._capability_grid = CapabilityGrid(self._left_column)
         self._heading_quick_card = HeadingQuickCard(self.bridge, self._capability_grid)
+        self._heading_quick_card.setObjectName("wb_heading_quick_card")
         self._capability_grid.add_card(self._heading_quick_card, 0, 0)
         self._quick_fill_card = QuickFillCard(self.bridge, self._capability_grid)
+        self._quick_fill_card.setObjectName("wb_quick_fill_card")
         self._capability_grid.add_card(self._quick_fill_card, 0, 1)
 
         self._left_layout.addWidget(self._strategy_card)
@@ -331,7 +333,7 @@ class WorkbenchPanel(BasePanel):
                 document_label=CurrentTaskState().document_label,
                 strategy_label="默认策略",
                 ready=True,
-                status_text="Ready",
+                status_text="待执行",
             )
         )
 

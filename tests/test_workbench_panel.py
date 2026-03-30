@@ -1,4 +1,5 @@
 import sys
+import subprocess
 from pathlib import Path
 
 
@@ -36,6 +37,25 @@ def test_workbench_panel_uses_bridge_reference_without_task_2_behavior():
         assert panel.objectName() == "WorkbenchPanel"
     finally:
         panel.close()
+
+
+def test_workbench_execution_adapter_import_is_not_blocked_by_panels_package_reexports():
+    script = (
+        "import sys; "
+        f"sys.path.insert(0, r'{ROOT}'); "
+        "from src.ui.adapters.workbench_execution_adapter import WorkbenchExecutionAdapter; "
+        "print(WorkbenchExecutionAdapter.__name__)"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "WorkbenchExecutionAdapter"
 
 
 def test_main_window_close_ignored_when_panel_shutdown_fails():

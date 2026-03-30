@@ -69,6 +69,33 @@ def test_execution_center_defaults_to_canonical_readiness_state():
     assert center._reason_label.text() == "、".join(default_state.reasons)
 
 
+def test_execution_center_exposes_polish_section_labels():
+    _app()
+    center = ExecutionCenter()
+
+    assert center._center_title.text() == "执行中心"
+    assert center._center_title.objectName() == "wb_execution_title"
+    assert center._summary_title.text() == "执行摘要"
+    assert center._progress_title.text() == "执行进度"
+
+
+def test_execution_center_primary_surface_uses_styled_section_hooks():
+    _app()
+    center = ExecutionCenter()
+    center.set_readiness(ReadinessState(ready=True, label="待执行", reasons=[]))
+    center.set_progress_state(
+        ExecutionProgressState(stage_text="执行中", current_step=1, total_steps=2, percent=50)
+    )
+
+    assert center._progress_title.objectName() == "wb_execution_section_title"
+    assert center._summary_title.objectName() == "wb_execution_section_title"
+    assert center._status_label.objectName() == "wb_execution_status"
+    assert center._summary_box.objectName() == "wb_execution_summary"
+    assert center._status_label.text() == "执行中"
+    assert center._execute_button.isEnabled() is False
+    assert center._cancel_button.isEnabled() is True
+
+
 def test_execution_adapter_build_readiness_blocks_without_document_or_strategy():
     adapter = WorkbenchExecutionAdapter()
 
@@ -105,7 +132,7 @@ def test_execution_adapter_build_readiness_ready_with_document_and_strategy():
     state = adapter.build_readiness(has_document=True, has_strategy=True)
 
     assert state.ready is True
-    assert state.label == "Ready"
+    assert state.label == "待执行"
     assert state.reasons == []
 
 
@@ -124,14 +151,14 @@ def test_execution_center_renders_readiness_and_summary():
 
     ready_state = ReadinessState(
         ready=True,
-        label="Ready",
+        label="待执行",
         reasons=[],
     )
 
     center.set_readiness(ready_state)
     center.set_summary("本次启用模块：3")
 
-    assert center._ready_label.text() == "Ready"
+    assert center._ready_label.text() == "待执行"
     assert center._reason_label.text() == ""
     assert center._summary_box.toPlainText() == "本次启用模块：3"
 
@@ -143,7 +170,7 @@ def test_execution_center_buttons_follow_readiness_and_running_state():
     assert not center._execute_button.isEnabled()
     assert not center._cancel_button.isEnabled()
 
-    ready_state = ReadinessState(ready=True, label="Ready", reasons=[])
+    ready_state = ReadinessState(ready=True, label="待执行", reasons=[])
     center.set_readiness(ready_state)
     assert center._execute_button.isEnabled()
 
@@ -164,7 +191,7 @@ def test_execution_center_buttons_follow_readiness_and_running_state():
 def test_execution_center_final_state_restores_controls_and_show_friendly_text():
     _app()
     center = ExecutionCenter()
-    center.set_readiness(ReadinessState(ready=True, label="Ready", reasons=[]))
+    center.set_readiness(ReadinessState(ready=True, label="待执行", reasons=[]))
 
     center.set_progress_state(
         ExecutionProgressState(stage_text="正在生成目录", current_step=2, total_steps=4, percent=50)
@@ -204,7 +231,7 @@ def test_execution_center_readiness_change_during_run_keeps_buttons_consistent()
     _app()
     center = ExecutionCenter()
 
-    center.set_readiness(ReadinessState(ready=True, label="Ready", reasons=[]))
+    center.set_readiness(ReadinessState(ready=True, label="待执行", reasons=[]))
     center.set_progress_state(
         ExecutionProgressState(stage_text="进行中", current_step=1, total_steps=2, percent=50)
     )
@@ -232,7 +259,7 @@ def test_execution_center_emits_execute_and_cancel_signals():
     center.execute_requested.connect(lambda: execute_calls.append(True))
     center.cancel_requested.connect(lambda: cancel_calls.append(True))
 
-    center.set_readiness(ReadinessState(ready=True, label="Ready", reasons=[]))
+    center.set_readiness(ReadinessState(ready=True, label="待执行", reasons=[]))
 
     center._execute_button.click()
     center.set_progress_state(

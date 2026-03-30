@@ -27,11 +27,15 @@ class ExecutionCenter(QWidget):
         layout.setSpacing(8)
 
         self._center_title = QLabel("执行中心")
-        self._center_title.setObjectName("wb_command_center_label")
+        self._center_title.setObjectName("wb_execution_title")
         self._ready_label = QLabel("待执行")
         self._ready_label.setObjectName("wb_ready_badge")
         self._reason_label = QLabel("")
         self._reason_label.setWordWrap(True)
+        self._progress_title = QLabel("执行进度")
+        self._progress_title.setObjectName("wb_execution_section_title")
+        self._summary_title = QLabel("执行摘要")
+        self._summary_title.setObjectName("wb_execution_section_title")
 
         progress_state = ExecutionProgressState()
         self._progress_stage_label = QLabel(progress_state.stage_text)
@@ -44,16 +48,19 @@ class ExecutionCenter(QWidget):
         self._execute_button = QPushButton("开始执行")
         self._cancel_button = QPushButton("取消")
         self._status_label = QLabel(self._friendly_status(ExecutionResultState().status))
+        self._status_label.setObjectName("wb_execution_status")
 
         self._execution_running = False
         self._readiness_ready = False
 
         self._summary_box = QTextEdit()
         self._summary_box.setReadOnly(True)
+        self._summary_box.setObjectName("wb_execution_summary")
 
         layout.addWidget(self._center_title)
         layout.addWidget(self._ready_label)
         layout.addWidget(self._reason_label)
+        layout.addWidget(self._progress_title)
 
         progress_header = QHBoxLayout()
         progress_header.addWidget(self._progress_stage_label)
@@ -68,6 +75,7 @@ class ExecutionCenter(QWidget):
         layout.addLayout(button_row)
 
         layout.addWidget(self._status_label)
+        layout.addWidget(self._summary_title)
         layout.addWidget(self._summary_box)
 
         self._execute_button.clicked.connect(self.execute_requested.emit)

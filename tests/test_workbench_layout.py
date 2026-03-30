@@ -223,7 +223,7 @@ def test_panel_can_forward_current_task_state_to_command_bar():
             document_label="thesis.docx",
             strategy_label="论文标准",
             ready=True,
-            status_text="Ready",
+            status_text="待执行",
         )
         panel.set_current_task_state(state)
         assert panel._command_bar._doc_value.text() == "thesis.docx"
@@ -251,14 +251,14 @@ def test_task_command_bar_renders_document_strategy_and_ready_status(qtbot=None)
         document_label="thesis.docx",
         strategy_label="论文标准",
         ready=True,
-        status_text="Ready",
+        status_text="待执行",
     )
 
     bar.set_state(state)
 
     assert bar._doc_value.text() == "thesis.docx"
     assert bar._strategy_value.text() == "论文标准"
-    assert bar._status_value.text() == "Ready"
+    assert bar._status_value.text() == "待执行"
     assert bar._run_button.isEnabled()
 
 
@@ -338,13 +338,75 @@ def test_workbench_stylesheet_contains_expected_workbench_selectors():
     stylesheet = build_workbench_stylesheet(theme)
 
     assert "#wb_command_bar," in stylesheet
-    assert "#wb_strategy_card," in stylesheet
-    assert "#wb_execution_center," in stylesheet
+    assert "#wb_strategy_card {" in stylesheet
+    assert "#wb_execution_center {" in stylesheet
     assert "#wb_recent_run {" in stylesheet
-    assert "#wb_command_center_label {" in stylesheet
+    assert "#wb_command_center_label," in stylesheet
+    assert "#wb_execution_title {" in stylesheet
     assert "#wb_ready_badge {" in stylesheet
     assert f"background: {theme.bg_card};" in stylesheet
     assert f"border-radius: {theme.radius_md}px;" in stylesheet
+
+
+def test_workbench_ready_copy_uses_chinese_operational_language():
+    _app()
+    panel = WorkbenchPanel(PanelBridge())
+    try:
+        assert panel._command_bar._status_value.text() == "待执行"
+        assert panel._execution_center._ready_label.text() == "待执行"
+    finally:
+        panel.close()
+
+
+def test_workbench_stylesheet_encodes_surface_hierarchy():
+    theme = get_theme()
+    stylesheet = build_workbench_stylesheet(theme)
+
+    assert "#wb_execution_center {" in stylesheet
+    assert "border: 2px solid" in stylesheet
+    assert "#wb_recent_run {" in stylesheet
+    assert "#wb_heading_quick_card," in stylesheet
+    assert "#wb_quick_fill_card {" in stylesheet
+
+
+def test_workbench_stylesheet_marks_execution_center_as_primary_surface():
+    theme = get_theme()
+    stylesheet = build_workbench_stylesheet(theme)
+
+    execution_start = stylesheet.index("#wb_execution_center {")
+    execution_end = stylesheet.index("}", execution_start)
+    execution_block = stylesheet[execution_start:execution_end]
+
+    assert "border: 2px solid" in execution_block
+    assert f"border-radius: {theme.radius_lg}px;" in execution_block
+    assert "#wb_execution_title" in stylesheet
+    assert "#wb_execution_section_title {" in stylesheet
+    assert "#wb_execution_summary {" in stylesheet
+    assert "#wb_execution_status {" in stylesheet
+
+
+def test_workbench_panel_assigns_role_specific_object_names():
+    _app()
+    panel = WorkbenchPanel(PanelBridge())
+    try:
+        assert panel._heading_quick_card.objectName() == "wb_heading_quick_card"
+        assert panel._quick_fill_card.objectName() == "wb_quick_fill_card"
+        assert panel._recent_run_panel.objectName() == "wb_recent_run"
+        assert panel._strategy_card.objectName() == "wb_strategy_card"
+    finally:
+        panel.close()
+
+
+def test_task_command_bar_uses_compact_strip_spacing():
+    _app()
+    bar = TaskCommandBar()
+    try:
+        margins = bar.layout().contentsMargins()
+
+        assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (16, 10, 16, 10)
+        assert bar.layout().spacing() == 12
+    finally:
+        bar.close()
 
 
 def test_strategy_card_label_rule_is_dark_theme_safe():
@@ -470,13 +532,13 @@ def test_workbench_panel_mirrors_current_task_readiness_into_execution_center():
         assert panel._command_bar._run_button.isEnabled()
         assert panel._command_bar._doc_value.text() == "未选择文档"
         assert panel._command_bar._strategy_value.text() == "默认策略"
-        assert panel._command_bar._status_value.text() == "Ready"
+        assert panel._command_bar._status_value.text() == "待执行"
 
         state = CurrentTaskState(
             document_label="thesis.docx",
             strategy_label="论文标准",
             ready=True,
-            status_text="Ready",
+            status_text="待执行",
         )
         panel.set_current_task_state(state)
 
@@ -656,7 +718,7 @@ def test_command_bar_run_button_click_prefers_worker_start_and_triggers_lifecycl
                 document_label="thesis.docx",
                 strategy_label="论文标准",
                 ready=True,
-                status_text="Ready",
+                status_text="待执行",
             )
         )
 
@@ -716,7 +778,7 @@ def test_workbench_panel_guards_against_repeated_starts_while_worker_active():
                 document_label="thesis.docx",
                 strategy_label="论文标准",
                 ready=True,
-                status_text="Ready",
+                status_text="待执行",
             )
         )
 
@@ -739,7 +801,7 @@ def test_workbench_panel_no_worker_path_surfaces_deterministic_failure_state():
                 document_label="thesis.docx",
                 strategy_label="论文标准",
                 ready=True,
-                status_text="Ready",
+                status_text="待执行",
             )
         )
 
@@ -789,7 +851,7 @@ def test_workbench_panel_disables_execute_until_execution_finished_even_after_re
                 document_label="thesis.docx",
                 strategy_label="论文标准",
                 ready=True,
-                status_text="Ready",
+                status_text="待执行",
             )
         )
 
@@ -832,7 +894,7 @@ def test_workbench_panel_no_worker_path_resets_stale_progress_before_failed_resu
                 document_label="thesis.docx",
                 strategy_label="论文标准",
                 ready=True,
-                status_text="Ready",
+                status_text="待执行",
             )
         )
 
@@ -902,7 +964,7 @@ def test_workbench_panel_execute_button_click_recovers_after_worker_finishes_wit
                 document_label="thesis.docx",
                 strategy_label="论文标准",
                 ready=True,
-                status_text="Ready",
+                status_text="待执行",
             )
         )
 

@@ -14,8 +14,8 @@ class TaskCommandBar(QWidget):
         self.setObjectName("wb_command_bar")
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(12)
 
         self._center_label = QLabel("任务中控")
         self._center_label.setObjectName("wb_command_center_label")

@@ -17,7 +17,7 @@ class WorkbenchExecutionAdapter:
             reasons.append("未选择策略")
         return ReadinessState(
             ready=not reasons,
-            label="Ready" if not reasons else "待执行",
+            label="待执行",
             reasons=reasons,
         )
 
