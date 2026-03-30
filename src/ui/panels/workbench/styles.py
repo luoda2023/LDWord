@@ -49,6 +49,17 @@ def build_workbench_stylesheet(t: AppTheme) -> str:
             border-radius: {t.radius_md}px;
         }}
 
+        #wb_recent_run_status {{
+            color: {t.text_secondary};
+            font-size: {t.font_size_sm}px;
+            font-weight: {t.font_weight_bold};
+        }}
+
+        #wb_recent_run_meta {{
+            color: {t.text_hint};
+            font-size: {t.font_size_sm}px;
+        }}
+
         #wb_command_bar QLabel,
         #wb_strategy_card QLabel,
         #wb_execution_center QLabel {{

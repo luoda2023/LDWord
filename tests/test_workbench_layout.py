@@ -274,6 +274,18 @@ def test_workbench_panel_uses_top_middle_bottom_page_skeleton():
         panel.close()
 
 
+def test_workbench_panel_uses_explicit_page_rhythm_spacing():
+    _app()
+    panel = WorkbenchPanel(PanelBridge())
+    try:
+        assert panel._root_layout.spacing() == 16
+        assert panel._middle_layout.spacing() == 16
+        assert panel._left_layout.spacing() == 16
+        assert panel._right_layout.spacing() == 0
+    finally:
+        panel.close()
+
+
 def test_workbench_panel_middle_region_absorbs_extra_height():
     _app()
     panel = WorkbenchPanel(PanelBridge())
@@ -362,6 +374,13 @@ def test_workbench_stylesheet_exposes_shared_quick_card_internal_roles():
     assert "#wb_quick_card_summary {" in stylesheet
     assert "#wb_quick_card_action {" in stylesheet
     assert "#wb_quick_card_action_secondary {" in stylesheet
+
+
+def test_workbench_stylesheet_exposes_quiet_recent_run_roles():
+    stylesheet = build_workbench_stylesheet(get_theme())
+
+    assert "#wb_recent_run_status {" in stylesheet
+    assert "#wb_recent_run_meta {" in stylesheet
 
 
 def test_workbench_ready_copy_uses_chinese_operational_language():

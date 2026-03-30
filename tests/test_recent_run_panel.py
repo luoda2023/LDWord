@@ -64,3 +64,23 @@ def test_recent_run_panel_accepts_recent_run_state_and_renders_summary():
         assert panel._summary.text() == "本次执行已完成"
     finally:
         panel.close()
+
+
+def test_recent_run_panel_renders_quiet_status_and_meta_lines():
+    _app()
+    panel = RecentRunPanel()
+    state = RecentRunState(
+        status="partial_success",
+        title="最近结果",
+        summary="执行完成，但有 2 个模块未成功",
+        output_label="out.docx",
+        report_label="report.json",
+        error_summary="",
+    )
+
+    panel.set_state(state)
+
+    assert panel._status_label.objectName() == "wb_recent_run_status"
+    assert panel._status_label.text() == "部分完成"
+    assert panel._meta_label.objectName() == "wb_recent_run_meta"
+    assert panel._meta_label.text() == "输出: out.docx | 报告: report.json"

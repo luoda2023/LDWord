@@ -277,16 +277,24 @@ class WorkbenchPanel(BasePanel):
     def _setup_ui(self) -> None:
         self.setObjectName("WorkbenchPanel")
         self._root_layout = QVBoxLayout(self)
+        self._root_layout.setContentsMargins(0, 0, 0, 0)
+        self._root_layout.setSpacing(16)
 
         self._command_bar = TaskCommandBar(self)
         self._root_layout.addWidget(self._command_bar)
 
         self._middle_container = QWidget(self)
         self._middle_layout = QHBoxLayout(self._middle_container)
+        self._middle_layout.setContentsMargins(0, 0, 0, 0)
+        self._middle_layout.setSpacing(16)
         self._left_column = QWidget(self._middle_container)
         self._left_layout = QVBoxLayout(self._left_column)
+        self._left_layout.setContentsMargins(0, 0, 0, 0)
+        self._left_layout.setSpacing(16)
         self._right_column = QWidget(self._middle_container)
         self._right_layout = QVBoxLayout(self._right_column)
+        self._right_layout.setContentsMargins(0, 0, 0, 0)
+        self._right_layout.setSpacing(0)
 
         self._strategy_adapter = WorkbenchStrategyAdapter()
         self._strategy_card = StrategyCard(self._left_column)
