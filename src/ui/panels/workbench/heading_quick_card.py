@@ -11,8 +11,10 @@ class HeadingQuickCard(Card):
     def __init__(self, bridge, parent=None):
         super().__init__("标题编号", parent=parent)
         self._bridge = bridge
-        self._summary_label = QLabel("当前方案：未读取")
+        self._summary_label = QLabel("标题方案：未读取")
+        self._summary_label.setObjectName("wb_quick_card_summary")
         self._advanced_btn = QPushButton("高级配置")
+        self._advanced_btn.setObjectName("wb_quick_card_action")
         apply_button_variant(self._advanced_btn, "secondary")
         self._advanced_btn.clicked.connect(self.advanced_requested.emit)
         self.add_widget(self._summary_label)

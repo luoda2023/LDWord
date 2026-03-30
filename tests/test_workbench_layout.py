@@ -356,6 +356,14 @@ def test_workbench_stylesheet_exposes_strategy_summary_roles():
     assert "#wb_strategy_meta {" in stylesheet
 
 
+def test_workbench_stylesheet_exposes_shared_quick_card_internal_roles():
+    stylesheet = build_workbench_stylesheet(get_theme())
+
+    assert "#wb_quick_card_summary {" in stylesheet
+    assert "#wb_quick_card_action {" in stylesheet
+    assert "#wb_quick_card_action_secondary {" in stylesheet
+
+
 def test_workbench_ready_copy_uses_chinese_operational_language():
     _app()
     panel = WorkbenchPanel(PanelBridge())

@@ -30,6 +30,19 @@ def build_workbench_stylesheet(t: AppTheme) -> str:
             border-radius: {t.radius_md}px;
         }}
 
+        #wb_quick_card_summary {{
+            color: {t.text_secondary};
+            font-size: {t.font_size_sm}px;
+        }}
+
+        #wb_quick_card_action {{
+            min-height: {t.button_height_md}px;
+        }}
+
+        #wb_quick_card_action_secondary {{
+            min-height: {t.button_height_md}px;
+        }}
+
         #wb_recent_run {{
             background: {t.bg_sidebar};
             border: 1px solid {t.border_light};

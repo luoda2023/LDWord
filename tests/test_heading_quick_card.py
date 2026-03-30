@@ -24,6 +24,15 @@ def test_heading_quick_card_exposes_summary_and_advanced_button():
     assert hasattr(card, "_advanced_btn")
 
 
+def test_heading_quick_card_uses_concise_summary_and_shared_action_hooks():
+    _app()
+    card = HeadingQuickCard(PanelBridge())
+
+    assert card._summary_label.text() == "标题方案：未读取"
+    assert card._summary_label.objectName() == "wb_quick_card_summary"
+    assert card._advanced_btn.objectName() == "wb_quick_card_action"
+
+
 def test_heading_quick_card_click_emits_advanced_requested():
     _app()
     card = HeadingQuickCard(PanelBridge())
