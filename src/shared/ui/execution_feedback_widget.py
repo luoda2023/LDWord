@@ -50,9 +50,11 @@ class ExecutionFeedbackWidget(QWidget):
 
     def set_completed(self, success: bool, summary: dict) -> None:
         self._progress.set_done()
-        summary_parts = [f"{key}={value}" for key, value in summary.items()]
-        summary_line = " ".join(summary_parts)
-        self._summary.setText(f"success={success} {summary_line}".strip())
+        success_count = int(summary.get("success_count", 0))
+        text = f"成功处理 {success_count} 项"
+        if not success:
+            text = f"{text}（部分未完成）"
+        self._summary.setText(text)
 
     def summary_text(self) -> str:
         return self._summary.text()

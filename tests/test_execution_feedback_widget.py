@@ -72,8 +72,8 @@ def test_execution_feedback_widget_set_completed_updates_summary():
     _app()
     widget = ExecutionFeedbackWidget()
     try:
-        widget.set_completed(True, {"completed": 4, "failed": 0, "total": 4})
-        assert widget.summary_text() == "success=True completed=4 failed=0 total=4"
+        widget.set_completed(True, {"success_count": 3})
+        assert "成功处理 3 项" in widget.summary_text()
     finally:
         widget.close()
 
