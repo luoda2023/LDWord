@@ -52,6 +52,8 @@ class ProgressIndicator(QWidget):
         self._cancel = self._build_cancel_button()
         row.addWidget(self._cancel)
         layout.addLayout(row)
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
 
     def _build_cancel_button(self) -> QPushButton:
         button = QPushButton(CANCEL_BUTTON_TEXT)
@@ -134,3 +136,15 @@ class ProgressIndicator(QWidget):
         self._pct_label.setText("100%")
         self._step_label.setText(DONE_STEP_TEXT)
         self._cancel.hide()
+
+    def reset_idle(self) -> None:
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
+        self._pct_label.setText("0%")
+        self._step_label.setText(DEFAULT_STEP_TEXT)
+        self._cancel.show()
+
+    def set_incomplete(self, step_name: str = "") -> None:
+        if step_name:
+            self._step_label.setText(step_name)
+        self._cancel.show()

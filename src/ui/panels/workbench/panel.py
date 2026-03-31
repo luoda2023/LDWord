@@ -12,21 +12,20 @@ from src.config.resolver import resolve_config
 from src.modules.registry import create_all_modules
 from src.pipeline.runner import Pipeline
 from src.pipeline.scheduler import select_enabled_modules
-from src.qt_api import QFileDialog, QHBoxLayout, QObject, QVBoxLayout, Signal, QWidget
+from src.qt_api import QFileDialog, QHBoxLayout, QObject, QStackedWidget, QVBoxLayout, Signal, QWidget
 from src.report_writer import write_json_report, write_markdown_report
+from src.shared.ui.dynamic_navigation_rail import DynamicNavigationRail
+from src.shared.ui.navigation_card import NavigationCard
 from src.shared.ui.theme import bind_theme, get_theme
 from src.ui.adapters.workbench_execution_adapter import WorkbenchExecutionAdapter
 from src.ui.adapters.workbench_strategy_adapter import WorkbenchStrategyAdapter
 from src.ui.base_panel import BasePanel
 
-from .capability_grid import CapabilityGrid
 from .command_bar import TaskCommandBar
-from .execution_center import ExecutionCenter
+from .config_management_pane import ConfigManagementPane
 from .execution_worker import ExecutionWorker
-from .heading_quick_card import HeadingQuickCard
-from .quick_fill_card import QuickFillCard
-from .recent_run_panel import RecentRunPanel
-from .state import CurrentTaskState, ExecutionProgressState, ReadinessState
+from .quick_execute_pane import QuickExecutePane
+from .state import CurrentTaskState, ExecutionProgressState, ReadinessState, WorkbenchHomeState
 from .styles import build_workbench_stylesheet
 from .strategy_card import StrategyCard
 
@@ -283,49 +282,73 @@ class WorkbenchPanel(BasePanel):
         self._command_bar = TaskCommandBar(self)
         self._root_layout.addWidget(self._command_bar)
 
-        self._middle_container = QWidget(self)
-        self._middle_layout = QHBoxLayout(self._middle_container)
-        self._middle_layout.setContentsMargins(0, 0, 0, 0)
-        self._middle_layout.setSpacing(16)
-        self._left_column = QWidget(self._middle_container)
-        self._left_layout = QVBoxLayout(self._left_column)
-        self._left_layout.setContentsMargins(0, 0, 0, 0)
-        self._left_layout.setSpacing(16)
-        self._right_column = QWidget(self._middle_container)
-        self._right_layout = QVBoxLayout(self._right_column)
-        self._right_layout.setContentsMargins(0, 0, 0, 0)
-        self._right_layout.setSpacing(0)
+        self._home_state = WorkbenchHomeState(selected_card_id="quick_execute")
+        self._shell_container = QWidget(self)
+        self._shell_container.setObjectName("wb_shell_content")
+        self._shell_layout = QHBoxLayout(self._shell_container)
+        self._shell_layout.setContentsMargins(16, 0, 16, 0)
+        self._shell_layout.setSpacing(16)
+
+        self._navigation_rail = DynamicNavigationRail(parent=self._shell_container)
+        self._navigation_rail.setObjectName("wb_navigation_rail")
+        self._detail_stack = QStackedWidget(self._shell_container)
+        self._detail_stack.setObjectName("wb_detail_stack")
 
         self._strategy_adapter = WorkbenchStrategyAdapter()
-        self._strategy_card = StrategyCard(self._left_column)
+        self._strategy_card = StrategyCard(self)
         self._strategy_card.setObjectName("wb_strategy_card")
-        self._capability_grid = CapabilityGrid(self._left_column)
-        self._heading_quick_card = HeadingQuickCard(self.bridge, self._capability_grid)
-        self._heading_quick_card.setObjectName("wb_heading_quick_card")
-        self._capability_grid.add_card(self._heading_quick_card, 0, 0)
-        self._quick_fill_card = QuickFillCard(self.bridge, self._capability_grid)
-        self._quick_fill_card.setObjectName("wb_quick_fill_card")
-        self._capability_grid.add_card(self._quick_fill_card, 0, 1)
 
-        self._left_layout.addWidget(self._strategy_card)
-        self._left_layout.addWidget(self._capability_grid)
+        self._quick_execute_pane = QuickExecutePane(self)
+        self._quick_execute_pane.setObjectName("wb_quick_execute_pane")
+        self._config_management_pane = ConfigManagementPane(self._strategy_card, self)
+        self._config_management_pane.setObjectName("wb_config_management_pane")
 
-        self._execution_center = ExecutionCenter(self._right_column)
-        self._execution_center.setObjectName("wb_execution_center")
-        self._right_layout.addWidget(self._execution_center)
+        self._detail_stack.addWidget(self._quick_execute_pane)
+        self._detail_stack.addWidget(self._config_management_pane)
+        self._detail_map = {
+            "quick_execute": self._quick_execute_pane,
+            "config_management": self._config_management_pane,
+        }
 
-        self._middle_layout.addWidget(self._left_column, 7)
-        self._middle_layout.addWidget(self._right_column, 3)
-        self._root_layout.addWidget(self._middle_container, 1)
+        self._navigation_titles = {
+            "quick_execute": "\u5feb\u901f\u6267\u884c",
+            "config_management": "闁板秶鐤嗙粻锛勬倞",
+        }
+        self._navigation_order = list(self._navigation_titles.keys())
+        self._navigation_cards: dict[str, NavigationCard] = {}
 
-        self._recent_run_panel = RecentRunPanel(self)
-        self._recent_run_panel.setObjectName("wb_recent_run")
-        self._root_layout.addWidget(self._recent_run_panel)
+        card_subtitles = {
+            "quick_execute": "\u8fd0\u884c\u6587\u6863\u5e76\u67e5\u770b\u8fdb\u5ea6\u4e0e\u7ed3\u679c",
+            "config_management": "缁狅紕鎮婂Ο鈩冩緲閵嗕礁婧€閺咁垯绗岄幍褑顢戠粵鏍殣",
+        }
+        card_badges = {
+            "quick_execute": ("\u9ed8\u8ba4", "neutral"),
+            "config_management": ("閸楀啿鐨㈡稉濠勫殠", "info"),
+        }
+
+        for card_id in self._navigation_order:
+            card = NavigationCard(card_id, self._navigation_titles[card_id], parent=self._navigation_rail)
+            card.setObjectName(f"wb_nav_card_{card_id}")
+            subtitle = card_subtitles.get(card_id, "")
+            if subtitle:
+                card.set_subtitle(subtitle)
+            badge_text, badge_variant = card_badges.get(card_id, ("", "neutral"))
+            if badge_text:
+                card.set_badge(badge_text, badge_variant)
+            self._navigation_cards[card_id] = card
+            self._navigation_rail.add_card(card_id, card)
+
+        self._shell_layout.addWidget(self._navigation_rail, 1)
+        self._shell_layout.addWidget(self._detail_stack, 5)
+        self._root_layout.addWidget(self._shell_container, 1)
+
+        self._detail_stack.setCurrentWidget(self._quick_execute_pane)
+        self._navigation_rail.select_card("quick_execute")
+        self._command_bar.set_center_title(self._navigation_titles["quick_execute"])
 
         self._current_template: TemplateConfig | None = None
         self._current_scene: SceneWorkspace | None = None
 
-        # Execution slice ownership (Task 5): panel owns the adapter + current worker reference.
         self._execution_adapter = WorkbenchExecutionAdapter()
         self._execution_worker = None
         self._last_task_state = CurrentTaskState()
@@ -334,19 +357,29 @@ class WorkbenchPanel(BasePanel):
         self._cached_document_path: str = ""
         self._last_execution_pick_cancelled = False
 
-        # Minimal shipped behavior: default-ready execution state.
-        # The user can pick a document on-demand when they click Run.
+        self._execution_center = self._quick_execute_pane.execution_center
+        self._recent_run_panel = self._quick_execute_pane.recent_run_panel
+
         self.set_current_task_state(
             CurrentTaskState(
                 document_label=CurrentTaskState().document_label,
-                strategy_label="默认策略",
+                strategy_label="\u9ed8\u8ba4\u7b56\u7565",
                 ready=True,
-                status_text="待执行",
+                status_text="\u5f85\u6267\u884c",
             )
         )
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
+
+    def _connect_signals(self) -> None:
+        self.bridge.template_changed.connect(self.on_template_changed)
+        self.bridge.scene_changed.connect(self.on_scene_changed)
+        self.bridge.document_loaded.connect(self._on_document_loaded)
+        self._navigation_rail.card_selected.connect(self._on_navigation_card_selected)
+        self._quick_execute_pane.execute_requested.connect(self._execute_requested)
+        self._quick_execute_pane.cancel_requested.connect(self._cancel_execution)
+        self._command_bar._run_button.clicked.connect(self._execute_requested)
 
     def set_strategy_summary(self, template: TemplateConfig | None, scene: SceneWorkspace | None) -> None:
         self._current_template = template
@@ -354,14 +387,18 @@ class WorkbenchPanel(BasePanel):
         state = self._strategy_adapter.build_summary(self._current_template, self._current_scene)
         self._strategy_card.set_state(state)
 
-    def _connect_signals(self) -> None:
-        self.bridge.template_changed.connect(self.on_template_changed)
-        self.bridge.scene_changed.connect(self.on_scene_changed)
-        self.bridge.document_loaded.connect(self._on_document_loaded)
-        self._heading_quick_card.advanced_requested.connect(self.heading_advanced_requested.emit)
-        self._execution_center.execute_requested.connect(self._execute_requested)
-        self._execution_center.cancel_requested.connect(self._cancel_execution)
-        self._command_bar._run_button.clicked.connect(self._execute_requested)
+    def _on_navigation_card_selected(self, card_id: str) -> None:
+        widget = self._detail_map.get(card_id)
+        if widget is None:
+            return
+        self._detail_stack.setCurrentWidget(widget)
+        self._home_state = WorkbenchHomeState(
+            selected_card_id=card_id,
+            enabled_features=list(self._home_state.enabled_features),
+        )
+        title = self._navigation_titles.get(card_id)
+        if title:
+            self._command_bar.set_center_title(title)
 
     def closeEvent(self, event) -> None:
         """Ensure active threaded executions are torn down if the panel is closed/destroyed."""
@@ -477,7 +514,7 @@ class WorkbenchPanel(BasePanel):
 
         file_name, _selected = QFileDialog.getOpenFileName(
             self,
-            "选择文档",
+            "\u9009\u62e9\u6587\u6863",
             "",
             "Word Documents (*.docx);;All Files (*)",
         )
@@ -560,7 +597,7 @@ class WorkbenchPanel(BasePanel):
     def _on_execution_started(self) -> None:
         self._execution_center.set_progress_state(
             self._execution_adapter.build_progress_state(
-                stage_text="开始执行",
+                stage_text="\u5f00\u59cb\u6267\u884c",
                 current_step=0,
                 total_steps=0,
             )

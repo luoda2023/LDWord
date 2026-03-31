@@ -4,13 +4,55 @@ from src.shared.ui.theme import AppTheme
 
 
 def build_workbench_stylesheet(t: AppTheme) -> str:
-    """任务中控 / 执行中心 shared styling."""
+    """Workbench V3 shell styling."""
     return f"""
         #WorkbenchPanel {{
             background: {t.bg_window};
         }}
 
-        #wb_command_bar,
+        #wb_command_bar {{
+            background: {t.bg_card};
+            border: 1px solid {t.border};
+            border-radius: {t.radius_md}px;
+        }}
+
+        #wb_command_center_subtitle {{
+            color: {t.text_secondary};
+            font-size: {t.font_size_sm}px;
+        }}
+
+        #wb_navigation_rail {{
+            background: {t.bg_sidebar};
+            border-radius: {t.radius_md}px;
+            border: 1px solid {t.border};
+            padding: 8px;
+        }}
+
+        #wb_detail_stack {{
+            background: transparent;
+        }}
+
+        #wb_quick_execute_pane,
+        #wb_config_management_pane {{
+            background: {t.bg_card};
+            border: 1px solid {t.border_light};
+            border-radius: {t.radius_md}px;
+            padding: 12px;
+        }}
+
+        #wb_quick_execute_title,
+        #wb_config_management_title,
+        #wb_execution_title {{
+            color: {t.text_primary};
+            font-size: {t.font_size_lg}px;
+            font-weight: {t.font_weight_bold};
+        }}
+
+        #wb_config_management_description {{
+            color: {t.text_secondary};
+            font-size: {t.font_size_sm}px;
+        }}
+
         #wb_strategy_card {{
             background: {t.bg_card};
             border: 1px solid {t.border};
