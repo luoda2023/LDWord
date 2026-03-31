@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.qt_api import QHBoxLayout, QLabel, Qt, Signal
+from src.qt_api import QHBoxLayout, QLabel, QVBoxLayout, Qt, Signal
 
 from src.shared.ui.badge import Badge
 from src.shared.ui.card import Card
@@ -19,12 +19,16 @@ class NavigationCard(Card):
         self._key = key
         self._selected = False
         self._title = QLabel(title)
-        self._badge = badge
+        self._subtitle = QLabel("")
+        self._badge = badge or Badge("")
 
         row = QHBoxLayout()
-        row.addWidget(self._title, 1)
-        if self._badge is not None:
-            row.addWidget(self._badge, 0, Qt.AlignRight)
+        labels = QVBoxLayout()
+        labels.setContentsMargins(0, 0, 0, 0)
+        labels.addWidget(self._title)
+        labels.addWidget(self._subtitle)
+        row.addLayout(labels, 1)
+        row.addWidget(self._badge, 0, Qt.AlignRight)
         self.add_layout(row)
         self._apply_navigation_theme()
         bind_theme(self, self._apply_navigation_theme)
@@ -43,6 +47,7 @@ class NavigationCard(Card):
             """
         )
         self._title.setStyleSheet(f"color: {t.text_primary};")
+        self._subtitle.setStyleSheet(f"color: {t.text_secondary};")
 
     def mousePressEvent(self, event):  # noqa: N802
         self.clicked.emit()
@@ -58,3 +63,10 @@ class NavigationCard(Card):
 
     def is_selected(self) -> bool:
         return self._selected
+
+    def set_subtitle(self, text: str) -> None:
+        self._subtitle.setText(text)
+
+    def set_badge(self, text: str, variant: str = "neutral") -> None:
+        self._badge.set_text(text)
+        self._badge.set_variant(variant)

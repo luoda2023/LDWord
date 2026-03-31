@@ -10,9 +10,10 @@ from src.shared.ui.theme import bind_theme, get_theme
 class Badge(QWidget):
     """Compact capsule text badge."""
 
-    def __init__(self, text: str = "", *, parent=None):
+    def __init__(self, text: str = "", variant: str = "neutral", *, parent=None):
         super().__init__(parent)
         self._text = text
+        self._variant = variant
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._label = QLabel(text)
@@ -23,11 +24,19 @@ class Badge(QWidget):
 
     def _apply_theme(self) -> None:
         t = get_theme()
+        variant_colors = {
+            "neutral": (t.bg_selected, t.text_secondary, t.border_light),
+            "info": (t.primary_light, t.primary, t.primary),
+            "success": (t.success_bg, t.success, t.success),
+            "warning": (t.warning_bg, t.warning, t.warning),
+            "danger": (t.error_bg, t.error, t.error),
+        }
+        bg, fg, border = variant_colors.get(self._variant, variant_colors["neutral"])
         self._label.setStyleSheet(
             f"""
-            background: {t.bg_selected};
-            color: {t.text_secondary};
-            border: 1px solid {t.border_light};
+            background: {bg};
+            color: {fg};
+            border: 1px solid {border};
             border-radius: {t.radius_full}px;
             padding: 0 {t.spacing_sm}px;
             """
@@ -42,3 +51,10 @@ class Badge(QWidget):
 
     def text(self) -> str:
         return self._text
+
+    def set_variant(self, variant: str) -> None:
+        self._variant = variant
+        self._apply_theme()
+
+    def variant(self) -> str:
+        return self._variant
