@@ -1,6 +1,9 @@
+from .badge import Badge
 from .button_style import apply_button_variant, build_button_stylesheet
+from .dynamic_navigation_rail import DynamicNavigationRail
 from .font_combo import FontCombo
 from .input_style import build_text_input_stylesheet
+from .navigation_card import NavigationCard
 from .numbering_preset import NumberingPreset
 from .search_input import SearchInput
 from .selection_control_style import (
@@ -22,6 +25,9 @@ __all__ = [
     "SizeCombo",
     "NumberingPreset",
     "SpacingInput",
+    "Badge",
+    "NavigationCard",
+    "DynamicNavigationRail",
     "apply_button_variant",
     "build_button_stylesheet",
     "build_checkbox_stylesheet",
