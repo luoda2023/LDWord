@@ -30,17 +30,17 @@ class ExecutionFeedbackWidget(QWidget):
         self._summary = QLabel("")
         layout.addWidget(self._summary)
 
-    def set_progress(self, current: int, total: int, step_name: str = "") -> None:
-        self._progress.set_progress(current, total, step_name)
+    def set_progress(self, current: int, total: int, module_title: str) -> None:
+        self._progress.set_progress(current, total, module_title)
 
-    def add_module(self, key: str, label: str, *, status: str = "queued", progress: int = 0) -> None:
-        self._modules.add_module(key, label, status=status, progress=progress)
+    def add_module(self, module_id: str, title: str) -> None:
+        self._modules.add_module(module_id, title)
 
-    def update_module_status(self, key: str, *, status: str | None = None, progress: int | None = None) -> None:
-        self._modules.update_module_status(key, status=status, progress=progress)
+    def update_module_status(self, module_id: str, status: str, progress: int = 0) -> None:
+        self._modules.update_status(module_id, status, progress)
 
-    def append_log(self, module: str, message: str, *, level: str = "info") -> None:
-        self._logs.append_log(module, message, level=level)
+    def append_log(self, level: str, message: str) -> None:
+        self._logs.append_log(level, message)
 
     def current_module_text(self) -> str:
         return self._modules.current_module_text()
@@ -48,9 +48,11 @@ class ExecutionFeedbackWidget(QWidget):
     def log_text(self) -> str:
         return self._logs.log_text()
 
-    def set_completed(self, status: str, *, completed: int, total: int) -> None:
+    def set_completed(self, success: bool, summary: dict) -> None:
         self._progress.set_done()
-        self._summary.setText(f"Completed {completed}/{total} modules ({status}).")
+        summary_parts = [f"{key}={value}" for key, value in summary.items()]
+        summary_line = " ".join(summary_parts)
+        self._summary.setText(f"success={success} {summary_line}".strip())
 
     def summary_text(self) -> str:
         return self._summary.text()

@@ -15,8 +15,8 @@ class LogStreamWidget(QWidget):
         layout.addWidget(self._view)
         self._lines: list[str] = []
 
-    def append_log(self, module: str, message: str, *, level: str = "info") -> None:
-        line = f"[{level}] {module}: {message}"
+    def append_log(self, level: str, message: str) -> None:
+        line = f"[{level}] {message}"
         self._lines.append(line)
         self._view.setPlainText(self.log_text())
 

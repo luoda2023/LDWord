@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from src.qt_api import QLabel, QVBoxLayout, QWidget
+from src.qt_api import QPushButton, QVBoxLayout, QWidget, Signal
 
 
 class ModuleStatusList(QWidget):
     """Lightweight per-module status/progress list."""
+
+    module_clicked = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -12,50 +14,47 @@ class ModuleStatusList(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(4)
         self._rows: dict[str, dict[str, object]] = {}
-        self._current_key = ""
+        self._current_module_id = ""
 
     @staticmethod
-    def _build_row_text(label: str, status: str, progress: int) -> str:
-        return f"{label} - {status} ({progress}%)"
+    def _build_row_text(title: str, status: str, progress: int) -> str:
+        return f"{title} - {status} ({progress}%)"
 
     @staticmethod
     def _clamp_progress(progress: int) -> int:
         return max(0, min(100, int(progress)))
 
-    def add_module(self, key: str, label: str, *, status: str = "queued", progress: int = 0) -> None:
-        pct = self._clamp_progress(progress)
-        row_label = QLabel(self._build_row_text(label, status, pct))
-        self._layout.addWidget(row_label)
-        self._rows[key] = {
-            "label": label,
-            "status": status,
-            "progress": pct,
-            "widget": row_label,
+    def add_module(self, module_id: str, title: str) -> None:
+        row_button = QPushButton(self._build_row_text(title, "queued", 0))
+        row_button.setFlat(True)
+        row_button.clicked.connect(lambda: self._on_row_clicked(module_id))
+        self._layout.addWidget(row_button)
+        self._rows[module_id] = {
+            "title": title,
+            "status": "queued",
+            "progress": 0,
+            "widget": row_button,
         }
-        if not self._current_key:
-            self._current_key = key
+        if not self._current_module_id:
+            self._current_module_id = module_id
 
-    def update_module_status(self, key: str, *, status: str | None = None, progress: int | None = None) -> None:
-        row = self._rows.get(key)
+    def _on_row_clicked(self, module_id: str) -> None:
+        self._current_module_id = module_id
+        self.module_clicked.emit(module_id)
+
+    def update_status(self, module_id: str, status: str, progress: int = 0) -> None:
+        row = self._rows.get(module_id)
         if row is None:
             return
-        if status is not None:
-            row["status"] = status
-        if progress is not None:
-            row["progress"] = self._clamp_progress(progress)
-        label = row["label"]
-        row_status = row["status"]
-        row_progress = row["progress"]
-        row["widget"].setText(self._build_row_text(label, row_status, row_progress))
-        self._current_key = key
-
-    def row_text(self, key: str) -> str:
-        row = self._rows.get(key)
-        if row is None:
-            return ""
-        return row["widget"].text()
+        row["status"] = status
+        row["progress"] = self._clamp_progress(progress)
+        row["widget"].setText(self._build_row_text(row["title"], row["status"], row["progress"]))
+        self._current_module_id = module_id
 
     def current_module_text(self) -> str:
-        if not self._current_key:
+        if not self._current_module_id:
             return ""
-        return self.row_text(self._current_key)
+        row = self._rows.get(self._current_module_id)
+        if row is None:
+            return ""
+        return str(row["title"])
