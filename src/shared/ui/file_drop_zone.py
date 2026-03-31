@@ -69,18 +69,17 @@ class FileDropZone(QWidget):
         if not file_path:
             return
         self.set_file(file_path)
-        self.file_selected.emit(file_path)
 
     def _on_recent_selected(self, value: str) -> None:
         file_path = str(value or "").strip()
         if not file_path:
             return
         self.set_file(file_path)
-        self.file_selected.emit(file_path)
 
     def set_file(self, file_path: str) -> None:
         self._file_path = str(file_path or "")
         self._file_input.setText(self._file_path)
+        self.file_selected.emit(self._file_path)
 
     def file_path(self) -> str:
         return self._file_path
@@ -93,4 +92,3 @@ class FileDropZone(QWidget):
             if candidate:
                 self._recent_combo.addItem(candidate)
         self._recent_combo.blockSignals(False)
-

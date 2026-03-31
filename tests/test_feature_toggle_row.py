@@ -7,6 +7,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.qt_api import QApplication
 from src.shared.ui.feature_toggle_row import FeatureToggleRow
+from src.shared.ui.flow_section import FlowSection
 
 
 def _app():
@@ -40,3 +41,20 @@ def test_feature_toggle_row_emits_toggled_signal_with_new_state():
 
     assert states == [True, False]
 
+
+def test_flow_section_is_constructible_and_expanded_by_default():
+    _app()
+    section = FlowSection("Demo")
+
+    assert section.is_expanded() is True
+
+
+def test_flow_section_supports_expand_collapse_toggle():
+    _app()
+    section = FlowSection("Demo", expanded=True)
+
+    section.set_expanded(False)
+    assert section.is_expanded() is False
+
+    section.set_expanded(True)
+    assert section.is_expanded() is True

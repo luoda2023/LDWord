@@ -38,6 +38,9 @@ class FlowSection(Card):
         bind_theme(self, self._apply_theme)
 
     def _apply_theme(self) -> None:
+        Card._apply_theme(self)
+        if not hasattr(self, "_toggle_button") or not hasattr(self, "_content_layout"):
+            return
         t = get_theme()
         self._content_layout.setSpacing(t.spacing_sm)
         self._toggle_button.setStyleSheet(
@@ -70,4 +73,3 @@ class FlowSection(Card):
 
     def add_layout(self, layout) -> None:
         self._content_layout.addLayout(layout)
-

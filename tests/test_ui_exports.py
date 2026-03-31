@@ -8,7 +8,10 @@ sys.path.insert(0, str(ROOT))
 from src.shared.ui import (
     Badge,
     DynamicNavigationRail,
+    FeatureToggleRow,
+    FileDropZone,
     FontCombo,
+    FlowSection,
     NavigationCard,
     NumberingPreset,
     SearchInput,
@@ -33,6 +36,9 @@ def test_shared_ui_exports_include_unified_controls():
     assert Badge.__name__ == "Badge"
     assert NavigationCard.__name__ == "NavigationCard"
     assert DynamicNavigationRail.__name__ == "DynamicNavigationRail"
+    assert FlowSection.__name__ == "FlowSection"
+    assert FileDropZone.__name__ == "FileDropZone"
+    assert FeatureToggleRow.__name__ == "FeatureToggleRow"
     assert callable(apply_button_variant)
     assert callable(build_button_stylesheet)
     assert callable(build_checkbox_stylesheet)

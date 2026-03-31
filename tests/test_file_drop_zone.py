@@ -32,3 +32,14 @@ def test_file_drop_zone_can_reset_explicit_path_to_empty():
 
     assert zone.file_path() == ""
 
+
+def test_file_drop_zone_set_file_emits_file_selected_signal():
+    _app()
+    zone = FileDropZone()
+    events = []
+    zone.file_selected.connect(events.append)
+
+    selected_path = "C:/demo.docx"
+    zone.set_file(selected_path)
+
+    assert events == [selected_path]
