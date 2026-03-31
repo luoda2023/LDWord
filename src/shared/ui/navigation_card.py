@@ -50,7 +50,8 @@ class NavigationCard(Card):
         self._subtitle.setStyleSheet(f"color: {t.text_secondary};")
 
     def mousePressEvent(self, event):  # noqa: N802
-        self.clicked.emit()
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
         return super().mousePressEvent(event)
 
     @property

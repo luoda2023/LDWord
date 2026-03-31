@@ -29,6 +29,7 @@ class Badge(QWidget):
             "info": (t.primary_light, t.primary, t.primary),
             "success": (t.success_bg, t.success, t.success),
             "warning": (t.warning_bg, t.warning, t.warning),
+            "error": (t.error_bg, t.error, t.error),
             "danger": (t.error_bg, t.error, t.error),
         }
         bg, fg, border = variant_colors.get(self._variant, variant_colors["neutral"])

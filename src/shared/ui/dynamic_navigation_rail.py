@@ -28,6 +28,10 @@ class DynamicNavigationRail(QWidget):
         self._layout.setSpacing(t.spacing_sm)
 
     def add_card(self, card_id: str, card: NavigationCard) -> None:
+        if card_id in self._cards:
+            raise ValueError(f"duplicate card_id: {card_id}")
+        if card.key != card_id:
+            raise ValueError("card.key must match card_id")
         card.setParent(self)
         card.clicked.connect(lambda: self.select_card(card_id))
         self._cards[card_id] = card
