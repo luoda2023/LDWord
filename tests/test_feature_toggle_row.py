@@ -87,3 +87,14 @@ def test_flow_section_mounts_header_and_content_into_card_body_layout():
     assert body_layout.count() == 2
     assert body_layout.itemAt(0).widget() is section._toggle_button
     assert body_layout.itemAt(1).widget() is section._content
+
+
+def test_flow_section_collapsed_construction_hides_content_after_show():
+    app = _app()
+    section = FlowSection("Demo", expanded=False)
+    section.show()
+    app.processEvents()
+
+    assert section.is_expanded() is False
+    assert section._toggle_button.isChecked() is False
+    assert section._content.isHidden() is True

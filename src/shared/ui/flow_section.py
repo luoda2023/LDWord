@@ -33,7 +33,7 @@ class FlowSection(Card):
         self._inner_content_layout.setContentsMargins(0, 0, 0, 0)
         super().add_widget(self._content)
 
-        self.set_expanded(self._expanded)
+        self._apply_expanded_state(emit_signal=False)
         self._apply_theme()
         bind_theme(self, self._apply_theme)
 
@@ -63,10 +63,14 @@ class FlowSection(Card):
         if new_state == self._expanded:
             return
         self._expanded = new_state
+        self._apply_expanded_state(emit_signal=True)
+
+    def _apply_expanded_state(self, *, emit_signal: bool) -> None:
         self._toggle_button.setChecked(self._expanded)
         self._toggle_button.setArrowType(Qt.DownArrow if self._expanded else Qt.RightArrow)
         self._content.setVisible(self._expanded)
-        self.expanded_changed.emit(self._expanded)
+        if emit_signal:
+            self.expanded_changed.emit(self._expanded)
 
     def is_expanded(self) -> bool:
         return self._expanded
