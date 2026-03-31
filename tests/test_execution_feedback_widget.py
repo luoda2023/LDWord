@@ -9,7 +9,7 @@ from src.qt_api import QApplication
 from src.shared.ui.execution_feedback_widget import ExecutionFeedbackWidget
 from src.shared.ui.log_stream_widget import LogStreamWidget
 from src.shared.ui.module_status_list import ModuleStatusList
-from src.shared.ui.progress_indicator import DONE_STEP_TEXT
+from src.shared.ui.progress_indicator import DONE_STEP_TEXT, ProgressIndicator
 
 
 def _app():
@@ -116,6 +116,9 @@ def test_execution_feedback_widget_reset_clears_run_state():
         assert widget.current_module_text() == ""
         assert widget.log_text() == ""
         assert widget.summary_text() == ""
+        assert widget._progress._bar.minimum() == 0
+        assert widget._progress._bar.maximum() == 100
+        assert widget._progress._bar.value() == 0
         assert widget._progress._pct_label.text() == "0%"
         assert widget._progress._cancel.isHidden() is False
     finally:
@@ -135,6 +138,35 @@ def test_execution_feedback_widget_non_success_completion_keeps_non_done_progres
         assert widget._progress._cancel.isHidden() is False
     finally:
         widget.close()
+
+
+def test_progress_indicator_reset_idle_restores_non_busy_zero_percent():
+    _app()
+    indicator = ProgressIndicator()
+    initial_step_text = indicator._step_label.text()
+
+    indicator.set_progress(2, 5, "Running")
+    indicator.set_done()
+    indicator.reset_idle()
+
+    assert indicator._bar.minimum() == 0
+    assert indicator._bar.maximum() == 100
+    assert indicator._bar.value() == 0
+    assert indicator._pct_label.text() == "0%"
+    assert indicator._step_label.text() == initial_step_text
+    assert indicator._cancel.isHidden() is False
+
+
+def test_progress_indicator_set_incomplete_keeps_non_done_state():
+    _app()
+    indicator = ProgressIndicator()
+
+    indicator.set_progress(1, 4, "Ingest")
+    indicator.set_incomplete("Interrupted")
+
+    assert indicator._pct_label.text() != "100%"
+    assert indicator._step_label.text() == "Interrupted"
+    assert indicator._cancel.isHidden() is False
 
 
 def test_execution_feedback_widget_emits_cancel_clicked():

@@ -3,7 +3,7 @@ from __future__ import annotations
 from src.qt_api import QLabel, QVBoxLayout, QWidget, Signal
 from src.shared.ui.log_stream_widget import LogStreamWidget
 from src.shared.ui.module_status_list import ModuleStatusList
-from src.shared.ui.progress_indicator import DEFAULT_STEP_TEXT, ProgressIndicator
+from src.shared.ui.progress_indicator import ProgressIndicator
 
 
 class ExecutionFeedbackWidget(QWidget):
@@ -52,7 +52,7 @@ class ExecutionFeedbackWidget(QWidget):
         if success:
             self._progress.set_done()
         else:
-            self._progress._cancel.show()
+            self._progress.set_incomplete()
         success_count = int(summary.get("success_count", 0))
         text = f"成功处理 {success_count} 项"
         if not success:
@@ -66,5 +66,4 @@ class ExecutionFeedbackWidget(QWidget):
         self._modules.clear()
         self._logs.clear()
         self._summary.clear()
-        self._progress.set_progress(0, 0, DEFAULT_STEP_TEXT)
-        self._progress._cancel.show()
+        self._progress.reset_idle()
