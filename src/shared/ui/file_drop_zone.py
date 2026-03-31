@@ -16,9 +16,19 @@ class FileDropZone(QWidget):
 
     file_selected = Signal(str)
 
-    def __init__(self, *, parent=None):
+    def __init__(
+        self,
+        *,
+        dialog_title: str = "Select File",
+        file_filter: str = "All Files (*)",
+        start_dir: str = "",
+        parent=None,
+    ):
         super().__init__(parent)
         self._file_path = ""
+        self._dialog_title = str(dialog_title or "Select File")
+        self._file_filter = str(file_filter or "All Files (*)")
+        self._start_dir = str(start_dir or "")
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -61,9 +71,9 @@ class FileDropZone(QWidget):
     def _pick_file(self) -> None:
         file_path, _selected = QFileDialog.getOpenFileName(
             self,
-            "Select file",
-            "",
-            "Word Documents (*.docx);;All Files (*)",
+            self._dialog_title,
+            self._start_dir,
+            self._file_filter,
         )
         file_path = str(file_path or "").strip()
         if not file_path:

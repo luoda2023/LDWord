@@ -59,7 +59,10 @@ class FlowSection(Card):
         self._toggle_button.setArrowType(Qt.DownArrow if self._expanded else Qt.RightArrow)
 
     def set_expanded(self, expanded: bool) -> None:
-        self._expanded = bool(expanded)
+        new_state = bool(expanded)
+        if new_state == self._expanded:
+            return
+        self._expanded = new_state
         self._toggle_button.setChecked(self._expanded)
         self._toggle_button.setArrowType(Qt.DownArrow if self._expanded else Qt.RightArrow)
         self._content.setVisible(self._expanded)

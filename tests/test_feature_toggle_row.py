@@ -55,9 +55,24 @@ def test_flow_section_supports_expand_collapse_toggle():
 
     section.set_expanded(False)
     assert section.is_expanded() is False
+    assert section._content.isHidden() is True
 
     section.set_expanded(True)
     assert section.is_expanded() is True
+    assert section._content.isHidden() is False
+
+
+def test_flow_section_set_expanded_same_value_does_not_emit_signal():
+    _app()
+    section = FlowSection("Demo", expanded=True)
+    events = []
+    section.expanded_changed.connect(events.append)
+
+    section.set_expanded(True)
+
+    assert events == []
+    assert section.is_expanded() is True
+    assert section._content.isHidden() is False
 
 
 def test_flow_section_mounts_header_and_content_into_card_body_layout():
