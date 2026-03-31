@@ -1,11 +1,14 @@
 from .badge import Badge
 from .button_style import apply_button_variant, build_button_stylesheet
 from .dynamic_navigation_rail import DynamicNavigationRail
+from .execution_feedback_widget import ExecutionFeedbackWidget
 from .feature_toggle_row import FeatureToggleRow
 from .file_drop_zone import FileDropZone
 from .font_combo import FontCombo
 from .flow_section import FlowSection
 from .input_style import build_text_input_stylesheet
+from .log_stream_widget import LogStreamWidget
+from .module_status_list import ModuleStatusList
 from .navigation_card import NavigationCard
 from .numbering_preset import NumberingPreset
 from .search_input import SearchInput
@@ -31,9 +34,12 @@ __all__ = [
     "Badge",
     "NavigationCard",
     "DynamicNavigationRail",
+    "ExecutionFeedbackWidget",
     "FlowSection",
     "FileDropZone",
     "FeatureToggleRow",
+    "LogStreamWidget",
+    "ModuleStatusList",
     "apply_button_variant",
     "build_button_stylesheet",
     "build_checkbox_stylesheet",
