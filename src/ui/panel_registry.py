@@ -37,7 +37,7 @@ BOTTOM_SPECS = tuple(s for s in PANEL_SPECS if s.group == "bottom")
 def create_panel(panel_id: str, bridge):
     """Return a real panel instance when that panel has landed."""
     if panel_id == "workbench":
-        from src.ui.panels.workbench_panel import WorkbenchPanel
+        from src.ui.panels.workbench.panel_v2 import WorkbenchPanelV2
 
-        return WorkbenchPanel(bridge)
+        return WorkbenchPanelV2(bridge)
     return None

@@ -20,6 +20,22 @@ class StrategySummaryState:
 
 
 @dataclass(slots=True)
+class FeatureCardState:
+    feature_id: str
+    title: str
+    enabled: bool = False
+    subtitle: str = ""
+    badge_text: str = ""
+    badge_variant: str = "neutral"
+
+
+@dataclass(slots=True)
+class WorkbenchHomeState:
+    selected_card_id: str = "quick_execute"
+    enabled_features: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ReadinessState:
     ready: bool = False
     label: str = "待执行"

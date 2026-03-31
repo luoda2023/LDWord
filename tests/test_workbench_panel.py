@@ -28,6 +28,16 @@ def test_main_window_registers_real_workbench_panel():
         window.close()
 
 
+def test_workbench_panel_exposes_navigation_components():
+    _app()
+    panel = WorkbenchPanel(PanelBridge())
+    try:
+        assert panel._navigation_rail.selected_card_id() == "quick_execute"
+        assert panel._detail_stack.currentWidget() is panel._quick_execute_pane
+    finally:
+        panel.close()
+
+
 def test_workbench_panel_uses_bridge_reference_without_task_2_behavior():
     _app()
     bridge = PanelBridge()

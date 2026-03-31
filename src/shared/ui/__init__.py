@@ -1,6 +1,8 @@
 from .badge import Badge
 from .button_style import apply_button_variant, build_button_stylesheet
+from .config_list_widget import ConfigListWidget
 from .dynamic_navigation_rail import DynamicNavigationRail
+from .execution_progress_widget import ExecutionProgressWidget
 from .execution_feedback_widget import ExecutionFeedbackWidget
 from .feature_toggle_row import FeatureToggleRow
 from .file_drop_zone import FileDropZone
@@ -34,6 +36,8 @@ __all__ = [
     "Badge",
     "NavigationCard",
     "DynamicNavigationRail",
+    "ConfigListWidget",
+    "ExecutionProgressWidget",
     "ExecutionFeedbackWidget",
     "FlowSection",
     "FileDropZone",

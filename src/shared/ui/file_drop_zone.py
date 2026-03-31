@@ -19,15 +19,15 @@ class FileDropZone(QWidget):
     def __init__(
         self,
         *,
-        dialog_title: str = "Select File",
-        file_filter: str = "All Files (*)",
+        dialog_title: str = "\u9009\u62e9\u6587\u4ef6",
+        file_filter: str = "\u6240\u6709\u6587\u4ef6 (*)",
         start_dir: str = "",
         parent=None,
     ):
         super().__init__(parent)
         self._file_path = ""
-        self._dialog_title = str(dialog_title or "Select File")
-        self._file_filter = str(file_filter or "All Files (*)")
+        self._dialog_title = str(dialog_title or "\u9009\u62e9\u6587\u4ef6")
+        self._file_filter = str(file_filter or "\u6240\u6709\u6587\u4ef6 (*)")
         self._start_dir = str(start_dir or "")
 
         self._layout = QVBoxLayout(self)
@@ -38,10 +38,10 @@ class FileDropZone(QWidget):
 
         self._file_input = QLineEdit(self)
         self._file_input.setReadOnly(True)
-        self._file_input.setPlaceholderText("No file selected")
+        self._file_input.setPlaceholderText("\u672a\u9009\u62e9\u6587\u4ef6")
         top_row.addWidget(self._file_input, 1)
 
-        self._browse_button = QPushButton("Browse", self)
+        self._browse_button = QPushButton("\u6d4f\u89c8", self)
         self._browse_button.setCursor(Qt.PointingHandCursor)
         apply_button_variant(self._browse_button, "secondary")
         self._browse_button.clicked.connect(self._pick_file)
@@ -51,7 +51,7 @@ class FileDropZone(QWidget):
 
         self._recent_combo = QComboBox(self)
         self._recent_combo.setEditable(False)
-        self._recent_combo.setPlaceholderText("Recent files")
+        self._recent_combo.setPlaceholderText("\u6700\u8fd1\u6587\u4ef6")
         self._recent_combo.currentTextChanged.connect(self._on_recent_selected)
         self._layout.addWidget(self._recent_combo)
 

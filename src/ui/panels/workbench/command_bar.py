@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.qt_api import QHBoxLayout, QLabel, QPushButton, Qt, QWidget
+from src.qt_api import QHBoxLayout, QLabel, QPushButton, Qt, QVBoxLayout, QWidget
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.theme import bind_theme, get_theme
 
@@ -17,17 +17,25 @@ class TaskCommandBar(QWidget):
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(12)
 
-        self._center_label = QLabel("任务中控")
+        self._center_label = QLabel("\u4efb\u52a1\u4e2d\u63a7")
         self._center_label.setObjectName("wb_command_center_label")
+        self._center_subtitle = QLabel("\u5feb\u901f\u6267\u884c \u00b7 \u914d\u7f6e\u7ba1\u7406")
+        self._center_subtitle.setObjectName("wb_command_center_subtitle")
         self._doc_value = QLabel()
         self._strategy_value = QLabel()
         self._status_value = QLabel()
         self._status_value.setObjectName("wb_ready_badge")
-        self._run_button = QPushButton("开始执行")
+        self._run_button = QPushButton("\u5f00\u59cb\u6267\u884c")
         self._run_button.setObjectName("task_command_bar_run")
         apply_button_variant(self._run_button, "primary")
 
-        layout.addWidget(self._center_label)
+        center_layout = QVBoxLayout()
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(2)
+        center_layout.addWidget(self._center_label)
+        center_layout.addWidget(self._center_subtitle)
+
+        layout.addLayout(center_layout)
         layout.addSpacing(8)
         layout.addWidget(self._doc_value)
         layout.addWidget(self._strategy_value)
@@ -47,6 +55,9 @@ class TaskCommandBar(QWidget):
 
     def set_center_title(self, text: str) -> None:
         self._center_label.setText(text)
+
+    def set_center_subtitle(self, text: str) -> None:
+        self._center_subtitle.setText(text)
 
     def _apply_theme(self) -> None:
         t = get_theme()
