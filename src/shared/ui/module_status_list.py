@@ -25,6 +25,15 @@ class ModuleStatusList(QWidget):
         return max(0, min(100, int(progress)))
 
     def add_module(self, module_id: str, title: str) -> None:
+        existing = self._rows.get(module_id)
+        if existing is not None:
+            existing["title"] = title
+            existing["status"] = "queued"
+            existing["progress"] = 0
+            existing["widget"].setText(self._build_row_text(title, "queued", 0))
+            self._current_module_id = module_id
+            return
+
         row_button = QPushButton(self._build_row_text(title, "queued", 0))
         row_button.setFlat(True)
         row_button.clicked.connect(lambda: self._on_row_clicked(module_id))
@@ -58,3 +67,11 @@ class ModuleStatusList(QWidget):
         if row is None:
             return ""
         return str(row["title"])
+
+    def clear(self) -> None:
+        for row in self._rows.values():
+            widget = row["widget"]
+            self._layout.removeWidget(widget)
+            widget.deleteLater()
+        self._rows.clear()
+        self._current_module_id = ""
