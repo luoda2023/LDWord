@@ -29,3 +29,6 @@ lark_formatter.log
 .vscode/
 *.swp
 *.swo
+
+# Local git worktrees
+.worktrees/
