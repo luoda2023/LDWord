@@ -18,7 +18,7 @@ def test_dynamic_navigation_rail_public_api_selects_and_emits_selected_card_id()
     rail = DynamicNavigationRail()
     try:
         selected_ids = []
-        rail.selected_card_id_changed.connect(selected_ids.append)
+        rail.card_selected.connect(selected_ids.append)
 
         home = NavigationCard("home", "Home")
         settings = NavigationCard("settings", "Settings")

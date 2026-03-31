@@ -11,7 +11,7 @@ from src.shared.ui.theme import bind_theme, get_theme
 class DynamicNavigationRail(QWidget):
     """Vertical navigation container with dynamic entries."""
 
-    selected_card_id_changed = Signal(str)
+    card_selected = Signal(str)
 
     def __init__(self, *, parent=None):
         super().__init__(parent)
@@ -53,7 +53,7 @@ class DynamicNavigationRail(QWidget):
         self._selected_key = card_id
         for card_key, card in self._cards.items():
             card.set_selected(card_key == card_id)
-        self.selected_card_id_changed.emit(card_id)
+        self.card_selected.emit(card_id)
 
     def selected_card_id(self) -> str | None:
         return self._selected_key
