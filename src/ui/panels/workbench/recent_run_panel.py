@@ -24,6 +24,7 @@ class RecentRunPanel(Card):
         self._summary.setWordWrap(True)
         self._meta_label = QLabel("")
         self._meta_label.setObjectName("wb_recent_run_meta")
+        self._meta_label.setWordWrap(True)
         self.add_widget(self._status_label)
         self.add_widget(self._summary)
         self.add_widget(self._meta_label)
