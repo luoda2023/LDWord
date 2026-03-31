@@ -29,8 +29,8 @@ class FlowSection(Card):
         super().add_widget(self._toggle_button)
 
         self._content = QWidget(self)
-        self._content_layout = QVBoxLayout(self._content)
-        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        self._inner_content_layout = QVBoxLayout(self._content)
+        self._inner_content_layout.setContentsMargins(0, 0, 0, 0)
         super().add_widget(self._content)
 
         self.set_expanded(self._expanded)
@@ -39,10 +39,10 @@ class FlowSection(Card):
 
     def _apply_theme(self) -> None:
         Card._apply_theme(self)
-        if not hasattr(self, "_toggle_button") or not hasattr(self, "_content_layout"):
+        if not hasattr(self, "_toggle_button") or not hasattr(self, "_inner_content_layout"):
             return
         t = get_theme()
-        self._content_layout.setSpacing(t.spacing_sm)
+        self._inner_content_layout.setSpacing(t.spacing_sm)
         self._toggle_button.setStyleSheet(
             f"""
             QToolButton {{
@@ -69,7 +69,7 @@ class FlowSection(Card):
         return self._expanded
 
     def add_widget(self, widget: QWidget) -> None:
-        self._content_layout.addWidget(widget)
+        self._inner_content_layout.addWidget(widget)
 
     def add_layout(self, layout) -> None:
-        self._content_layout.addLayout(layout)
+        self._inner_content_layout.addLayout(layout)

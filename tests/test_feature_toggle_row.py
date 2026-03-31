@@ -58,3 +58,17 @@ def test_flow_section_supports_expand_collapse_toggle():
 
     section.set_expanded(True)
     assert section.is_expanded() is True
+
+
+def test_flow_section_mounts_header_and_content_into_card_body_layout():
+    _app()
+    section = FlowSection("Demo")
+
+    root_layout = section.layout()
+    assert root_layout.count() == 1
+
+    body_layout = root_layout.itemAt(0).layout()
+    assert body_layout is not None
+    assert body_layout.count() == 2
+    assert body_layout.itemAt(0).widget() is section._toggle_button
+    assert body_layout.itemAt(1).widget() is section._content
