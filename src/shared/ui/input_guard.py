@@ -19,7 +19,7 @@ GlobalInputGuard — 全局输入守卫
 
 from __future__ import annotations
 
-from src.qt_api import QAbstractItemView, QAbstractSlider, QAbstractSpinBox, QComboBox, QEvent, QObject, Qt
+from src.qt_api import QAbstractItemView, QAbstractSlider, QAbstractSpinBox, QComboBox, QEvent, QObject, QScrollBar, Qt
 
 
 def _get_spinbox(obj: QObject):
@@ -53,8 +53,11 @@ class GlobalInputGuard(QObject):
                 curr = curr.parent()
 
             # 封杀 ComboBox / SpinBox / Slider 滚轮改值
+            # 但排除 QScrollBar — 否则 QScrollArea 无法滚轮滚动
             curr = obj
             while curr:
+                if isinstance(curr, QScrollBar):
+                    return False  # 放行，让滚动条正常工作
                 if isinstance(curr, (QComboBox, QAbstractSpinBox, QAbstractSlider)):
                     event.ignore()
                     return True

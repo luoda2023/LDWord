@@ -8,6 +8,7 @@ from src.qt_api import QFileDialog, QComboBox, QHBoxLayout, QLineEdit, QPushButt
 
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.input_style import build_text_input_stylesheet
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import bind_theme, get_theme
 
 
@@ -61,9 +62,9 @@ class FileDropZone(QWidget):
     def _apply_theme(self) -> None:
         t = get_theme()
         self._layout.setSpacing(t.spacing_xs)
-        self._file_input.setFixedHeight(t.control_height_md)
-        self._browse_button.setFixedHeight(t.button_height_md)
-        self._recent_combo.setFixedHeight(t.control_height_md)
+        apply_size_class(self._file_input, "md")
+        apply_size_class(self._browse_button, "md")
+        apply_size_class(self._recent_combo, "md")
         self._file_input.setStyleSheet(build_text_input_stylesheet(t))
         self._recent_combo.setStyleSheet(build_text_input_stylesheet(t, selector="QComboBox"))
         self._browse_button.setStyleSheet(build_button_stylesheet(t))

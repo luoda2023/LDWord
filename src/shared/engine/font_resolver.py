@@ -1,8 +1,4 @@
-"""
-font_resolver — 字体名解析+系统检测+fallback
-
-解析用户指定的字体名→系统实际可用的字体名。
-"""
+"""Resolve configured font names to fonts available on the current machine."""
 
 from __future__ import annotations
 
@@ -11,49 +7,7 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
-
-# ── 系统字体扫描 ─────────────────────────────────
-
-@lru_cache(maxsize=1)
-def list_system_fonts() -> set[str]:
-    """扫描系统已安装的字体名称。"""
-    font_dirs = _get_font_dirs()
-    names: set[str] = set()
-    for d in font_dirs:
-        if not d.is_dir():
-            continue
-        for f in d.iterdir():
-            if f.suffix.lower() in (".ttf", ".otf", ".ttc"):
-                names.add(f.stem)
-    return names
-
-
-def _get_font_dirs() -> list[Path]:
-    if sys.platform == "win32":
-        windir = os.environ.get("WINDIR", r"C:\Windows")
-        return [
-            Path(windir) / "Fonts",
-            Path.home() / "AppData" / "Local" / "Microsoft" / "Windows" / "Fonts",
-        ]
-    elif sys.platform == "darwin":
-        return [
-            Path("/System/Library/Fonts"),
-            Path("/Library/Fonts"),
-            Path.home() / "Library" / "Fonts",
-        ]
-    else:
-        return [
-            Path("/usr/share/fonts"),
-            Path("/usr/local/share/fonts"),
-            Path.home() / ".fonts",
-            Path.home() / ".local" / "share" / "fonts",
-        ]
-
-
-# ── 字体名解析 ───────────────────────────────────
-
-# 常见中文字体别名 → 标准名
-_CN_ALIASES: dict[str, list[str]] = {
+CN_ALIASES: dict[str, list[str]] = {
     "宋体": ["SimSun", "NSimSun", "宋体"],
     "黑体": ["SimHei", "黑体"],
     "微软雅黑": ["Microsoft YaHei", "微软雅黑"],
@@ -64,12 +18,10 @@ _CN_ALIASES: dict[str, list[str]] = {
     "方正小标宋": ["FZXiaoBiaoSong-B05", "方正小标宋简体", "方正小标宋_GBK"],
 }
 
-# Fallback 链
-_FALLBACK_CN = ["宋体", "SimSun", "Microsoft YaHei"]
-_FALLBACK_EN = ["Times New Roman", "Arial", "Calibri"]
+FALLBACK_CN = ["宋体", "SimSun", "Microsoft YaHei"]
+FALLBACK_EN = ["Times New Roman", "Arial", "Calibri"]
 
-# 常见英文字体别名 → 文件名 stem
-_EN_ALIASES: dict[str, list[str]] = {
+EN_ALIASES: dict[str, list[str]] = {
     "Times New Roman": ["times", "timesbd", "timesbi", "timesi"],
     "Arial": ["arial", "arialbd", "arialbi", "ariali"],
     "Calibri": ["calibri", "calibrib", "calibrii", "calibriz"],
@@ -83,74 +35,139 @@ _EN_ALIASES: dict[str, list[str]] = {
 }
 
 
+@lru_cache(maxsize=1)
+def list_system_fonts() -> set[str]:
+    font_dirs = _get_font_dirs()
+    names: set[str] = set()
+    for directory in font_dirs:
+        if not directory.is_dir():
+            continue
+        for font_file in directory.iterdir():
+            if font_file.suffix.lower() in (".ttf", ".otf", ".ttc"):
+                names.add(font_file.stem)
+    return names
+
+
+@lru_cache(maxsize=1)
+def qt_font_families() -> tuple[str, ...]:
+    try:
+        from PySide6.QtWidgets import QApplication
+        if QApplication.instance() is None:
+            return ()
+        from PySide6.QtGui import QFontDatabase
+    except Exception:
+        return ()
+
+    try:
+        names = sorted(
+            {str(name).strip() for name in QFontDatabase.families() if str(name).strip()},
+            key=lambda item: item.casefold(),
+        )
+    except Exception:
+        return ()
+    return tuple(names)
+
+
+def _get_font_dirs() -> list[Path]:
+    if sys.platform == "win32":
+        windir = os.environ.get("WINDIR", r"C:\Windows")
+        return [
+            Path(windir) / "Fonts",
+            Path.home() / "AppData" / "Local" / "Microsoft" / "Windows" / "Fonts",
+        ]
+    if sys.platform == "darwin":
+        return [
+            Path("/System/Library/Fonts"),
+            Path("/Library/Fonts"),
+            Path.home() / "Library" / "Fonts",
+        ]
+    return [
+        Path("/usr/share/fonts"),
+        Path("/usr/local/share/fonts"),
+        Path.home() / ".fonts",
+        Path.home() / ".local" / "share" / "fonts",
+    ]
+
+
 def resolve_font(
     font_name: str,
     *,
     lang: str = "auto",
     fallback: bool = True,
 ) -> str:
-    """解析字体名为系统可用的字体名。
-
-    Args:
-        font_name: 用户指定的字体名
-        lang: "cn" / "en" / "auto" — 决定 fallback 链
-        fallback: 未找到时是否使用 fallback
-
-    Returns:
-        系统可用的字体名。找不到且不 fallback 则返回原名。
-    """
-    # 直接匹配
-    if _is_available(font_name):
+    normalized = str(font_name or "").strip()
+    if not normalized:
         return font_name
 
-    # 别名查找
-    for canonical, aliases in _CN_ALIASES.items():
-        if font_name in (canonical, *aliases):
+    matched = _match_available_font(normalized)
+    if matched is not None:
+        return matched
+
+    for canonical, aliases in CN_ALIASES.items():
+        if normalized in (canonical, *aliases):
             for alias in aliases:
-                if _is_available(alias):
-                    return alias
+                matched = _match_available_font(alias)
+                if matched is not None:
+                    return matched
 
     if not fallback:
-        return font_name
+        return normalized
 
-    # Fallback
-    chain = _FALLBACK_CN if _is_cn(font_name, lang) else _FALLBACK_EN
-    for fb in chain:
-        if _is_available(fb):
-            return fb
+    chain = FALLBACK_CN if _is_cn(normalized, lang) else FALLBACK_EN
+    for fallback_name in chain:
+        matched = _match_available_font(fallback_name)
+        if matched is not None:
+            return matched
 
-    return font_name
+    return normalized
 
 
-def _is_available(name: str) -> bool:
-    """检查字体是否在系统中（启发式）。
+def _match_available_font(name: str) -> str | None:
+    normalized_target = _normalize_font_name(name)
+    if not normalized_target:
+        return None
 
-    由于 list_system_fonts() 仅返回文件名 stem（如 times, simsun），
-    无法精确匹配 "Times New Roman" 等含空格的名称。
-    因此采用启发式：先查别名表 → 再比较去空格小写 stem。
-    """
+    for family in qt_font_families():
+        if _normalize_font_name(family) == normalized_target:
+            return family
+
     fonts = list_system_fonts()
-    fonts_lower = {n.lower() for n in fonts}
+    fonts_lower = {font.lower(): font for font in fonts}
+    if name in fonts:
+        return name
+    if name.lower() in fonts_lower:
+        return fonts_lower[name.lower()]
 
-    # 直接 stem 匹配
-    if name in fonts or name.lower() in fonts_lower:
-        return True
-
-    # 中文别名表
-    for canonical, aliases in _CN_ALIASES.items():
+    for canonical, aliases in CN_ALIASES.items():
         if name in (canonical, *aliases):
             for alias in aliases:
-                if alias.lower() in fonts_lower:
-                    return True
+                matched = _match_stem(alias, fonts)
+                if matched is not None:
+                    return name
 
-    # 英文别名表
-    for canonical, stems in _EN_ALIASES.items():
+    for canonical, stems in EN_ALIASES.items():
         if name == canonical:
             for stem in stems:
-                if stem.lower() in fonts_lower:
-                    return True
+                matched = _match_stem(stem, fonts)
+                if matched is not None:
+                    return canonical
 
-    return False
+    return None
+
+
+def _match_stem(name: str, fonts: set[str]) -> str | None:
+    normalized = name.lower()
+    for font in fonts:
+        if font.lower() == normalized:
+            return font
+    return None
+
+
+def _normalize_font_name(name: str) -> str:
+    return "".join(
+        ch for ch in str(name or "").strip().casefold()
+        if not ch.isspace() and ch not in "-_.,()[]{}"
+    )
 
 
 def _is_cn(name: str, lang: str) -> bool:
@@ -158,5 +175,4 @@ def _is_cn(name: str, lang: str) -> bool:
         return True
     if lang == "en":
         return False
-    # auto: 包含 CJK 字符则视为中文字体
-    return any("\u4e00" <= c <= "\u9fff" for c in name)
+    return any("\u4e00" <= char <= "\u9fff" for char in name)

@@ -106,6 +106,20 @@ def build_button_stylesheet(
             color: {theme.text_disabled};
             border: none;
         }}
+
+        /* ── Size-class tiers (via sizeClass dynamic property) ── */
+        {selector}[sizeClass="sm"] {{
+            min-height: {theme.control_height_sm}px;
+            max-height: {theme.control_height_sm}px;
+        }}
+        {selector}[sizeClass="md"] {{
+            min-height: {theme.button_height_md}px;
+            max-height: {theme.button_height_md}px;
+        }}
+        {selector}[sizeClass="lg"] {{
+            min-height: {theme.control_height_lg}px;
+            max-height: {theme.control_height_lg}px;
+        }}
     """
 
 

@@ -26,13 +26,13 @@ class FeatureToggleRow(QWidget):
         self._toggle = QCheckBox(label, self)
         self._toggle.setChecked(bool(checked))
         self._toggle.toggled.connect(self._on_toggled)
-        self._layout.addWidget(self._toggle, 1)
+        self._layout.addWidget(self._toggle, 1, Qt.AlignVCenter)
 
-        self._config_button = QPushButton("Config", self)
+        self._config_button = QPushButton("配置", self)
         self._config_button.setCursor(Qt.PointingHandCursor)
         apply_button_variant(self._config_button, "secondary")
         self._config_button.clicked.connect(self.config_clicked.emit)
-        self._layout.addWidget(self._config_button)
+        self._layout.addWidget(self._config_button, 0, Qt.AlignVCenter)
 
         self._config_button.setEnabled(self._toggle.isChecked())
 
@@ -43,8 +43,15 @@ class FeatureToggleRow(QWidget):
         t = get_theme()
         self._layout.setSpacing(t.spacing_sm)
         self._toggle.setStyleSheet(build_checkbox_stylesheet(t))
-        self._config_button.setStyleSheet(build_button_stylesheet(t))
-        self._config_button.setMinimumHeight(t.button_height_md)
+        # Compact link-style config button (no border, small)
+        self._config_button.setStyleSheet(
+            f"QPushButton {{ font-size: {t.font_size_sm}px; color: {t.primary}; "
+            f"border: none; background: transparent; padding: 2px 6px; }}"
+            f"QPushButton:hover {{ text-decoration: underline; }}"
+            f"QPushButton:disabled {{ color: {t.text_hint}; }}"
+        )
+        self._config_button.setMinimumHeight(0)
+        self._config_button.setFixedHeight(24)
 
     def _on_toggled(self, checked: bool) -> None:
         self._config_button.setEnabled(bool(checked))

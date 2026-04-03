@@ -60,12 +60,13 @@ class AppTheme:
     logo_light: str = "#4096FF"           # Logo 浅色部分
 
     # ━━ 表面色 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    bg_window: str = "#F8FAFC"           # 窗口/页面背景
+    bg_window: str = "#F5F7FA"           # 窗口/页面背景（蓝调极浅灰，衬托白色 Card）
     bg_card: str = "#FFFFFF"             # 卡片/面板背景
     bg_input: str = "#FFFFFF"            # 输入框背景
-    bg_hover: str = "#F1F5F9"            # 悬停背景
+    bg_hover: str = "#EDF0F8"            # 悬停背景
     bg_selected: str = "#E6F4FF"         # 选中背景
     bg_tooltip: str = "#1E293B"          # 提示框背景
+    bg_nav_rail: str = ""                # 导航卡片区背景（空=自动 fallback 到 bg_card）
 
     # ━━ 文字 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     text_primary: str = "#1E293B"        # 主文字
@@ -77,8 +78,8 @@ class AppTheme:
     text_link: str = "#1677FF"           # 链接文字
 
     # ━━ 侧边栏 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    bg_sidebar: str = "#F1F5F9"          # 侧边栏背景（浅灰）
-    bg_sidebar_active: str = "#E2E8F0"   # 侧边栏选中项背景
+    bg_sidebar: str = "#EBF0FA"          # 侧边栏+标题栏背景（蓝调浅灰，品牌暗示）
+    bg_sidebar_active: str = "#DDE5F5"   # 侧边栏选中项背景
     text_sidebar: str = "#64748B"        # 侧边栏图标默认色
     text_sidebar_active: str = "#0F172A" # 侧边栏选中文字
 
@@ -147,6 +148,7 @@ class AppTheme:
     radius_lg: int = 14                  # 大圆角（对话框）
     radius_xl: int = 20                  # 超大圆角（浮层）
     radius_full: int = 9999              # 全圆（胶囊按钮）
+    shell_radius: int = 10               # 主窗口/弹窗/外壳统一圆角
 
     # ── Shared control tokens (px) ──────────────────────────────────────────
     button_radius: int = 6
@@ -302,7 +304,7 @@ class AppTheme:
     shadow_offset_y_lg: int = 16         # 弹窗 Y 偏移
 
     # ━━ 字体 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    font_family: str = "'Segoe UI', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'Microsoft YaHei', sans-serif"
+    font_family: str = "'Microsoft YaHei', 'Segoe UI', 'Inter', '-apple-system', 'BlinkMacSystemFont', sans-serif"
 
     font_size_xs: int = 11               # 角标、徽标
     font_size_sm: int = 12               # 辅助文字、脚注
@@ -335,6 +337,9 @@ class AppTheme:
     # ── 工具方法 ──
 
     def __post_init__(self) -> None:
+        # bg_nav_rail 智能 fallback：未显式定义时自动取 bg_card
+        if not self.bg_nav_rail:
+            self.bg_nav_rail = self.bg_card
         if not self.checkbox_border_color:
             self.checkbox_border_color = self.border
         if not self.checkbox_hover_border_color:
@@ -473,72 +478,90 @@ _FIELD_NAMES = {f.name for f in AppTheme.__dataclass_fields__.values()}
 LIGHT = AppTheme()  # 默认浅色
 
 DARK = AppTheme(
-    # 深色配色——高质量暗黑模式, inspired by Vercel/Linear
-    # 降低饱和度以减少视觉疲劳
+    # 深色配色——高质量暗黑模式, inspired by GitHub Dark + Linear
+    # 表面层级: sidebar(L0) → window(L0) → nav_rail(L1) → card(L2)
     primary="#1677FF", primary_hover="#4096FF",
     primary_pressed="#0958D9", primary_light="#111A2C",
-    accent="#E0993A",       # 柔化橙（原 #FA8C16 太刺眼）
+    accent="#E0993A",       # 柔化橙
     logo_dark="#E2E8F0", logo_light="#94A3B8",
-    bg_window="#0B0F19", bg_card="#111827", bg_input="#1F2937",
-    bg_hover="#1F2937", bg_selected="#1E293B", bg_tooltip="#334155",
-    bg_sidebar="#111827", bg_sidebar_active="#1E293B",
+    bg_window="#0D1117", bg_card="#161B22", bg_input="#0D1117",
+    bg_hover="#1C2333", bg_selected="#1F2D40", bg_tooltip="#2D3545",
+    bg_nav_rail="#161B22",            # L1 导航层
+    bg_sidebar="#010409", bg_sidebar_active="#161B22",
     text_sidebar="#64748B", text_sidebar_active="#E2E8F0",
-    text_primary="#E2E8F0",    # 柔化白（原 #F8FAFC 太亮）
+    text_primary="#E2E8F0",    # 柔化白
     text_secondary="#94A3B8",
     text_hint="#64748B", text_disabled="#475569",
     text_on_primary="#FFFFFF", text_on_accent="#FFFFFF",
     text_link="#4096FF",
     window_close_hover_bg="#E81123", window_close_hover_text="#FFFFFF",
-    border="#334155", border_light="#293548",  # ΔL ≥12% vs bg_card #111827
+    border="#2D3545", border_light="#21262D",
     border_focus="#1677FF", border_error="#E07070",
-    divider="#1E293B", overlay="rgba(0, 0, 0, 0.75)",
-    success="#6EBC8A",        # 柔化绿（原 #4ADE80 太刺眼）
+    divider="#21262D", overlay="rgba(0, 0, 0, 0.75)",
+    success="#6EBC8A",        # 柔化绿
     success_bg="#14532D",
-    warning="#D4A843",        # 柔化金（原 #FBBF24 太刺眼）
+    warning="#D4A843",        # 柔化金
     warning_bg="#78350F",
-    error="#E07070",          # 柔化红（原 #F87171 太刺眼）
+    error="#E07070",          # 柔化红
     error_hover="#ECA5A5",
     error_pressed="#CC5555",
     error_bg="#7F1D1D",
-    info="#6BA3D4",           # 柔化蓝（原 #38BDF8 太刺眼）
+    info="#6BA3D4",           # 柔化蓝
     info_bg="#0C4A6E",
-    switch_on="#1677FF", switch_off="#334155",
+    switch_on="#1677FF", switch_off="#2D3545",
     switch_thumb="#E2E8F0", switch_disabled="#1E293B",
-    progress_track="#1E293B", progress_fill="#1677FF",
-    scrollbar_track="transparent", scrollbar_thumb="#334155",
+    progress_track="#21262D", progress_fill="#1677FF",
+    scrollbar_track="transparent", scrollbar_thumb="#2D3545",
     scrollbar_thumb_hover="#475569",
     tab_active_text="#4096FF", tab_active_border="#4096FF",
     tab_inactive_text="#64748B",
-    icon_primary="#B0BAC9",   # 柔化图标色（原 #CBD5E1 太亮）
+    icon_primary="#B0BAC9",
     icon_secondary="#64748B",
     icon_accent="#1677FF",
     shadow_color="rgba(0, 0, 0, 0.50)",
 )
 
 OCEAN = AppTheme(
-    # 海蓝配色
+    # 海蓝配色 — 全 token 补齐版
+    # 表面层级: sidebar(深蓝灰) → window(浅蓝) → nav_rail/card(白)
     primary="#0EA5E9", primary_hover="#38BDF8",
     primary_pressed="#0284C7", primary_light="#E0F2FE",
     accent="#F59E0B", accent_hover="#FBBF24",
     logo_dark="#0369A1", logo_light="#38BDF8",
-    bg_window="#F0F9FF", bg_card="#FFFFFF", bg_input="#FFFFFF",
-    bg_hover="#E0F2FE", bg_selected="#BAE6FD", bg_tooltip="#0c4a6e",
-    bg_sidebar="#E0F2FE", bg_sidebar_active="#BAE6FD",
+    bg_window="#EDF5FC", bg_card="#FFFFFF", bg_input="#FFFFFF",
+    bg_hover="#E5F3FC", bg_selected="#BAE6FD", bg_tooltip="#0C4A6E",
+    bg_nav_rail="#FFFFFF",
+    bg_sidebar="#D0E8F7", bg_sidebar_active="#B5DDF5",
     text_sidebar="#0369A1", text_sidebar_active="#0C4A6E",
-    text_primary="#0c4a6e", text_secondary="#0369a1",
-    text_hint="#38bdf8", text_link="#0ea5e9",
-    border="#bae6fd", border_light="#BAE6FD", border_focus="#0ea5e9",  # border_light 同 border
-    divider="#bae6fd",
+    text_primary="#0C4A6E", text_secondary="#0369A1",
+    text_hint="#38BDF8", text_disabled="#7DD3FC",
+    text_on_primary="#FFFFFF", text_on_accent="#FFFFFF",
+    text_link="#0EA5E9",
+    window_close_hover_bg="#E81123", window_close_hover_text="#FFFFFF",
+    icon_primary="#0C4A6E", icon_secondary="#38BDF8",
+    icon_accent="#0EA5E9",
+    border="#BAE6FD", border_light="#BAE6FD", border_focus="#0EA5E9",
+    border_error="#EF4444",
+    divider="#BAE6FD",
+    overlay="rgba(12, 74, 110, 0.40)",
+    success="#22C55E", success_bg="#DCFCE7",
+    warning="#F59E0B", warning_bg="#FEF3C7",
     error="#EF4444", error_hover="#F87171", error_pressed="#DC2626",
-    switch_on="#0ea5e9", progress_fill="#0ea5e9",
-    tab_active_text="#0ea5e9", tab_active_border="#0ea5e9",
-    icon_primary="#0c4a6e", icon_secondary="#38bdf8",
-    icon_accent="#0ea5e9",
+    error_bg="#FEE2E2",
+    info="#0EA5E9", info_bg="#E0F2FE",
+    switch_on="#0EA5E9", switch_off="#BAE6FD",
+    switch_thumb="#FFFFFF", switch_disabled="#E0F2FE",
+    progress_track="#BAE6FD", progress_fill="#0EA5E9",
+    scrollbar_track="transparent", scrollbar_thumb="#BAE6FD",
+    scrollbar_thumb_hover="#7DD3FC",
+    tab_active_text="#0EA5E9", tab_active_border="#0EA5E9",
+    tab_inactive_text="#38BDF8",
+    shadow_color="rgba(3, 105, 161, 0.12)",
 )
 
 EYECARE = AppTheme(
-    # 护眼配色 —— 暖色低蓝光暗色主题，灵感来源于 Antigravity 配色
-    # 使用温暖的棕褐色系，减少蓝光刺激，适合长时间编辑场景
+    # 护眼配色 —— 暖色低蓝光暗色主题
+    # 表面层级: sidebar(L0最深) → window(L0) → nav_rail(L1) → card(L2)
     primary="#D4915E",            # 暖琥珀色
     primary_hover="#E0A97A",
     primary_pressed="#B87A4A",
@@ -546,18 +569,19 @@ EYECARE = AppTheme(
     accent="#C4A35A",             # 暖金色
     accent_hover="#D4B76A",
 
-    logo_dark="#E8DDD0",          # Logo 深色部分（用亮色因为底色深）
+    logo_dark="#E8DDD0",          # Logo 深色部分
     logo_light="#8B7355",         # Logo 浅色部分
 
-    bg_window="#1C1816",          # 窗口背景：深棕
-    bg_card="#231F1B",            # 卡片背景：略浅棕
-    bg_input="#2A2520",           # 输入框背景
-    bg_hover="#332D26",           # 悬停背景
-    bg_selected="#3D3429",        # 选中背景
-    bg_tooltip="#3D3429",         # 提示框背景
+    bg_window="#1A1512",          # 窗口背景：最深棕底色
+    bg_card="#2A2320",            # 卡片背景：L2 抬升层，ΔL=6%
+    bg_input="#1A1512",           # 输入框底色=window，靠 border 区分
+    bg_hover="#342C27",           # 悬停背景
+    bg_selected="#3D332E",        # 选中背景
+    bg_tooltip="#453B35",         # 提示框背景
+    bg_nav_rail="#231E1A",        # L1 导航层，ΔL=4% vs sidebar
 
-    bg_sidebar="#211D19",         # 侧边栏
-    bg_sidebar_active="#332D26",
+    bg_sidebar="#140F0C",         # 侧边栏：最深锚点
+    bg_sidebar_active="#2A2320",
     text_sidebar="#8B7355",
     text_sidebar_active="#E8DDD0",
 
@@ -576,12 +600,12 @@ EYECARE = AppTheme(
     icon_secondary="#8B7355",     # 次要图标色
     icon_accent="#D4915E",        # 强调图标色
 
-    border="#4D4237",             # 默认边框（ΔL ≥12% vs bg_card #231F1B）
-    border_light="#453A2E",       # 浅边框（ΔL ≥10% vs bg_card #231F1B）
+    border="#4A3E35",             # 默认边框 ΔL≥12% vs bg_card
+    border_light="#3D332E",       # 浅边框
     border_focus="#D4915E",       # 聚焦边框
     border_error="#C0392B",       # 错误边框
 
-    divider="#332D26",
+    divider="#342C27",
     overlay="rgba(0, 0, 0, 0.65)",
 
     success="#7FB069",            # 柔和绿
@@ -596,16 +620,16 @@ EYECARE = AppTheme(
     info_bg="#1A2A3D",
 
     switch_on="#D4915E",
-    switch_off="#3D3429",
+    switch_off="#3D332E",
     switch_thumb="#E8DDD0",
     switch_disabled="#2A2520",
 
-    progress_track="#332D26",
+    progress_track="#342C27",
     progress_fill="#D4915E",
 
     scrollbar_track="transparent",
-    scrollbar_thumb="#3D3429",
-    scrollbar_thumb_hover="#5A4D3E",
+    scrollbar_thumb="#453B35",
+    scrollbar_thumb_hover="#5C4F45",
 
     tab_active_text="#D4915E",
     tab_active_border="#D4915E",
@@ -616,9 +640,9 @@ EYECARE = AppTheme(
 
 
 WARM_LIGHT = AppTheme(
-    # 护眼暖光 —— 基于 Antigravity IDE 实际配色采集
-    # 暖黄色系浅色主题，L=88-91%，H≈50°，降低白光刺激
-    primary="#697A98",            # 蓝灰（Antigravity Tab 高亮色）
+    # 护眼暖光 — 暖黄色系浅色主题
+    # 表面层级: sidebar(最深暖灰) → window(暖灰) → nav_rail/card(暖白)
+    primary="#697A98",            # 蓝灰
     primary_hover="#7D8FAB",
     primary_pressed="#566883",
     primary_light="#E8E5D0",      # 品牌浅底
@@ -628,23 +652,24 @@ WARM_LIGHT = AppTheme(
     logo_dark="#4A3F33",          # Logo 深色部分
     logo_light="#697A98",         # Logo 浅色部分
 
-    bg_window="#ECE9D6",          # 窗口背景：暖米色（采集值）
-    bg_card="#F7F1D8",            # 卡片/编辑器背景：暖黄白（采集值）
-    bg_input="#F2EDD8",           # 输入框背景
-    bg_hover="#E3DFC8",           # 悬停背景
-    bg_selected="#D8D4BA",        # 选中背景
+    bg_window="#E6E2CC",          # 窗口背景：暖灰，ΔL=5% vs card
+    bg_card="#F5F0DA",            # 卡片背景：暖白
+    bg_input="#EFE9D2",           # 输入框背景：微暗于 Card
+    bg_hover="#E3DECC",           # 悬停背景
+    bg_selected="#D8D3BD",        # 选中背景
     bg_tooltip="#4A3F33",         # 提示框背景（深色）
+    bg_nav_rail="#F5F0DA",        # 导航区：暖白，同 Card
 
-    bg_sidebar="#E5E2CE",         # 侧边栏
-    bg_sidebar_active="#D8D4BA",
-    text_sidebar="#8C7D6C",       # 侧边栏图标（采集值）
+    bg_sidebar="#D9D4BE",         # 侧边栏：最深锚点，ΔL=5% vs window
+    bg_sidebar_active="#CEC8B0",
+    text_sidebar="#8C7D6C",
     text_sidebar_active="#4A3F33",
 
     text_primary="#4A3F33",       # 主文字：深棕
     text_secondary="#6B5D4E",     # 次要文字
     text_hint="#9E8E7A",          # 提示文字
     text_disabled="#BFB39E",      # 禁用文字
-    text_on_primary="#FFFFFF",    # 品牌色上的文字（必须纯白确保高对比度）
+    text_on_primary="#FFFFFF",
     text_on_accent="#FFFFFF",
     text_link="#697A98",
 
@@ -655,12 +680,12 @@ WARM_LIGHT = AppTheme(
     icon_secondary="#9E8E7A",     # 次要图标色
     icon_accent="#697A98",        # 强调图标色
 
-    border="#D1CCB8",             # 默认边框（采集 Tab 栏色）
-    border_light="#C8C3AC",       # 浅边框（ΔL ≥12% vs bg_card #F7F1D8）
+    border="#C8C2AB",             # 默认边框（加深确保 Card 上可见）
+    border_light="#D1CDB8",       # 浅边框
     border_focus="#697A98",       # 聚焦边框
     border_error="#C0392B",       # 错误边框
 
-    divider="#D1CCB8",
+    divider="#CCC6AF",
     overlay="rgba(74, 63, 51, 0.45)",
 
     success="#6B8E4E",            # 柔和森绿
@@ -676,21 +701,345 @@ WARM_LIGHT = AppTheme(
 
     switch_on="#697A98",
     switch_off="#D1CCB8",
-    switch_thumb="#F7F1D8",
+    switch_thumb="#F5F0DA",
     switch_disabled="#DDD9C5",
 
-    progress_track="#D8D4BA",
+    progress_track="#D8D3BD",
     progress_fill="#697A98",
 
     scrollbar_track="transparent",
-    scrollbar_thumb="#CCC7B0",
+    scrollbar_thumb="#CCC6AF",
     scrollbar_thumb_hover="#B8B39E",
 
     tab_active_text="#697A98",
     tab_active_border="#697A98",
     tab_inactive_text="#8C7D6C",
 
-    shadow_color="rgba(74, 63, 51, 0.20)",  # 暖色浅底需更强阴影
+    shadow_color="rgba(74, 63, 51, 0.20)",
+)
+
+
+GREEN_LIGHT = AppTheme(
+    # 浅绿护眼 — 深翠绿浅色主题，参考 WPS 护眼绿
+    # primary 用深翠绿 #3D7A56 而非鼠尾草，更沉稳有力
+    primary="#3D7A56",            # 深翠绿（参考 WPS）
+    primary_hover="#4A8A65",
+    primary_pressed="#306A48",
+    primary_light="#E0EBE4",      # 极浅灰绿
+    accent="#8B6914",             # 暗金强调
+    accent_hover="#A07A20",
+
+    logo_dark="#1E3A28",
+    logo_light="#3D7A56",
+
+    bg_window="#ECF0ED",          # 灰绿底色（低饱和）
+    bg_card="#F5F7F5",            # 近白灰绿
+    bg_input="#F5F7F5",
+    bg_hover="#DDE4DE",
+    bg_selected="#CED8D0",
+    bg_tooltip="#1E3A28",
+    bg_nav_rail="#F5F7F5",
+
+    bg_sidebar="#D0DCD4",         # 灰绿锚点（更沉）
+    bg_sidebar_active="#BED0C4",
+    text_sidebar="#2D5040",
+    text_sidebar_active="#1A3028",
+
+    text_primary="#1A3028",       # 深绿黑
+    text_secondary="#2D5040",
+    text_hint="#6E8A78",
+    text_disabled="#A0B0A5",
+    text_on_primary="#FFFFFF",
+    text_on_accent="#FFFFFF",
+    text_link="#306A48",
+
+    window_close_hover_bg="#E81123",
+    window_close_hover_text="#FFFFFF",
+
+    icon_primary="#2D5040",
+    icon_secondary="#6E8A78",
+    icon_accent="#3D7A56",
+
+    border="#B0C4B5", border_light="#C5D5CA",
+    border_focus="#3D7A56", border_error="#C0392B",
+    divider="#BCC8BE",
+    overlay="rgba(30, 58, 40, 0.35)",
+
+    success="#306A48", success_bg="#E0EBE4",
+    warning="#8B6914", warning_bg="#F0E8D0",
+    error="#B33A3A", error_hover="#CC4E4E", error_pressed="#993030",
+    error_bg="#F5E0D8",
+    info="#4A6A88", info_bg="#DDE5EE",
+
+    switch_on="#3D7A56", switch_off="#B0C4B5",
+    switch_thumb="#F5F7F5", switch_disabled="#D0DCD4",
+    progress_track="#B0C4B5", progress_fill="#3D7A56",
+    scrollbar_track="transparent",
+    scrollbar_thumb="#B0C4B5", scrollbar_thumb_hover="#8AA090",
+    tab_active_text="#3D7A56", tab_active_border="#3D7A56",
+    tab_inactive_text="#6E8A78",
+    shadow_color="rgba(30, 58, 40, 0.10)",
+)
+
+GREEN_DARK = AppTheme(
+    # 深绿暗色护眼 — 深翠绿暗色，低蓝光
+    # 绿色用 #5A9E72（比浅色版稍亮确保暗底可读）
+    primary="#5A9E72",            # 暗色中的翠绿（稍亮确保可读）
+    primary_hover="#6AB882",
+    primary_pressed="#4A8A62",
+    primary_light="#152218",
+    accent="#C4982E",             # 暖金
+    accent_hover="#D4AA40",
+
+    logo_dark="#B0C4B5",
+    logo_light="#6AB882",
+
+    bg_window="#101A13",          # 深森林底色
+    bg_card="#182420",            # L2 卡片层
+    bg_input="#101A13",
+    bg_hover="#223028",
+    bg_selected="#2C3E32",
+    bg_tooltip="#3A5040",
+    bg_nav_rail="#142018",        # L1 导航层
+
+    bg_sidebar="#0A120C",         # 最深锚点
+    bg_sidebar_active="#182420",
+    text_sidebar="#5A9E72",
+    text_sidebar_active="#B0C4B5",
+
+    text_primary="#B0C4B5",       # 柔白灰绿
+    text_secondary="#80A090",
+    text_hint="#5A9E72",
+    text_disabled="#3A5040",
+    text_on_primary="#101A13",
+    text_on_accent="#141408",
+    text_link="#5A9E72",
+
+    window_close_hover_bg="#E81123",
+    window_close_hover_text="#FFFFFF",
+
+    icon_primary="#80A090",
+    icon_secondary="#5A9E72",
+    icon_accent="#5A9E72",
+
+    border="#304838", border_light="#223028",
+    border_focus="#5A9E72", border_error="#D9534F",
+    divider="#223028",
+    overlay="rgba(0, 0, 0, 0.65)",
+
+    success="#5A9E72", success_bg="#152218",
+    warning="#C4982E", warning_bg="#252015",
+    error="#D9534F", error_hover="#E8706C", error_pressed="#C0392B",
+    error_bg="#3A1A1A",
+    info="#5A88B8", info_bg="#152230",
+
+    switch_on="#5A9E72", switch_off="#304838",
+    switch_thumb="#B0C4B5", switch_disabled="#223028",
+    progress_track="#223028", progress_fill="#5A9E72",
+    scrollbar_track="transparent",
+    scrollbar_thumb="#304838", scrollbar_thumb_hover="#4A6858",
+    tab_active_text="#5A9E72", tab_active_border="#5A9E72",
+    tab_inactive_text="#4A6858",
+    shadow_color="rgba(0, 0, 0, 0.45)",
+)
+
+ROSE = AppTheme(
+    # 玫瑰粉 — 降饱和脏粉/灰粉，优雅不刺眼
+    # 表面用"Dusty Rose"灰粉调，参考高端设计系统
+    primary="#B5708A",            # 降饱和玫粉（Dusty Rose）
+    primary_hover="#C4849E",
+    primary_pressed="#A05C76",
+    primary_light="#F0E6EB",      # 极浅灰粉
+    accent="#8B7DA8",             # 灰紫强调
+    accent_hover="#9D90BA",
+
+    logo_dark="#6E4A5C",
+    logo_light="#B5708A",
+
+    bg_window="#F4F0F2",          # 灰粉底色（S=5%, L=95%）
+    bg_card="#FAF8F9",            # 近白灰粉
+    bg_input="#FAF8F9",
+    bg_hover="#EDE6E9",
+    bg_selected="#E3DAE0",
+    bg_tooltip="#4A3040",
+    bg_nav_rail="#FAF8F9",
+
+    bg_sidebar="#E6DDE2",         # 灰粉锚点
+    bg_sidebar_active="#D9CED5",
+    text_sidebar="#7A5A6A",
+    text_sidebar_active="#4A3040",
+
+    text_primary="#3A2030",       # 深玫瑰棕
+    text_secondary="#6E4A5C",
+    text_hint="#A08A95",
+    text_disabled="#C4B5BD",
+    text_on_primary="#FFFFFF",
+    text_on_accent="#FFFFFF",
+    text_link="#A05C76",
+
+    window_close_hover_bg="#E81123",
+    window_close_hover_text="#FFFFFF",
+
+    icon_primary="#6E4A5C",
+    icon_secondary="#A08A95",
+    icon_accent="#B5708A",
+
+    border="#D0C4CA", border_light="#DDD5D9",
+    border_focus="#B5708A", border_error="#C0392B",
+    divider="#D9D0D5",
+    overlay="rgba(74, 48, 64, 0.35)",
+
+    success="#6B8E4E", success_bg="#E8EFD8",
+    warning="#B8860B", warning_bg="#F5ECD0",
+    error="#B33A3A", error_hover="#CC4E4E", error_pressed="#993030",
+    error_bg="#F5E0D8",
+    info="#5A7A98", info_bg="#E0E8F0",
+
+    switch_on="#B5708A", switch_off="#D0C4CA",
+    switch_thumb="#FAF8F9", switch_disabled="#E6DDE2",
+    progress_track="#D0C4CA", progress_fill="#B5708A",
+    scrollbar_track="transparent",
+    scrollbar_thumb="#D0C4CA", scrollbar_thumb_hover="#B0A0A8",
+    tab_active_text="#B5708A", tab_active_border="#B5708A",
+    tab_inactive_text="#A08A95",
+    shadow_color="rgba(74, 48, 64, 0.10)",
+)
+
+
+BLUE_GREEN = AppTheme(
+    # 蓝绿 — 蓝色 + 绿色双色调
+    # 蓝色 → primary（按钮、链接）
+    # 绿色 → sidebar + 开关 + 标签（深翠绿 #2D7050）
+    primary="#3B6FC2",            # 柔蓝 — 按钮/链接
+    primary_hover="#4D82D4",
+    primary_pressed="#2F5CA6",
+    primary_light="#E4EBF5",
+    accent="#2D7050",             # 深翠绿
+    accent_hover="#3A8060",
+
+    logo_dark="#2A4A78",          # 蓝色 Logo
+    logo_light="#2D7050",         # 绿色 Logo 辅色
+
+    bg_window="#ECF0ED",          # 微绿灰底色
+    bg_card="#F5F7F5",
+    bg_input="#F5F7F5",
+    bg_hover="#DDE4DE",
+    bg_selected="#CED8D0",
+    bg_tooltip="#1A3028",
+    bg_nav_rail="#F5F7F5",
+
+    bg_sidebar="#C8D8CC",         # ★ 深绿调灰 sidebar
+    bg_sidebar_active="#B8CABD",
+    text_sidebar="#2D5040",       # 深绿文字
+    text_sidebar_active="#1A3028",
+
+    text_primary="#1A2828",       # 深蓝绿
+    text_secondary="#2D4A48",
+    text_hint="#6E8878",
+    text_disabled="#A0B0A5",
+    text_on_primary="#FFFFFF",
+    text_on_accent="#FFFFFF",
+    text_link="#2F5CA6",          # 蓝色链接
+
+    window_close_hover_bg="#E81123",
+    window_close_hover_text="#FFFFFF",
+
+    icon_primary="#2D5040",       # 深绿图标
+    icon_secondary="#6E8878",
+    icon_accent="#2D7050",        # ★ 深绿图标强调
+
+    border="#B0C0B5", border_light="#C5D0C8",
+    border_focus="#3B6FC2",       # 蓝色聚焦
+    border_error="#C0392B",
+    divider="#BCC8BE",
+    overlay="rgba(26, 48, 40, 0.35)",
+
+    success="#2D7050", success_bg="#E0EBE4",
+    warning="#8B6914", warning_bg="#F0E8D0",
+    error="#B33A3A", error_hover="#CC4E4E", error_pressed="#993030",
+    error_bg="#F5E0D8",
+    info="#3B6FC2", info_bg="#E4EBF5",
+
+    switch_on="#2D7050",          # ★ 深绿开关
+    switch_off="#B0C0B5",
+    switch_thumb="#F5F7F5", switch_disabled="#C8D8CC",
+    progress_track="#B0C0B5",
+    progress_fill="#3B6FC2",      # 蓝色进度条
+    scrollbar_track="transparent",
+    scrollbar_thumb="#B0C0B5", scrollbar_thumb_hover="#8A9A90",
+    tab_active_text="#2D7050",    # ★ 深绿标签
+    tab_active_border="#2D7050",
+    tab_inactive_text="#6E8878",
+    shadow_color="rgba(26, 48, 40, 0.10)",
+)
+
+RED_BLUE = AppTheme(
+    # 红蓝 — 蓝色 + 红色双色调
+    # 分配策略：
+    #   蓝色 → primary（按钮、链接、border_focus、进度条）
+    #   红色 → sidebar 色调 + 开关 + 标签高亮 + 图标强调
+    # 两色各有"领地"，红色不仅是警示色更是设计元素
+    primary="#4A6FA5",            # 柔蓝 — 按钮/链接
+    primary_hover="#5C82B8",
+    primary_pressed="#3D5E90",
+    primary_light="#E4EAF2",
+    accent="#B85450",             # 柔砖红
+    accent_hover="#CC6A66",
+
+    logo_dark="#2E4468",          # 蓝色 Logo
+    logo_light="#B85450",         # 红色 Logo 辅色
+
+    bg_window="#F4F0F0",          # 微暖灰底色（偏红调）
+    bg_card="#FAF8F8",            # 微暖白
+    bg_input="#FAF8F8",
+    bg_hover="#ECE4E4",
+    bg_selected="#E2D8D8",
+    bg_tooltip="#3A2828",
+    bg_nav_rail="#FAF8F8",
+
+    bg_sidebar="#E4D8DA",         # ★ 暖粉灰 — 让红色在 sidebar 可见
+    bg_sidebar_active="#D8CACF",
+    text_sidebar="#6E4850",       # 红调文字
+    text_sidebar_active="#3A2028",
+
+    text_primary="#2E2028",       # 深暖灰
+    text_secondary="#584048",
+    text_hint="#A08890",
+    text_disabled="#C0B0B5",
+    text_on_primary="#FFFFFF",
+    text_on_accent="#FFFFFF",
+    text_link="#3D5E90",          # 蓝色链接
+
+    window_close_hover_bg="#B85450",   # 呼应红色
+    window_close_hover_text="#FFFFFF",
+
+    icon_primary="#6E4850",       # 红调图标
+    icon_secondary="#A08890",
+    icon_accent="#B85450",        # ★ 红色图标强调
+
+    border="#D0C0C4", border_light="#DDD2D5",
+    border_focus="#4A6FA5",       # 蓝色聚焦
+    border_error="#B85450",
+    divider="#D5C8CC",
+    overlay="rgba(58, 32, 40, 0.35)",
+
+    success="#5A8A4E", success_bg="#E8EFE2",
+    warning="#B8860B", warning_bg="#F5ECD0",
+    error="#B85450", error_hover="#CC6A66", error_pressed="#A04540",
+    error_bg="#F5E2E0",
+    info="#4A6FA5", info_bg="#E4EAF2",
+
+    switch_on="#B85450",          # ★ 红色开关
+    switch_off="#D0C0C4",
+    switch_thumb="#FAF8F8", switch_disabled="#E4D8DA",
+    progress_track="#D0C0C4",
+    progress_fill="#4A6FA5",      # 蓝色进度条
+    scrollbar_track="transparent",
+    scrollbar_thumb="#D0C0C4", scrollbar_thumb_hover="#B0A0A5",
+    tab_active_text="#B85450",    # ★ 红色标签高亮
+    tab_active_border="#B85450",
+    tab_inactive_text="#A08890",
+    shadow_color="rgba(58, 32, 40, 0.10)",
 )
 
 
@@ -784,3 +1133,134 @@ def bind_theme(owner, callback) -> None:
 def load_theme_from_dict(data: dict) -> AppTheme:
     """从 dict 创建配色（可来自 YAML/JSON）。"""
     return AppTheme(**{k: v for k, v in data.items() if k in _FIELD_NAMES})
+
+
+def derive_theme_from_core(
+    primary: str,
+    accent: str,
+    bg_window: str,
+    bg_card: str,
+    bg_sidebar: str,
+    text_primary: str,
+) -> AppTheme:
+    """从 6 个核心色自动推算完整 AppTheme。
+
+    推算策略:
+      hover  = 亮度 +12%
+      pressed = 亮度 -8%
+      secondary = 不透明度 70%（混合 bg_window）
+      hint = 不透明度 45%
+      disabled = 不透明度 30%
+      border = bg 与 text 之间 20% 混合
+    """
+    from colorsys import rgb_to_hls, hls_to_rgb
+
+    def _hex_to_rgb(h: str) -> tuple[int, int, int]:
+        h = h.lstrip("#")
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+    def _rgb_to_hex(r: int, g: int, b: int) -> str:
+        return f"#{max(0,min(255,r)):02X}{max(0,min(255,g)):02X}{max(0,min(255,b)):02X}"
+
+    def _mix(c1: str, c2: str, ratio: float) -> str:
+        """ratio=0 → c1, ratio=1 → c2"""
+        r1, g1, b1 = _hex_to_rgb(c1)
+        r2, g2, b2 = _hex_to_rgb(c2)
+        return _rgb_to_hex(
+            int(r1 + (r2 - r1) * ratio),
+            int(g1 + (g2 - g1) * ratio),
+            int(b1 + (b2 - b1) * ratio),
+        )
+
+    def _shift_lightness(color: str, delta: float) -> str:
+        r, g, b = _hex_to_rgb(color)
+        h, l, s = rgb_to_hls(r / 255, g / 255, b / 255)
+        l = max(0, min(1, l + delta))
+        r2, g2, b2 = hls_to_rgb(h, l, s)
+        return _rgb_to_hex(int(r2 * 255), int(g2 * 255), int(b2 * 255))
+
+    def _luminance(color: str) -> float:
+        r, g, b = _hex_to_rgb(color)
+        return (0.299 * r + 0.587 * g + 0.114 * b) / 255
+
+    is_dark = _luminance(bg_window) < 0.4
+
+    # 推算所有 token
+    primary_hover = _shift_lightness(primary, 0.12 if is_dark else 0.08)
+    primary_pressed = _shift_lightness(primary, -0.08 if is_dark else -0.06)
+    primary_light = _mix(bg_window, primary, 0.08) if not is_dark else _shift_lightness(bg_window, -0.05)
+    accent_hover = _shift_lightness(accent, 0.12 if is_dark else 0.08)
+
+    text_secondary = _mix(text_primary, bg_window, 0.35)
+    text_hint = _mix(text_primary, bg_window, 0.55)
+    text_disabled = _mix(text_primary, bg_window, 0.72)
+    text_on_primary = "#FFFFFF" if _luminance(primary) < 0.5 else "#1A1A1A"
+    text_on_accent = "#FFFFFF" if _luminance(accent) < 0.5 else "#1A1A1A"
+    text_link = primary_pressed if not is_dark else primary_hover
+
+    bg_input = bg_card
+    bg_hover = _mix(bg_window, text_primary, 0.06)
+    bg_selected = _mix(bg_window, primary, 0.12)
+    bg_tooltip = text_primary if not is_dark else _shift_lightness(bg_window, 0.15)
+    bg_nav_rail = bg_card
+    bg_sidebar_active = _mix(bg_sidebar, text_primary, 0.08)
+    text_sidebar = _mix(text_primary, bg_sidebar, 0.30)
+    text_sidebar_active = text_primary
+
+    border = _mix(bg_card, text_primary, 0.18)
+    border_light = _mix(bg_card, text_primary, 0.10)
+
+    icon_primary = text_secondary
+    icon_secondary = text_hint
+    icon_accent = primary
+
+    return AppTheme(
+        primary=primary, primary_hover=primary_hover,
+        primary_pressed=primary_pressed, primary_light=primary_light,
+        accent=accent, accent_hover=accent_hover,
+
+        logo_dark=primary_pressed if not is_dark else _shift_lightness(primary, 0.25),
+        logo_light=primary,
+
+        bg_window=bg_window, bg_card=bg_card, bg_input=bg_input,
+        bg_hover=bg_hover, bg_selected=bg_selected,
+        bg_tooltip=bg_tooltip, bg_nav_rail=bg_nav_rail,
+
+        bg_sidebar=bg_sidebar, bg_sidebar_active=bg_sidebar_active,
+        text_sidebar=text_sidebar, text_sidebar_active=text_sidebar_active,
+
+        text_primary=text_primary, text_secondary=text_secondary,
+        text_hint=text_hint, text_disabled=text_disabled,
+        text_on_primary=text_on_primary, text_on_accent=text_on_accent,
+        text_link=text_link,
+
+        window_close_hover_bg="#E81123",
+        window_close_hover_text="#FFFFFF",
+
+        icon_primary=icon_primary, icon_secondary=icon_secondary,
+        icon_accent=icon_accent,
+
+        border=border, border_light=border_light,
+        border_focus=primary, border_error="#C0392B" if not is_dark else "#E8706C",
+        divider=border_light,
+        overlay=f"rgba({', '.join(str(c) for c in _hex_to_rgb(text_primary))}, {'0.35' if not is_dark else '0.60'})",
+
+        success=_mix("#22C55E", bg_window, 0.15),
+        success_bg=_mix(bg_window, "#22C55E", 0.08),
+        warning=_mix("#D97706", bg_window, 0.10),
+        warning_bg=_mix(bg_window, "#D97706", 0.08),
+        error="#C0392B" if not is_dark else "#E8706C",
+        error_hover="#E04040" if not is_dark else "#F0908C",
+        error_pressed="#993030" if not is_dark else "#C0392B",
+        error_bg=_mix(bg_window, "#EF4444", 0.08),
+        info=primary, info_bg=primary_light,
+
+        switch_on=primary, switch_off=border,
+        switch_thumb=bg_card, switch_disabled=border_light,
+        progress_track=border, progress_fill=primary,
+        scrollbar_track="transparent",
+        scrollbar_thumb=border, scrollbar_thumb_hover=_mix(border, text_primary, 0.20),
+        tab_active_text=primary, tab_active_border=primary,
+        tab_inactive_text=text_hint,
+        shadow_color=f"rgba({', '.join(str(c) for c in _hex_to_rgb(text_primary))}, 0.10)",
+    )

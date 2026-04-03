@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from src.qt_api import QLabel, QVBoxLayout, QWidget, Signal
 from src.shared.ui.log_stream_widget import LogStreamWidget
-from src.shared.ui.module_status_list import ModuleStatusList
+from src.shared.ui.stepper_widget import StepperWidget
 from src.shared.ui.progress_indicator import ProgressIndicator
 
 
@@ -21,7 +21,7 @@ class ExecutionFeedbackWidget(QWidget):
         self._progress.cancel_clicked.connect(self.cancel_clicked.emit)
         layout.addWidget(self._progress)
 
-        self._modules = ModuleStatusList()
+        self._modules = StepperWidget(self)
         layout.addWidget(self._modules)
 
         self._logs = LogStreamWidget()
@@ -31,7 +31,7 @@ class ExecutionFeedbackWidget(QWidget):
         layout.addWidget(self._summary)
 
     def set_progress(self, current: int, total: int, module_title: str) -> None:
-        self._progress.set_progress(current, total, module_title)
+        self._progress.set_progress(current, total, "整体执行任务")
 
     def add_module(self, module_id: str, title: str) -> None:
         self._modules.add_module(module_id, title)

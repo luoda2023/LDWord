@@ -66,6 +66,8 @@ def normalize_module_name(module_name: str) -> str:
 
 def normalize_module_switches(
     module_switches: Mapping[str, Any] | None,
+    *,
+    defaults: Mapping[str, bool] | None = None,
 ) -> dict[str, bool]:
     """归一化模块开关字典。
 
@@ -74,7 +76,7 @@ def normalize_module_switches(
     2. 未实现 / 未注册的遗留 key 直接丢弃
     3. 缺失的已注册模块补默认值
     """
-    normalized = dict(get_default_module_switches())
+    normalized = dict(defaults if defaults is not None else get_default_module_switches())
 
     for raw_name, enabled in (module_switches or {}).items():
         canonical_name = normalize_module_name(str(raw_name))
@@ -442,7 +444,14 @@ def normalize_scene_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]
     capability_switches = _extract_switches_from_capabilities(raw.get("capabilities"))
     direct_switches = raw.get("module_switches") if isinstance(raw.get("module_switches"), Mapping) else {}
 
-    switches: dict[str, Any] = {}
+    if isinstance(raw.get("pipeline"), list):
+        switch_defaults: dict[str, bool] = {
+            name: False for name in get_default_module_switches()
+        }
+    else:
+        switch_defaults = dict(get_default_module_switches())
+
+    switches: dict[str, Any] = dict(switch_defaults)
     switches.update(pipeline_switches)
     switches.update(capability_switches)
     switches.update(copy.deepcopy(dict(direct_switches)))
@@ -458,7 +467,10 @@ def normalize_scene_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]
         if module_name is not None and enabled is not None:
             switches[module_name] = bool(enabled)
 
-    normalized["module_switches"] = normalize_module_switches(switches)
+    normalized["module_switches"] = normalize_module_switches(
+        switches,
+        defaults=switch_defaults,
+    )
 
     if "strict_mode" in raw:
         normalized["strict_mode"] = bool(raw["strict_mode"])

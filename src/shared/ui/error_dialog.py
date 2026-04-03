@@ -4,6 +4,7 @@ Legacy-compatible error dialog built on BaseDialog.
 
 from __future__ import annotations
 
+from src.app_meta import APP_DISPLAY_NAME
 from src.qt_api import QHBoxLayout, QLabel, QTextEdit, QWidget
 
 from src.shared.ui.base_dialog import BaseDialog
@@ -26,7 +27,7 @@ class ErrorDialog(BaseDialog):
         log_path: str = "",
         parent=None,
     ):
-        super().__init__(title="Lark Formatter - 错误", icon_style="error", parent=parent)
+        super().__init__(title=f"{APP_DISPLAY_NAME} - 错误", icon_style="error", parent=parent)
         self.setMinimumWidth(520)
         self.setMaximumWidth(700)
 

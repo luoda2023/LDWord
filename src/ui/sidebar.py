@@ -118,7 +118,7 @@ class Sidebar(QWidget):
         self.setStyleSheet(f"""
             #sidebar {{
                 background: {t.bg_sidebar};
-                border-right: 1px solid {t.border_light};
+                border-bottom-left-radius: {t.shell_radius}px;
             }}
         """)
         for btn in self._buttons:

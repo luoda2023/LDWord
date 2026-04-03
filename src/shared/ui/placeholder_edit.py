@@ -7,6 +7,7 @@ from __future__ import annotations
 from src.qt_api import QLineEdit, Signal
 
 from src.shared.ui.input_style import build_text_input_stylesheet
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import bind_theme, get_theme
 
 
@@ -21,7 +22,7 @@ class PlaceholderEdit(QLineEdit):
     def __init__(self, *, placeholder: str = DEFAULT_PLACEHOLDER_TEMPLATE, parent=None):
         super().__init__(parent)
         self.setPlaceholderText(placeholder)
-        self.setFixedHeight(get_theme().control_height_md)
+        apply_size_class(self, "md")
         self.textChanged.connect(self.placeholder_changed.emit)
         self._apply_theme()
         bind_theme(self, self._apply_theme)

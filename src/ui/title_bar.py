@@ -7,21 +7,27 @@ title_bar — 自定义标题栏
 
 from __future__ import annotations
 
-from src.qt_api import QFont, QHBoxLayout, QLabel, QMouseEvent, QPoint, QPushButton, QSizePolicy, QWidget, Qt
+import ctypes
+import sys
+
+from src.app_meta import APP_DISPLAY_NAME_FULL
+from src.qt_api import QFont, QHBoxLayout, QLabel, QMouseEvent, QPoint, QPushButton, QSize, QSizePolicy, QWidget, Qt
 
 from src.shared.ui.theme import get_theme, bind_theme
-from src.ui.icons.catalog import get_app_logo
+from src.ui.icons.catalog import get_app_logo, get_icon
 
 
 class TitleBar(QWidget):
     """自定义标题栏 — 40px 高度，可拖拽。"""
 
     HEIGHT = 40
+    ICON_SIZE = 14
 
     def __init__(self, parent_window, parent=None):
         super().__init__(parent)
         self._window = parent_window
         self._drag_pos: QPoint | None = None
+        self._pinned = False
 
         self.setFixedHeight(self.HEIGHT)
         self.setObjectName("titlebar")
@@ -30,31 +36,35 @@ class TitleBar(QWidget):
         # ── 布局 ──
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 0, 4, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(0)
 
         # App 图标
         self._icon_label = QLabel()
         self._icon_label.setFixedSize(24, 24)
         layout.addWidget(self._icon_label)
 
+        layout.addSpacing(8)
+
         # 标题
-        self._title_label = QLabel("Lark Formatter V1.0")
+        self._title_label = QLabel(APP_DISPLAY_NAME_FULL)
         self._title_label.setObjectName("titlebar_title")
 
         layout.addWidget(self._title_label)
         layout.addStretch()
 
         # 窗口控制按钮
-        self._btn_min = self._make_btn("minimize", "—", "最小化")
-        self._btn_max = self._make_btn("maximize", "☐", "最大化")
-        self._btn_close = self._make_btn("close", "✕", "关闭")
-        self._btn_close.setObjectName("titlebar_close")
+        self._btn_pin = self._make_btn("titlebar_pin", "置顶")
+        self._btn_min = self._make_btn("titlebar_min", "最小化")
+        self._btn_max = self._make_btn("titlebar_max", "最大化")
+        self._btn_close = self._make_btn("titlebar_close", "关闭")
 
+        layout.addWidget(self._btn_pin)
         layout.addWidget(self._btn_min)
         layout.addWidget(self._btn_max)
         layout.addWidget(self._btn_close)
 
         # 信号
+        self._btn_pin.clicked.connect(self._toggle_pin)
         self._btn_min.clicked.connect(self._window.showMinimized)
         self._btn_max.clicked.connect(self._toggle_maximize)
         self._btn_close.clicked.connect(self._window.close)
@@ -62,22 +72,56 @@ class TitleBar(QWidget):
         self._apply_theme()
         bind_theme(self, self._apply_theme)
 
-    def _make_btn(self, name: str, text: str, tooltip: str) -> QPushButton:
-        btn = QPushButton(text)
+    def _make_btn(self, object_name: str, tooltip: str) -> QPushButton:
+        btn = QPushButton()
+        btn.setObjectName(object_name)
         btn.setToolTip(tooltip)
         btn.setFixedSize(46, self.HEIGHT)
         btn.setCursor(Qt.PointingHandCursor)
+        btn.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
         return btn
 
     def _toggle_maximize(self) -> None:
         if self._window.isMaximized():
             self._window.showNormal()
-            self._btn_max.setText("☐")
-            self._btn_max.setToolTip("最大化")
         else:
             self._window.showMaximized()
-            self._btn_max.setText("❐")
-            self._btn_max.setToolTip("向下还原")
+        self._update_icons()
+
+    def _toggle_pin(self) -> None:
+        self._pinned = not self._pinned
+        if sys.platform == "win32":
+            try:
+                hwnd = int(self._window.winId())
+                HWND_TOPMOST = ctypes.c_void_p(-1)
+                HWND_NOTOPMOST = ctypes.c_void_p(-2)
+                SWP_FLAGS = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
+                target = HWND_TOPMOST if self._pinned else HWND_NOTOPMOST
+                ctypes.windll.user32.SetWindowPos(
+                    ctypes.c_void_p(hwnd), target, 0, 0, 0, 0, SWP_FLAGS
+                )
+            except Exception:
+                # Fallback: setWindowFlags (causes brief flash)
+                geo = self._window.geometry()
+                flags = self._window.windowFlags()
+                if self._pinned:
+                    self._window.setWindowFlags(flags | Qt.WindowStaysOnTopHint)
+                else:
+                    self._window.setWindowFlags(flags & ~Qt.WindowStaysOnTopHint)
+                self._window.setGeometry(geo)
+                self._window.show()
+        else:
+            geo = self._window.geometry()
+            flags = self._window.windowFlags()
+            if self._pinned:
+                self._window.setWindowFlags(flags | Qt.WindowStaysOnTopHint)
+            else:
+                self._window.setWindowFlags(flags & ~Qt.WindowStaysOnTopHint)
+            self._window.setGeometry(geo)
+            self._window.show()
+
+        self._btn_pin.setToolTip("取消置顶" if self._pinned else "置顶")
+        self._update_icons()
 
     # ── 拖拽移动窗口 ──
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -100,13 +144,14 @@ class TitleBar(QWidget):
     # ── 主题 ──
     def _apply_theme(self) -> None:
         t = get_theme()
-        # App Logo (深蓝+浅蓝双色跟随主题)
         logo = get_app_logo(24)
         self._icon_label.setPixmap(logo.pixmap(24, 24))
+        self._update_icons()
         self.setStyleSheet(f"""
             #titlebar {{
                 background: {t.bg_sidebar};
-                border-bottom: 1px solid {t.border_light};
+                border-top-left-radius: {t.shell_radius}px;
+                border-top-right-radius: {t.shell_radius}px;
             }}
             #titlebar_title {{
                 color: {t.text_primary};
@@ -115,15 +160,35 @@ class TitleBar(QWidget):
             }}
             QPushButton {{
                 background: transparent;
-                color: {t.text_secondary};
                 border: none;
-                font-size: 13px;
             }}
             QPushButton:hover {{
                 background: {t.bg_hover};
             }}
             #titlebar_close:hover {{
                 background: {t.window_close_hover_bg};
-                color: {t.window_close_hover_text};
             }}
         """)
+
+    def _update_icons(self) -> None:
+        t = get_theme()
+        s = self.ICON_SIZE
+        color = t.text_secondary
+
+        # Pin
+        pin_color = t.primary if self._pinned else color
+        self._btn_pin.setIcon(get_icon("pin", size=s, color=pin_color))
+
+        # Minimize
+        self._btn_min.setIcon(get_icon("minus", size=s, color=color))
+
+        # Maximize / Restore
+        if self._window.isMaximized():
+            self._btn_max.setIcon(get_icon("copy", size=s, color=color))
+            self._btn_max.setToolTip("向下还原")
+        else:
+            self._btn_max.setIcon(get_icon("square", size=s, color=color))
+            self._btn_max.setToolTip("最大化")
+
+        # Close
+        self._btn_close.setIcon(get_icon("x", size=s, color=color))

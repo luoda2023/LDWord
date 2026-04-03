@@ -45,7 +45,6 @@ class CollapsibleSection(QWidget):
 
     def _apply_theme(self) -> None:
         t = get_theme()
-        self._toggle_btn.setFixedHeight(t.collapsible_toggle_height)
         self._content_layout.setContentsMargins(t.collapsible_content_indent, t.collapsible_content_padding_y, 0, t.collapsible_content_padding_y)
         self._content_layout.setSpacing(t.spacing_xs)
         self._toggle_btn.setStyleSheet(
@@ -59,6 +58,8 @@ class CollapsibleSection(QWidget):
                 padding-left: {t.collapsible_toggle_padding_x}px;
                 text-align: left;
                 color: {t.text_primary};
+                min-height: {t.collapsible_toggle_height}px;
+                max-height: {t.collapsible_toggle_height}px;
             }}
             QToolButton:hover {{
                 background: {t.bg_hover};

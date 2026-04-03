@@ -8,6 +8,7 @@ from src.qt_api import QFileDialog, QHBoxLayout, QLineEdit, QPushButton, QWidget
 
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.input_style import build_text_input_stylesheet
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import bind_theme, get_theme
 
 
@@ -56,9 +57,9 @@ class FolderPicker(QWidget):
     def _apply_theme(self) -> None:
         t = get_theme()
         self.layout().setSpacing(t.spacing_xs)
-        self._path.setFixedHeight(t.control_height_md)
+        apply_size_class(self._path, "md")
         self._path.setStyleSheet(build_text_input_stylesheet(t))
-        self._btn.setFixedHeight(t.button_height_md)
+        apply_size_class(self._btn, "md")
         self._btn.setMinimumWidth(t.button_height_md * 2)
         self._btn.setStyleSheet(build_button_stylesheet(t))
         self.setFixedHeight(max(t.control_height_md, t.button_height_md))

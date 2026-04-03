@@ -4,7 +4,7 @@ Shared combo-box foundation with themed popup shell styling.
 
 from __future__ import annotations
 
-from src.qt_api import QComboBox, QFrame, QListView, QSizeGrip, QStyledItemDelegate, QColor, QPainter, QPen, QTimer, Qt
+from src.qt_api import QComboBox, QFrame, QListView, QRectF, QSizeGrip, QStyledItemDelegate, QColor, QPainter, QPen, QTimer, Qt
 
 from src.shared.ui.theme import bind_theme, get_theme
 
@@ -45,6 +45,11 @@ class StyledComboBox(QComboBox):
         popup.setAttribute(Qt.WA_StyledBackground, True)
         popup.setAttribute(Qt.WA_TranslucentBackground, False)
         popup.setAutoFillBackground(False)
+        # Prevent ghost rectangle by hiding the popup and ensuring zero size
+        popup.hide()
+        popup.move(-9999, -9999)
+        popup.resize(1, 1)
+        self._popup_initialized = False
 
         self.setSizeAdjustPolicy(QComboBox.AdjustToContents)
 
@@ -90,7 +95,7 @@ class StyledComboBox(QComboBox):
             #{object_name} {{
                 background: {theme.bg_input};
                 color: {theme.text_primary};
-                border: 1px solid {theme.border};
+                border: none;
                 border-radius: {theme.input_radius}px;
                 padding: {theme.input_padding_y}px {theme.input_padding_x}px;
                 padding-right: {theme.combo_arrow_zone_width}px;
@@ -101,7 +106,6 @@ class StyledComboBox(QComboBox):
             }}
             #{object_name}:focus,
             #{object_name}:on {{
-                border-color: {theme.border_focus};
                 background: {theme.bg_window};
             }}
             #{object_name}:disabled {{
@@ -198,12 +202,24 @@ class StyledComboBox(QComboBox):
         theme = get_theme()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(
-            QPen(
-                QColor(theme.border_focus if self.hasFocus() else theme.text_hint),
-                1.5,
-            )
-        )
+
+        # ── Anti-aliased rounded border ──
+        if not self.isEnabled():
+            border_color = QColor(theme.border)
+        elif self.hasFocus() or self.view().isVisible():
+            border_color = QColor(theme.border_focus)
+        else:
+            border_color = QColor(theme.border)
+
+        radius = float(theme.input_radius)
+        border_rect = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
+        painter.setPen(QPen(border_color, 1.0))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(border_rect, radius, radius)
+
+        # ── Chevron arrow ──
+        arrow_color = QColor(theme.border_focus if self.hasFocus() else theme.text_hint)
+        painter.setPen(QPen(arrow_color, 1.5))
 
         zone_center_x = self.width() - (theme.combo_arrow_zone_width // 2)
         zone_center_y = self.height() // 2

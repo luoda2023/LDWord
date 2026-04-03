@@ -5,7 +5,6 @@ Card container widget.
 from __future__ import annotations
 
 from src.qt_api import QColor, QFrame, QGraphicsDropShadowEffect, QLabel, QVBoxLayout, QWidget
-
 from src.shared.ui.theme import bind_theme, get_theme
 
 

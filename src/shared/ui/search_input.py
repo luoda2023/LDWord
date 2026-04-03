@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from src.qt_api import QEvent, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTimer, QWidget, Signal, Qt
 
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import bind_theme, get_theme
 from src.ui.icons.catalog import get_icon
 
@@ -62,7 +63,7 @@ class SearchInput(QWidget):
         self._clear_btn.hide()
         layout.addWidget(self._clear_btn, 0, Qt.AlignVCenter)
 
-        self.setFixedHeight(get_theme().control_height_md)
+        apply_size_class(self, "md")
 
         bind_theme(self, self._apply_theme)
         self._apply_theme()

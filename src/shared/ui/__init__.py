@@ -1,52 +1,75 @@
-from .badge import Badge
-from .button_style import apply_button_variant, build_button_stylesheet
-from .config_list_widget import ConfigListWidget
-from .dynamic_navigation_rail import DynamicNavigationRail
-from .execution_progress_widget import ExecutionProgressWidget
-from .execution_feedback_widget import ExecutionFeedbackWidget
-from .feature_toggle_row import FeatureToggleRow
-from .file_drop_zone import FileDropZone
-from .font_combo import FontCombo
-from .flow_section import FlowSection
-from .input_style import build_text_input_stylesheet
-from .log_stream_widget import LogStreamWidget
-from .module_status_list import ModuleStatusList
-from .navigation_card import NavigationCard
-from .numbering_preset import NumberingPreset
-from .search_input import SearchInput
-from .selection_control_style import (
-    build_checkbox_stylesheet,
-)
-from .size_combo import SizeCombo
-from .spacing_input import SpacingInput
-from .styled_combo_box import StyledComboBox
-from .themed_radio_button import ThemedRadioButton
-from .themed_slider import ThemedSlider
-from .theme import bind_theme
+from __future__ import annotations
 
-__all__ = [
-    "SearchInput",
-    "StyledComboBox",
-    "ThemedRadioButton",
-    "ThemedSlider",
-    "FontCombo",
-    "SizeCombo",
-    "NumberingPreset",
-    "SpacingInput",
-    "Badge",
-    "NavigationCard",
-    "DynamicNavigationRail",
-    "ConfigListWidget",
-    "ExecutionProgressWidget",
-    "ExecutionFeedbackWidget",
-    "FlowSection",
-    "FileDropZone",
-    "FeatureToggleRow",
-    "LogStreamWidget",
-    "ModuleStatusList",
-    "apply_button_variant",
-    "build_button_stylesheet",
-    "build_checkbox_stylesheet",
-    "build_text_input_stylesheet",
-    "bind_theme",
-]
+from importlib import import_module
+
+
+_EXPORT_MAP: dict[str, tuple[str, str]] = {
+    "Badge": (".badge", "Badge"),
+    "CalendarMonth": (".calendar_month", "CalendarMonth"),
+    "ChatBubble": (".chat_bubble", "ChatBubble"),
+    "CommandPalette": (".command_palette", "CommandPalette"),
+    "ConfigListWidget": (".config_list_widget", "ConfigListWidget"),
+    "ContextMenu": (".context_menu", "ContextMenu"),
+    "DataTable": (".data_table", "DataTable"),
+    "DatePicker": (".date_picker", "DatePicker"),
+    "Descriptions": (".descriptions", "Descriptions"),
+    "Divider": (".divider", "Divider"),
+    "Drawer": (".drawer", "Drawer"),
+    "DynamicNavigationRail": (".dynamic_navigation_rail", "DynamicNavigationRail"),
+    "EmptyState": (".empty_state", "EmptyState"),
+    "ExecutionFeedbackWidget": (".execution_feedback_widget", "ExecutionFeedbackWidget"),
+    "ExecutionProgressWidget": (".execution_progress_widget", "ExecutionProgressWidget"),
+    "FeatureToggleRow": (".feature_toggle_row", "FeatureToggleRow"),
+    "FileDropZone": (".file_drop_zone", "FileDropZone"),
+    "Form": (".form", "Form"),
+    "FlowSection": (".flow_section", "FlowSection"),
+    "FontCombo": (".font_combo", "FontCombo"),
+    "InlineAlert": (".inline_alert", "InlineAlert"),
+    "LogStreamWidget": (".log_stream_widget", "LogStreamWidget"),
+    "MarkdownPreview": (".markdown_preview", "MarkdownPreview"),
+    "MessageInput": (".message_input", "MessageInput"),
+    "ModuleStatusList": (".module_status_list", "ModuleStatusList"),
+    "NavigationCard": (".navigation_card", "NavigationCard"),
+    "NumberingPreset": (".numbering_preset", "NumberingPreset"),
+    "Pagination": (".pagination", "Pagination"),
+    "Result": (".result", "Result"),
+    "SearchInput": (".search_input", "SearchInput"),
+    "SegmentedControl": (".segmented_control", "SegmentedControl"),
+    "SizeCombo": (".size_combo", "SizeCombo"),
+    "SpacingInput": (".spacing_input", "SpacingInput"),
+    "Spin": (".spin", "Spin"),
+    "SplitPane": (".split_pane", "SplitPane"),
+    "StyledComboBox": (".styled_combo_box", "StyledComboBox"),
+    "SurfaceCard": (".surface_card", "SurfaceCard"),
+    "TabBar": (".tab_bar", "TabBar"),
+    "TagChip": (".tag_chip", "TagChip"),
+    "TextArea": (".text_area", "TextArea"),
+    "ThemedRadioButton": (".themed_radio_button", "ThemedRadioButton"),
+    "ThemedSlider": (".themed_slider", "ThemedSlider"),
+    "Toast": (".toast", "Toast"),
+    "Typography": (".typography", "Typography"),
+    "TypingIndicator": (".typing_indicator", "TypingIndicator"),
+    "apply_button_variant": (".button_style", "apply_button_variant"),
+    "bind_theme": (".theme", "bind_theme"),
+    "build_button_stylesheet": (".button_style", "build_button_stylesheet"),
+    "build_checkbox_stylesheet": (".selection_control_style", "build_checkbox_stylesheet"),
+    "build_text_input_stylesheet": (".input_style", "build_text_input_stylesheet"),
+}
+
+__all__ = list(_EXPORT_MAP)
+
+
+def __getattr__(name: str):
+    try:
+        module_name, attr_name = _EXPORT_MAP[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+
+    module = import_module(module_name, __name__)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + list(__all__))

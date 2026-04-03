@@ -4,9 +4,10 @@ Progress indicator with shared button styling.
 
 from __future__ import annotations
 
-from src.qt_api import QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget, Signal, Qt
+from src.qt_api import QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget, Signal, Qt, QPropertyAnimation
 
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import bind_theme, get_theme
 
 
@@ -28,32 +29,46 @@ class ProgressIndicator(QWidget):
         layout.setSpacing(get_theme().spacing_xs)
 
         self._step_label = self._build_step_label()
-        layout.addWidget(self._step_label)
-
-        self._build_progress_row(layout)
-
         self._pct_label = self._build_percentage_label()
-        layout.addWidget(self._pct_label)
 
+        row1 = QHBoxLayout()
+        row1.setContentsMargins(0, 0, 0, 0)
+        row1.addWidget(self._step_label)
+        row1.addStretch(1)
+        row1.addWidget(self._pct_label)
+        layout.addLayout(row1)
+
+        self._bar = self._build_progress_bar()
+        self._animation = QPropertyAnimation(self._bar, b"value", self)
+        self._animation.setDuration(250)
+        self._cancel = self._build_cancel_button()
+        self._progress_row = self._build_progress_row()
+        layout.addLayout(self._progress_row)
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
         self._apply_theme()
         bind_theme(self, self._apply_theme)
 
-    @staticmethod
-    def _build_step_label() -> QLabel:
+    def _build_step_label(self) -> QLabel:
         return QLabel(DEFAULT_STEP_TEXT)
 
-    def _build_progress_row(self, layout: QVBoxLayout) -> None:
+    def _build_percentage_label(self) -> QLabel:
+        label = QLabel("0%")
+        label.setAlignment(Qt.AlignRight)
+        return label
+
+    def _build_progress_bar(self) -> QProgressBar:
+        bar = QProgressBar()
+        bar.setTextVisible(False)
+        return bar
+
+    def _build_progress_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(get_theme().spacing_sm)
-
-        self._bar = QProgressBar()
         row.addWidget(self._bar, 1)
-
-        self._cancel = self._build_cancel_button()
         row.addWidget(self._cancel)
-        layout.addLayout(row)
-        self._bar.setRange(0, 100)
-        self._bar.setValue(0)
+        return row
 
     def _build_cancel_button(self) -> QPushButton:
         button = QPushButton(CANCEL_BUTTON_TEXT)
@@ -63,21 +78,14 @@ class ProgressIndicator(QWidget):
         apply_button_variant(button, "ghost-danger")
         return button
 
-    @staticmethod
-    def _build_percentage_label() -> QLabel:
-        label = QLabel("0%")
-        label.setAlignment(Qt.AlignRight)
-        return label
-
     def _apply_theme(self) -> None:
         t = get_theme()
         self.layout().setSpacing(t.spacing_xs)
-        row_layout = self.layout().itemAt(1).layout()
-        row_layout.setSpacing(t.spacing_sm)
+        self._progress_row.setSpacing(t.spacing_sm)
         self._apply_progress_bar_theme(t)
         self._apply_cancel_button_theme(t)
         self._apply_progress_label_theme(t)
-        self.setFixedHeight(t.progress_indicator_height)
+        # remove fixed height constraint to allow natural multi-row wrapping
 
     def _apply_progress_bar_theme(self, theme) -> None:
         self._bar.setFixedHeight(theme.progress_bar_height)
@@ -89,7 +97,7 @@ class ProgressIndicator(QWidget):
                 border-radius: {theme.radius_xs}px;
             }}
             QProgressBar::chunk {{
-                background: {theme.progress_fill};
+                background: {theme.primary};
                 border-radius: {theme.radius_xs}px;
             }}
             """
@@ -97,7 +105,7 @@ class ProgressIndicator(QWidget):
 
     def _apply_cancel_button_theme(self, theme) -> None:
         self._cancel.setMinimumWidth(theme.progress_cancel_min_width)
-        self._cancel.setFixedHeight(theme.control_height_sm)
+        apply_size_class(self._cancel, "sm")
         self.setStyleSheet(self._build_cancel_button_stylesheet(theme))
 
     @staticmethod
@@ -126,18 +134,23 @@ class ProgressIndicator(QWidget):
     def set_progress(self, current: int, total: int, step_name: str = ""):
         pct = int(current / max(total, 1) * 100)
         self._bar.setMaximum(total)
-        self._bar.setValue(current)
+        self._animation.stop()
+        self._animation.setEndValue(current)
+        self._animation.start()
         self._pct_label.setText(f"{pct}%")
         if step_name:
             self._step_label.setText(step_name)
 
     def set_done(self):
-        self._bar.setValue(self._bar.maximum())
+        self._animation.stop()
+        self._animation.setEndValue(self._bar.maximum())
+        self._animation.start()
         self._pct_label.setText("100%")
         self._step_label.setText(DONE_STEP_TEXT)
         self._cancel.hide()
 
     def reset_idle(self) -> None:
+        self._animation.stop()
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
         self._pct_label.setText("0%")

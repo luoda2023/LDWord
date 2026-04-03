@@ -12,6 +12,7 @@ from pathlib import Path
 
 from lxml import etree
 
+from src.app_meta import APP_TEMP_DIR_NAME
 from src.shared.engine.field_builder import iter_field_instructions
 from src.shared.engine.ooxml_ops import qn
 
@@ -281,7 +282,7 @@ def refresh_doc_fields_with_word(doc_path: str, timeout_sec: int = 30) -> tuple[
     if not target.exists():
         return False, f"Output file not found: {doc_path}"
 
-    tmp_dir = Path(tempfile.gettempdir()) / "lark_formatter_refresh"
+    tmp_dir = Path(tempfile.gettempdir()) / APP_TEMP_DIR_NAME
     tmp_dir.mkdir(parents=True, exist_ok=True)
     shadow = tmp_dir / f"{uuid.uuid4().hex}.docx"
     try:

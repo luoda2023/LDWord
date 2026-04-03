@@ -8,12 +8,13 @@ from src.shared.ui.theme import bind_theme, get_theme
 
 
 class Badge(QWidget):
-    """Compact capsule text badge."""
+    """Compact capsule text badge with optional on-primary mode."""
 
     def __init__(self, text: str = "", variant: str = "neutral", *, parent=None):
         super().__init__(parent)
         self._text = text
         self._variant = variant
+        self._on_primary = False  # True when displayed on primary-colored bg
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._label = QLabel(text)
@@ -24,25 +25,33 @@ class Badge(QWidget):
 
     def _apply_theme(self) -> None:
         t = get_theme()
-        variant_colors = {
-            "neutral": (t.bg_selected, t.text_secondary, t.border_light),
-            "info": (t.primary_light, t.primary, t.primary),
-            "success": (t.success_bg, t.success, t.success),
-            "warning": (t.warning_bg, t.warning, t.warning),
-            "error": (t.error_bg, t.error, t.error),
-            "danger": (t.error_bg, t.error, t.error),
-        }
-        bg, fg, border = variant_colors.get(self._variant, variant_colors["neutral"])
+        if self._on_primary:
+            # On blue/primary background: white text + white translucent bg
+            bg = "rgba(255,255,255,0.20)"
+            fg = "#FFFFFF"
+        else:
+            # Normal: translucent semantic bg + semantic text color
+            variant_colors = {
+                "neutral": ("rgba(128,128,128,0.08)", t.text_hint),
+                "info": ("rgba(59,130,246,0.10)", t.primary),
+                "success": ("rgba(34,197,94,0.10)", t.success),
+                "warning": ("rgba(245,158,11,0.10)", t.warning),
+                "error": ("rgba(239,68,68,0.10)", t.error),
+                "danger": ("rgba(239,68,68,0.10)", t.error),
+            }
+            bg, fg = variant_colors.get(self._variant, variant_colors["neutral"])
         self._label.setStyleSheet(
             f"""
             background: {bg};
             color: {fg};
-            border: 1px solid {border};
-            border-radius: {t.radius_full}px;
-            padding: 0 {t.spacing_sm}px;
+            border: none;
+            border-radius: {t.radius_sm}px;
+            padding: 1px 8px;
+            font-size: {max(t.font_size_sm - 1, 11)}px;
+            font-weight: 500;
             """
         )
-        self._label.setMinimumHeight(max(18, t.spacing_lg + 2))
+        self._label.setMinimumHeight(max(16, t.spacing_md + 2))
         self.setVisible(bool(self._text))
 
     def set_text(self, text: str) -> None:
@@ -59,3 +68,9 @@ class Badge(QWidget):
 
     def variant(self) -> str:
         return self._variant
+
+    def set_on_primary(self, on_primary: bool) -> None:
+        """Switch to on-primary mode (white text on blue card)."""
+        if self._on_primary != on_primary:
+            self._on_primary = on_primary
+            self._apply_theme()

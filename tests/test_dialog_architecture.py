@@ -5,12 +5,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from src.qt_api import QApplication
 from src.shared.ui import dialogs
 from src.shared.ui.base_dialog import BaseDialog
 from src.shared.ui.confirm_dialog import ConfirmDialog
 from src.shared.ui.folder_picker import FolderPicker
 from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.theme import LIGHT
+
+
+def _app():
+    return QApplication.instance() or QApplication([])
 
 
 def test_base_dialog_buttons_delegate_to_shared_variant_helpers():
@@ -30,6 +35,16 @@ def test_confirm_dialog_is_built_on_base_dialog_without_local_button_qss():
 
     source = inspect.getsource(ConfirmDialog)
     assert ".setStyleSheet" not in source
+
+
+def test_base_dialog_does_not_reserve_outer_shadow_margin_in_top_level_layout():
+    _app()
+    dialog = BaseDialog()
+    try:
+        margins = dialog.layout().contentsMargins()
+        assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (0, 0, 0, 0)
+    finally:
+        dialog.close()
 
 
 def test_confirm_dialog_uses_readable_default_copy_constants():
@@ -131,7 +146,7 @@ def test_dialog_cluster_uses_shared_dialog_style_helpers():
 def test_error_dialog_source_uses_readable_text_constants():
     source = (ROOT / "src/shared/ui/error_dialog.py").read_text(encoding="utf-8")
 
-    assert 'title="Lark Formatter - 错误"' in source
+    assert 'title=f"{APP_DISPLAY_NAME} - 错误"' in source
     assert "处理过程中发生错误，请查看以下详情。" in source
     assert 'self._ok_btn = self.add_primary_button(OK_TEXT)' in source
     assert 'path_label = QLabel(f"{LOG_PATH_PREFIX}{log_path}")' in source

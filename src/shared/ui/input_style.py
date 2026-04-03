@@ -46,4 +46,36 @@ def build_text_input_stylesheet(
         {selector}::placeholder {{
             color: {theme.text_hint};
         }}
+
+        /* ── Size-class tiers (via sizeClass dynamic property) ── */
+        {selector}[sizeClass="sm"] {{
+            min-height: {theme.control_height_sm}px;
+            max-height: {theme.control_height_sm}px;
+        }}
+        {selector}[sizeClass="md"] {{
+            min-height: {theme.control_height_md}px;
+            max-height: {theme.control_height_md}px;
+        }}
+        {selector}[sizeClass="lg"] {{
+            min-height: {theme.control_height_lg}px;
+            max-height: {theme.control_height_lg}px;
+        }}
+
+        QComboBox[sizeClass="sm"] {{
+            min-height: {theme.control_height_sm}px;
+            max-height: {theme.control_height_sm}px;
+        }}
+        QComboBox[sizeClass="md"] {{
+            min-height: {theme.control_height_md}px;
+            max-height: {theme.control_height_md}px;
+        }}
+
+        QSpinBox[sizeClass="sm"] {{
+            min-height: {theme.control_height_sm}px;
+            max-height: {theme.control_height_sm}px;
+        }}
+        QSpinBox[sizeClass="md"] {{
+            min-height: {theme.control_height_md}px;
+            max-height: {theme.control_height_md}px;
+        }}
     """

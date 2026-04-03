@@ -7,6 +7,7 @@ from __future__ import annotations
 from src.qt_api import Signal
 
 from src.shared.ui.styled_combo_box import StyledComboBox
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import get_theme
 
 _PRESETS = {
@@ -25,7 +26,7 @@ class NumberingPreset(StyledComboBox):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(get_theme().control_height_md)
+        apply_size_class(self, "md")
         self.setMinimumWidth(180)
         for key, preview in _PRESETS.items():
             self.addItem(f"{preview}", key)

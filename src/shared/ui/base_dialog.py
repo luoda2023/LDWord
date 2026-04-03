@@ -4,9 +4,9 @@ Shared themed base dialog.
 
 from __future__ import annotations
 
+from src.app_meta import APP_DISPLAY_NAME
 from src.qt_api import (
     QDialog,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -14,7 +14,6 @@ from src.qt_api import (
     QPushButton,
     QVBoxLayout,
     QWidget,
-    QColor,
     QMouseEvent,
     Qt,
 )
@@ -25,6 +24,8 @@ from src.shared.ui.dialog_style import (
     build_dialog_message_stylesheet,
 )
 from src.shared.ui.input_style import build_text_input_stylesheet
+from src.shared.ui.rounded_surface import RoundedSurfaceFrame
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import get_theme
 
 
@@ -55,34 +56,18 @@ class BaseDialog(QDialog):
         self._icon_style = icon_style
 
         t = self._t
-        self.setWindowTitle(title or "Lark Formatter")
+        self.setWindowTitle(title or APP_DISPLAY_NAME)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMinimumWidth(460)
         self.setMaximumWidth(600)
 
-        self._content_card = QWidget(self)
+        self._content_card = RoundedSurfaceFrame(radius=t.shell_radius, parent=self)
         self._content_card.setObjectName("dialog_content_card")
-        self._content_card.setAttribute(Qt.WA_StyledBackground, True)
 
         outer = QVBoxLayout(self)
-        shadow_margin = t.shadow_blur_xl
-        outer.setContentsMargins(shadow_margin, shadow_margin - 16, shadow_margin, shadow_margin + 10)
+        outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(self._content_card)
-
-        self._bg_card = QWidget(self)
-        self._bg_card.setObjectName("dialog_bg")
-        self._bg_card.setAttribute(Qt.WA_StyledBackground, True)
-        self._bg_card.show()
-
-        shadow = QGraphicsDropShadowEffect(self._bg_card)
-        shadow.setBlurRadius(t.shadow_blur_xl)
-        shadow.setColor(QColor(0, 0, 0, t.shadow_color_dialog_alpha))
-        shadow.setOffset(0, t.shadow_offset_y_lg)
-        self._bg_card.setGraphicsEffect(shadow)
-
-        self._bg_card.lower()
-        self._content_card.raise_()
 
         card_layout = QVBoxLayout(self._content_card)
         card_layout.setContentsMargins(0, 0, 0, 0)
@@ -145,11 +130,6 @@ class BaseDialog(QDialog):
 
         self._apply_style()
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if hasattr(self, "_bg_card") and hasattr(self, "_content_card"):
-            self._bg_card.setGeometry(self._content_card.geometry())
-
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
@@ -164,7 +144,7 @@ class BaseDialog(QDialog):
     def add_primary_button(self, text: str, *, destructive: bool = False) -> QPushButton:
         btn = QPushButton(text)
         btn.setMinimumWidth(104)
-        btn.setFixedHeight(self._t.control_height_md)
+        apply_size_class(btn, "md")
         btn.setCursor(Qt.PointingHandCursor)
         btn.setDefault(True)
         apply_button_variant(btn, "danger" if destructive else "primary")
@@ -174,7 +154,7 @@ class BaseDialog(QDialog):
     def add_secondary_button(self, text: str) -> QPushButton:
         btn = QPushButton(text)
         btn.setMinimumWidth(104)
-        btn.setFixedHeight(self._t.control_height_md)
+        apply_size_class(btn, "md")
         btn.setCursor(Qt.PointingHandCursor)
         apply_button_variant(btn, "secondary")
         self._btn_layout.addWidget(btn)
@@ -185,7 +165,7 @@ class BaseDialog(QDialog):
         line_edit.setText(default)
         if placeholder:
             line_edit.setPlaceholderText(placeholder)
-        line_edit.setFixedHeight(self._t.control_height_md)
+        apply_size_class(line_edit, "md")
         line_edit.setStyleSheet(build_text_input_stylesheet(self._t))
         self.content_layout.addWidget(line_edit)
         return line_edit
@@ -199,12 +179,16 @@ class BaseDialog(QDialog):
 
     def _apply_style(self):
         t = self._t
+        self._content_card.configure_surface(
+            background=t.bg_card,
+            radius=t.shell_radius,
+            border_color=t.border_light,
+            border_width=1.0,
+        )
         self.setStyleSheet(
             f"""
-            #dialog_bg, #dialog_content_card {{
-                background: {t.bg_card};
-                border: 1px solid {t.border_light};
-                border-radius: {t.radius_xl}px;
+            QDialog {{
+                background: transparent;
             }}
             #dialog_title {{
                 color: {t.text_primary};
@@ -215,7 +199,7 @@ class BaseDialog(QDialog):
             #dialog_close {{
                 background: transparent;
                 border: none;
-                border-radius: {t.radius_xl}px;
+                border-radius: {t.shell_radius}px;
             }}
             #dialog_close:hover {{
                 background: {t.bg_hover};
