@@ -29,7 +29,7 @@ BLOCKING_GLOBS = [
 WARNING_GLOBS = [
     "crash.log",
     "demo_crash.log",
-    "lark_formatter.log",
+    "alavette_form.log",
 ]
 PYQT5_IMPORT_RE = re.compile(r"^\s*(from|import)\s+PyQt5\b", re.M)
 

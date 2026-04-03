@@ -22,7 +22,7 @@ tests/output/
 # Runtime logs
 crash.log
 demo_crash.log
-lark_formatter.log
+alavette_form.log
 
 # IDE
 .idea/

@@ -1,6 +1,6 @@
-# Lark Formatter V1.0 —— UI 控件样式设计与审阅指南
+# Alavette Form V1.0 —— UI 控件样式设计与审阅指南
 
-本文档用于团队内部传阅，对 Lark Formatter 项目的 UI 控件进行视觉样式审查。项目中目前所有的 UI 视觉元素均已抽离并在 `demo_style_gallery.py` 中集中展示。
+本文档用于团队内部传阅，对 Alavette Form 项目的 UI 控件进行视觉样式审查。项目中目前所有的 UI 视觉元素均已抽离并在 `demo_style_gallery.py` 中集中展示。
 
 请运行以下命令启动全量控件画廊，对照本文档进行审阅：
 ```bash

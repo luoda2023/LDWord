@@ -42,7 +42,7 @@
 - `__pycache__/`
 - `crash.log`
 - `demo_crash.log`
-- `lark_formatter.log`
+- `alavette_form.log`
 - 各类临时输出文档、对比稿、扫描报告
 
 ---

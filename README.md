@@ -1,4 +1,4 @@
-# Lark-Formatter V1.0
+# Alavette Form V1.0
 
 毕业论文 / 学位论文 `docx` 格式修订桌面工具（**PySide6 + python-docx**）。
 
@@ -40,7 +40,7 @@ python main.py --gui
 
 默认输出目录：
 
-- `dist/Lark-Formatter_V1.0/`
+- `dist/Alavette-Form_V1.0/`
 
 打包脚本会：
 

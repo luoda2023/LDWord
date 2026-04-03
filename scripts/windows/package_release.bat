@@ -11,7 +11,7 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
-set "APP_NAME=Lark-Formatter_V1.0"
+set "APP_NAME=Alavette-Form_V1.0"
 set "DIST_DIR=dist\%APP_NAME%"
 
 tasklist /FI "IMAGENAME eq %APP_NAME%.exe" 2>nul | find /I "%APP_NAME%.exe" >nul

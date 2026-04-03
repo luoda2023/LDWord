@@ -51,7 +51,7 @@ def test_windows_package_script_builds_pyside6_release_and_copies_notices():
 
     assert "PyInstaller" in script
     assert "main.py" in script
-    assert "Lark-Formatter_V1.0" in script
+    assert "Alavette-Form_V1.0" in script
     assert "--collect-submodules PySide6" not in script
     assert '--hidden-import PySide6.QtCore' in script
     assert '--hidden-import PySide6.QtGui' in script
@@ -78,7 +78,7 @@ def test_windows_clean_script_removes_local_release_artifacts():
     assert 'rmdir /s /q "dist"' in script
     assert 'del /q "crash.log"' in script
     assert 'del /q "demo_crash.log"' in script
-    assert 'del /q "lark_formatter.log"' in script
+    assert 'del /q "alavette_form.log"' in script
     assert 'for %%F in (*.spec)' in script
 
 
@@ -113,7 +113,7 @@ def test_gitignore_covers_local_release_artifacts():
         "dist/",
         "crash.log",
         "demo_crash.log",
-        "lark_formatter.log",
+        "alavette_form.log",
         "*_new.docx",
         ".pytest_cache/",
     ]:
@@ -124,7 +124,7 @@ def test_no_local_release_artifacts_remain_in_workspace():
     unwanted_paths = [
         ROOT / "crash.log",
         ROOT / "demo_crash.log",
-        ROOT / "lark_formatter.log",
+        ROOT / "alavette_form.log",
         ROOT / "tests" / "test_input_new.docx",
         ROOT / "tests" / "TEST-1" / "测试文档_new.docx",
     ]
