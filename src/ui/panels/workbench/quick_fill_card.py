@@ -1,11 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from src.qt_api import QLabel, QPushButton
 from src.shared.ui.button_style import apply_button_variant
-from src.shared.ui.card import Card
+from src.shared.ui.surface_card import SurfaceCard
 
 
-class QuickFillCard(Card):
+class QuickFillCard(SurfaceCard):
     def __init__(self, bridge, parent=None):
         super().__init__("快捷填充", parent=parent)
         self._bridge = bridge

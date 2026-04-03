@@ -35,3 +35,11 @@ def test_run_app_uses_cli_when_input_is_provided(monkeypatch):
     monkeypatch.setattr(main, "_run_cli", fake_run_cli)
 
     assert main.run_app(["example.docx"]) == 321
+
+
+def test_start_gui_uses_lazy_file_handler_for_exception_logging():
+    source = (ROOT / "main.py").read_text(encoding="utf-8")
+
+    assert "logging.basicConfig(" not in source
+    assert "logging.FileHandler(" in source
+    assert "delay=True" in source

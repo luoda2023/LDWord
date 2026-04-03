@@ -1,11 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from src.qt_api import QLabel, QPushButton, Signal
 from src.shared.ui.button_style import apply_button_variant
-from src.shared.ui.card import Card
+from src.shared.ui.surface_card import SurfaceCard
 
 
-class HeadingQuickCard(Card):
+class HeadingQuickCard(SurfaceCard):
     advanced_requested = Signal()
 
     def __init__(self, bridge, parent=None):

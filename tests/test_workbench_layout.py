@@ -31,51 +31,74 @@ def test_workbench_panel_import_path_stays_stable_after_package_split():
         panel.close()
 
 
-def test_workbench_panel_uses_v3_dynamic_navigation_shell():
+def test_workbench_panel_uses_v2_master_detail_shell():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        assert hasattr(panel, "_navigation_rail")
-        assert hasattr(panel, "_detail_stack")
-        assert panel._navigation_rail.selected_card_id() == "quick_execute"
+        assert hasattr(panel, "_nav_rail")
+        assert hasattr(panel, "_detail_scroll")
+        assert panel._nav_rail.selected_card_id() == "quick_execute"
+        assert panel._current_detail is panel._quick_execution_detail
     finally:
         panel.close()
 
 
-def test_workbench_panel_starts_with_quick_execute_and_config_cards_only():
+def test_workbench_panel_starts_with_fixed_cards_only():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        assert panel._navigation_order == ["quick_execute", "config_management"]
+        assert list(panel._navigation_cards) == ["quick_execute", "config_management"]
     finally:
         panel.close()
 
 
-def test_navigation_selection_switches_detail_stack():
+def test_navigation_selection_switches_detail_pane():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        panel._navigation_rail.select_card("config_management")
-        assert panel._detail_stack.currentWidget() is panel._config_management_pane
+        panel._nav_rail.select_card("config_management")
+        assert panel._current_detail is panel._config_management_detail
     finally:
         panel.close()
 
 
-def test_navigation_selection_updates_command_bar_title():
+def test_enabling_feature_adds_dynamic_navigation_card():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        panel._navigation_rail.select_card("config_management")
-        assert panel._command_bar._center_label.text() == "配置管理"
+        panel._quick_execution_detail.set_feature_enabled("content_fill", True)
+
+        assert "content_fill" in panel._navigation_cards
+        panel._nav_rail.select_card("content_fill")
+        assert panel._current_detail is panel._content_fill_detail
     finally:
         panel.close()
 
 
-def test_command_bar_is_first_root_widget():
+def test_disabling_feature_removes_dynamic_navigation_card():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        assert panel._root_layout.itemAt(0).widget() is panel._command_bar
+        panel._quick_execution_detail.set_feature_enabled("content_fill", True)
+        assert "content_fill" in panel._navigation_cards
+
+        panel._quick_execution_detail.set_feature_enabled("content_fill", False)
+
+        assert "content_fill" not in panel._navigation_cards
+    finally:
+        panel.close()
+
+
+def test_summary_refresh_does_not_recreate_existing_dynamic_navigation_cards():
+    _app()
+    panel = WorkbenchPanel(PanelBridge())
+    try:
+        panel._quick_execution_detail.set_feature_enabled("content_fill", True)
+        original_card = panel._navigation_cards["content_fill"]
+
+        panel._quick_execution_detail.set_document_path("C:/docs/thesis.docx")
+
+        assert panel._navigation_cards["content_fill"] is original_card
     finally:
         panel.close()
 

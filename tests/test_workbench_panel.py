@@ -32,8 +32,8 @@ def test_workbench_panel_exposes_navigation_components():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        assert panel._navigation_rail.selected_card_id() == "quick_execute"
-        assert panel._detail_stack.currentWidget() is panel._quick_execute_pane
+        assert panel._nav_rail.selected_card_id() == "quick_execute"
+        assert panel._current_detail is panel._quick_execution_detail
     finally:
         panel.close()
 

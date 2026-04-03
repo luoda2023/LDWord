@@ -1,5 +1,5 @@
 """
-Lark Formatter V1.0 — 主入口
+Alavette Form V1.0 — 主入口
 
 用法:
     python main.py input.docx                           # CLI 模式
@@ -13,15 +13,36 @@ import argparse
 import sys
 from pathlib import Path
 
+from src.app_meta import APP_CLI_NAME, APP_DISPLAY_NAME_FULL, APP_LOG_FILE
+
 # 项目根目录加入 sys.path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 
+def _create_gui_exception_logger(log_path: Path):
+    import logging
+
+    logger = logging.getLogger("alavette.gui")
+    logger.setLevel(logging.ERROR)
+    logger.propagate = False
+
+    resolved_log_path = str(log_path.resolve())
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler) and handler.baseFilename == resolved_log_path:
+            return logger
+
+    handler = logging.FileHandler(resolved_log_path, encoding="utf-8", delay=True)
+    handler.setLevel(logging.ERROR)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(handler)
+    return logger
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        prog="lark-formatter",
-        description="Lark Formatter V1.0 — 文档排版格式化工具",
+        prog=APP_CLI_NAME,
+        description=f"{APP_DISPLAY_NAME_FULL} — 文档排版格式化工具",
     )
     p.add_argument("input", nargs="?", default=None,
                    help="输入 .docx 文件路径 (GUI 模式可省略)")
@@ -34,7 +55,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _start_gui() -> int:
     """启动 GUI 模式。"""
-    import logging
     import traceback
 
     from src.qt_api import QApplication, QFont, Qt
@@ -49,24 +69,20 @@ def _start_gui() -> int:
         pass  # Qt < 5.14
 
     from src.ui.main_window import MainWindow
-    from src.shared.ui.theme import get_theme
+
 
     app = QApplication(sys.argv)
 
     # ── GUI 全局异常处理 ──
-    _log_path = ROOT / "lark_formatter.log"
-    logging.basicConfig(
-        filename=str(_log_path),
-        level=logging.ERROR,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    _log_path = ROOT / APP_LOG_FILE
+    gui_logger = _create_gui_exception_logger(_log_path)
 
     def _gui_excepthook(exc_type, exc_value, exc_tb):
         if issubclass(exc_type, (KeyboardInterrupt, SystemExit)):
             sys.__excepthook__(exc_type, exc_value, exc_tb)
             return
         msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-        logging.error(msg)
+        gui_logger.error(msg)
         try:
             from src.shared.ui.dialogs import error as show_error
             show_error(
@@ -81,8 +97,7 @@ def _start_gui() -> int:
     sys.excepthook = _gui_excepthook
 
     # 全局字体
-    t = get_theme()
-    font = QFont(t.font_family.split(",")[0].strip("' "))
+    font = QFont("Microsoft YaHei")
     font.setPointSize(10)
     app.setFont(font)
 

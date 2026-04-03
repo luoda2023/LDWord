@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from src.qt_api import QLabel
-from src.shared.ui.card import Card
+from src.shared.ui.surface_card import SurfaceCard
 
 from .state import StrategySummaryState
 
 
-class StrategyCard(Card):
+class StrategyCard(SurfaceCard):
     _SOURCE_TYPE_LABELS = {
         "default": "默认",
         "template": "模板",

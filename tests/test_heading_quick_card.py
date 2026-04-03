@@ -53,11 +53,15 @@ def test_heading_quick_card_can_update_summary_text():
     assert card._summary_label.text() == "summary: thesis-template"
 
 
-def test_workbench_uses_heading_quick_card_instead_of_inline_full_editor():
+def test_workbench_exposes_table_chart_detail_via_dynamic_navigation_card():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        assert hasattr(panel, "_heading_quick_card")
+        panel._quick_execution_detail.set_feature_enabled("table_chart", True)
+
+        assert "table_chart" in panel._navigation_cards
+        panel._nav_rail.select_card("table_chart")
+        assert panel._current_detail is panel._table_chart_detail
         assert panel.findChild(HeadingNumberingPanel) is None
     finally:
         panel.close()

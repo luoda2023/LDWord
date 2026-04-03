@@ -3,11 +3,45 @@ from __future__ import annotations
 from src.shared.ui.theme import AppTheme
 
 
+def apply_workbench_v2_shell_theme(panel, nav_rail, detail_scroll, detail_container, *, theme: AppTheme) -> None:
+    """Apply the V2 master-detail shell styling."""
+    radius = theme.shell_radius
+    panel.setStyleSheet(
+        f"#WorkbenchPanel {{ background: {theme.bg_window}; border-bottom-right-radius: {radius}px; }}"
+    )
+    nav_rail.setStyleSheet(
+        f"""
+        #wb_v2_navigation {{
+            background: {theme.bg_nav_rail};
+        }}
+        """
+    )
+    detail_scroll.setStyleSheet(
+        f"""
+        #wb_v2_detail {{
+            border: none;
+            background: {theme.bg_window};
+            border-bottom-right-radius: {radius}px;
+        }}
+        """
+    )
+    detail_container.setStyleSheet(
+        f"#wb_v2_detail_content {{ background: {theme.bg_window}; border-bottom-right-radius: {radius}px; }}"
+    )
+    viewport = detail_scroll.viewport()
+    if viewport is not None:
+        viewport.setObjectName("wb_v2_detail_viewport")
+        viewport.setStyleSheet(
+            f"#wb_v2_detail_viewport {{ background: {theme.bg_window}; border-bottom-right-radius: {radius}px; }}"
+        )
+
+
 def build_workbench_stylesheet(t: AppTheme) -> str:
     """Workbench V3 shell styling."""
     return f"""
         #WorkbenchPanel {{
             background: {t.bg_window};
+            border-bottom-right-radius: {t.shell_radius}px;
         }}
 
         #wb_command_bar {{

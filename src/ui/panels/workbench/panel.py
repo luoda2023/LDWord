@@ -312,18 +312,14 @@ class WorkbenchPanel(BasePanel):
 
         self._navigation_titles = {
             "quick_execute": "\u5feb\u901f\u6267\u884c",
-            "config_management": "闁板秶鐤嗙粻锛勬倞",
+            "config_management": "\u914d\u7f6e\u7ba1\u7406",
         }
         self._navigation_order = list(self._navigation_titles.keys())
         self._navigation_cards: dict[str, NavigationCard] = {}
 
         card_subtitles = {
             "quick_execute": "\u8fd0\u884c\u6587\u6863\u5e76\u67e5\u770b\u8fdb\u5ea6\u4e0e\u7ed3\u679c",
-            "config_management": "缁狅紕鎮婂Ο鈩冩緲閵嗕礁婧€閺咁垯绗岄幍褑顢戠粵鏍殣",
-        }
-        card_badges = {
-            "quick_execute": ("\u9ed8\u8ba4", "neutral"),
-            "config_management": ("閸楀啿鐨㈡稉濠勫殠", "info"),
+            "config_management": "\u7ba1\u7406\u5df2\u4fdd\u5b58\u7684\u914d\u7f6e\u65b9\u6848",
         }
 
         for card_id in self._navigation_order:
@@ -332,9 +328,6 @@ class WorkbenchPanel(BasePanel):
             subtitle = card_subtitles.get(card_id, "")
             if subtitle:
                 card.set_subtitle(subtitle)
-            badge_text, badge_variant = card_badges.get(card_id, ("", "neutral"))
-            if badge_text:
-                card.set_badge(badge_text, badge_variant)
             self._navigation_cards[card_id] = card
             self._navigation_rail.add_card(card_id, card)
 

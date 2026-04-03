@@ -38,11 +38,14 @@ def test_quick_fill_card_uses_shared_summary_and_action_hooks():
     assert card._advanced_mapping_btn.objectName() == "wb_quick_card_action_secondary"
 
 
-def test_workbench_includes_quick_fill_as_default_homepage_card():
+def test_workbench_exposes_content_fill_via_dynamic_navigation_card():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        assert hasattr(panel, "_quick_fill_card")
-        assert panel._capability_grid.card_at(0, 1) is panel._quick_fill_card
+        panel._quick_execution_detail.set_feature_enabled("content_fill", True)
+
+        assert "content_fill" in panel._navigation_cards
+        panel._nav_rail.select_card("content_fill")
+        assert panel._current_detail is panel._content_fill_detail
     finally:
         panel.close()
