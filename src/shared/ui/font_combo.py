@@ -71,10 +71,12 @@ class FontCombo(StyledComboBox):
         apply_size_class(self, "md")
         self._populate()
         self.currentTextChanged.connect(self._on_text_changed)
+        self.setToolTip("下拉显示本机已安装字体，也支持直接输入字体名。")
 
         line_edit = self.lineEdit()
         if line_edit is not None:
             line_edit.setPlaceholderText("输入字体名或下拉选择")
+            line_edit.setToolTip("例如宋体、黑体、Times New Roman，未收录字体名也会保留。")
 
     def _populate(self) -> None:
         self.addItems(list(ordered_font_families(self._lang)))

@@ -34,6 +34,14 @@ _ALIGNMENT_OPTIONS: tuple[tuple[str, str], ...] = (
     ("justify", "两端对齐"),
 )
 
+_LINE_SPACING_NOTES = {
+    "exact": "固定值: 直接输入磅值，例如 20 磅。",
+    "single": "单倍行距: 快捷预设已锁定为 1.0 倍，如需自定义请切到“多倍”或“固定值”。",
+    "one_half": "1.5 倍行距: 快捷预设已锁定为 1.5 倍。",
+    "double": "双倍行距: 快捷预设已锁定为 2.0 倍。",
+    "multiple": "多倍行距: 输入倍数，例如 1.75。",
+}
+
 
 class StyleDetail(QWidget):
     """Editable body-style pane backed by TemplateConfig.styles['body']."""
@@ -106,6 +114,7 @@ class StyleDetail(QWidget):
         for value, label in _ALIGNMENT_OPTIONS:
             self._alignment_combo.addItem(label, value)
         self._alignment_combo.currentIndexChanged.connect(self._on_form_edited)
+        self._alignment_combo.setToolTip("正文对齐方式。常用为两端对齐。")
         self._card.add_widget(FormRow("对齐", self._alignment_combo, parent=self._card))
 
         self._special_indent = SpecialIndentInput(self, reference_size_pt=12.0)
@@ -121,11 +130,16 @@ class StyleDetail(QWidget):
         self._right_indent = IndentInput(self, reference_size_pt=12.0)
         self._right_indent.value_changed.connect(self._on_form_edited)
         self._card.add_widget(FormRow("右缩进", self._right_indent, parent=self._card))
+        self._indent_note = QLabel("缩进支持字 / 磅 / cm，其中“字”会跟随当前字号换算。", self)
+        self._indent_note.setObjectName("tpl_style_help")
+        self._indent_note.setWordWrap(True)
+        self._card.add_widget(self._indent_note)
 
         self._line_type_combo = StyledComboBox(self)
         for value, label in LINE_SPACING_OPTIONS:
             self._line_type_combo.addItem(label, value)
         self._line_type_combo.currentIndexChanged.connect(self._on_line_spacing_type_changed)
+        self._line_type_combo.setToolTip("支持固定值、单倍、1.5 倍、双倍和多倍行距。")
         self._card.add_widget(FormRow("行距类型", self._line_type_combo, parent=self._card))
 
         self._line_value = SpacingInput(
@@ -144,6 +158,10 @@ class StyleDetail(QWidget):
         self._card.add_widget(
             FormRow("行距值", self._line_value, suffix_widget=self._line_value_suffix, parent=self._card)
         )
+        self._line_spacing_note = QLabel("", self)
+        self._line_spacing_note.setObjectName("tpl_style_help")
+        self._line_spacing_note.setWordWrap(True)
+        self._card.add_widget(self._line_spacing_note)
 
         self._space_before = SpacingInput(
             unit="pt",
@@ -201,6 +219,40 @@ class StyleDetail(QWidget):
         self._line_value_suffix.setText(line_spacing_unit_label(line_kind))
         self._line_value.setEnabled(editable)
         self._line_value.set_value(value, "pt")
+        self._line_value.setToolTip(_LINE_SPACING_NOTES.get(line_kind, ""))
+        self._line_value.spin_box.setToolTip(_LINE_SPACING_NOTES.get(line_kind, ""))
+        self._line_spacing_note.setText(_LINE_SPACING_NOTES.get(line_kind, ""))
+
+    def _update_footer_summary(self) -> None:
+        style = self._editable_style()
+        if style is None:
+            return
+
+        special = resolve_style_special_indent(style)
+        unit_label = {"chars": "字", "pt": "磅", "cm": "cm"}.get(str(special["unit"]), str(special["unit"]))
+        if special["mode"] == "first_line" and float(special["value"]) > 0:
+            indent = f"首行{float(special['value']):g}{unit_label}"
+        elif special["mode"] == "hanging" and float(special["value"]) > 0:
+            indent = f"悬挂{float(special['value']):g}{unit_label}"
+        elif style.left_indent_chars:
+            left_unit = {"chars": "字", "pt": "磅", "cm": "cm"}.get(style.left_indent_unit, style.left_indent_unit)
+            indent = f"左缩进{style.left_indent_chars:g}{left_unit}"
+        else:
+            indent = "无特殊缩进"
+
+        size_text = style.size_display or (f"{style.size_pt:g}pt" if style.size_pt else "未设置字号")
+        line_kind = normalize_line_spacing_type(style.line_spacing_type)
+        if line_kind == "exact":
+            line_text = f"固定{resolve_line_spacing_value(line_kind, style.line_spacing_pt):g}磅"
+        elif line_kind == "multiple":
+            line_text = f"{resolve_line_spacing_value(line_kind, style.line_spacing_pt):g}倍"
+        else:
+            line_text = self._line_type_combo.currentText() or line_kind
+
+        self._footer_note.setText(
+            f"当前正文: {style.font_cn or '-'} / {style.font_en or '-'} · {size_text} · "
+            f"{self._alignment_combo.currentText() or '未设置对齐'} · {indent} · {line_text}"
+        )
 
     def _editable_style(self) -> StyleConfig | None:
         if self._current_template is None:
@@ -259,6 +311,7 @@ class StyleDetail(QWidget):
 
             self._space_before.set_value(style.space_before_pt, "pt")
             self._space_after.set_value(style.space_after_pt, "pt")
+            self._update_footer_summary()
         finally:
             self._is_syncing = False
 
@@ -316,6 +369,7 @@ class StyleDetail(QWidget):
         style.line_spacing_pt = resolve_line_spacing_value(line_kind, self._line_value.value())
         style.space_before_pt = self._space_before.value()
         style.space_after_pt = self._space_after.value()
+        self._update_footer_summary()
 
         self.template_edited.emit(self._current_template)
 
@@ -330,6 +384,8 @@ class StyleDetail(QWidget):
             )
         self._desc.setStyleSheet(f"font-size: {theme.font_size_sm}px; color: {theme.text_secondary};")
         self._footer_note.setStyleSheet(f"font-size: {theme.font_size_sm}px; color: {theme.text_hint};")
+        for widget in self.findChildren(QLabel, "tpl_style_help"):
+            widget.setStyleSheet(f"font-size: {theme.font_size_sm}px; color: {theme.text_hint};")
         for widget in self.findChildren(QLabel, "tpl_style_unit"):
             widget.setStyleSheet(f"font-size: {theme.font_size_sm}px; color: {theme.text_secondary};")
 

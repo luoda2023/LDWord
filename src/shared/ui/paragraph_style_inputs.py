@@ -25,6 +25,12 @@ _SPECIAL_MODES: tuple[tuple[str, str], ...] = (
     ("hanging", "悬挂"),
 )
 
+_UNIT_HINTS = {
+    "chars": "按当前字号换算，常用于“首行2字”。",
+    "pt": "直接按磅值设置缩进。",
+    "cm": "按厘米设置缩进，适合精确版芯控制。",
+}
+
 
 class IndentInput(QWidget):
     """Unit-aware indent editor that preserves a canonical pt value."""
@@ -56,6 +62,7 @@ class IndentInput(QWidget):
         apply_size_class(self._spin, "md")
         apply_size_class(self._unit_combo, "md")
         self._sync_spin_for_unit("chars")
+        self._refresh_tooltips()
 
     def _sync_spin_for_unit(self, unit: str) -> None:
         normalized = normalize_indent_unit(unit)
@@ -84,6 +91,16 @@ class IndentInput(QWidget):
         blocked = self._spin.blockSignals(True)
         self._spin.setValue(self._display_value_for_canonical(unit))
         self._spin.blockSignals(blocked)
+        self._refresh_tooltips()
+
+    def _refresh_tooltips(self) -> None:
+        unit = self._current_unit()
+        unit_label = dict(_INDENT_UNITS).get(unit, unit)
+        hint = _UNIT_HINTS.get(unit, "")
+        text = f"当前单位: {unit_label}。{hint} 参考字号 {self._reference_size_pt:g}pt。"
+        self.setToolTip(text)
+        self._spin.setToolTip(text)
+        self._unit_combo.setToolTip("切换缩进单位: 字 / 磅 / cm。")
 
     def _emit(self) -> None:
         self.value_changed.emit(self.value(), self.unit())
@@ -169,6 +186,15 @@ class SpecialIndentInput(QWidget):
     def _sync_enabled_state(self) -> None:
         enabled = self._mode() != "none"
         self._indent_input.setEnabled(enabled)
+        mode = self._mode()
+        if mode == "none":
+            text = "不启用特殊缩进。"
+        elif mode == "first_line":
+            text = "首行缩进: 仅第一行向内缩进。"
+        else:
+            text = "悬挂缩进: 首行顶格，后续各行向内缩进。"
+        self.setToolTip(text)
+        self._mode_combo.setToolTip("切换特殊缩进模式: 无 / 首行 / 悬挂。")
 
     def _emit(self) -> None:
         self.value_changed.emit(self.mode(), self.value(), self.unit())

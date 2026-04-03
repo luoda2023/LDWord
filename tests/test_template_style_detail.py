@@ -73,6 +73,29 @@ def test_style_detail_reuses_shared_controls():
     assert "ToggleSwitch(" in source
 
 
+def test_style_detail_exposes_hints_for_font_size_indent_and_line_spacing():
+    _app()
+    detail = StyleDetail()
+
+    try:
+        assert detail._font_cn.toolTip()
+        assert detail._font_cn.lineEdit().placeholderText()
+        assert detail._size_combo.toolTip()
+        assert detail._size_combo.lineEdit().placeholderText()
+        assert detail._left_indent.toolTip()
+        assert "缩进支持" in detail._indent_note.text()
+
+        detail._line_type_combo.setCurrentIndex(detail._line_type_combo.findData("double"))
+        assert "快捷预设" in detail._line_spacing_note.text()
+        assert detail._line_value.isEnabled() is False
+
+        detail._line_type_combo.setCurrentIndex(detail._line_type_combo.findData("exact"))
+        assert "固定值" in detail._line_spacing_note.text()
+        assert detail._line_value.isEnabled() is True
+    finally:
+        detail.close()
+
+
 def test_style_detail_restores_line_spacing_presets_as_locked_values():
     _app()
     detail = StyleDetail()
@@ -96,6 +119,25 @@ def test_style_detail_restores_line_spacing_presets_as_locked_values():
         body = template.styles["body"]
         assert body.line_spacing_type == "multiple"
         assert body.line_spacing_pt == 1.8
+    finally:
+        detail.close()
+
+
+def test_style_detail_updates_footer_summary_with_current_body_settings():
+    _app()
+    detail = StyleDetail()
+    template = TemplateConfig()
+    template.styles["body"] = StyleConfig(font_cn="宋体", font_en="Times New Roman", size_pt=12)
+
+    try:
+        detail.set_template(template)
+        detail._font_cn.set_font_name("黑体")
+        detail._line_type_combo.setCurrentIndex(detail._line_type_combo.findData("one_half"))
+
+        text = detail._footer_note.text()
+        assert "当前正文:" in text
+        assert "黑体" in text
+        assert "1.5" in text or "1.5 倍" in text
     finally:
         detail.close()
 
