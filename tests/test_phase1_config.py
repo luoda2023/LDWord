@@ -390,6 +390,27 @@ def test_load_scene_normalizes_legacy_capabilities_and_overrides():
 
 
 
+def test_normalize_scene_payload_treats_legacy_pipeline_as_explicit_enabled_list():
+    """legacy pipeline should only enable the modules it explicitly lists."""
+    from src.config.migration import normalize_scene_payload
+
+    normalized = normalize_scene_payload(
+        {
+            "name": "legacy_pipeline_only",
+            "pipeline": ["page_setup", "caption"],
+        }
+    )
+    switches = normalized["module_switches"]
+
+    assert switches["page_setup"] is True
+    assert switches["caption"] is True
+    assert switches["header_footer"] is False
+    assert switches["table_format"] is False
+    assert switches["reference_format"] is False
+    print("  ? legacy pipeline keeps only explicitly listed modules")
+
+
+
 
 def test_load_scene_accepts_overrides_alias():
     """Scene overrides should normalize into template_overrides."""

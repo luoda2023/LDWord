@@ -8,6 +8,7 @@ UI 层通过此 adapter 读写 heading_numbering 配置，
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from src.qt_api import QObject, Signal
@@ -57,11 +58,6 @@ class HeadingNumberingAdapter(QObject):
 
     # ── 预设检测 ─────────────────────────────────
 
-    _COMPARE_FIELDS = (
-        "display_template", "display_core_style", "reference_core_style",
-        "chain", "chain_separator", "title_separator",
-    )
-
     def detect_active_preset(self) -> str | None:
         """比对当前 bindings 和所有预设, 完全匹配则返回 key, 否则 None。"""
         from src.config.heading_presets import PRESET_CATALOG
@@ -77,13 +73,14 @@ class HeadingNumberingAdapter(QObject):
         current: dict,
         preset: dict,
     ) -> bool:
-        for key, p_bind in preset.items():
-            c_bind = current.get(key)
-            if not c_bind:
+        from src.config.template import HeadingLevelBindingConfig as BindingConfig
+
+        for level in range(1, self.max_levels + 1):
+            key = f"heading{level}"
+            c_bind = current.get(key) or BindingConfig()
+            p_bind = preset.get(key) or BindingConfig()
+            if asdict(c_bind) != asdict(p_bind):
                 return False
-            for f in self._COMPARE_FIELDS:
-                if getattr(c_bind, f, None) != getattr(p_bind, f, None):
-                    return False
         return True
 
     # ── 读取 ─────────────────────────────────────

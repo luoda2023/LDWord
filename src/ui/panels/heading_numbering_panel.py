@@ -25,6 +25,7 @@ from src.qt_api import (
 from src.config.heading_presets import get_preset_labels
 from src.shared.ui import ThemedRadioButton, ThemedSlider
 from src.shared.ui.styled_combo_box import StyledComboBox
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import get_theme, bind_theme
 from src.ui.adapters.heading_numbering_adapter import HeadingNumberingAdapter
 from src.ui.base_panel import BasePanel
@@ -165,7 +166,7 @@ class HeadingNumberingPanel(BasePanel):
     def _build_preset_selector_group(self, layout: QHBoxLayout, theme) -> None:
         layout.addWidget(self._label("编号库 (预设):"))
         self._preset_cb = StyledComboBox()
-        self._preset_cb.setFixedHeight(theme.control_height_md)
+        apply_size_class(self._preset_cb, "md")
         self._preset_cb.setMinimumWidth(theme.heading_panel_preset_width)
         for key, label in get_preset_labels():
             self._preset_cb.addItem(label, key)
@@ -409,7 +410,7 @@ class HeadingNumberingPanel(BasePanel):
         row.addWidget(self._form_label("此级别的编号样式:"))
 
         self._core_style_cb = StyledComboBox()
-        self._core_style_cb.setFixedHeight(theme.control_height_md)
+        apply_size_class(self._core_style_cb, "md")
         self._core_style_cb.setMinimumWidth(theme.heading_panel_editor_combo_width)
         for key, desc in STYLE_OPTIONS:
             self._core_style_cb.addItem(desc, key)
@@ -432,7 +433,7 @@ class HeadingNumberingPanel(BasePanel):
         self._prefix_edit = QLineEdit()
         self._prefix_edit.setPlaceholderText("如: 第")
         self._prefix_edit.setFixedWidth(theme.heading_panel_short_input_width)
-        self._prefix_edit.setFixedHeight(theme.control_height_md)
+        apply_size_class(self._prefix_edit, "md")
         self._prefix_edit.textEdited.connect(self._on_editor_changed)
         return prefix_label, self._prefix_edit
 
@@ -441,7 +442,7 @@ class HeadingNumberingPanel(BasePanel):
         self._suffix_edit = QLineEdit()
         self._suffix_edit.setPlaceholderText("如: 章")
         self._suffix_edit.setFixedWidth(theme.heading_panel_short_input_width)
-        self._suffix_edit.setFixedHeight(theme.control_height_md)
+        apply_size_class(self._suffix_edit, "md")
         self._suffix_edit.textEdited.connect(self._on_editor_changed)
         return suffix_label, self._suffix_edit
 
@@ -471,7 +472,7 @@ class HeadingNumberingPanel(BasePanel):
 
     def _build_editor_chain_selector(self, theme) -> StyledComboBox:
         self._chain_cb = StyledComboBox()
-        self._chain_cb.setFixedHeight(theme.control_height_md)
+        apply_size_class(self._chain_cb, "md")
         self._chain_cb.setMinimumWidth(theme.heading_panel_editor_combo_width)
         self._chain_cb.currentIndexChanged.connect(self._on_chain_selected)
         return self._chain_cb
@@ -481,7 +482,7 @@ class HeadingNumberingPanel(BasePanel):
         self._chain_sep_edit = QLineEdit()
         self._chain_sep_edit.setFixedWidth(theme.heading_panel_tiny_input_width)
         self._chain_sep_edit.setAlignment(Qt.AlignCenter)
-        self._chain_sep_edit.setFixedHeight(theme.control_height_md)
+        apply_size_class(self._chain_sep_edit, "md")
         self._chain_sep_edit.textEdited.connect(self._on_chain_sep_edited)
         return self._chain_sep_lbl, self._chain_sep_edit
 
@@ -612,8 +613,10 @@ class HeadingNumberingPanel(BasePanel):
 
     def _build_advanced_level_checkbox(self, level: int, binding) -> QCheckBox:
         en_cb = QCheckBox()
+        en_cb.setProperty("heading_level_toggle", True)
         en_cb.setChecked(binding.enabled if binding else True)
-        en_cb.setToolTip("启用/禁用此级别的编号")
+        en_cb.setEnabled(self._is_custom_mode)
+        en_cb.setToolTip("Enable or disable numbering for this level")
         en_cb.toggled.connect(lambda checked, lv=level: self._on_level_enabled_changed(lv, checked))
         return en_cb
 
@@ -743,7 +746,7 @@ class HeadingNumberingPanel(BasePanel):
     def _build_non_numbered_toggle_button(self, theme) -> QPushButton:
         self._nn_toggle = QPushButton(build_non_numbered_toggle_text(False))
         self._nn_toggle.setObjectName("hn_section_toggle")
-        self._nn_toggle.setFixedHeight(theme.control_height_md)
+        apply_size_class(self._nn_toggle, "md")
         self._nn_toggle.setFlat(True)
         self._nn_toggle.setCursor(Qt.PointingHandCursor)
         self._nn_toggle.clicked.connect(self._toggle_non_numbered)
@@ -766,14 +769,14 @@ class HeadingNumberingPanel(BasePanel):
     def _build_non_numbered_texts_input(self, layout: QVBoxLayout, theme) -> None:
         layout.addWidget(self._small_label("跳过包含以下完整文本的标题 (使用逗号分隔):"))
         self._nn_texts_edit = QLineEdit()
-        self._nn_texts_edit.setFixedHeight(theme.control_height_md)
+        apply_size_class(self._nn_texts_edit, "md")
         self._nn_texts_edit.setPlaceholderText("如: 参考文献, 致谢, 摘要")
         layout.addWidget(self._nn_texts_edit)
 
     def _build_non_numbered_prefix_input(self, layout: QVBoxLayout, theme) -> None:
         layout.addWidget(self._small_label("跳过以此文本开头的标题 (使用逗号分隔):"))
         self._nn_prefix_edit = QLineEdit()
-        self._nn_prefix_edit.setFixedHeight(theme.control_height_md)
+        apply_size_class(self._nn_prefix_edit, "md")
         self._nn_prefix_edit.setPlaceholderText("如: 附录, 附件, Appendix")
         layout.addWidget(self._nn_prefix_edit)
 
@@ -810,7 +813,7 @@ class HeadingNumberingPanel(BasePanel):
         self._sync_levels_display(value)
         if self._adapter.has_template:
             self._adapter.set_max_levels(value)
-            self._mark_dirty()
+            self._mark_dirty(force_custom=True)
             self._refresh_views()
 
     def _sync_levels_display(self, value: int) -> None:
@@ -822,19 +825,42 @@ class HeadingNumberingPanel(BasePanel):
             return
             
         if key == "__custom__":
-            self._is_custom_mode = True
+            self._activate_custom_mode()
         else:
-            self._is_custom_mode = False
             self._adapter.apply_preset(key)
-            
-        self._sync_lock_state()
+            self._activate_preset_mode(key)
+
         self._refresh_views()
+
+    def _custom_preset_index(self) -> int:
+        return max(0, self._preset_cb.count() - 1)
+
+    def _set_preset_selection(self, key: str) -> None:
+        self._preset_cb.blockSignals(True)
+        try:
+            for i in range(self._preset_cb.count()):
+                if self._preset_cb.itemData(i) == key:
+                    self._preset_cb.setCurrentIndex(i)
+                    return
+            self._preset_cb.setCurrentIndex(self._custom_preset_index())
+        finally:
+            self._preset_cb.blockSignals(False)
+
+    def _activate_custom_mode(self) -> None:
+        self._is_custom_mode = True
+        self._set_preset_selection("__custom__")
+        self._sync_lock_state()
+
+    def _activate_preset_mode(self, key: str) -> None:
+        self._is_custom_mode = False
+        self._set_preset_selection(key)
+        self._sync_lock_state()
         
     def _sync_lock_state(self) -> None:
         """Lock or unlock configuration fields based on whether Custom mode is active.
         
-        锁定范围: 仅锁定“编号格式参数”。
-        永远开放: TOC 勾选 (SPEC: 所有模式可编辑), 最大级数, 非编号例外。
+        Only numbering-format parameters are locked here.
+        TOC toggles, max levels, and non-numbered exceptions stay editable.
         """
         self._apply_editor_enable_state(
             build_editor_enable_state(
@@ -842,10 +868,27 @@ class HeadingNumberingPanel(BasePanel):
                 use_raw_template=self._use_raw_cb.isChecked(),
             )
         )
+        self._sync_advanced_level_toggle_state()
+
+    def _sync_advanced_level_toggle_state(self) -> None:
+        if not hasattr(self, "_adv_list"):
+            return
+        for row in range(self._adv_list.count()):
+            item = self._adv_list.item(row)
+            widget = self._adv_list.itemWidget(item)
+            if widget is None:
+                continue
+            for checkbox in widget.findChildren(QCheckBox):
+                if checkbox.property("heading_level_toggle"):
+                    checkbox.setEnabled(self._is_custom_mode)
 
     def _on_level_enabled_changed(self, level: int, checked: bool) -> None:
+        if not self._is_custom_mode:
+            self._sync_advanced_level_toggle_state()
+            return
         if self._adapter.has_template:
             self._adapter.set_binding_field(level, "enabled", checked)
+            self._mark_dirty()
             self._refresh_views()
 
     def _on_toc_changed(self, level: int, checked: bool) -> None:
@@ -907,19 +950,26 @@ class HeadingNumberingPanel(BasePanel):
         if self._adapter.has_template:
             items = parse_csv_items(text)
             self._adapter.set_non_numbered_texts(items)
-            self._mark_dirty()
+            self._mark_dirty(force_custom=True)
 
     def _on_nn_prefix_changed(self, text: str) -> None:
         if self._adapter.has_template:
             items = parse_csv_items(text)
             self._adapter.set_non_numbered_prefixes(items)
-            self._mark_dirty()
+            self._mark_dirty(force_custom=True)
 
-    def _mark_dirty(self):
-        # We don't magically switch the combobox to Custom anymore.
-        # The user MUST have already selected Custom to edit and make it dirty,
-        # because the UI locks them out otherwise!
-        pass
+    def _mark_dirty(self, *, force_custom: bool = False) -> None:
+        if not self._adapter.has_template:
+            return
+        if force_custom or self._is_custom_mode:
+            self._activate_custom_mode()
+        else:
+            key = self._adapter.detect_active_preset()
+            if key:
+                self._activate_preset_mode(key)
+            else:
+                self._activate_custom_mode()
+        self.bridge.mark_template_dirty()
 
     def _refresh_views(self) -> None:
         if self._current_mode == _MODE_SIMPLE:
@@ -931,20 +981,11 @@ class HeadingNumberingPanel(BasePanel):
         if not self._adapter.has_template:
             return
         key = self._adapter.detect_active_preset()
-        
-        self._preset_cb.blockSignals(True)
+
         if key:
-            self._is_custom_mode = False
-            for i in range(self._preset_cb.count()):
-                if self._preset_cb.itemData(i) == key:
-                    self._preset_cb.setCurrentIndex(i)
-                    break
+            self._activate_preset_mode(key)
         else:
-            self._is_custom_mode = True
-            self._preset_cb.setCurrentIndex(self._preset_cb.count() - 1) # Custom
-            
-        self._preset_cb.blockSignals(False)
-        self._sync_lock_state()
+            self._activate_custom_mode()
 
     # ━━ 生命周期 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -957,6 +998,7 @@ class HeadingNumberingPanel(BasePanel):
 
     def on_template_changed(self, template) -> None:
         self._adapter.set_template(template)
+        self.bridge.clear_template_dirty()
         self._levels_slider.blockSignals(True)
         self._levels_slider.setValue(max(1, min(self._adapter.max_levels, 8)))
         self._levels_slider.blockSignals(False)
