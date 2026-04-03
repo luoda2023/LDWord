@@ -1,5 +1,5 @@
 """
-Lark-Formatter V1.0 — 管线模块基类与元数据定义
+Alavette Form V1.0 — 管线模块基类与元数据定义
 
 每个管线模块继承 BaseModule 并声明 ModuleMeta，
 Pipeline 调度器依据 meta 自动排序、校验、执行。

@@ -236,7 +236,7 @@ class ColorSwatch(QWidget):
 class StyleGallery(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Lark Formatter — UI 控件样式全览")
+        self.setWindowTitle("Alavette Form — UI 控件样式全览")
         self.resize(1080, 740)
         self.setMinimumSize(800, 500)
         self.setAttribute(Qt.WA_StyledBackground, True)

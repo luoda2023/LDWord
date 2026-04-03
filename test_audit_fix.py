@@ -5,7 +5,8 @@ sys.excepthook = lambda *a: (traceback.print_exception(*a),)
 
 import demo_heading_panel
 
-def test():
+
+def run_manual_audit():
     p = demo_heading_panel.win.panel
     results = []
     try:
@@ -48,4 +49,15 @@ def test():
         traceback.print_exc()
     QApplication.quit()
 
-QTimer.singleShot(800, test)
+
+def main() -> int:
+    app = QApplication.instance() or QApplication(sys.argv)
+    win = demo_heading_panel.DemoWindow()
+    win.show()
+    demo_heading_panel.win = win
+    QTimer.singleShot(800, run_manual_audit)
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

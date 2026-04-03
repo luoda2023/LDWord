@@ -1,9 +1,7 @@
 import sys
-from src.qt_api import QApplication, QComboBox, QColor, QFrame, QImage, QListView, QTimer, Qt
 
-app = QApplication(sys.argv)
-# 必须启用高DPI否则可能会有误差
-QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+from src.qt_api import QApplication, QComboBox, QColor, QListView, QTimer, Qt
+
 
 class MyCombo(QComboBox):
     def showPopup(self):
@@ -12,48 +10,57 @@ class MyCombo(QComboBox):
         popup.setAttribute(Qt.WA_TranslucentBackground, True)
         super().showPopup()
 
-combo = MyCombo()
-combo.addItems(["Test Option 1", "Test Option 2", "Test Option 3"])
-combo.resize(200, 40)
 
-# Apply QSS
-combo.setStyleSheet("""
-    QComboBox { background: white; border: 1px solid gray; }
-""")
+def main() -> int:
+    app = QApplication(sys.argv)
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 
-lv = QListView(combo)
-lv.setAttribute(Qt.WA_StyledBackground, True)
-lv.setStyleSheet("""
-    QListView {
-        background: lightblue;
-        border-radius: 15px;
-    }
-""")
-combo.setView(lv)
+    combo = MyCombo()
+    combo.addItems(["Test Option 1", "Test Option 2", "Test Option 3"])
+    combo.resize(200, 40)
+    combo.setStyleSheet(
+        """
+        QComboBox { background: white; border: 1px solid gray; }
+        """
+    )
 
-def run_test():
-    combo.showPopup()
-    QTimer.singleShot(200, grab_and_check)
+    lv = QListView(combo)
+    lv.setAttribute(Qt.WA_StyledBackground, True)
+    lv.setStyleSheet(
+        """
+        QListView {
+            background: lightblue;
+            border-radius: 15px;
+        }
+        """
+    )
+    combo.setView(lv)
 
-def grab_and_check():
-    # Grab the whole screen
-    screen = QApplication.primaryScreen()
-    top_win = lv.window()
-    geom = top_win.geometry()
-    
-    # Grab the rect around the popup
-    img = screen.grabWindow(0, geom.x(), geom.y(), geom.width(), geom.height()).toImage()
-    
-    w, h = img.width(), img.height()
-    print(f"Screen Rect Grabbed: {w}x{h} at {geom.x()},{geom.y()}")
-    
-    corners = [(0, 0), (w-1, 0), (0, h-1), (w-1, h-1)]
-    for idx, (x, y) in enumerate(corners):
-        c = QColor(img.pixelColor(x, y))
-        print(f"Corner {idx} ({x}, {y}): RGBA({c.red()}, {c.green()}, {c.blue()}, {c.alpha()})")
-        
-    app.quit()
+    def run_test():
+        combo.showPopup()
+        QTimer.singleShot(200, grab_and_check)
 
-combo.show()
-QTimer.singleShot(200, run_test)
-app.exec()
+    def grab_and_check():
+        screen = QApplication.primaryScreen()
+        top_win = lv.window()
+        geom = top_win.geometry()
+
+        img = screen.grabWindow(0, geom.x(), geom.y(), geom.width(), geom.height()).toImage()
+
+        w, h = img.width(), img.height()
+        print(f"Screen Rect Grabbed: {w}x{h} at {geom.x()},{geom.y()}")
+
+        corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+        for idx, (x, y) in enumerate(corners):
+            c = QColor(img.pixelColor(x, y))
+            print(f"Corner {idx} ({x}, {y}): RGBA({c.red()}, {c.green()}, {c.blue()}, {c.alpha()})")
+
+        app.quit()
+
+    combo.show()
+    QTimer.singleShot(200, run_test)
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

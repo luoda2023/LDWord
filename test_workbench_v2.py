@@ -9,7 +9,7 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from PySide6.QtWidgets import QApplication
+from src.qt_api import QApplication
 from src.ui.panels.workbench.panel_v2 import WorkbenchPanelV2
 from src.ui.bridge import PanelBridge
 

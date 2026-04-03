@@ -7,23 +7,8 @@ sys.path.insert(0, str(ROOT))
 
 from src.qt_api import QApplication, QFont, QPushButton, QVBoxLayout, QWidget, Qt
 
-QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-try:
-    QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-except AttributeError:
-    pass
-
-app = QApplication(sys.argv)
-
 from src.shared.ui.theme import get_theme
 from src.shared.ui.dialogs import info, success, warning, error, confirm, input_text
-
-t = get_theme()
-font = QFont(t.font_family.split(",")[0].strip("' "))
-font.setPointSize(10)  # 用 pt 而非 px，跟随系统 DPI 缩放
-app.setFont(font)
 
 
 class DemoWindow(QWidget):
@@ -67,7 +52,7 @@ class DemoWindow(QWidget):
                    "  File \"pipeline.py\", line 42\n"
                    "    result = module.execute(doc)\n"
                    "ValueError: 无法解析段落样式 'Heading 99'",
-            log_path="C:\\...\\lark_formatter.log",
+            log_path="C:\\...\\alavette_form.log",
         )
 
     def _confirm(self):
@@ -85,6 +70,26 @@ class DemoWindow(QWidget):
         print(f"  输入结果: {name}")
 
 
-win = DemoWindow()
-win.show()
-sys.exit(app.exec())
+def main() -> int:
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    try:
+        QApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
+    except AttributeError:
+        pass
+
+    app = QApplication(sys.argv)
+    theme = get_theme()
+    font = QFont(theme.font_family.split(",")[0].strip("' "))
+    font.setPointSize(10)  # 用 pt 而非 px，跟随系统 DPI 缩放
+    app.setFont(font)
+
+    win = DemoWindow()
+    win.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
