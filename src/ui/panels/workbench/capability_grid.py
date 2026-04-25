@@ -9,7 +9,7 @@ class CapabilityGrid(QWidget):
         super().__init__(parent)
         self._layout = QGridLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(12)
+        self._layout.setSpacing(8)
 
     def add_card(self, widget: QWidget, row: int, column: int) -> None:
         self._layout.addWidget(widget, row, column)

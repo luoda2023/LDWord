@@ -17,7 +17,6 @@ def test_shared_input_stylesheet_supports_font_family_override():
     assert "font-family: Consolas, monospace;" in qss
     assert f"border-radius: {LIGHT.input_radius}px;" in qss
 
-
 def test_placeholder_edit_uses_shared_text_input_stylesheet():
     source = inspect.getsource(PlaceholderEdit._apply_theme)
 
@@ -26,11 +25,8 @@ def test_placeholder_edit_uses_shared_text_input_stylesheet():
 
 
 def test_heading_numbering_panel_uses_shared_text_input_and_selection_helpers():
-    source = inspect.getsource(HeadingNumberingPanel._apply_theme)
-    stylesheet_source = (ROOT / "src/ui/panels/heading_numbering_styles.py").read_text(encoding="utf-8")
+    source = inspect.getsource(HeadingNumberingPanel._build_stylesheet)
 
-    assert "build_heading_numbering_panel_stylesheet" in source
-    assert "build_text_input_stylesheet" in stylesheet_source
-    assert "build_checkbox_stylesheet" in stylesheet_source
-    assert "build_selection_control_stylesheet" not in stylesheet_source
+    assert "build_text_input_stylesheet" in source
+    assert "build_checkbox_stylesheet" in source
     assert "QLineEdit {" not in source

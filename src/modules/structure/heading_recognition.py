@@ -1,9 +1,4 @@
-"""
-heading_recognition — 标题识别模块
-
-扫描文档段落，识别各级标题并构建文档结构树 (doc_tree)。
-依据样式名 + 编号模式 + 大纲级别进行多策略识别。
-"""
+"""Detect document headings and logical section ranges."""
 
 from __future__ import annotations
 
@@ -11,8 +6,16 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from src.config.section_semantics import canonicalize_section_type
 from src.modules.base import BaseModule, ModuleMeta
-from src.shared.engine.style_resolver import get_heading_level, is_heading_paragraph
+from src.shared.engine.docx_heading_semantics import get_paragraph_outline_level
+from src.shared.engine.document_text_heuristics import (
+    looks_like_date_placeholder_line,
+    looks_like_numbered_toc_entry_with_page_suffix,
+    looks_like_reference_entry_line,
+    looks_like_toc_entry_line,
+)
+from src.shared.engine.style_resolver import get_heading_level
 
 if TYPE_CHECKING:
     from docx import Document
@@ -22,84 +25,223 @@ if TYPE_CHECKING:
     from src.pipeline.tracker import ChangeTracker
 
 
-# ── 编号模式 ─────────────────────────────────────
-
-_LEVEL_PATTERNS: list[tuple[str, re.Pattern]] = [
-    # 阿拉伯数字层级
-    ("heading4", re.compile(r"^\d+\.\d+\.\d+\.\d+[\s\u3000\t]")),
-    ("heading3", re.compile(r"^\d+\.\d+\.\d+[\s\u3000\t]")),
-    ("heading2", re.compile(r"^\d+\.\d+[\s\u3000\t]")),
-    ("heading1", re.compile(r"^\d+[\s\u3000\t]")),
-    # 中文
-    ("heading1", re.compile(r"^第[一二三四五六七八九十百零]+[章篇][\s\u3000]")),
-    ("heading1", re.compile(r"^第[一二三四五六七八九十百零]+[节条][\s\u3000]")),
-    ("heading2", re.compile(r"^[一二三四五六七八九十百]+[、.][\s\u3000]?")),
-    ("heading3", re.compile(r"^[（(][一二三四五六七八九十]+[）)]")),
-    ("heading4", re.compile(r"^\d+[)）][\s\u3000\t]")),
-    # 罗马数字
-    ("heading1", re.compile(r"^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][、.\s\u3000]")),
-    ("heading2", re.compile(r"^[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ][、.\s\u3000]")),
-    # 字母
-    ("heading3", re.compile(r"^[A-Z][、.)）][\s\u3000]?")),
-    ("heading4", re.compile(r"^[a-z][、.)）][\s\u3000]?")),
+LEVEL_PATTERNS: list[tuple[int, re.Pattern[str]]] = [
+    (4, re.compile(r"^\d+\.\d+\.\d+\.\d+[\s\u3000\t]")),
+    (3, re.compile(r"^\d+\.\d+\.\d+[\s\u3000\t]")),
+    (2, re.compile(r"^\d+\.\d+[\s\u3000\t]")),
+    (1, re.compile(r"^\d+[\s\u3000\t]")),
+    (1, re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+[\u7ae0\u8282\u7bc7][\s\u3000]")),
+    (2, re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+\u8282[\s\u3000]")),
+    (2, re.compile(r"^[\u4e00-\u9fff]{1,4}[、.)）][\s\u3000]?")),
+    (3, re.compile(r"^[（(][\u4e00-\u9fff]{1,4}[)）]")),
+    (4, re.compile(r"^\d+[)）][\s\u3000\t]")),
+    (1, re.compile(r"^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][、.\s\u3000]")),
+    (3, re.compile(r"^[A-Z][、.)）][\s\u3000]?")),
+    (4, re.compile(r"^[a-z][、.)）][\s\u3000]?")),
 ]
 
-_NARRATIVE_PUNCT = re.compile(r"[。；;？！?!]")
-_TOC_STYLE_RE = re.compile(r"^(toc|目录)(\s*\d+|\s*heading)", re.IGNORECASE)
+BODY_START_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^#{1,6}\s+"),
+    re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+[\u7ae0\u8282\u7bc7]"),
+    re.compile(r"^\d+[\.、．]\S"),
+    re.compile(r"^\d+\s+\S"),
+]
 
-# 特殊节标题（一级标题但不编号）
-_SPECIAL_SECTION_TITLES: dict[str, str] = {
-    "参考文献": "references", "references": "references", "bibliography": "references",
-    "摘要": "abstract_cn", "abstract": "abstract_en",
-    "致谢": "acknowledgements", "acknowledgements": "acknowledgements",
-    "附录": "appendix", "appendix": "appendix",
-    "目录": "toc", "绪论": "body", "引言": "body",
-    "勘误": "errata", "勘误页": "errata",
-    "个人简历": "bio",
-    "在学期间发表的学术论文与研究成果": "bio",
+NARRATIVE_PUNCT = re.compile(r"[。；;！？!?]")
+TOC_LEVEL_STYLE_RE = re.compile(r"^(toc|\u76ee\u5f55)\s*\d+$", re.IGNORECASE)
+TOC_TITLE_RE = re.compile(r"^(\u76ee\u5f55|\u76ee\s*\u5f55|contents|tableofcontents)$", re.IGNORECASE)
+BROKEN_TOC_BOOKMARK_HINTS = (
+    "error! bookmark not defined",
+    "bookmark not defined",
+    "\u672a\u5b9a\u4e49\u4e66\u7b7e",
+)
+CHAPTER_REF_RE = re.compile(r"\u7b2c[\u4e00-\u9fff\d]+\u7ae0")
+SECTION_REF_RE = re.compile(r"\u7b2c[\u4e00-\u9fff\d]+\u8282")
+
+SPECIAL_SECTION_TITLES: dict[str, str] = {
+    "\u5b66\u4f4d\u8bba\u6587": "cover",
+    "\u535a\u58eb\u5b66\u4f4d\u8bba\u6587": "cover",
+    "\u7855\u58eb\u5b66\u4f4d\u8bba\u6587": "cover",
+    "\u672c\u79d1\u6bd5\u4e1a\u8bba\u6587": "cover",
+    "\u6bd5\u4e1a\u8bba\u6587": "cover",
+    "\u672c\u79d1\u6bd5\u4e1a\u8bbe\u8ba1": "cover",
+    "\u6bd5\u4e1a\u8bbe\u8ba1": "cover",
+    "\u539f\u521b\u6027\u58f0\u660e": "statement",
+    "\u72ec\u521b\u6027\u58f0\u660e": "statement",
+    "\u5b66\u4f4d\u8bba\u6587\u539f\u521b\u6027\u58f0\u660e": "statement",
+    "\u58f0\u660e": "statement",
+    "\u627f\u8bfa\u4e66": "statement",
+    "\u8bda\u4fe1\u627f\u8bfa\u4e66": "statement",
+    "\u5b66\u4f4d\u8bba\u6587\u7248\u6743\u4f7f\u7528\u6388\u6743\u4e66": "authorization",
+    "\u7248\u6743\u4f7f\u7528\u6388\u6743\u4e66": "authorization",
+    "\u6388\u6743\u4e66": "authorization",
+    "\u8bf4\u660e": "front_note",
+    "\u586b\u8868\u8bf4\u660e": "front_note",
+    "\u4f7f\u7528\u8bf4\u660e": "front_note",
+    "\u7b54\u8fa9\u59d4\u5458\u4f1a": "front_note",
+    "\u8bc4\u9605\u4eba": "front_note",
+    "\u53c2\u8003\u6587\u732e": "references",
+    "references": "references",
+    "bibliography": "references",
+    "\u6458\u8981": "abstract_cn",
+    "abstract": "abstract_en",
+    "\u81f4\u8c22": "acknowledgment",
+    "acknowledgement": "acknowledgment",
+    "acknowledgments": "acknowledgment",
+    "acknowledgements": "acknowledgment",
+    "\u9644\u5f55": "appendix",
+    "appendix": "appendix",
+    "\u76ee\u5f55": "toc",
+    "\u7eea\u8bba": "body",
+    "\u5f15\u8a00": "body",
+    "\u52d8\u8bef": "errata",
+    "\u52d8\u8bef\u9875": "errata",
+    "\u4e2a\u4eba\u7b80\u5386": "resume",
+    "\u5728\u5b66\u671f\u95f4\u53d1\u8868\u7684\u5b66\u672f\u8bba\u6587\u4e0e\u7814\u7a76\u6210\u679c": "resume",
 }
 
+SECTION_ANCHORS: dict[str, tuple[str, ...]] = {
+    "cover": (
+        "\u5b66\u4f4d\u8bba\u6587",
+        "\u535a\u58eb\u5b66\u4f4d",
+        "\u7855\u58eb\u5b66\u4f4d",
+        "\u672c\u79d1\u6bd5\u4e1a\u8bba\u6587",
+        "\u6bd5\u4e1a\u8bba\u6587",
+        "\u672c\u79d1\u6bd5\u4e1a\u8bbe\u8ba1",
+        "\u6bd5\u4e1a\u8bbe\u8ba1",
+    ),
+    "statement": (
+        "\u5b66\u4f4d\u8bba\u6587\u539f\u521b\u6027\u58f0\u660e",
+        "\u539f\u521b\u6027\u58f0\u660e",
+        "\u72ec\u521b\u6027\u58f0\u660e",
+        "\u8bda\u4fe1\u627f\u8bfa\u4e66",
+        "\u627f\u8bfa\u4e66",
+        "\u58f0\u660e",
+    ),
+    "authorization": (
+        "\u5b66\u4f4d\u8bba\u6587\u7248\u6743\u4f7f\u7528\u6388\u6743\u4e66",
+        "\u7248\u6743\u4f7f\u7528\u6388\u6743\u4e66",
+        "\u6388\u6743\u4e66",
+    ),
+    "front_note": (
+        "\u586b\u8868\u8bf4\u660e",
+        "\u4f7f\u7528\u8bf4\u660e",
+        "\u8bf4\u660e",
+        "\u7b54\u8fa9\u59d4\u5458\u4f1a",
+        "\u8bc4\u9605\u4eba",
+    ),
+    "abstract_cn": ("\u6458\u8981", "\u6458 \u8981"),
+    "abstract_en": ("abstract",),
+    "toc": ("\u76ee\u5f55", "\u76ee \u5f55", "contents", "table of contents"),
+    "references": ("\u53c2\u8003\u6587\u732e", "references", "bibliography"),
+    "errata": ("\u52d8\u8bef\u9875", "\u52d8\u8bef"),
+    "appendix": ("\u9644\u5f55", "appendix"),
+    "acknowledgment": ("\u81f4\u8c22", "acknowledgement", "acknowledgments", "acknowledgements"),
+    "resume": (
+        "\u4e2a\u4eba\u7b80\u5386",
+        "\u7b80\u5386",
+        "\u5728\u5b66\u671f\u95f4\u53d1\u8868\u7684\u5b66\u672f\u8bba\u6587\u4e0e\u7814\u7a76\u6210\u679c",
+    ),
+}
 
-# ── 数据结构 ─────────────────────────────────────
+SECTION_ORDER = [
+    "cover",
+    "statement",
+    "authorization",
+    "front_note",
+    "abstract_cn",
+    "abstract_en",
+    "toc",
+    "body",
+    "references",
+    "errata",
+    "appendix",
+    "acknowledgment",
+    "resume",
+]
+
+SECTION_MIN_ACCEPT_SCORE = {
+    "cover": 8.0,
+    "statement": 8.0,
+    "authorization": 8.0,
+    "front_note": 8.0,
+    "abstract_cn": 8.0,
+    "abstract_en": 8.0,
+    "toc": 8.0,
+    "references": 8.0,
+    "errata": 8.0,
+    "appendix": 8.0,
+    "acknowledgment": 8.0,
+    "resume": 8.0,
+}
+SECTION_TITLE_CONFIDENCE = {key: 10.0 for key in SECTION_MIN_ACCEPT_SCORE}
+PRE_BODY_TYPES = {"cover", "statement", "authorization", "front_note", "abstract_cn", "abstract_en", "toc"}
+POST_BODY_TYPES = {"references", "errata", "appendix", "acknowledgment", "resume"}
+POST_BODY_MIN_RATIO = 0.35
+PRE_BODY_MAX_RATIO = 0.70
+HIGH_CONF_OVERRIDE = 12.0
+MIN_SECTION_SCORE = 4.0
+
 
 @dataclass
 class HeadingInfo:
-    """标题识别结果。"""
     para_index: int
-    level: int                  # 1-9
+    level: int
     text: str
-    confidence: str = "high"    # "high" | "low"
+    confidence: str = "high"
+
+
+@dataclass
+class DocSection:
+    section_type: str
+    start_index: int
+    end_index: int = -1
+    confidence: float = 0.0
+    title_confident: bool = True
+
+
+@dataclass
+class _SectionCandidate:
+    para_index: int
+    section_type: str
+    score: float
 
 
 @dataclass
 class DocTree:
-    """文档结构树。"""
     headings: list[HeadingInfo] = field(default_factory=list)
-    heading_map: dict[int, int] = field(default_factory=dict)  # para_index → level
-    section_ranges: dict[str, tuple[int, int]] = field(default_factory=dict)  # section → (start, end)
+    heading_map: dict[int, int] = field(default_factory=dict)
+    section_ranges: dict[str, tuple[int, int]] = field(default_factory=dict)
+    sections: list[DocSection] = field(default_factory=list)
+    detection_log: list[str] = field(default_factory=list)
 
     def get_heading_level(self, para_index: int) -> int | None:
         return self.heading_map.get(para_index)
 
+    def get_section(self, section_type: str) -> DocSection | None:
+        canonical = canonicalize_section_type(section_type)
+        for section in self.sections:
+            if section.section_type == canonical:
+                return section
+        if canonical in self.section_ranges:
+            start, end = self.section_ranges[canonical]
+            return DocSection(canonical, start, end)
+        return None
+
     def get_section_for_paragraph(self, para_index: int) -> str:
-        """获取段落所在的逻辑区域。"""
+        for section in self.sections:
+            if section.start_index <= para_index < section.end_index:
+                return canonicalize_section_type(section.section_type)
         for section_name, (start, end) in self.section_ranges.items():
             if start <= para_index < end:
-                return section_name
+                return canonicalize_section_type(section_name)
         return "body"
 
 
 class HeadingRecognitionModule(BaseModule):
-    """标题识别模块。
-
-    职责：
-    - 扫描文档段落，依据样式名/编号模式/大纲级别识别标题
-    - 构建 doc_tree 和 heading_map 写入 PipelineContext
-    """
-
     meta = ModuleMeta(
         name="heading_recognition",
-        description="标题识别",
+        description="\u6807\u9898\u8bc6\u522b",
         category="structure",
         requires_config=(),
         provides=("doc_tree", "heading_map"),
@@ -113,134 +255,542 @@ class HeadingRecognitionModule(BaseModule):
         tracker: ChangeTracker,
         context: PipelineContext,
     ) -> None:
-        headings: list[HeadingInfo] = []
+        # Sanitize spurious outlineLvl before heading scan.
+        _sanitize_outline_levels(doc)
 
-        for i, para in enumerate(doc.paragraphs):
+        headings: list[HeadingInfo] = []
+        for index, para in enumerate(doc.paragraphs):
             text = (para.text or "").strip()
             if not text:
                 continue
-
             level = _detect_heading(para, text)
             if level is not None:
-                headings.append(HeadingInfo(
-                    para_index=i,
-                    level=level,
-                    text=text[:80],
-                ))
+                headings.append(HeadingInfo(index, level, text[:80]))
 
-        # 构建 doc_tree
-        heading_map = {h.para_index: h.level for h in headings}
-        section_ranges = _build_section_ranges(headings, len(doc.paragraphs))
-        doc_tree = DocTree(
+        sections, detection_log = _build_sections(doc, headings)
+        heading_map = {heading.para_index: heading.level for heading in headings}
+        section_ranges = {section.section_type: (section.start_index, section.end_index) for section in sections}
+
+        context.doc_tree = DocTree(
             headings=headings,
             heading_map=heading_map,
             section_ranges=section_ranges,
+            sections=sections,
+            detection_log=detection_log,
         )
-
-        # 写入 context
-        context.doc_tree = doc_tree
         context.heading_map = heading_map
 
         if headings:
-            level_counts = {}
-            for h in headings:
-                level_counts[h.level] = level_counts.get(h.level, 0) + 1
-
+            counts: dict[int, int] = {}
+            for heading in headings:
+                counts[heading.level] = counts.get(heading.level, 0) + 1
             tracker.record(
                 rule_name=self.meta.name,
-                target=f"{len(headings)} 个标题",
+                target=f"{len(headings)} headings",
                 section="global",
                 change_type="detect",
-                before="(未识别)",
-                after=", ".join(f"H{k}={v}" for k, v in sorted(level_counts.items())),
+                before="(none)",
+                after=", ".join(f"H{level}={count}" for level, count in sorted(counts.items())),
             )
 
 
-# ── 标题检测 ─────────────────────────────────────
+def _norm_no_space(text: str) -> str:
+    return re.sub(r"\s+", "", text or "").strip()
 
-def _detect_heading(para: Paragraph, text: str) -> int | None:
-    """检测段落是否为标题，返回级别 (1-9) 或 None。"""
-    # 排除：含叙事标点的长文本
-    if len(text) > 80 and _NARRATIVE_PUNCT.search(text):
-        return None
 
-    # 排除：目录样式段落
-    style_name = para.style.name if para.style else ""
-    if _TOC_STYLE_RE.match(style_name.lower()):
-        return None
+def _is_toc_style_para(para: Paragraph) -> bool:
+    style = para.style
+    style_name = ((style.name if style else "") or "").strip()
+    style_id = ((getattr(style, "style_id", "") if style else "") or "").strip()
+    return bool(TOC_LEVEL_STYLE_RE.match(style_name) or TOC_LEVEL_STYLE_RE.match(style_id))
 
-    # 策略1: 通过 Word 样式名/大纲级别 (高置信度)
-    level_from_style = get_heading_level(para)
-    if level_from_style is not None:
-        return level_from_style
 
-    # 策略2: 通过编号模式匹配文本 (需要辅助视觉信号)
-    # Normal 样式段落不能仅靠文本模式提升为标题 — 必须有标题视觉特征
-    if len(text) <= 60 and _has_heading_visual_traits(para):
-        level_from_pattern = _detect_by_pattern(text)
-        if level_from_pattern is not None:
-            return level_from_pattern
+def _looks_like_tabular_numeric_line(text: str) -> bool:
+    raw = (text or "").strip()
+    if "\t" not in raw:
+        return False
+    tokens = [token.strip() for token in raw.split("\t") if token.strip()]
+    if len(tokens) < 2:
+        return False
+    numeric_like = 0
+    for token in tokens:
+        if re.fullmatch(r"[+\-]?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?%?", token) or re.fullmatch(r"\d+:\d+", token):
+            numeric_like += 1
+    return numeric_like >= 2 and not re.search(r"[A-Za-z\u4e00-\u9fff]", "".join(tokens))
 
-    return None
+
+def _looks_like_tabular_structured_line(text: str) -> bool:
+    raw = (text or "").strip()
+    if "\t" not in raw:
+        return False
+    tokens = [token.strip() for token in raw.split("\t") if token.strip()]
+    if len(tokens) < 3:
+        return False
+    structured = 0
+    for token in tokens:
+        has_digit = bool(re.search(r"\d", token))
+        has_unitish = bool(re.search(r"[A-Za-z%<>=/\-]", token))
+        if has_digit and has_unitish and len(token) <= 32:
+            structured += 1
+    return structured >= 2
+
+
+def _looks_like_broken_toc_entry_line(text: str) -> bool:
+    raw = (text or "").strip()
+    if not raw or "\t" not in raw:
+        return False
+    lower = raw.lower()
+    return any(hint in lower for hint in BROKEN_TOC_BOOKMARK_HINTS)
+
+
+def _looks_like_chapter_outline_sentence(text: str) -> bool:
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    total_hits = len(CHAPTER_REF_RE.findall(raw)) + len(SECTION_REF_RE.findall(raw))
+    if total_hits >= 2:
+        return True
+    if total_hits == 0 or len(raw) < 24 or not NARRATIVE_PUNCT.search(raw):
+        return False
+    sep_count = raw.count("，") + raw.count(",") + raw.count("；") + raw.count(";") + raw.count("。")
+    return sep_count >= 2
 
 
 def _has_heading_visual_traits(para: Paragraph) -> bool:
-    """判断段落是否具有标题视觉特征（加粗/大字号/短且独立）。
-
-    用于辅助确认文本模式匹配的有效性：
-    - 段落整体加粗
-    - 首 run 字号 >= 12pt (小四)
-    - 段落有 outlineLvl (即使 get_heading_level 没返回有效值)
-    """
     from docx.shared import Pt
-    from src.shared.engine.ooxml_ops import qn
 
-    # 检查 outline level (即使超出 1-9, 也说明段落有结构意图)
-    pPr = para._element.find(qn("w:pPr"))
-    if pPr is not None and pPr.find(qn("w:outlineLvl")) is not None:
+    if get_paragraph_outline_level(para) is not None:
         return True
-
-    # 检查加粗 — 段落级别或首 run 级别
     if para.runs:
         first_run = para.runs[0]
         if first_run.bold:
             return True
-        # 检查字号 >= 三号 (16pt) — 明显大于正文的字号
         if first_run.font.size and first_run.font.size >= Pt(14):
             return True
-
     return False
 
 
 def _detect_by_pattern(text: str) -> int | None:
-    """通过编号模式匹配标题级别。"""
-    for level_name, pattern in _LEVEL_PATTERNS:
+    for level, pattern in LEVEL_PATTERNS:
         if pattern.match(text):
-            return int(level_name[-1])
+            return level
     return None
 
 
 def _detect_special_section(text: str) -> str | None:
-    """检测特殊节标题（参考文献/致谢/附录等）。"""
-    normalized = text.strip().lower()
-    for title, section in _SPECIAL_SECTION_TITLES.items():
-        if title in normalized and len(text) < 30:
-            return section
+    normalized = _norm_no_space(text).lower()
+    if not normalized:
+        return None
+    for title, section in SPECIAL_SECTION_TITLES.items():
+        if normalized == _norm_no_space(title).lower():
+            return canonicalize_section_type(section)
+    if normalized.startswith("\u9644\u5f55") or normalized.startswith("appendix"):
+        return "appendix"
     return None
 
 
-def _build_section_ranges(
-    headings: list[HeadingInfo],
-    total_paras: int,
-) -> dict[str, tuple[int, int]]:
-    """根据标题构建逻辑区域范围。"""
-    ranges: dict[str, tuple[int, int]] = {}
+def _detect_heading(para: Paragraph, text: str) -> int | None:
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    if len(raw) > 80 and NARRATIVE_PUNCT.search(raw):
+        return None
+    if _is_toc_style_para(para):
+        return None
+    if looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
+        return None
+    if looks_like_reference_entry_line(raw) or looks_like_date_placeholder_line(raw):
+        return None
+    if _looks_like_broken_toc_entry_line(raw):
+        return None
+    if _looks_like_tabular_numeric_line(raw) or _looks_like_tabular_structured_line(raw):
+        return None
+    if _looks_like_chapter_outline_sentence(raw):
+        return None
 
-    for i, h in enumerate(headings):
-        section = _detect_special_section(h.text)
-        if section:
-            start = h.para_index
-            end = headings[i + 1].para_index if i + 1 < len(headings) else total_paras
-            ranges[section] = (start, end)
+    style_level = get_heading_level(para)
+    if style_level is not None:
+        return style_level
 
-    return ranges
+    outline_level = get_paragraph_outline_level(para)
+    if outline_level is not None and 0 <= outline_level <= 8 and 4 <= len(raw) <= 80:
+        return outline_level + 1
+
+    special_section = _detect_special_section(raw)
+    pattern_level = _detect_by_pattern(raw)
+    if special_section is not None and len(raw) <= 30:
+        return 1
+    if pattern_level is not None and len(raw) <= 60 and _has_heading_visual_traits(para):
+        return pattern_level
+    return None
+
+
+def _score_section_anchor(para: Paragraph, section_type: str, anchors: tuple[str, ...], total: int, para_index: int) -> float:
+    text = (para.text or "").strip()
+    if not text or len(text) > 80:
+        return 0.0
+    if section_type != "toc" and (looks_like_toc_entry_line(text) or looks_like_numbered_toc_entry_with_page_suffix(text)):
+        return 0.0
+    if section_type != "references" and looks_like_reference_entry_line(text):
+        return 0.0
+
+    text_no_space = _norm_no_space(text).lower()
+    ratio = para_index / max(total, 1)
+    best = 0.0
+    matched = ""
+    for anchor in anchors:
+        anchor_no_space = _norm_no_space(anchor).lower()
+        local = 0.0
+        if text_no_space == anchor_no_space:
+            local = 10.0
+        elif text_no_space.startswith(anchor_no_space):
+            local = 6.0
+        elif anchor_no_space and anchor_no_space in text_no_space:
+            local = 2.0
+        if local > best:
+            best = local
+            matched = anchor
+    if not matched:
+        return 0.0
+
+    score = best
+    if get_heading_level(para) is not None or get_paragraph_outline_level(para) is not None:
+        score += 5.0
+    elif _has_heading_visual_traits(para):
+        score += 3.0
+    if len(text) <= len(matched) + 4:
+        score += 3.0
+    if score >= 6.0:
+        if section_type == "cover" and ratio < 0.15:
+            score += 2.0
+        elif section_type in {"abstract_cn", "abstract_en"} and ratio < 0.35:
+            score += 2.0
+        elif section_type == "toc" and ratio < 0.60:
+            score += 2.0
+        elif section_type in POST_BODY_TYPES and ratio > 0.50:
+            score += 2.0
+    return score
+
+
+def _is_candidate_credible(candidate: _SectionCandidate, total: int) -> bool:
+    if candidate.score < SECTION_MIN_ACCEPT_SCORE.get(candidate.section_type, MIN_SECTION_SCORE):
+        return False
+    ratio = candidate.para_index / max(total, 1)
+    if candidate.section_type in POST_BODY_TYPES and ratio < POST_BODY_MIN_RATIO and candidate.score < HIGH_CONF_OVERRIDE:
+        return False
+    if candidate.section_type in PRE_BODY_TYPES and ratio > PRE_BODY_MAX_RATIO and candidate.score < HIGH_CONF_OVERRIDE:
+        return False
+    return True
+
+
+def _scan_section_candidates(doc: Document, total: int) -> list[_SectionCandidate]:
+    candidates: list[_SectionCandidate] = []
+    for index, para in enumerate(doc.paragraphs):
+        if not (para.text or "").strip():
+            continue
+        for section_type, anchors in SECTION_ANCHORS.items():
+            score = _score_section_anchor(para, section_type, anchors, total, index)
+            if score >= MIN_SECTION_SCORE:
+                candidates.append(_SectionCandidate(index, section_type, score))
+    return candidates
+
+
+def _pick_best_section_candidates(candidates: list[_SectionCandidate], total: int, detection_log: list[str]) -> dict[str, DocSection]:
+    best: dict[str, _SectionCandidate] = {}
+    for candidate in candidates:
+        if not _is_candidate_credible(candidate, total):
+            detection_log.append(f"drop weak section candidate: {candidate.section_type}@{candidate.para_index}")
+            continue
+        current = best.get(candidate.section_type)
+        if current is None or candidate.score > current.score:
+            best[candidate.section_type] = candidate
+            continue
+        if candidate.score == current.score:
+            if candidate.section_type in PRE_BODY_TYPES and candidate.para_index < current.para_index:
+                best[candidate.section_type] = candidate
+            elif candidate.section_type in POST_BODY_TYPES and candidate.para_index > current.para_index:
+                best[candidate.section_type] = candidate
+    return {
+        section_type: DocSection(
+            section_type=section_type,
+            start_index=candidate.para_index,
+            confidence=candidate.score,
+            title_confident=candidate.score >= SECTION_TITLE_CONFIDENCE.get(section_type, 10.0),
+        )
+        for section_type, candidate in best.items()
+    }
+
+
+def _order_compatible(prev_type: str, cur_type: str, order_rank: dict[str, int]) -> bool:
+    if prev_type == cur_type:
+        return False
+    prev_is_pre = prev_type in PRE_BODY_TYPES
+    cur_is_pre = cur_type in PRE_BODY_TYPES
+    if prev_is_pre and cur_is_pre:
+        return True
+    if prev_is_pre and not cur_is_pre:
+        return True
+    if not prev_is_pre and cur_is_pre:
+        return False
+    prev_is_post = prev_type in POST_BODY_TYPES
+    cur_is_post = cur_type in POST_BODY_TYPES
+    if prev_is_post and cur_is_post:
+        return True
+    if prev_is_post and not cur_is_post:
+        return False
+    if not prev_is_post and cur_is_post:
+        return True
+    return order_rank.get(prev_type, 10_000) < order_rank.get(cur_type, 10_000)
+
+
+def _order_validate_sections(sections_by_type: dict[str, DocSection], detection_log: list[str]) -> list[DocSection]:
+    if "cover" in sections_by_type:
+        sections_by_type["cover"].start_index = 0
+    sorted_sections = sorted(sections_by_type.values(), key=lambda section: section.start_index)
+    if not sorted_sections:
+        return []
+    order_rank = {name: index for index, name in enumerate(SECTION_ORDER)}
+    size = len(sorted_sections)
+    scores = [sorted_sections[i].confidence for i in range(size)]
+    previous = [-1] * size
+    for right in range(size):
+        for left in range(right):
+            if not _order_compatible(sorted_sections[left].section_type, sorted_sections[right].section_type, order_rank):
+                continue
+            candidate_score = scores[left] + sorted_sections[right].confidence
+            if candidate_score > scores[right]:
+                scores[right] = candidate_score
+                previous[right] = left
+    best_index = max(range(size), key=lambda index: scores[index])
+    picked: list[int] = []
+    cursor = best_index
+    while cursor != -1:
+        picked.append(cursor)
+        cursor = previous[cursor]
+    picked.reverse()
+    validated = [sorted_sections[index] for index in picked]
+    keep = {(section.section_type, section.start_index) for section in validated}
+    for section in sorted_sections:
+        if (section.section_type, section.start_index) not in keep:
+            detection_log.append(f"drop order-conflicting section: {section.section_type}@{section.start_index}")
+    return validated
+
+
+def _detect_toc_by_style(doc: Document, total: int) -> DocSection | None:
+    start = None
+    end = None
+    for index, para in enumerate(doc.paragraphs):
+        raw = (para.text or "").strip()
+        if _is_toc_style_para(para):
+            if start is None:
+                start = index
+            end = index + 1
+            continue
+        if start is None:
+            continue
+        if not raw:
+            end = index + 1
+            continue
+        if looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
+            end = index + 1
+            continue
+        break
+    if start is not None and end is not None and end > start:
+        if start > 0 and TOC_TITLE_RE.match(_norm_no_space(doc.paragraphs[start - 1].text or "")):
+            start -= 1
+        return DocSection("toc", start, min(end, total), confidence=8.0, title_confident=True)
+    return None
+
+
+def _detect_toc_by_title_and_entries(doc: Document, total: int) -> DocSection | None:
+    for index, para in enumerate(doc.paragraphs):
+        if not TOC_TITLE_RE.match(_norm_no_space(para.text)):
+            continue
+        end = index + 1
+        entry_count = 0
+        for probe in range(index + 1, total):
+            raw = (doc.paragraphs[probe].text or "").strip()
+            if not raw:
+                end = probe + 1
+                continue
+            if _is_toc_style_para(doc.paragraphs[probe]) or looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
+                end = probe + 1
+                entry_count += 1
+                continue
+            break
+        if entry_count >= 2:
+            return DocSection("toc", index, min(end, total), confidence=7.5, title_confident=True)
+    return None
+
+
+def _detect_references_by_content(doc: Document, total: int) -> DocSection | None:
+    if total <= 0:
+        return None
+    start_search = max(0, int(total * 0.35))
+    cluster_start = None
+    cluster_size = 0
+    best_start = None
+    best_size = 0
+    for index in range(start_search, total):
+        raw = (doc.paragraphs[index].text or "").strip()
+        if looks_like_reference_entry_line(raw):
+            if cluster_start is None:
+                cluster_start = index
+            cluster_size += 1
+            if cluster_size > best_size:
+                best_size = cluster_size
+                best_start = cluster_start
+            continue
+        if raw:
+            cluster_start = None
+            cluster_size = 0
+    if best_start is not None and best_size >= 2:
+        return DocSection("references", best_start, total, confidence=7.5, title_confident=False)
+    return None
+
+
+def _detect_cover_by_content(doc: Document, total: int) -> DocSection | None:
+    for index in range(min(total, 12)):
+        raw = (doc.paragraphs[index].text or "").strip()
+        if raw and any(keyword in raw for keyword in SECTION_ANCHORS["cover"]):
+            return DocSection("cover", 0, 1, confidence=8.0, title_confident=False)
+    return None
+
+
+def _scan_body_start_range(doc: Document, headings: list[HeadingInfo], start: int, end: int) -> int | None:
+    for heading in headings:
+        if not (start <= heading.para_index < end):
+            continue
+        section_type = _detect_special_section(heading.text)
+        if section_type in {None, "body"}:
+            return heading.para_index
+    for index in range(start, min(end, len(doc.paragraphs))):
+        para = doc.paragraphs[index]
+        raw = (para.text or "").strip()
+        if not raw:
+            continue
+        if _is_toc_style_para(para):
+            continue
+        if looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
+            continue
+        if looks_like_reference_entry_line(raw) or looks_like_date_placeholder_line(raw):
+            continue
+        if TOC_TITLE_RE.match(_norm_no_space(raw)):
+            continue
+        style_level = get_heading_level(para)
+        if style_level is not None and style_level <= 2:
+            return index
+        outline_level = get_paragraph_outline_level(para)
+        if outline_level in (0, 1) and raw[-1:] not in {"：", ":", "；", ";", "。", "!", "！", "?", "？"}:
+            return index
+        if any(pattern.match(raw) for pattern in BODY_START_PATTERNS):
+            return index
+    return None
+
+
+def _insert_body_section(doc: Document, headings: list[HeadingInfo], special_sections: list[DocSection], total: int, detection_log: list[str]) -> list[DocSection]:
+    if not special_sections:
+        return [DocSection("body", 0, total, confidence=10.0)] if total > 0 else []
+
+    sections = sorted(special_sections, key=lambda section: section.start_index)
+    pre_sections = [section for section in sections if section.section_type in PRE_BODY_TYPES]
+    post_sections = [section for section in sections if section.section_type in POST_BODY_TYPES]
+
+    body_scan_start = max((section.start_index + 1 for section in pre_sections), default=0)
+    first_post = next((section for section in post_sections if section.start_index >= body_scan_start), None)
+    body_scan_end = first_post.start_index if first_post is not None else total
+
+    body_start = _scan_body_start_range(doc, headings, body_scan_start, body_scan_end)
+    if body_start is None:
+        body_start = body_scan_start
+
+    if pre_sections:
+        last_pre = max(pre_sections, key=lambda section: section.start_index)
+        if last_pre.start_index < body_start:
+            last_pre.end_index = min(last_pre.end_index, body_start)
+
+    body_end = first_post.start_index if first_post is not None else total
+    if body_start < body_end:
+        sections.append(DocSection("body", body_start, body_end, confidence=10.0))
+        detection_log.append(f"insert body section: [{body_start}, {body_end})")
+    return sorted([section for section in sections if section.end_index > section.start_index], key=lambda section: section.start_index)
+
+
+def _build_sections(doc: Document, headings: list[HeadingInfo]) -> tuple[list[DocSection], list[str]]:
+    total = len(doc.paragraphs)
+    detection_log: list[str] = []
+
+    candidates = _scan_section_candidates(doc, total)
+    anchors = _pick_best_section_candidates(candidates, total, detection_log)
+
+    cover_section = _detect_cover_by_content(doc, total)
+    if "cover" not in anchors and cover_section is not None:
+        anchors["cover"] = cover_section
+        detection_log.append(f"fallback cover by content: @{cover_section.start_index}")
+
+    toc_section = _detect_toc_by_style(doc, total) or _detect_toc_by_title_and_entries(doc, total)
+    if "toc" not in anchors and toc_section is not None:
+        anchors["toc"] = toc_section
+        detection_log.append(f"fallback toc: [{toc_section.start_index}, {toc_section.end_index})")
+
+    references_section = _detect_references_by_content(doc, total)
+    current_references = anchors.get("references")
+    if references_section is not None and current_references is None:
+        anchors["references"] = references_section
+        detection_log.append(f"fallback references by cluster: @{references_section.start_index}")
+    elif (
+        references_section is not None
+        and current_references is not None
+        and (
+            not current_references.title_confident
+            or (
+                current_references.start_index / max(total, 1) < POST_BODY_MIN_RATIO
+                and references_section.start_index > current_references.start_index
+            )
+        )
+    ):
+        anchors["references"] = references_section
+        detection_log.append(
+            f"replace weak references anchor: {current_references.start_index} -> {references_section.start_index}"
+        )
+
+    ordered = _order_validate_sections(anchors, detection_log)
+    for index, section in enumerate(ordered):
+        next_start = ordered[index + 1].start_index if index + 1 < len(ordered) else total
+        section.end_index = next_start
+    finalized = [section for section in ordered if section.end_index > section.start_index]
+
+    sections = _insert_body_section(doc, headings, finalized, total, detection_log)
+    if not sections and total > 0:
+        sections = [DocSection("body", 0, total, confidence=10.0)]
+    return sections, detection_log
+
+
+def _sanitize_outline_levels(doc: Document) -> None:
+    """Remove outlineLvl from empty paragraphs and reference-like entries."""
+    from src.shared.engine.ooxml_ops import qn, remove_child
+
+    for para in doc.paragraphs:
+        p_pr = para._element.find(qn("w:pPr"))
+        if p_pr is None or p_pr.find(qn("w:outlineLvl")) is None:
+            continue
+        text = (para.text or "").strip()
+        if not text:
+            remove_child(p_pr, "w:outlineLvl")
+            continue
+        if looks_like_reference_entry_line(text):
+            remove_child(p_pr, "w:outlineLvl")
+
+
+def _has_list_numpr(para: Paragraph) -> bool:
+    """Check if paragraph has w:numPr (Word list numbering)."""
+    from src.shared.engine.ooxml_ops import qn
+
+    p_pr = para._element.find(qn("w:pPr"))
+    if p_pr is None:
+        return False
+    num_pr = p_pr.find(qn("w:numPr"))
+    if num_pr is None:
+        return False
+    num_id = num_pr.find(qn("w:numId"))
+    return num_id is not None and (num_id.get(qn("w:val")) or "0") != "0"

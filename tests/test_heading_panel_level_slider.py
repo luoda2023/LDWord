@@ -7,7 +7,8 @@ sys.path.insert(0, str(ROOT))
 
 from src.config.template import TemplateConfig
 from src.qt_api import QApplication
-from src.shared.ui.themed_slider import ThemedSlider
+from src.shared.ui.spacing_input import SpacingInput
+from src.shared.ui.styled_spin_box import StyledSpinBox
 from src.ui.bridge import PanelBridge
 from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
 
@@ -21,28 +22,32 @@ def _build_panel():
     return app, panel
 
 
-def test_heading_numbering_panel_uses_themed_slider_for_max_levels_control():
+def test_heading_numbering_panel_uses_spacing_input_for_max_levels_control():
     app, panel = _build_panel()
 
-    assert isinstance(panel._levels_slider, ThemedSlider)
-    assert panel._levels_slider.minimum() == 1
-    assert panel._levels_slider.maximum() == 8
-    assert panel._levels_slider.value() == 4
-    assert panel._levels_value_label.text() == "4 级"
-
-    panel.close()
-    app.processEvents()
+    try:
+        assert isinstance(panel._levels_input, SpacingInput)
+        assert isinstance(panel._levels_slider, StyledSpinBox)
+        assert panel._levels_slider.minimum() == 1
+        assert panel._levels_slider.maximum() == 8
+        assert panel._levels_slider.value() == 4
+        assert panel._levels_input.value() == 4
+    finally:
+        panel.close()
+        app.processEvents()
 
 
 def test_heading_numbering_panel_level_slider_updates_adapter_and_preview_rows():
     app, panel = _build_panel()
 
-    panel._levels_slider.setValue(6)
-    app.processEvents()
+    try:
+        panel._levels_input.set_value(6, "")
+        panel._on_levels_changed()
+        app.processEvents()
 
-    assert panel._adapter.max_levels == 6
-    assert len(panel._simple_rows) == 6
-    assert panel._levels_value_label.text() == "6 级"
-
-    panel.close()
-    app.processEvents()
+        assert panel._adapter.max_levels == 6
+        assert panel._adv_list.count() == 6
+        assert panel._levels_input.value() == 6
+    finally:
+        panel.close()
+        app.processEvents()

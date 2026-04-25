@@ -7,11 +7,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.qt_api import QApplication
+from src.config.scene import SceneWorkspace
 from src.ui.bridge import PanelBridge
 from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
 from src.ui.panels.template_format import TEMPLATE_PREVIEW_SPECS
 from src.ui.panels.template_panel import TemplatePanel
-from src.ui.panels.workbench.scene_presets import SCENE_METAS
 
 
 def _app():
@@ -48,25 +48,68 @@ def test_template_panel_builtin_selection_loads_real_template_config():
     _app()
     panel = TemplatePanel(PanelBridge())
     try:
-        thesis_index = next(
-            index
-            for index, scene_meta in enumerate(SCENE_METAS)
-            if scene_meta.default_template_id == "thesis_gbt"
-        )
-        thesis_name = SCENE_METAS[thesis_index].compatible_templates[0].name
-
         combo_index = next(
             index
             for index in range(panel._overview_detail._combo.count())
-            if panel._overview_detail._combo.itemText(index) == thesis_name
+            if panel._overview_detail._combo.itemData(index) == "thesis_gbt"
         )
+        thesis_name = panel._overview_detail._combo.itemText(combo_index)
 
         panel._on_template_selected(combo_index)
 
+        assert panel._current_template_id == "thesis_gbt"
         assert panel._current_template.name == thesis_name
         assert panel._current_template.page_setup.margin.top_cm == 3.8
-        assert panel._current_template.header_footer.header_mode == "styleref"
-        assert panel._current_template.toc.mode == "word_native"
+        assert "body" in panel._current_template.styles
+        assert panel._current_template.styles["body"].font_cn == "宋体"
+        assert "heading1" in panel._current_template.heading_numbering.level_bindings
+    finally:
+        panel.close()
+
+
+def test_template_panel_selector_uses_primary_scene_templates_when_no_scene_context():
+    _app()
+    panel = TemplatePanel(PanelBridge())
+    try:
+        option_ids = [
+            panel._overview_detail._combo.itemData(index)
+            for index in range(panel._overview_detail._combo.count())
+        ]
+
+        assert option_ids == [
+            "default",
+            "thesis_gbt",
+            "bid_engineering",
+            "official_gbt",
+            "tech_standard",
+            "report_default",
+        ]
+    finally:
+        panel.close()
+
+
+def test_template_panel_selector_scopes_to_current_scene_compatible_templates():
+    _app()
+    bridge = PanelBridge()
+    bridge.set_current_scene(
+        SceneWorkspace(
+            scene_id="thesis",
+            template_id="thesis_gbt",
+            default_template_id="thesis_gbt",
+            compatible_template_ids=["thesis_gbt", "thesis_custom"],
+        ),
+        config_id="thesis",
+        source="library",
+        emit_signal=False,
+    )
+    panel = TemplatePanel(bridge)
+    try:
+        option_ids = [
+            panel._overview_detail._combo.itemData(index)
+            for index in range(panel._overview_detail._combo.count())
+        ]
+
+        assert option_ids == ["thesis_gbt", "thesis_custom"]
     finally:
         panel.close()
 

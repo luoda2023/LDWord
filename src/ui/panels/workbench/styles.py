@@ -6,13 +6,16 @@ from src.shared.ui.theme import AppTheme
 def apply_workbench_v2_shell_theme(panel, nav_rail, detail_scroll, detail_container, *, theme: AppTheme) -> None:
     """Apply the V2 master-detail shell styling."""
     radius = theme.shell_radius
+    nav_background = theme.bg_nav_rail
+    if not nav_background or nav_background == theme.bg_card:
+        nav_background = theme.bg_sidebar
     panel.setStyleSheet(
         f"#WorkbenchPanel {{ background: {theme.bg_window}; border-bottom-right-radius: {radius}px; }}"
     )
     nav_rail.setStyleSheet(
         f"""
         #wb_v2_navigation {{
-            background: {theme.bg_nav_rail};
+            background: {nav_background};
         }}
         """
     )

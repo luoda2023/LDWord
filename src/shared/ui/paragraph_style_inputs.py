@@ -9,7 +9,8 @@ from src.config.style_semantics import (
     normalize_special_indent_mode,
     resolve_pt_indent_value,
 )
-from src.qt_api import QDoubleSpinBox, QHBoxLayout, QSizePolicy, QWidget, Signal
+from src.qt_api import QHBoxLayout, QSizePolicy, QWidget, Signal
+from src.shared.ui.styled_spin_box import StyledSpinBox
 from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.styled_combo_box import StyledComboBox
 
@@ -33,7 +34,14 @@ _UNIT_HINTS = {
 
 
 class IndentInput(QWidget):
-    """Unit-aware indent editor that preserves a canonical pt value."""
+    """Unit-aware indent editor that preserves a canonical pt value.
+
+    Invariant: ``set_reference_size()`` preserves the **display value**
+    when the current unit is ``"chars"`` (recalculates the internal pt
+    canonical), and preserves the **canonical pt** when the unit is
+    ``"pt"`` or ``"cm"``.  This matches Word's behaviour where a
+    "首行缩进 2字" stays as "2字" after a font-size change.
+    """
 
     value_changed = Signal(float, str)
 
@@ -45,15 +53,16 @@ class IndentInput(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(4)
 
-        self._spin = QDoubleSpinBox(self)
+        self._spin = StyledSpinBox(self)
         self._spin.valueChanged.connect(self._on_spin_changed)
         self._spin.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout.addWidget(self._spin, 1)
 
         self._unit_combo = StyledComboBox(self)
         self._unit_combo.setSizeAdjustPolicy(StyledComboBox.AdjustToContents)
+        self._unit_combo.set_inline(True)
         for value, label in _INDENT_UNITS:
             self._unit_combo.addItem(label, value)
         self._unit_combo.currentIndexChanged.connect(self._on_unit_changed)
@@ -97,7 +106,7 @@ class IndentInput(QWidget):
         unit = self._current_unit()
         unit_label = dict(_INDENT_UNITS).get(unit, unit)
         hint = _UNIT_HINTS.get(unit, "")
-        text = f"当前单位: {unit_label}。{hint} 参考字号 {self._reference_size_pt:g}pt。"
+        text = f"当前单位: {unit_label}。{hint} 参考字号 {self._reference_size_pt:g}磅。"
         self.setToolTip(text)
         self._spin.setToolTip(text)
         self._unit_combo.setToolTip("切换缩进单位: 字 / 磅 / cm。")
@@ -122,7 +131,28 @@ class IndentInput(QWidget):
         self._emit()
 
     def set_reference_size(self, size_pt: float) -> None:
-        self._reference_size_pt = normalize_indent_size_pt(size_pt)
+        new_ref = normalize_indent_size_pt(size_pt)
+        if new_ref == self._reference_size_pt:
+            return
+
+        # When the unit is "chars", the user-visible character count must
+        # stay unchanged (matching Word's behaviour).  We recalculate the
+        # canonical pt value from the *current display value* × the *new*
+        # reference size so that ``value()`` returns the same number the
+        # user already sees.
+        #
+        # For "pt" and "cm" the canonical pt is an absolute physical
+        # measurement and must NOT change when the font size changes.
+        unit = self._current_unit()
+        if unit == "chars":
+            current_display = float(self._spin.value())
+            self._reference_size_pt = new_ref
+            self._canonical_pt_value = config_indent_value_to_pt(
+                current_display, self._reference_size_pt, "chars",
+            )
+        else:
+            self._reference_size_pt = new_ref
+
         self._is_syncing = True
         try:
             self._refresh_display()
@@ -169,6 +199,7 @@ class SpecialIndentInput(QWidget):
         layout.setSpacing(8)
 
         self._mode_combo = StyledComboBox(self)
+        self._mode_combo.set_inline(True)
         for value, label in _SPECIAL_MODES:
             self._mode_combo.addItem(label, value)
         self._mode_combo.currentIndexChanged.connect(self._on_any_changed)

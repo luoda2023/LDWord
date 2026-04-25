@@ -58,6 +58,8 @@ class ExecutionResultState:
     output_path: str = ""
     report_paths: list[str] = field(default_factory=list)
     failed_count: int = 0
+    diagnostics_count: int = 0
+    diagnostics_summary: str = ""
 
 
 @dataclass(slots=True)
@@ -68,3 +70,5 @@ class RecentRunState:
     output_label: str = ""
     report_label: str = ""
     error_summary: str = ""
+    diagnostics_count: int = 0
+    diagnostics_summary: str = ""

@@ -13,6 +13,7 @@ from src.modules.registry import create_all_modules
 from src.pipeline.runner import Pipeline
 from src.pipeline.scheduler import select_enabled_modules
 from src.qt_api import QFileDialog, QHBoxLayout, QObject, QStackedWidget, QVBoxLayout, Signal, QWidget
+from src.execution_diagnostics import build_execution_diagnostics
 from src.report_writer import write_json_report, write_markdown_report
 from src.shared.ui.dynamic_navigation_rail import DynamicNavigationRail
 from src.shared.ui.navigation_card import NavigationCard
@@ -23,6 +24,7 @@ from src.ui.base_panel import BasePanel
 
 from .command_bar import TaskCommandBar
 from .config_management_pane import ConfigManagementPane
+from .diagnostics import log_best_effort_shutdown_failure, log_path_fallback_failure
 from .execution_worker import ExecutionWorker
 from .quick_execute_pane import QuickExecutePane
 from .state import CurrentTaskState, ExecutionProgressState, ReadinessState, WorkbenchHomeState
@@ -67,6 +69,7 @@ class _WorkbenchProductionRunner:
         )
         result = pipeline.execute(str(input_path))
         elapsed = time.perf_counter() - t0
+        diagnostics = build_execution_diagnostics(result)
 
         status = getattr(result, "status", "failed") or "failed"
         if status == "cancelled":
@@ -82,6 +85,8 @@ class _WorkbenchProductionRunner:
                 "report_paths": [],
                 "failed_count": failed_count,
                 "error_text": str(getattr(result, "error", "") or ""),
+                "diagnostics_count": int(diagnostics["count"]),
+                "diagnostics_summary": str(diagnostics["summary"] or ""),
             }
 
         output_path = ""
@@ -90,12 +95,17 @@ class _WorkbenchProductionRunner:
             output_path = str(output_paths.get("final") or "")
 
         report_paths: list[str] = []
-        if output_path:
+        output_cfg = getattr(config, "output", None)
+        report_json_enabled = bool(getattr(output_cfg, "report_json", True))
+        report_markdown_enabled = bool(getattr(output_cfg, "report_markdown", True))
+        final_output_path = Path(output_path) if output_path else None
+
+        if report_json_enabled:
             report_json = output_dir / f"{input_path.stem}_changes.json"
             write_json_report(
                 result,
                 input_path=input_path,
-                output_path=Path(output_path),
+                output_path=final_output_path,
                 report_path=report_json,
                 elapsed=elapsed,
                 modules_enabled=len(enabled),
@@ -103,6 +113,7 @@ class _WorkbenchProductionRunner:
             )
             report_paths.append(str(report_json))
 
+        if report_markdown_enabled:
             report_md = output_dir / f"{input_path.stem}_changes.md"
             write_markdown_report(
                 result,
@@ -120,6 +131,8 @@ class _WorkbenchProductionRunner:
             "report_paths": report_paths,
             "failed_count": failed_count,
             "error_text": str(getattr(result, "error", "") or ""),
+            "diagnostics_count": int(diagnostics["count"]),
+            "diagnostics_summary": str(diagnostics["summary"] or ""),
         }
 
 
@@ -178,8 +191,8 @@ class _ThreadedExecutionHandle(QObject):
         """
         try:
             self.request_cancel()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_best_effort_shutdown_failure("legacy execution thread handle", "request_cancel", exc)
 
         thread = getattr(self, "_thread", None)
         if thread is None:
@@ -188,7 +201,8 @@ class _ThreadedExecutionHandle(QObject):
         is_running = getattr(thread, "isRunning", None)
         try:
             running = bool(is_running()) if callable(is_running) else True
-        except Exception:
+        except Exception as exc:
+            log_best_effort_shutdown_failure("legacy execution thread handle", "thread.isRunning", exc)
             running = True
 
         if not running:
@@ -198,8 +212,8 @@ class _ThreadedExecutionHandle(QObject):
         if callable(quit_thread):
             try:
                 quit_thread()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_best_effort_shutdown_failure("legacy execution thread handle", "thread.quit", exc)
 
         wait_thread = getattr(thread, "wait", None)
         if callable(wait_thread):
@@ -212,10 +226,10 @@ class _ThreadedExecutionHandle(QObject):
                 # Some test doubles or bindings may not accept the timeout param.
                 try:
                     wait_thread()
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as exc:
+                    log_best_effort_shutdown_failure("legacy execution thread handle", "thread.wait", exc)
+            except Exception as exc:
+                log_best_effort_shutdown_failure("legacy execution thread handle", "thread.wait", exc)
 
 
 class WorkbenchPanel(BasePanel):
@@ -237,9 +251,9 @@ class WorkbenchPanel(BasePanel):
         if callable(request_cancel):
             try:
                 request_cancel()
-            except Exception:
+            except Exception as exc:
                 # Continue with shutdown attempts even if cancel can't be requested.
-                pass
+                log_best_effort_shutdown_failure("legacy workbench panel", "request_cancel", exc)
 
         shutdown = getattr(worker, "shutdown", None)
         if callable(shutdown):
@@ -252,11 +266,11 @@ class WorkbenchPanel(BasePanel):
                         shutdown()
                     else:
                         shutdown(int(timeout_ms))
-                except Exception:
-                    pass
-            except Exception:
+                except Exception as exc:
+                    log_best_effort_shutdown_failure("legacy workbench panel", "worker.shutdown", exc)
+            except Exception as exc:
                 # Still try to detect running state below.
-                pass
+                log_best_effort_shutdown_failure("legacy workbench panel", "worker.shutdown", exc)
 
         # Prefer checking a threaded handle's thread state (QThread.isRunning).
         thread = getattr(worker, "_thread", None)
@@ -267,7 +281,8 @@ class WorkbenchPanel(BasePanel):
         if callable(is_running):
             try:
                 return not bool(is_running())
-            except Exception:
+            except Exception as exc:
+                log_best_effort_shutdown_failure("legacy workbench panel", "worker.isRunning", exc)
                 return False
 
         # Non-threaded executions can't be observed reliably; treat best-effort cancel as success.
@@ -403,13 +418,20 @@ class WorkbenchPanel(BasePanel):
     def _on_document_loaded(self, file_path: str) -> None:
         try:
             resolved = Path(str(file_path or "")).expanduser()
-        except Exception:
+        except Exception as exc:
+            log_path_fallback_failure("legacy workbench panel", "document load expanduser", file_path, exc)
             return
-        if not resolved.exists():
+        try:
+            exists = resolved.exists()
+        except Exception as exc:
+            log_path_fallback_failure("legacy workbench panel", "document load exists check", file_path, exc)
+            return
+        if not exists:
             return
         try:
             self._cached_document_path = str(resolved.resolve())
-        except Exception:
+        except Exception as exc:
+            log_path_fallback_failure("legacy workbench panel", "document load resolve", file_path, exc)
             self._cached_document_path = str(resolved)
         self._sync_document_label_from_path(self._cached_document_path)
 
@@ -417,7 +439,8 @@ class WorkbenchPanel(BasePanel):
         """Keep the command bar document label in sync with the chosen path."""
         try:
             name = Path(str(file_path or "")).name
-        except Exception:
+        except Exception as exc:
+            log_path_fallback_failure("legacy workbench panel", "document label name extraction", file_path, exc)
             name = str(file_path or "").strip()
         if not name:
             return
@@ -490,8 +513,8 @@ class WorkbenchPanel(BasePanel):
                 if Path(cached).exists():
                     self._sync_document_label_from_path(cached)
                     return cached
-            except Exception:
-                pass
+            except Exception as exc:
+                log_path_fallback_failure("legacy workbench panel", "cached document exists check", cached, exc)
 
         label = str(getattr(self._last_task_state, "document_label", "") or "").strip()
         if label:
@@ -502,8 +525,8 @@ class WorkbenchPanel(BasePanel):
                     self._cached_document_path = resolved
                     self._sync_document_label_from_path(resolved)
                     return resolved
-            except Exception:
-                pass
+            except Exception as exc:
+                log_path_fallback_failure("legacy workbench panel", "document label path check", label, exc)
 
         file_name, _selected = QFileDialog.getOpenFileName(
             self,
@@ -516,12 +539,24 @@ class WorkbenchPanel(BasePanel):
             return None
         try:
             path = Path(file_name).expanduser()
-            if path.exists():
-                resolved = str(path.resolve())
-            else:
-                resolved = str(path)
-        except Exception:
+        except Exception as exc:
+            log_path_fallback_failure("legacy workbench panel", "picker expanduser", file_name, exc)
             resolved = file_name
+        else:
+            try:
+                exists = path.exists()
+            except Exception as exc:
+                log_path_fallback_failure("legacy workbench panel", "picker exists check", file_name, exc)
+                resolved = str(path)
+            else:
+                if exists:
+                    try:
+                        resolved = str(path.resolve())
+                    except Exception as exc:
+                        log_path_fallback_failure("legacy workbench panel", "picker resolve", file_name, exc)
+                        resolved = str(path)
+                else:
+                    resolved = str(path)
         self._cached_document_path = resolved
         self._sync_document_label_from_path(resolved)
         return resolved
@@ -622,6 +657,8 @@ class WorkbenchPanel(BasePanel):
                 report_paths=[],
                 failed_count=0,
                 error_text="",
+                diagnostics_count=0,
+                diagnostics_summary="",
             )
         )
 
@@ -648,6 +685,8 @@ class WorkbenchPanel(BasePanel):
                 report_paths=list(payload.get("report_paths") or []),
                 failed_count=int(payload.get("failed_count") or 0),
                 error_text=str(payload.get("error_text") or ""),
+                diagnostics_count=int(payload.get("diagnostics_count") or 0),
+                diagnostics_summary=str(payload.get("diagnostics_summary") or ""),
             )
 
         self._execution_center.set_result_state(result_state)

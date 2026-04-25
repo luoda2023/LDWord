@@ -131,7 +131,7 @@ def test_task_command_bar_uses_compact_strip_spacing():
         margins = bar.layout().contentsMargins()
 
         assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (16, 10, 16, 10)
-        assert bar.layout().spacing() == 12
+        assert bar.layout().spacing() == 8
     finally:
         bar.close()
 

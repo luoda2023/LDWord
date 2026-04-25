@@ -51,6 +51,8 @@ class WorkbenchExecutionAdapter:
         report_paths: list[str],
         failed_count: int,
         error_text: str,
+        diagnostics_count: int = 0,
+        diagnostics_summary: str = "",
     ) -> ExecutionResultState:
         summary_map = {
             "success": "本次执行已完成",
@@ -68,6 +70,8 @@ class WorkbenchExecutionAdapter:
             output_path=output_path,
             report_paths=list(report_paths),
             failed_count=failed_count,
+            diagnostics_count=diagnostics_count,
+            diagnostics_summary=diagnostics_summary,
         )
 
     def build_recent_run_state(
@@ -82,4 +86,6 @@ class WorkbenchExecutionAdapter:
             output_label=result_state.output_path,
             report_label=report_label,
             error_summary=result_state.error_text,
+            diagnostics_count=result_state.diagnostics_count,
+            diagnostics_summary=result_state.diagnostics_summary,
         )

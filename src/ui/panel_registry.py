@@ -40,6 +40,10 @@ def create_panel(panel_id: str, bridge):
         from src.ui.panels.workbench import WorkbenchPanel
 
         return WorkbenchPanel(bridge)
+    if panel_id == "scene":
+        from src.ui.panels.scene_panel import ScenePanel
+
+        return ScenePanel(bridge)
     if panel_id == "template":
         from src.ui.panels.template_panel import TemplatePanel
 

@@ -42,7 +42,7 @@ class _FeatureDetailPaneBase(QWidget):
     def _apply_theme(self) -> None:
         theme = get_theme()
         self._title.setStyleSheet(
-            f"font-size: {theme.font_size_xl}px; font-weight: {theme.font_weight_bold}; color: {theme.text_primary};"
+            f"font-size: {theme.font_size_xl}px; font-weight: {theme.font_weight_emphasis}; color: {theme.text_primary};"
         )
         self._subtitle.setStyleSheet(
             f"font-size: {theme.font_size_md}px; color: {theme.text_secondary};"
@@ -72,7 +72,7 @@ class TableChartDetailPane(_FeatureDetailPaneBase):
         self._caption_gap_slider.setRange(4, 20)
         self._caption_gap_slider.setValue(10)
         self._caption_gap_slider.valueChanged.connect(self._update_gap_label)
-        self._caption_gap_value = QLabel("10 pt", caption_card)
+        self._caption_gap_value = QLabel("10 磅", caption_card)
         caption_card.add_widget(
             FormRow("题注间距", self._caption_gap_slider, suffix_widget=self._caption_gap_value, parent=caption_card)
         )
@@ -92,14 +92,14 @@ class TableChartDetailPane(_FeatureDetailPaneBase):
         self.finish_setup()
 
     def _update_gap_label(self, value: int) -> None:
-        self._caption_gap_value.setText(f"{value} pt")
+        self._caption_gap_value.setText(f"{value} 磅")
         self._refresh_summary()
 
     def _refresh_summary(self) -> None:
         center_text = "图表居中" if self._center_toggle.isChecked() else "仅保持原始位置"
         continued_text = "续表自动补题注" if self._continued_toggle.isChecked() else "续表人工确认"
         self.set_summary(
-            f"当前策略：{self._caption_style_combo.currentText()} · 题注间距 {self._caption_gap_slider.value()} pt · {center_text} · {continued_text}"
+            f"当前策略：{self._caption_style_combo.currentText()} · 题注间距 {self._caption_gap_slider.value()} 磅 · {center_text} · {continued_text}"
         )
 
 
@@ -185,7 +185,7 @@ class FormulaDetailPane(_FeatureDetailPaneBase):
         self._formula_gap_slider.setRange(4, 18)
         self._formula_gap_slider.setValue(8)
         self._formula_gap_slider.valueChanged.connect(self._update_gap_label)
-        self._formula_gap_value = QLabel("8 pt", chemistry_card)
+        self._formula_gap_value = QLabel("8 磅", chemistry_card)
         chemistry_card.add_widget(
             FormRow("上下留白", self._formula_gap_slider, suffix_widget=self._formula_gap_value, parent=chemistry_card)
         )
@@ -195,13 +195,13 @@ class FormulaDetailPane(_FeatureDetailPaneBase):
         self.finish_setup()
 
     def _update_gap_label(self, value: int) -> None:
-        self._formula_gap_value.setText(f"{value} pt")
+        self._formula_gap_value.setText(f"{value} 磅")
         self._refresh_summary()
 
     def _refresh_summary(self) -> None:
         chem_text = "化学式修正开启" if self._chem_toggle.isChecked() else "仅保留公式基础格式"
         self.set_summary(
-            f"当前策略：{self._formula_style_combo.currentText()} · {self._formula_align_combo.currentText()} · {chem_text} · 留白 {self._formula_gap_slider.value()} pt"
+            f"当前策略：{self._formula_style_combo.currentText()} · {self._formula_align_combo.currentText()} · {chem_text} · 留白 {self._formula_gap_slider.value()} 磅"
         )
 
 

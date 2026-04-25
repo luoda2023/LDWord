@@ -82,33 +82,37 @@ def run(
         return 1
 
     # ── 输出结果 ──
-    final_output = Path(result.output_paths.get("final", str(output_docx)))
-    if result.output_paths.get("final"):
+    final_output_raw = result.output_paths.get("final", "")
+    final_output = Path(final_output_raw) if final_output_raw else None
+    if final_output is not None:
         print(f"✅ 输出: {final_output}")
 
     # ── 报告 ──
-    report_json = output_dir / f"{input_path.stem}_changes.json"
-    write_json_report(
-        result,
-        input_path=input_path,
-        output_path=final_output,
-        report_path=report_json,
-        elapsed=elapsed,
-        modules_enabled=len(enabled),
-        modules_total=len(modules),
-    )
-    print(f"📊 报告: {report_json}")
+    output_cfg = getattr(config, "output", None)
+    if bool(getattr(output_cfg, "report_json", True)):
+        report_json = output_dir / f"{input_path.stem}_changes.json"
+        write_json_report(
+            result,
+            input_path=input_path,
+            output_path=final_output,
+            report_path=report_json,
+            elapsed=elapsed,
+            modules_enabled=len(enabled),
+            modules_total=len(modules),
+        )
+        print(f"📊 报告: {report_json}")
 
-    report_md = output_dir / f"{input_path.stem}_changes.md"
-    write_markdown_report(
-        result,
-        input_path=input_path,
-        report_path=report_md,
-        elapsed=elapsed,
-        modules_enabled=len(enabled),
-        modules_total=len(modules),
-    )
-    print(f"📝 报告: {report_md}")
+    if bool(getattr(output_cfg, "report_markdown", True)):
+        report_md = output_dir / f"{input_path.stem}_changes.md"
+        write_markdown_report(
+            result,
+            input_path=input_path,
+            report_path=report_md,
+            elapsed=elapsed,
+            modules_enabled=len(enabled),
+            modules_total=len(modules),
+        )
+        print(f"📝 报告: {report_md}")
 
     # ── 汇总 ──
     print(f"\n{'='*50}")

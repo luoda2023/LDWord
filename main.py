@@ -99,6 +99,10 @@ def _start_gui() -> int:
     # 全局字体
     font = QFont("Microsoft YaHei")
     font.setPointSize(10)
+    try:
+        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+    except AttributeError:
+        pass
     app.setFont(font)
 
     # 全局输入守卫（滚轮防劫持 + SpinBox Enter/Click 行为修正）

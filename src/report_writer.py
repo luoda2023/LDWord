@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from src.execution_diagnostics import build_execution_diagnostics, describe_execution_diagnostic
+
 if TYPE_CHECKING:
     from src.pipeline.result import PipelineResult
 
@@ -18,7 +20,7 @@ def write_json_report(
     result: PipelineResult,
     *,
     input_path: Path,
-    output_path: Path,
+    output_path: Path | None,
     report_path: Path,
     elapsed: float,
     modules_enabled: int,
@@ -26,14 +28,19 @@ def write_json_report(
 ) -> None:
     """写入 JSON 变更报告。"""
     changes = _extract_changes(result)
+    diagnostics = build_execution_diagnostics(result)
     report_data = {
         "input": str(input_path),
-        "output": str(output_path),
+        "output": str(output_path) if output_path is not None else "",
         "status": result.status,
         "elapsed_seconds": round(elapsed, 2),
         "modules_enabled": modules_enabled,
         "modules_total": modules_total,
         "changes": changes,
+        "diagnostics": {
+            "count": diagnostics["count"],
+            "items": diagnostics["items"],
+        },
         "failed_items": result.failed_items or [],
     }
     report_path.write_text(
@@ -53,8 +60,9 @@ def write_markdown_report(
 ) -> None:
     """写入 Markdown 变更报告。"""
     changes = _extract_changes(result)
+    diagnostics = build_execution_diagnostics(result)
     lines = [
-        f"# 排版报告 — {input_path.name}",
+        f"# 排版报告 - {input_path.name}",
         "",
         f"- 状态: **{result.status}**",
         f"- 耗时: {elapsed:.2f}s",
@@ -67,6 +75,13 @@ def write_markdown_report(
         lines.append("")
         for item in result.failed_items:
             lines.append(f"- **{item.get('rule_name', '?')}**: {item.get('reason', '?')}")
+        lines.append("")
+
+    if diagnostics["count"]:
+        lines.append(f"## 诊断提示 ({diagnostics['count']} 项)")
+        lines.append("")
+        for item in diagnostics["items"]:
+            lines.append(f"- {describe_execution_diagnostic(item)}")
         lines.append("")
 
     lines.append(f"## 变更记录 ({len(changes)} 项)")

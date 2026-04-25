@@ -269,10 +269,17 @@ class Pipeline:
         out_dir = self._output_dir or src_path.parent
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        final_path = out_dir / f"{stem}{self._output_suffix}{suffix}"
-        doc.save(str(final_path))
-        self._best_effort_refresh_fields(doc, final_path)
-        return {"final": str(final_path)}
+        output_cfg = getattr(self._config, "output", None)
+        final_enabled = bool(getattr(output_cfg, "final_docx", True))
+        output_paths: dict[str, str] = {}
+
+        if final_enabled:
+            final_path = out_dir / f"{stem}{self._output_suffix}{suffix}"
+            doc.save(str(final_path))
+            self._best_effort_refresh_fields(doc, final_path)
+            output_paths["final"] = str(final_path)
+
+        return output_paths
 
     def _best_effort_refresh_fields(self, doc: Document, final_path: Path) -> None:
         if not document_has_toc(doc):

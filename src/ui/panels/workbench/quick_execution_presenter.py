@@ -6,9 +6,6 @@ from pathlib import Path
 from .scene_presets import (
     LEGACY_FEATURE_GROUP_MAP,
     UI_CAPABILITY_GROUPS,
-    SCENE_META_MAP,
-    SCENE_METAS,
-    build_scene_summary,
 )
 
 

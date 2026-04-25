@@ -78,4 +78,13 @@ def build_text_input_stylesheet(
             min-height: {theme.control_height_md}px;
             max-height: {theme.control_height_md}px;
         }}
+
+        QDoubleSpinBox[sizeClass="sm"] {{
+            min-height: {theme.control_height_sm}px;
+            max-height: {theme.control_height_sm}px;
+        }}
+        QDoubleSpinBox[sizeClass="md"] {{
+            min-height: {theme.control_height_md}px;
+            max-height: {theme.control_height_md}px;
+        }}
     """

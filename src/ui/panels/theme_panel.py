@@ -538,7 +538,7 @@ class _ThemeEditorDialog(QDialog):
         self._color_btns: dict[str, _ColorButton] = {}
         for key, label_text, desc in color_defs:
             row = QHBoxLayout()
-            row.setSpacing(12)
+            row.setSpacing(8)
 
             btn = _ColorButton(self._core_colors[key], self)
             btn.color_changed.connect(lambda c, k=key: self._on_color_changed(k, c))
@@ -575,7 +575,7 @@ class _ThemeEditorDialog(QDialog):
 
         # 按钮行
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(12)
+        btn_row.setSpacing(8)
         btn_row.addStretch()
 
         self._cancel_btn = QPushButton("取消")

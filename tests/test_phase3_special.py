@@ -49,6 +49,11 @@ def test_equation_table_format():
     mod = EquationTableFormatModule()
     assert mod.meta.name == "equation_table_format"
     assert mod.meta.category == "special"
+    assert "formula_table" in mod.meta.requires_config
+    assert "formula_style" in mod.meta.requires_config
+    assert "equation_numbering" in mod.meta.requires_config
+    assert "heading_map" in mod.meta.soft_consumes
+    assert "doc_tree" in mod.meta.soft_consumes
     assert "table_format" in mod.meta.soft_after
     print("  ✅ M18 equation_table_format 导入正常")
 

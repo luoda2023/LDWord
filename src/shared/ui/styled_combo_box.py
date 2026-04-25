@@ -1,17 +1,14 @@
 """
-Shared combo-box foundation with themed popup shell styling.
+Shared combo-box foundation with an anchored in-window popup panel.
 """
 
 from __future__ import annotations
 
-from src.qt_api import QComboBox, QFrame, QListView, QRectF, QSizeGrip, QStyledItemDelegate, QColor, QPainter, QPen, QTimer, Qt
+from src.qt_api import QComboBox, QListView, QPoint, QRect, QRectF, QColor, QPainter, QPen, Qt
 
+from src.shared.ui.combo_popup_panel import ComboPopupPanel
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import bind_theme, get_theme
-
-# PySide6 popup shells can briefly report `maximumHeight() == 0` after
-# `super().showPopup()`. If we lock width before releasing that cap, the popup
-# can collapse to 0px high even though Qt already created the menu items.
-_QT_WIDGETSIZE_MAX = 16777215
 
 
 class StyledComboBox(QComboBox):
@@ -26,32 +23,29 @@ class StyledComboBox(QComboBox):
         self.setObjectName(f"styled_combo_{combo_id}")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._popup_shell_name = f"combo_popup_shell_{combo_id}"
-        self._popup_shell_qss = ""
+        self._popup_surface_name = f"combo_popup_surface_{combo_id}"
 
         view = QListView(self)
         view.setObjectName(f"combo_popup_{combo_id}")
-        view.setItemDelegate(QStyledItemDelegate(view))
+        view.setAttribute(Qt.WA_StyledBackground, True)
+        view.setFrameShape(QListView.NoFrame)
         view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        view.setFrameShape(QFrame.NoFrame)
         self.setView(view)
 
-        popup = view.window()
-        popup.setObjectName(self._popup_shell_name)
-        popup.setContentsMargins(0, 0, 0, 0)
-        if hasattr(popup, "setFrameShape"):
-            popup.setFrameShape(QFrame.NoFrame)
-        popup.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
-        popup.setAttribute(Qt.WA_StyledBackground, True)
-        popup.setAttribute(Qt.WA_TranslucentBackground, False)
-        popup.setAutoFillBackground(False)
-        # Prevent ghost rectangle by hiding the popup and ensuring zero size
-        popup.hide()
-        popup.move(-9999, -9999)
-        popup.resize(1, 1)
-        self._popup_initialized = False
+        self._popup_panel = ComboPopupPanel(
+            self,
+            view,
+            object_name=self._popup_shell_name,
+            surface_name=self._popup_surface_name,
+        )
+        self._popup_panel.item_activated.connect(self._on_popup_item_activated)
+        self._popup_panel.dismissed.connect(self.update)
+        self.destroyed.connect(self._popup_panel.deleteLater)
 
         self.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self._inline = False
+        apply_size_class(self, "md")
 
         bind_theme(self, self._refresh_style)
         self._refresh_style()
@@ -60,8 +54,17 @@ class StyledComboBox(QComboBox):
     def build_popup_container_qss(popup_id: str, theme) -> str:
         return f"""
             #{popup_id} {{
+                background: transparent;
+                border: none;
+            }}
+        """
+
+    @staticmethod
+    def build_popup_surface_qss(surface_id: str, theme) -> str:
+        return f"""
+            #{surface_id} {{
                 background: {theme.bg_card};
-                border: 1px solid {theme.border};
+                border: {theme.combo_popup_border_width}px solid {theme.border};
                 border-radius: {theme.combo_popup_radius}px;
             }}
         """
@@ -70,21 +73,20 @@ class StyledComboBox(QComboBox):
     def build_popup_view_qss(view_id: str, theme) -> str:
         return f"""
             #{view_id} {{
-                background: {theme.bg_card};
+                background: transparent;
                 border: none;
                 padding: {theme.combo_popup_padding}px;
                 outline: none;
             }}
             #{view_id}::item {{
                 padding: {theme.combo_popup_item_padding_y}px {theme.combo_popup_item_padding_x}px;
-                border-radius: {theme.radius_sm}px;
                 color: {theme.text_primary};
             }}
             #{view_id}::item:hover {{
                 background: {theme.bg_hover};
             }}
             #{view_id}::item:selected {{
-                background: {theme.bg_selected};
+                background: transparent;
                 color: {theme.text_primary};
             }}
         """
@@ -125,6 +127,42 @@ class StyledComboBox(QComboBox):
                 height: {theme.combo_arrow_size}px;
                 image: none;
             }}
+            #{object_name}[sizeClass="sm"] {{
+                min-height: {theme.control_height_sm}px;
+                max-height: {theme.control_height_sm}px;
+            }}
+            #{object_name}[sizeClass="md"] {{
+                min-height: {theme.control_height_md}px;
+                max-height: {theme.control_height_md}px;
+            }}
+            #{object_name}[sizeClass="lg"] {{
+                min-height: {theme.control_height_lg}px;
+                max-height: {theme.control_height_lg}px;
+            }}
+            #{object_name}[inline="true"] {{
+                background: transparent;
+                border: none;
+                padding: 0 14px 0 2px;
+                min-height: {theme.control_height_md}px;
+                max-height: {theme.control_height_md}px;
+                color: {theme.text_secondary};
+                font-size: {theme.font_size_md}px;
+            }}
+            #{object_name}[inline="true"]:hover {{
+                color: {theme.primary};
+            }}
+            #{object_name}[inline="true"]:focus,
+            #{object_name}[inline="true"]:on {{
+                background: transparent;
+                color: {theme.primary};
+            }}
+            #{object_name}[inline="true"]:disabled {{
+                background: transparent;
+                color: {theme.text_disabled};
+            }}
+            #{object_name}[inline="true"]::drop-down {{
+                width: 14px;
+            }}
         """
 
     @staticmethod
@@ -142,84 +180,177 @@ class StyledComboBox(QComboBox):
         """
 
     def showPopup(self):
-        super().showPopup()
+        if self._popup_panel.isVisible():
+            self.hidePopup()
+            return
+        geometry = self._popup_geometry_in_window()
+        if geometry.width() <= 0 or geometry.height() <= 0:
+            return
+        self._popup_panel.open_for_combo(geometry)
+        self.update()
 
-        popup = self.view().window()
-        popup.setStyleSheet(self._popup_shell_qss)
-
-        for grip in popup.findChildren(QSizeGrip):
-            grip.hide()
-
-        QTimer.singleShot(0, self._sync_popup_geometry)
-
-    def _sync_popup_geometry(self) -> None:
-        popup = self.view().window()
-        self._release_popup_height_constraint(popup)
-        popup.setFixedWidth(self.width())
-        popup.setFixedHeight(self._popup_content_height())
-        self._position_popup_below_combo(popup)
-
-    def _release_popup_height_constraint(self, popup) -> None:
-        if popup.maximumHeight() == 0:
-            popup.setMinimumHeight(0)
-            popup.setMaximumHeight(_QT_WIDGETSIZE_MAX)
+    def hidePopup(self):
+        self._popup_panel.close_panel()
+        self.update()
 
     def _popup_content_height(self) -> int:
         view = self.view()
         model = view.model()
         if model is None:
-            return self.height()
+            return max(1, self.height())
 
         view.doItemsLayout()
-
         visible_rows = min(self.maxVisibleItems(), model.rowCount())
         if visible_rows <= 0:
-            return self.height()
+            return max(1, self.height())
 
         minimum_row_height = self.fontMetrics().height() + (get_theme().combo_popup_item_padding_y * 2)
         rows_height = sum(max(view.sizeHintForRow(row), minimum_row_height) for row in range(visible_rows))
         chrome_height = view.contentsMargins().top() + view.contentsMargins().bottom()
-        return rows_height + chrome_height
+        if visible_rows == 1:
+            chrome_height -= view.contentsMargins().bottom()
+        surface_border = get_theme().combo_popup_border_width * 2
+        return max(1, rows_height + chrome_height + surface_border)
 
-    def _position_popup_below_combo(self, popup) -> None:
-        pos = self.mapToGlobal(self.rect().bottomLeft())
-        popup.move(pos.x(), pos.y() + get_theme().combo_popup_offset_y)
+    def _popup_content_width(self) -> int:
+        view = self.view()
+        model = view.model()
+        if model is None:
+            return max(1, self.width())
+
+        theme = get_theme()
+        content_width = max(0, view.sizeHintForColumn(0))
+        if content_width <= 0:
+            font_metrics = view.fontMetrics()
+            for row in range(model.rowCount()):
+                index = model.index(row, self.modelColumn())
+                text = str(index.data(Qt.DisplayRole) or "")
+                content_width = max(
+                    content_width,
+                    font_metrics.horizontalAdvance(text) + (theme.combo_popup_item_padding_x * 2),
+                )
+
+        chrome_width = view.contentsMargins().left() + view.contentsMargins().right()
+        chrome_width += theme.combo_popup_border_width * 2
+        if 0 < self.maxVisibleItems() < model.rowCount():
+            chrome_width += view.verticalScrollBar().sizeHint().width()
+        return max(1, content_width + chrome_width)
+
+    def _popup_geometry_in_window(self) -> QRect:
+        root = self.window()
+        if root is None:
+            return QRect()
+        root_rect = root.rect()
+        if root_rect.width() <= 0 or root_rect.height() <= 0:
+            return QRect()
+
+        offset_y = get_theme().combo_popup_offset_y
+        min_popup_height = max(1, min(24, root_rect.height()))
+        width = max(1, min(max(self.width(), self._popup_content_width()), root_rect.width()))
+        height = max(min_popup_height, min(self._popup_content_height(), root_rect.height()))
+
+        below = self.mapTo(root, QPoint(0, self.height() + offset_y))
+        x = max(0, min(below.x(), max(0, root_rect.width() - width)))
+        below_y = max(0, below.y())
+        space_below = max(0, root_rect.height() - below_y)
+
+        above_anchor = self.mapTo(root, QPoint(0, -offset_y)).y()
+        space_above = max(0, above_anchor)
+
+        if space_below >= height or space_below >= space_above:
+            y = max(0, min(below_y, max(0, root_rect.height() - min_popup_height)))
+            height = min(height, max(min_popup_height, root_rect.height() - y))
+        else:
+            height = min(height, max(min_popup_height, space_above))
+            y = max(0, above_anchor - height)
+
+        return QRect(x, y, width, height)
+
+    def _on_popup_item_activated(self, row: int) -> None:
+        if 0 <= row < self.count():
+            self.setCurrentIndex(row)
+        self.hidePopup()
 
     def _refresh_style(self) -> None:
         theme = get_theme()
-        popup = self.view().window()
 
-        self._popup_shell_qss = self.build_popup_container_qss(self._popup_shell_name, theme)
         self.setStyleSheet(self.build_combo_stylesheet(self.objectName(), theme))
         self.view().setStyleSheet(self.build_popup_view_qss(self.view().objectName(), theme))
-        popup.setStyleSheet(self._popup_shell_qss)
+        self._popup_panel.setStyleSheet(self.build_popup_container_qss(self._popup_shell_name, theme))
+        self._popup_panel.surface().setStyleSheet(
+            self.build_popup_surface_qss(self._popup_surface_name, theme)
+        )
+
+        viewport = self.view().viewport()
+        viewport.setAttribute(Qt.WA_StyledBackground, True)
+        viewport.setAutoFillBackground(False)
+        viewport.setStyleSheet("background: transparent; border: none;")
+
         if self.isEditable() and self.lineEdit() is not None:
             self.lineEdit().setStyleSheet(self.build_editor_stylesheet(theme))
+
+        if self._popup_panel.isVisible():
+            self._popup_panel.reposition()
+        self.updateGeometry()
+        self.update()
+
+    def set_inline(self, inline: bool = True) -> None:
+        """Enable borderless inline mode — WPS-style unit selector."""
+        self._inline = inline
+        self.setProperty("inline", "true" if inline else "false")
+        style = self.style()
+        if style:
+            style.unpolish(self)
+            style.polish(self)
+        self._refresh_style()
 
     def paintEvent(self, event):
         super().paintEvent(event)
 
+        if self._inline:
+            # Inline mode: only draw a small dropdown chevron, no border
+            theme = get_theme()
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            arrow_color = QColor(theme.primary if (self.hasFocus() or self._popup_panel.isVisible()) else theme.text_hint)
+            painter.setPen(QPen(arrow_color, 1.5))
+            zone_x = self.width() - 10
+            cy = self.height() // 2
+            half = 3
+            painter.drawLine(zone_x - half, cy - 1, zone_x, cy + half - 1)
+            painter.drawLine(zone_x, cy + half - 1, zone_x + half, cy - 1)
+            painter.end()
+            return
         theme = get_theme()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # ── Anti-aliased rounded border ──
         if not self.isEnabled():
             border_color = QColor(theme.border)
-        elif self.hasFocus() or self.view().isVisible():
+            border_width = 1.0
+        elif self.hasFocus() or self._popup_panel.isVisible():
             border_color = QColor(theme.border_focus)
+            border_width = 1.5
         else:
-            border_color = QColor(theme.border)
+            border_color = QColor(theme.text_hint)
+            border_width = 1.25
 
         radius = float(theme.input_radius)
-        border_rect = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
-        painter.setPen(QPen(border_color, 1.0))
+        half_border = border_width / 2.0
+        border_rect = QRectF(half_border, half_border, self.width() - border_width, self.height() - border_width)
+        painter.setPen(QPen(border_color, border_width))
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(border_rect, radius, radius)
 
-        # ── Chevron arrow ──
-        arrow_color = QColor(theme.border_focus if self.hasFocus() else theme.text_hint)
-        painter.setPen(QPen(arrow_color, 1.5))
+        separator_color = QColor(theme.border_focus if (self.hasFocus() or self._popup_panel.isVisible()) else theme.border)
+        separator_color.setAlpha(170 if self.hasFocus() or self._popup_panel.isVisible() else 135)
+        painter.setPen(QPen(separator_color, 1.0))
+        separator_x = self.width() - theme.combo_arrow_zone_width
+        inset = max(4, self.height() // 5)
+        painter.drawLine(separator_x, inset, separator_x, self.height() - inset)
+
+        arrow_color = QColor(theme.border_focus if self.hasFocus() or self._popup_panel.isVisible() else theme.text_secondary)
+        painter.setPen(QPen(arrow_color, 1.8))
 
         zone_center_x = self.width() - (theme.combo_arrow_zone_width // 2)
         zone_center_y = self.height() // 2

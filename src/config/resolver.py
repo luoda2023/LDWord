@@ -13,6 +13,7 @@ from typing import Any, Mapping, Sequence
 
 from src.config.dataclass_utils import dict_to_dataclass, merge_dict_layers
 from src.config.migration import (
+    add_template_compat_aliases,
     flatten_dict,
     normalize_module_switches,
     normalize_template_overrides,
@@ -27,6 +28,32 @@ from src.config.resolved import (
     ReplacementRule,
 )
 
+_SCENE_HEADER_FOOTER_ALLOWED_HEADER_KEYS = {
+    "mode",
+    "fixed_text",
+    "styleref_level",
+    "border",
+}
+_SCENE_HEADER_FOOTER_ALLOWED_ROOT_KEYS = {
+    "typography",
+    "header",
+}
+_SCENE_IGNORED_PAGE_NUMBER_OVERRIDE_KEYS = {
+    "header_footer.page_number_enabled",
+    "header_footer.hide_cover_header_footer",
+    "header_footer.suppress_header_footer_selectors",
+    "header_footer.front_matter_page_number_format",
+    "header_footer.front_matter_page_number_start",
+    "header_footer.body_page_number_format",
+    "header_footer.body_page_number_start",
+    "header_footer.restart_body_page_number",
+}
+_SCENE_IGNORED_PAGE_NUMBER_OVERRIDE_PREFIXES = (
+    "header_footer.page_number_plan.",
+    "header_footer.footer.",
+    "header_footer.header.hide_on_cover",
+)
+
 
 def resolve_config(
     template: TemplateConfig,
@@ -38,42 +65,54 @@ def resolve_config(
     replacements: Sequence[ReplacementRule | Mapping[str, Any]] | None = None,
 ) -> ResolvedConfig:
     """Merge template, scene and session values into a ResolvedConfig."""
-    scene_overrides = normalize_template_overrides(scene.template_overrides)
+    scene_overrides = _filter_scene_template_overrides(
+        normalize_template_overrides(scene.template_overrides)
+    )
     session_overrides = normalize_template_overrides(session_overrides)
+    scene_feature_overrides = _extract_scene_feature_overrides(scene)
 
     template_payload = asdict(template)
-    template_flat = flatten_dict("", template_payload)
+    template_flat = add_template_compat_aliases(flatten_dict("", template_payload))
 
     merged_payload = merge_dict_layers(
         template_payload,
+        scene_feature_overrides,
         unflatten_dict(scene_overrides),
         unflatten_dict(session_overrides),
     )
     merged_template = dict_to_dataclass(TemplateConfig, merged_payload)
-    merged_flat = flatten_dict("", asdict(merged_template))
+    merged_flat = add_template_compat_aliases(
+        flatten_dict("", asdict(merged_template))
+    )
     provenance = _build_provenance(
         template_flat=template_flat,
         merged_flat=merged_flat,
+        scene_feature_overrides=add_template_compat_aliases(
+            flatten_dict("", scene_feature_overrides)
+        ),
         scene_overrides=scene_overrides,
         session_overrides=session_overrides,
     )
 
     return ResolvedConfig(
+        # From template (core appearance)
         page_setup=merged_template.page_setup,
-        styles=merged_template.styles,
+        styles={**merged_template.styles, **copy.deepcopy(scene.section_styles)},
         heading_numbering=merged_template.heading_numbering,
         heading_model=merged_template.heading_model,
+        section=merged_template.section,
+        # Feature-specific config: template base + scene feature overrides + session overrides
+        table=merged_template.table,
+        output=merged_template.output,
         toc=merged_template.toc,
         caption=merged_template.caption,
-        table=merged_template.table,
-        section=merged_template.section,
         header_footer=merged_template.header_footer,
         watermark=merged_template.watermark,
         reference_style=merged_template.reference_style,
         formula_table=merged_template.formula_table,
         formula_style=merged_template.formula_style,
         equation_numbering=merged_template.equation_numbering,
-        output=merged_template.output,
+        # From scene (behavior)
         module_switches=normalize_module_switches(scene.module_switches),
         format_scope=copy.deepcopy(scene.format_scope),
         strict_mode=scene.strict_mode,
@@ -94,6 +133,7 @@ def _build_provenance(
     *,
     template_flat: dict[str, Any],
     merged_flat: dict[str, Any],
+    scene_feature_overrides: dict[str, Any],
     scene_overrides: dict[str, Any],
     session_overrides: dict[str, Any],
 ) -> dict[str, ConfigValue]:
@@ -102,6 +142,8 @@ def _build_provenance(
     for key, value in merged_flat.items():
         if key in session_overrides:
             source = "session"
+        elif key in scene_feature_overrides:
+            source = "scene"
         elif key in scene_overrides:
             source = "scene"
         else:
@@ -114,6 +156,79 @@ def _build_provenance(
         )
 
     return provenance
+
+
+_SCENE_FEATURE_FIELDS = (
+    "table",
+    "header_footer",
+    "toc",
+    "caption",
+    "formula_table",
+    "formula_style",
+    "equation_numbering",
+    "reference_style",
+    "watermark",
+    "output",
+)
+
+
+def _extract_scene_feature_overrides(scene: SceneWorkspace) -> dict[str, Any]:
+    """Return scene feature-config values that differ from feature defaults."""
+    overrides: dict[str, Any] = {}
+    for field_name in _SCENE_FEATURE_FIELDS:
+        current = getattr(scene, field_name, None)
+        if current is None:
+            continue
+        current_payload = asdict(current)
+        default_payload = asdict(type(current)())
+        diff = {
+            key: copy.deepcopy(value)
+            for key, value in current_payload.items()
+            if value != default_payload.get(key)
+        }
+        if field_name == "header_footer":
+            diff = _filter_scene_header_footer_overrides(diff)
+        if diff:
+            overrides[field_name] = diff
+    return overrides
+
+
+def _filter_scene_header_footer_overrides(diff: dict[str, Any]) -> dict[str, Any]:
+    filtered: dict[str, Any] = {}
+
+    typography = diff.get("typography")
+    if isinstance(typography, Mapping) and typography:
+        filtered["typography"] = copy.deepcopy(dict(typography))
+
+    header = diff.get("header")
+    if isinstance(header, Mapping):
+        header_filtered = {
+            key: copy.deepcopy(value)
+            for key, value in dict(header).items()
+            if key in _SCENE_HEADER_FOOTER_ALLOWED_HEADER_KEYS
+        }
+        if header_filtered:
+            filtered["header"] = header_filtered
+
+    return {
+        key: value
+        for key, value in filtered.items()
+        if key in _SCENE_HEADER_FOOTER_ALLOWED_ROOT_KEYS and value
+    }
+
+
+def _filter_scene_template_overrides(overrides: dict[str, Any]) -> dict[str, Any]:
+    filtered: dict[str, Any] = {}
+    for key, value in overrides.items():
+        if key in _SCENE_IGNORED_PAGE_NUMBER_OVERRIDE_KEYS:
+            continue
+        if any(
+            key == prefix.rstrip(".") or key.startswith(prefix)
+            for prefix in _SCENE_IGNORED_PAGE_NUMBER_OVERRIDE_PREFIXES
+        ):
+            continue
+        filtered[key] = value
+    return filtered
 
 
 def _normalize_image_items(

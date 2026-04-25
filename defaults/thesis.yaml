@@ -1,10 +1,10 @@
-# 论文排版默认模板参数 — Alavette Form V1.0
-# 仅定义「文档长什么样」，不含功能开关
+# 论文排版默认模板参数 - Alavette Form V1.0
+# 仅定义“文档长什么样”，不含功能开关
 
 name: "thesis_default"
 description: "学术论文默认排版模板"
 
-# ── 页面设置 ──
+# 页面设置
 
 page_setup:
   paper_size: A4
@@ -17,7 +17,7 @@ page_setup:
   header_distance_cm: 3.0
   footer_distance_cm: 3.0
 
-# ── 段落样式 ──
+# 段落样式
 
 styles:
   normal:
@@ -93,6 +93,66 @@ styles:
     size_pt: 12
     alignment: "left"
 
+  toc_title:
+    font_cn: "黑体"
+    font_en: "Times New Roman"
+    size_pt: 16
+    size_display: "16"
+    bold: true
+    alignment: "center"
+    first_line_indent_chars: 0
+    left_indent_chars: 0
+    right_indent_chars: 0
+    line_spacing_type: "multiple"
+    line_spacing_pt: 1
+    space_before_pt: 24
+    space_after_pt: 18
+
+  toc_chapter:
+    font_cn: "宋体"
+    font_en: "Times New Roman"
+    size_pt: 14
+    size_display: "14"
+    bold: false
+    alignment: "justify"
+    first_line_indent_chars: 0
+    left_indent_chars: 0
+    right_indent_chars: 0
+    line_spacing_type: "multiple"
+    line_spacing_pt: 1
+    space_before_pt: 6
+    space_after_pt: 0
+
+  toc_level1:
+    font_cn: "宋体"
+    font_en: "Times New Roman"
+    size_pt: 12
+    size_display: "12"
+    bold: false
+    alignment: "justify"
+    first_line_indent_chars: 0
+    left_indent_chars: 1
+    right_indent_chars: 0
+    line_spacing_type: "multiple"
+    line_spacing_pt: 1
+    space_before_pt: 6
+    space_after_pt: 0
+
+  toc_level2:
+    font_cn: "宋体"
+    font_en: "Times New Roman"
+    size_pt: 10.5
+    size_display: "10.5"
+    bold: false
+    alignment: "justify"
+    first_line_indent_chars: 0
+    left_indent_chars: 2
+    right_indent_chars: 0
+    line_spacing_type: "multiple"
+    line_spacing_pt: 1
+    space_before_pt: 6
+    space_after_pt: 0
+
   references_body:
     font_cn: "宋体"
     font_en: "Times New Roman"
@@ -113,7 +173,7 @@ styles:
     line_spacing_type: "exact"
     line_spacing_pt: 20
 
-# ── 标题编号 ──
+# 标题编号
 
 heading_numbering:
   level_bindings:
@@ -139,10 +199,9 @@ heading_numbering:
       start_at: 1
       include_in_toc: true
 
-# ── 标题模型 ──
+# 标题模型
 
 heading_model:
-  # 精确匹配词典: 标题文本完全一致时跳过编号
   non_numbered_title_texts:
     - "参考文献"
     - "致谢"
@@ -152,13 +211,12 @@ heading_model:
     - "摘要"
     - "Abstract"
     - "目录"
-  # 前缀匹配词典: 标题文本以此开头时跳过编号
   non_numbered_prefixes:
     - "附录"
     - "附件"
     - "Appendix"
 
-# ── 题注 ──
+# 题注
 
 caption:
   figure_prefix: "图"
@@ -166,8 +224,10 @@ caption:
   separator: "\u3000"
   placeholder: "[待补充]"
   numbering_format: "chapter.seq"
+  auto_insert: true
+  format_inserted: false
 
-# ── 表格 ──
+# 表格
 
 table:
   layout_mode: "smart"
@@ -178,14 +238,34 @@ table:
   line_spacing_mode: "single"
   repeat_header: false
 
-# ── 页眉页脚 ──
+# 页眉页脚
 
 header_footer:
-  header_mode: "styleref"
-  page_number_enabled: true
-  header_border: true
+  header:
+    mode: "styleref"
+    border: true
+    hide_on_cover: true
+  footer:
+    content_mode: "page_number"
+    hide_on_cover: true
+  page_number_plan:
+    validation_mode: "strict"
+    on_missing_doc_tree: "warn_and_fallback"
+    phases:
+      - phase_id: "front"
+        selectors: ["front_matter"]
+        visible: true
+        number_format: "upperRoman"
+        start_mode: "restart"
+        start_value: 1
+      - phase_id: "body"
+        selectors: ["body", "back_matter"]
+        visible: true
+        number_format: "decimal"
+        start_mode: "restart"
+        start_value: 1
 
-# ── 公式 ──
+# 公式
 
 formula_table:
   formula_font_name: "Times New Roman"
@@ -199,12 +279,12 @@ formula_table:
 equation_numbering:
   numbering_format: "chapter.seq"
 
-# ── 目录 ──
+# 目录
 
 toc:
   mode: "word_native"
 
-# ── 输出 ──
+# 输出
 
 output:
   final_docx: true

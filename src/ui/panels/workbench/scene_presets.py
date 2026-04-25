@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 from src.config.scene import FormatScopeConfig, SceneWorkspace
 from src.config.template import TemplateConfig
+from src.config.feature_configs import TableConfig, OutputConfig
 
 
 # ---------------------------------------------------------------------------
@@ -64,13 +65,13 @@ UI_CAPABILITY_GROUPS: tuple[UICapabilityGroup, ...] = (
         group_id="citation",
         label="参考文献",
         description="域关联·自动编号·上标跟随",
-        module_names=("reference_format",),
+        module_names=("reference_format", "citation_link"),
     ),
     UICapabilityGroup(
         group_id="cleanup",
         label="校验与清理",
         description="Markdown修复·空白清洗·格式校验",
-        module_names=("md_cleanup",),
+        module_names=("md_cleanup", "whitespace_normalize"),
     ),
     UICapabilityGroup(
         group_id="content_fill",
@@ -245,11 +246,14 @@ def _build_switches(
 def create_custom_scene() -> SceneWorkspace:
     """自定义场景：所有分区全开、能力组默认关闭，等待人工启用。"""
     return SceneWorkspace(
+        scene_id="custom",
         name="自定义",
         description="手动控制所有功能开关与处理范围",
         category="general",
         category_label="通用文档",
         template_id="default",
+        default_template_id="default",
+        compatible_template_ids=["default"],
         strict_mode=True,
         format_scope=FormatScopeConfig(sections=_all_sections_on()),
         module_switches=_build_switches(
@@ -266,11 +270,14 @@ def create_custom_scene() -> SceneWorkspace:
 def create_thesis_scene() -> SceneWorkspace:
     """论文排版场景。"""
     return SceneWorkspace(
+        scene_id="thesis",
         name="论文排版",
         description="学位论文·期刊论文·学术报告",
         category="academic",
         category_label="学术文档",
         template_id="thesis_gbt",
+        default_template_id="thesis_gbt",
+        compatible_template_ids=["thesis_gbt", "thesis_custom"],
         strict_mode=True,
         format_scope=FormatScopeConfig(sections=_thesis_sections()),
         module_switches=_build_switches(
@@ -287,11 +294,14 @@ def create_thesis_scene() -> SceneWorkspace:
 def create_bidding_scene() -> SceneWorkspace:
     """标书排版场景。"""
     return SceneWorkspace(
+        scene_id="bidding",
         name="标书排版",
         description="工程投标·政府采购·商务投标",
         category="business",
         category_label="商务文档",
         template_id="bid_engineering",
+        default_template_id="bid_engineering",
+        compatible_template_ids=["bid_engineering", "bid_procurement", "bid_custom"],
         strict_mode=True,
         format_scope=FormatScopeConfig(sections=_bidding_sections()),
         module_switches=_build_switches(
@@ -302,17 +312,21 @@ def create_bidding_scene() -> SceneWorkspace:
             cleanup=True,
             content_fill=True,
         ),
+        table=TableConfig(border_mode="full_grid", layout_mode="full"),
     )
 
 
 def create_official_scene() -> SceneWorkspace:
     """公文排版场景。"""
     return SceneWorkspace(
+        scene_id="official",
         name="公文排版",
         description="政府公文·通知·批复·函",
         category="government",
         category_label="政府公文",
         template_id="official_gbt",
+        default_template_id="official_gbt",
+        compatible_template_ids=["official_gbt", "official_custom"],
         strict_mode=False,          # 公文保留原编号
         format_scope=FormatScopeConfig(sections=_official_sections()),
         module_switches=_build_switches(
@@ -329,11 +343,14 @@ def create_official_scene() -> SceneWorkspace:
 def create_technical_scene() -> SceneWorkspace:
     """技术文档场景。"""
     return SceneWorkspace(
+        scene_id="technical",
         name="技术文档",
         description="技术规范·操作手册·设计文档",
         category="technical",
         category_label="技术文档",
         template_id="tech_standard",
+        default_template_id="tech_standard",
+        compatible_template_ids=["tech_standard", "tech_custom"],
         strict_mode=True,
         format_scope=FormatScopeConfig(sections={
             "body": True,
@@ -354,17 +371,21 @@ def create_technical_scene() -> SceneWorkspace:
             cleanup=True,
             content_fill=True,
         ),
+        table=TableConfig(border_mode="full_grid"),
     )
 
 
 def create_report_scene() -> SceneWorkspace:
     """通用报告场景。"""
     return SceneWorkspace(
+        scene_id="report",
         name="通用报告",
         description="汇报·总结·调研报告",
         category="general",
         category_label="通用文档",
         template_id="report_default",
+        default_template_id="report_default",
+        compatible_template_ids=["report_default", "report_custom"],
         strict_mode=True,
         format_scope=FormatScopeConfig(sections={
             "body": True,

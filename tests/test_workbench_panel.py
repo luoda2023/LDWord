@@ -1,3 +1,4 @@
+import logging
 import sys
 import subprocess
 from pathlib import Path
@@ -138,4 +139,55 @@ def test_main_window_close_requests_workbench_shutdown_before_closing():
     finally:
         if workbench_panel is not None:
             workbench_panel._execution_worker = None
+        window.close()
+
+
+def test_main_window_close_logs_shutdown_exception_before_blocking_close(caplog):
+    app = _app()
+    window = MainWindow()
+    failing_panel = None
+    try:
+        from src.qt_api import QWidget
+
+        class _ExplodingPanel(QWidget):
+            def shutdown_active_execution(self, timeout_ms: int | None = None) -> bool:
+                raise RuntimeError("shutdown boom")
+
+        failing_panel = _ExplodingPanel()
+        window.register_panel(0, failing_panel)
+
+        window.show()
+        app.processEvents()
+
+        with caplog.at_level(logging.WARNING):
+            assert window.close() is False
+            app.processEvents()
+
+        assert any("panel shutdown at index 0" in record.getMessage() for record in caplog.records)
+    finally:
+        if failing_panel is not None:
+            failing_panel.shutdown_active_execution = lambda timeout_ms=None: True
+        window.close()
+
+
+def test_main_window_close_logs_panel_stack_count_failure_and_still_closes(caplog):
+    app = _app()
+    window = MainWindow()
+    original_stack = window.panel_stack
+    try:
+        class _BrokenStack:
+            def count(self):
+                raise RuntimeError("count boom")
+
+        window.panel_stack = _BrokenStack()
+        window.show()
+        app.processEvents()
+
+        with caplog.at_level(logging.WARNING):
+            assert window.close() is True
+            app.processEvents()
+
+        assert any("panel stack count" in record.getMessage() for record in caplog.records)
+    finally:
+        window.panel_stack = original_stack
         window.close()

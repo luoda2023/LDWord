@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable
 
 from src.config.loader import load_template
-from src.config.template import StyleConfig, TemplateConfig
+from src.config.template import PageNumberPhaseConfig, StyleConfig, TemplateConfig
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +25,48 @@ def _normalize_template(cfg: TemplateConfig) -> TemplateConfig:
     if "body" not in normalized.styles and "normal" in normalized.styles:
         normalized.styles["body"] = deepcopy(normalized.styles["normal"])
     return normalized
+
+
+def _set_continuous_decimal_page_plan(cfg: TemplateConfig, *, start: int = 1) -> None:
+    header_footer = cfg.header_footer
+    header_footer.page_number_enabled = True
+    header_footer.page_number_plan.validation_mode = "strict"
+    header_footer.page_number_plan.on_missing_doc_tree = "warn_and_fallback"
+    header_footer.page_number_plan.phases = [
+        PageNumberPhaseConfig(
+            phase_id="main",
+            selectors=["all_numbered_content"],
+            visible=True,
+            number_format="decimal",
+            start_mode="restart",
+            start_value=max(1, int(start)),
+        )
+    ]
+
+
+def _set_thesis_page_plan(cfg: TemplateConfig) -> None:
+    header_footer = cfg.header_footer
+    header_footer.page_number_enabled = True
+    header_footer.page_number_plan.validation_mode = "strict"
+    header_footer.page_number_plan.on_missing_doc_tree = "warn_and_fallback"
+    header_footer.page_number_plan.phases = [
+        PageNumberPhaseConfig(
+            phase_id="front",
+            selectors=["front_matter"],
+            visible=True,
+            number_format="upperRoman",
+            start_mode="restart",
+            start_value=1,
+        ),
+        PageNumberPhaseConfig(
+            phase_id="body",
+            selectors=["body", "back_matter"],
+            visible=True,
+            number_format="decimal",
+            start_mode="restart",
+            start_value=1,
+        ),
+    ]
 
 
 @lru_cache(maxsize=1)
@@ -47,6 +89,18 @@ def _default_template() -> TemplateConfig:
         line_spacing_type="exact",
         line_spacing_pt=20,
     )
+    cfg.styles["heading"] = StyleConfig(
+        font_cn="宋体",
+        font_en="Times New Roman",
+        size_pt=12,
+        size_display="小四",
+        bold=True,
+        alignment="left",
+        first_line_indent_chars=0,
+        line_spacing_type="exact",
+        line_spacing_pt=20,
+    )
+    _set_continuous_decimal_page_plan(cfg)
     return cfg
 
 
@@ -54,6 +108,7 @@ def _thesis_gbt_template() -> TemplateConfig:
     cfg = _normalize_template(_load_thesis_asset())
     cfg.name = "GB/T 7713 学位论文"
     cfg.description = "适用于学位论文与学术论文的内置模板。"
+    _set_thesis_page_plan(cfg)
     return cfg
 
 
@@ -72,10 +127,7 @@ def _bid_engineering_template() -> TemplateConfig:
     cfg.page_setup.margin.bottom_cm = 2.6
     cfg.page_setup.margin.left_cm = 2.8
     cfg.page_setup.margin.right_cm = 2.6
-    cfg.table.border_mode = "full_grid"
-    cfg.table.layout_mode = "full"
-    cfg.header_footer.header_mode = "fixed"
-    cfg.header_footer.header_text = "工程类投标文件"
+    _set_continuous_decimal_page_plan(cfg)
     return cfg
 
 
@@ -83,8 +135,6 @@ def _bid_procurement_template() -> TemplateConfig:
     cfg = _bid_engineering_template()
     cfg.name = "政府采购投标"
     cfg.description = "适用于政府采购投标文件的内置模板。"
-    cfg.header_footer.header_text = "政府采购投标文件"
-    cfg.table.layout_mode = "smart"
     return cfg
 
 
@@ -103,10 +153,8 @@ def _official_gbt_template() -> TemplateConfig:
     cfg.page_setup.margin.bottom_cm = 3.5
     cfg.page_setup.margin.left_cm = 2.8
     cfg.page_setup.margin.right_cm = 2.6
-    cfg.header_footer.header_mode = "fixed"
-    cfg.header_footer.header_text = ""
-    cfg.header_footer.page_number_enabled = True
     cfg.heading_numbering.level_bindings = {}
+    _set_continuous_decimal_page_plan(cfg)
     return cfg
 
 
@@ -123,10 +171,7 @@ def _tech_standard_template() -> TemplateConfig:
     cfg.description = "适用于技术方案、设计说明和操作手册的内置模板。"
     cfg.page_setup.margin.top_cm = 2.5
     cfg.page_setup.margin.bottom_cm = 2.5
-    cfg.table.border_mode = "full_grid"
-    cfg.header_footer.header_mode = "styleref"
-    cfg.toc.enabled = True
-    cfg.toc.mode = "word_native"
+    _set_continuous_decimal_page_plan(cfg)
     return cfg
 
 
@@ -145,9 +190,7 @@ def _report_default_template() -> TemplateConfig:
     cfg.page_setup.margin.bottom_cm = 2.54
     cfg.page_setup.margin.left_cm = 3.0
     cfg.page_setup.margin.right_cm = 3.0
-    cfg.table.layout_mode = "smart"
-    cfg.header_footer.header_mode = "none"
-    cfg.toc.enabled = True
+    _set_continuous_decimal_page_plan(cfg)
     return cfg
 
 
@@ -186,4 +229,8 @@ def has_builtin_template(template_id: str) -> bool:
     return str(template_id or "").strip() in _BUILTIN_TEMPLATE_FACTORIES
 
 
-__all__ = ["create_builtin_template", "has_builtin_template"]
+def list_builtin_template_ids() -> list[str]:
+    return list(_BUILTIN_TEMPLATE_FACTORIES.keys())
+
+
+__all__ = ["create_builtin_template", "has_builtin_template", "list_builtin_template_ids"]

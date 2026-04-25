@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.wintypes
+import logging
 import sys
 
 from src.app_meta import APP_DISPLAY_NAME_FULL
@@ -37,6 +38,18 @@ from src.ui.bridge import PanelBridge
 from src.ui.panel_registry import PANEL_SPECS, create_panel
 from src.ui.sidebar import Sidebar
 from src.ui.title_bar import TitleBar
+
+
+logger = logging.getLogger(__name__)
+
+
+def _log_close_handling_failure(action: str, exc: Exception) -> None:
+    logger.warning(
+        "Main window ignored %s failure during close handling: %s",
+        action,
+        exc,
+        exc_info=exc,
+    )
 
 # ── Win32 常量 ──
 if sys.platform == "win32":
@@ -295,7 +308,8 @@ class MainWindow(QMainWindow):
         if stack is not None:
             try:
                 count = int(stack.count())
-            except Exception:
+            except Exception as exc:
+                _log_close_handling_failure("panel stack count", exc)
                 count = 0
             for index in range(count):
                 panel = stack.widget(index)
@@ -307,9 +321,11 @@ class MainWindow(QMainWindow):
                 except TypeError:
                     try:
                         ok = bool(shutdown())
-                    except Exception:
+                    except Exception as exc:
+                        _log_close_handling_failure(f"panel shutdown fallback at index {index}", exc)
                         ok = False
-                except Exception:
+                except Exception as exc:
+                    _log_close_handling_failure(f"panel shutdown at index {index}", exc)
                     ok = False
                 if not ok:
                     event.ignore()

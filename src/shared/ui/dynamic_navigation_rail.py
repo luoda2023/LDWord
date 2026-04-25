@@ -38,7 +38,7 @@ class DynamicNavigationRail(QWidget):
                 label.setStyleSheet(
                     f"font-size: {t.font_size_xs}px; "
                     f"color: {t.text_hint}; "
-                    f"font-weight: {t.font_weight_bold}; "
+                    f"font-weight: {t.font_weight_emphasis}; "
                     f"padding: {t.spacing_sm}px 4px 2px 4px; "
                     f"letter-spacing: 1px;"
                 )

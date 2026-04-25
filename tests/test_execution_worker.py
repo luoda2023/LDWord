@@ -53,6 +53,8 @@ def test_execution_worker_emits_progress_and_success_signals():
             "report_paths": [],
             "failed_count": 0,
             "error_text": "",
+            "diagnostics_count": 0,
+            "diagnostics_summary": "",
         }
     ]
     assert partial == []
@@ -124,6 +126,8 @@ def test_execution_worker_resets_cancel_flag_after_run_finishes():
             "report_paths": [],
             "failed_count": 0,
             "error_text": "",
+            "diagnostics_count": 0,
+            "diagnostics_summary": "",
         }
     ]
     assert partial == []
@@ -171,6 +175,8 @@ def test_execution_worker_supports_pipeline_result_objects():
             "report_paths": [],
             "failed_count": 1,
             "error_text": "1 module operation(s) failed.",
+            "diagnostics_count": 0,
+            "diagnostics_summary": "",
         }
     ]
     assert failed == []
@@ -209,6 +215,8 @@ def test_execution_worker_treats_unknown_status_as_failure():
             "report_paths": [],
             "failed_count": 0,
             "error_text": "Unknown execution status: 'paused'",
+            "diagnostics_count": 0,
+            "diagnostics_summary": "",
         }
     ]
     assert cancelled == []
@@ -240,5 +248,41 @@ def test_execution_worker_normalizes_report_paths_to_strings():
             "report_paths": [str(Path("logs/report.json")), str(Path("logs/report.md"))],
             "failed_count": 0,
             "error_text": "",
+            "diagnostics_count": 0,
+            "diagnostics_summary": "",
+        }
+    ]
+
+
+def test_execution_worker_preserves_diagnostics_fields():
+    _app()
+
+    class _DiagnosticRunner:
+        def run(self, progress_cb, cancel_check):
+            assert cancel_check() is False
+            progress_cb(1, 1, "done")
+            return {
+                "status": "success",
+                "output_path": "out.docx",
+                "report_paths": [],
+                "diagnostics_count": 1,
+                "diagnostics_summary": "诊断提示（1）\n- [equation_table_format] 1 个公式编号: skipped",
+            }
+
+    worker = ExecutionWorker(_DiagnosticRunner())
+    success = []
+    worker.execution_succeeded.connect(lambda payload: success.append(payload))
+
+    worker.run()
+
+    assert success == [
+        {
+            "status": "success",
+            "output_path": "out.docx",
+            "report_paths": [],
+            "failed_count": 0,
+            "error_text": "",
+            "diagnostics_count": 1,
+            "diagnostics_summary": "诊断提示（1）\n- [equation_table_format] 1 个公式编号: skipped",
         }
     ]

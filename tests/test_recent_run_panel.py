@@ -89,6 +89,27 @@ def test_recent_run_panel_renders_quiet_status_and_meta_lines():
         panel.close()
 
 
+def test_recent_run_panel_appends_diagnostics_to_summary():
+    _app()
+    panel = RecentRunPanel()
+    try:
+        state = RecentRunState(
+            status="success",
+            title="最近结果",
+            summary="本次执行已完成",
+            diagnostics_count=1,
+            diagnostics_summary="诊断提示（1）\n- [equation_table_format] 1 个公式编号: skipped",
+        )
+
+        panel.set_state(state)
+
+        assert panel._summary.text() == (
+            "本次执行已完成\n诊断提示（1）\n- [equation_table_format] 1 个公式编号: skipped"
+        )
+    finally:
+        panel.close()
+
+
 def test_recent_run_panel_wraps_meta_line_for_long_paths():
     _app()
     panel = RecentRunPanel()

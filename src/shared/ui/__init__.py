@@ -5,12 +5,14 @@ from importlib import import_module
 
 _EXPORT_MAP: dict[str, tuple[str, str]] = {
     "Badge": (".badge", "Badge"),
+    "AdaptivePairRow": (".adaptive_pair_row", "AdaptivePairRow"),
     "CalendarMonth": (".calendar_month", "CalendarMonth"),
     "ChatBubble": (".chat_bubble", "ChatBubble"),
     "CommandPalette": (".command_palette", "CommandPalette"),
     "ConfigListWidget": (".config_list_widget", "ConfigListWidget"),
     "ContextMenu": (".context_menu", "ContextMenu"),
     "DataTable": (".data_table", "DataTable"),
+    "DashedSeparator": (".dashed_separator", "DashedSeparator"),
     "DatePicker": (".date_picker", "DatePicker"),
     "Descriptions": (".descriptions", "Descriptions"),
     "Divider": (".divider", "Divider"),
@@ -40,9 +42,14 @@ _EXPORT_MAP: dict[str, tuple[str, str]] = {
     "Spin": (".spin", "Spin"),
     "SplitPane": (".split_pane", "SplitPane"),
     "StyledComboBox": (".styled_combo_box", "StyledComboBox"),
+    "StyledSpinBox": (".styled_spin_box", "StyledSpinBox"),
+    "SummaryGrid": (".summary_grid", "SummaryGrid"),
+    "SummaryGridItem": (".summary_grid", "SummaryGridItem"),
     "SurfaceCard": (".surface_card", "SurfaceCard"),
     "TabBar": (".tab_bar", "TabBar"),
     "TagChip": (".tag_chip", "TagChip"),
+    "TemplateFormGrid": (".template_form_layout", "TemplateFormGrid"),
+    "TemplateSplitColumns": (".template_form_layout", "TemplateSplitColumns"),
     "TextArea": (".text_area", "TextArea"),
     "ThemedRadioButton": (".themed_radio_button", "ThemedRadioButton"),
     "ThemedSlider": (".themed_slider", "ThemedSlider"),
@@ -54,6 +61,7 @@ _EXPORT_MAP: dict[str, tuple[str, str]] = {
     "build_button_stylesheet": (".button_style", "build_button_stylesheet"),
     "build_checkbox_stylesheet": (".selection_control_style", "build_checkbox_stylesheet"),
     "build_text_input_stylesheet": (".input_style", "build_text_input_stylesheet"),
+    "template_form_row": (".template_form_layout", "template_form_row"),
 }
 
 __all__ = list(_EXPORT_MAP)

@@ -12,7 +12,7 @@ class StepperItem(QWidget):
         super().__init__(parent)
         self._status = "queued"
         self._progress = 0
-        self.setFixedHeight(36)
+        self.setFixedHeight(get_theme().control_height_md)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 0, 8, 0)

@@ -6,6 +6,7 @@ from src.qt_api import (
     QButtonGroup,
     QHBoxLayout,
     QPushButton,
+    QSizePolicy,
     QWidget,
     Qt,
     Signal,
@@ -42,6 +43,8 @@ class SegmentedControl(QWidget):
         super().__init__(parent)
         self._segments = []
         self._current_index = 0
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self._setup_ui()
         self._apply_theme()
@@ -70,6 +73,7 @@ class SegmentedControl(QWidget):
             f"""
             SegmentedControl {{
                 background: {t.bg_hover};
+                border: 1px solid {t.border_light};
                 border-radius: {t.radius_full}px;
             }}
             """
@@ -93,12 +97,13 @@ class SegmentedControl(QWidget):
         btn.setCheckable(True)
         btn.setCursor(Qt.PointingHandCursor)
         btn.setProperty("data", data)
+        btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         index = len(self._segments)
         btn.clicked.connect(lambda: self.set_current_index(index))
 
         self._button_group.addButton(btn, index)
-        self._layout.addWidget(btn)
+        self._layout.addWidget(btn, 1)
         self._segments.append(btn)
 
         # 第一个按钮默认选中
@@ -153,10 +158,10 @@ class SegmentedControl(QWidget):
                 background: {t.primary if is_checked else 'transparent'};
                 color: {t.text_on_primary if is_checked else t.text_secondary};
                 border: none;
-                border-radius: {t.radius_full}px;
+                border-radius: {max(t.radius_full - 2, t.radius_sm)}px;
                 padding: {t.button_padding_y}px {t.button_padding_x}px;
                 font-size: {t.font_size_sm}px;
-                font-weight: {500 if is_checked else 400};
+                font-weight: {t.font_weight_emphasis if is_checked else 500};
                 min-height: 28px;
             }}
             QPushButton:hover {{

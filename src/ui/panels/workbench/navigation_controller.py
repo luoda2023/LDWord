@@ -80,10 +80,11 @@ class WorkbenchNavigationController:
         self,
         *,
         strategy_state: "StrategySummaryState",
+        scene_dirty: bool,
         template_dirty: bool,
     ) -> dict[str, str]:
         fallback = self._config_management_detail.navigation_snapshot()
-        if template_dirty:
+        if scene_dirty or template_dirty:
             return fallback
         if strategy_state.source_type == "scene":
             subtitle = f"{strategy_state.name} · {strategy_state.enabled_module_count} 个模块"
@@ -111,16 +112,17 @@ class WorkbenchNavigationController:
             ),
         )
 
-    def refresh_config_management_card(self, *, strategy_state: "StrategySummaryState", template_dirty: bool) -> None:
+    def refresh_config_management_card(self, *, strategy_state: "StrategySummaryState", scene_dirty: bool, template_dirty: bool) -> None:
         self.update_navigation_card(
             "config_management",
             self.build_config_management_snapshot(
                 strategy_state=strategy_state,
+                scene_dirty=scene_dirty,
                 template_dirty=template_dirty,
             ),
         )
 
-    def refresh_fixed_cards(self, *, cached_document_path: str, strategy_state: "StrategySummaryState", execution_worker, template_dirty: bool) -> None:
+    def refresh_fixed_cards(self, *, cached_document_path: str, strategy_state: "StrategySummaryState", execution_worker, scene_dirty: bool, template_dirty: bool) -> None:
         self.refresh_quick_execute_card(
             cached_document_path=cached_document_path,
             strategy_state=strategy_state,
@@ -128,6 +130,7 @@ class WorkbenchNavigationController:
         )
         self.refresh_config_management_card(
             strategy_state=strategy_state,
+            scene_dirty=scene_dirty,
             template_dirty=template_dirty,
         )
 

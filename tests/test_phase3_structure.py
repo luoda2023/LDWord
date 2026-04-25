@@ -153,6 +153,38 @@ def test_heading_numbering_logic():
     print("  ✅ M06 模板化编号 — 所有格式通过")
 
 
+def test_heading_numbering_logic_uses_reference_core_style_for_parent_segments():
+    """M06: 多级 chain 中 parent 段应使用 source level 的 reference_core_style。"""
+    from src.modules.structure.heading_numbering import _format_level_number
+    from src.config.template import HeadingLevelBindingConfig
+
+    parent = HeadingLevelBindingConfig(
+        enabled=True,
+        display_template="第{cn}章",
+        display_core_style="chinese_lower",
+        reference_core_style="roman_lower",
+        chain="current_only",
+        title_separator=" ",
+    )
+    child = HeadingLevelBindingConfig(
+        enabled=True,
+        display_template="{nn}",
+        display_core_style="arabic",
+        chain="parent.current",
+        chain_separator=".",
+        title_separator=" ",
+    )
+    counters = [0, 1, 1, 0, 0, 0, 0, 0, 0, 0]
+    level_bindings = {
+        "heading1": parent,
+        "heading2": child,
+    }
+
+    result = _format_level_number(2, counters, child, level_bindings)
+
+    assert result == "i.1 ", f"Expected 'i.1 ', got {result!r}"
+
+
 def test_should_skip_numbering_edge_cases():
     """M06: _should_skip_numbering 应覆盖常见跳过边界。"""
     from src.modules.structure.heading_numbering import _should_skip_numbering

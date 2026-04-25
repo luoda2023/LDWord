@@ -8,11 +8,14 @@ from PySide6.QtCore import QThread
 from src.config.resolver import resolve_config
 from src.config.scene import SceneWorkspace
 from src.config.template import TemplateConfig
+from src.execution_diagnostics import build_execution_diagnostics
 from src.modules.registry import create_all_modules
 from src.pipeline.runner import Pipeline
 from src.pipeline.scheduler import select_enabled_modules
 from src.qt_api import QObject, Signal
 from src.report_writer import write_json_report, write_markdown_report
+
+from .diagnostics import log_best_effort_shutdown_failure
 
 
 class WorkbenchProductionRunner:
@@ -24,10 +27,12 @@ class WorkbenchProductionRunner:
         doc_path: str,
         template: TemplateConfig | None,
         scene: SceneWorkspace | None,
+        session_overrides: dict[str, object] | None = None,
     ) -> None:
         self.doc_path = str(doc_path or "")
         self._template = template
         self._scene = scene
+        self._session_overrides = dict(session_overrides or {})
 
     def run(self, progress_cb, cancel_check):
         input_path = Path(self.doc_path)
@@ -36,7 +41,11 @@ class WorkbenchProductionRunner:
 
         template = self._template or TemplateConfig()
         scene = self._scene or SceneWorkspace()
-        config = resolve_config(template, scene)
+        config = resolve_config(
+            template,
+            scene,
+            session_overrides=self._session_overrides,
+        )
 
         modules = create_all_modules()
         enabled, _auto_pruned = select_enabled_modules(modules, config.is_module_enabled)
@@ -52,6 +61,7 @@ class WorkbenchProductionRunner:
         )
         result = pipeline.execute(str(input_path))
         elapsed = time.perf_counter() - started_at
+        diagnostics = build_execution_diagnostics(result)
 
         status = getattr(result, "status", "failed") or "failed"
         if status == "cancelled":
@@ -67,6 +77,8 @@ class WorkbenchProductionRunner:
                 "report_paths": [],
                 "failed_count": failed_count,
                 "error_text": str(getattr(result, "error", "") or ""),
+                "diagnostics_count": int(diagnostics["count"]),
+                "diagnostics_summary": str(diagnostics["summary"] or ""),
             }
 
         output_path = ""
@@ -75,12 +87,17 @@ class WorkbenchProductionRunner:
             output_path = str(output_paths.get("final") or "")
 
         report_paths: list[str] = []
-        if output_path:
+        output_cfg = getattr(config, "output", None)
+        report_json_enabled = bool(getattr(output_cfg, "report_json", True))
+        report_markdown_enabled = bool(getattr(output_cfg, "report_markdown", True))
+        final_output_path = Path(output_path) if output_path else None
+
+        if report_json_enabled:
             report_json = output_dir / f"{input_path.stem}_changes.json"
             write_json_report(
                 result,
                 input_path=input_path,
-                output_path=Path(output_path),
+                output_path=final_output_path,
                 report_path=report_json,
                 elapsed=elapsed,
                 modules_enabled=len(enabled),
@@ -88,6 +105,7 @@ class WorkbenchProductionRunner:
             )
             report_paths.append(str(report_json))
 
+        if report_markdown_enabled:
             report_md = output_dir / f"{input_path.stem}_changes.md"
             write_markdown_report(
                 result,
@@ -105,6 +123,8 @@ class WorkbenchProductionRunner:
             "report_paths": report_paths,
             "failed_count": failed_count,
             "error_text": str(getattr(result, "error", "") or ""),
+            "diagnostics_count": int(diagnostics["count"]),
+            "diagnostics_summary": str(diagnostics["summary"] or ""),
         }
 
 
@@ -149,8 +169,8 @@ class ThreadedExecutionHandle(QObject):
     def shutdown(self, timeout_ms: int | None = 1000) -> None:
         try:
             self.request_cancel()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_best_effort_shutdown_failure("execution thread handle", "request_cancel", exc)
 
         thread = getattr(self, "_thread", None)
         if thread is None:
@@ -159,7 +179,8 @@ class ThreadedExecutionHandle(QObject):
         is_running = getattr(thread, "isRunning", None)
         try:
             running = bool(is_running()) if callable(is_running) else True
-        except Exception:
+        except Exception as exc:
+            log_best_effort_shutdown_failure("execution thread handle", "thread.isRunning", exc)
             running = True
 
         if not running:
@@ -169,8 +190,8 @@ class ThreadedExecutionHandle(QObject):
         if callable(quit_thread):
             try:
                 quit_thread()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_best_effort_shutdown_failure("execution thread handle", "thread.quit", exc)
 
         wait_thread = getattr(thread, "wait", None)
         if callable(wait_thread):
@@ -182,10 +203,10 @@ class ThreadedExecutionHandle(QObject):
             except TypeError:
                 try:
                     wait_thread()
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as exc:
+                    log_best_effort_shutdown_failure("execution thread handle", "thread.wait", exc)
+            except Exception as exc:
+                log_best_effort_shutdown_failure("execution thread handle", "thread.wait", exc)
 
 
 __all__ = ["ThreadedExecutionHandle", "WorkbenchProductionRunner"]

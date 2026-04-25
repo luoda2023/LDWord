@@ -35,6 +35,26 @@ EN_ALIASES: dict[str, list[str]] = {
 }
 
 
+def canonicalize_font_name(font_name: str) -> str:
+    normalized = str(font_name or "").strip()
+    if not normalized:
+        return normalized
+
+    repaired = _repair_utf8_gbk_mojibake(normalized)
+    if repaired:
+        normalized = repaired
+
+    for canonical, aliases in CN_ALIASES.items():
+        if normalized == canonical or normalized in aliases:
+            return canonical
+
+    for canonical in EN_ALIASES:
+        if normalized.casefold() == canonical.casefold():
+            return canonical
+
+    return normalized
+
+
 @lru_cache(maxsize=1)
 def list_system_fonts() -> set[str]:
     font_dirs = _get_font_dirs()
@@ -95,7 +115,7 @@ def resolve_font(
     lang: str = "auto",
     fallback: bool = True,
 ) -> str:
-    normalized = str(font_name or "").strip()
+    normalized = canonicalize_font_name(font_name)
     if not normalized:
         return font_name
 
@@ -143,7 +163,7 @@ def _match_available_font(name: str) -> str | None:
             for alias in aliases:
                 matched = _match_stem(alias, fonts)
                 if matched is not None:
-                    return name
+                    return matched
 
     for canonical, stems in EN_ALIASES.items():
         if name == canonical:
@@ -168,6 +188,17 @@ def _normalize_font_name(name: str) -> str:
         ch for ch in str(name or "").strip().casefold()
         if not ch.isspace() and ch not in "-_.,()[]{}"
     )
+
+
+def _repair_utf8_gbk_mojibake(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return raw
+    try:
+        repaired = raw.encode("gbk").decode("utf-8")
+    except UnicodeError:
+        return raw
+    return repaired if repaired else raw
 
 
 def _is_cn(name: str, lang: str) -> bool:

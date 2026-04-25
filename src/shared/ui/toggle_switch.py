@@ -26,6 +26,7 @@ class ToggleSwitch(QAbstractButton):
     TRACK_H = 24
     THUMB_D = 18
     THUMB_MARGIN = 3
+    OFF_TRACK_BORDER_W = 1.0
 
     def __init__(self, parent=None, *, checked: bool = False):
         super().__init__(parent)
@@ -64,6 +65,30 @@ class ToggleSwitch(QAbstractButton):
         self._anim.start()
         self.toggled_signal.emit(checked)
 
+    def _has_off_track_border(self) -> bool:
+        return (not self.isChecked()) and self.isEnabled()
+
+    def _track_pen_width(self) -> float:
+        return self.OFF_TRACK_BORDER_W if self._has_off_track_border() else 0.0
+
+    def _track_rect(self) -> QRectF:
+        pen_width = self._track_pen_width()
+        if pen_width <= 0:
+            return QRectF(0.0, 0.0, float(self.width()), float(self.height()))
+
+        # Keep the OFF-state border fully inside the widget bounds so the
+        # capsule edge does not lose half of its stroke to clipping.
+        inset = pen_width / 2.0
+        return QRectF(
+            inset,
+            inset,
+            float(self.width()) - pen_width,
+            float(self.height()) - pen_width,
+        )
+
+    def _thumb_y(self, track_rect: QRectF) -> float:
+        return track_rect.y() + (track_rect.height() - self.THUMB_D) / 2.0
+
     # ── 绘制 ──
     def paintEvent(self, event) -> None:
         t = get_theme()  # 每次绘制时动态取色
@@ -79,18 +104,19 @@ class ToggleSwitch(QAbstractButton):
             track_color = QColor(t.switch_off)
 
         p.setBrush(QBrush(track_color))
+        track_rect = self._track_rect()
         # OFF 状态增加极其轻微的边框勾勒
-        if not self.isChecked() and self.isEnabled():
-            p.setPen(QPen(QColor(t.border), 1))
+        if self._has_off_track_border():
+            p.setPen(QPen(QColor(t.border), self.OFF_TRACK_BORDER_W))
         else:
             p.setPen(Qt.NoPen)
-            
-        p.drawRoundedRect(QRectF(0, 0, self.TRACK_W, self.TRACK_H),
-                          self.TRACK_H / 2, self.TRACK_H / 2)
+
+        radius = track_rect.height() / 2.0
+        p.drawRoundedRect(track_rect, radius, radius)
 
         p.setPen(Qt.NoPen)
         # 滑块和柔软阴影 (Soft Shadow)
-        thumb_y = (self.TRACK_H - self.THUMB_D) / 2
+        thumb_y = self._thumb_y(track_rect)
         
         p.setBrush(QBrush(QColor(0, 0, 0, 20)))
         p.drawEllipse(QRectF(self._thumb_x, thumb_y + 1, self.THUMB_D, self.THUMB_D))

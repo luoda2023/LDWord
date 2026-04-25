@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+from .diagnostics import log_path_fallback_failure
+
 if TYPE_CHECKING:
     from .quick_execution_detail import QuickExecutionDetail
 
@@ -70,32 +72,52 @@ class WorkbenchDocumentPathController:
         self._quick_execution_detail.set_document_path(file_path)
 
     @staticmethod
-    def _normalize_any_path(file_path: str | None) -> str | None:
+    def _coerce_candidate_path(file_path: str | None) -> tuple[str | None, Path | None]:
         cleaned = str(file_path or "").strip()
         if not cleaned:
-            return None
+            return None, None
         try:
-            candidate = Path(cleaned).expanduser()
-        except Exception:
+            return cleaned, Path(cleaned).expanduser()
+        except Exception as exc:
+            log_path_fallback_failure("document path controller", "expanduser", cleaned, exc)
+            return cleaned, None
+
+    @classmethod
+    def _normalize_any_path(cls, file_path: str | None) -> str | None:
+        cleaned, candidate = cls._coerce_candidate_path(file_path)
+        if not cleaned:
+            return None
+        if candidate is None:
             return cleaned
-        if candidate.exists():
+        try:
+            exists = candidate.exists()
+        except Exception as exc:
+            log_path_fallback_failure("document path controller", "exists probe", cleaned, exc)
+            return str(candidate)
+        if exists:
             try:
                 return str(candidate.resolve())
-            except Exception:
+            except Exception as exc:
+                log_path_fallback_failure("document path controller", "resolve", cleaned, exc)
                 return str(candidate)
         return str(candidate)
 
     @classmethod
     def _normalize_existing_path(cls, file_path: str | None) -> str | None:
-        normalized = cls._normalize_any_path(file_path)
-        if not normalized:
+        cleaned, candidate = cls._coerce_candidate_path(file_path)
+        if not cleaned or candidate is None:
             return None
         try:
-            if not Path(normalized).exists():
+            if not candidate.exists():
                 return None
-        except Exception:
+        except Exception as exc:
+            log_path_fallback_failure("document path controller", "existing-path check", cleaned, exc)
             return None
-        return normalized
+        try:
+            return str(candidate.resolve())
+        except Exception as exc:
+            log_path_fallback_failure("document path controller", "resolve", cleaned, exc)
+            return str(candidate)
 
 
 __all__ = ["WorkbenchDocumentPathController"]

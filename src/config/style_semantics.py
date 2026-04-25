@@ -117,6 +117,46 @@ SPECIAL_INDENT_NONE = "none"
 SPECIAL_INDENT_FIRST_LINE = "first_line"
 SPECIAL_INDENT_HANGING = "hanging"
 CM_TO_PT = 72.0 / 2.54
+MM_TO_PT = 72.0 / 25.4
+IN_TO_PT = 72.0
+
+SPACING_UNIT_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("pt", "磅"),
+    ("lines", "行"),
+    ("cm", "cm"),
+    ("mm", "毫米"),
+    ("in", "英寸"),
+    ("auto", "自动"),
+)
+
+SPACING_UNIT_VALUE_TO_LABEL = {
+    value: label for value, label in SPACING_UNIT_OPTIONS
+}
+
+SPACING_UNIT_ALIASES = {
+    "pt": "pt",
+    "point": "pt",
+    "points": "pt",
+    "磅": "pt",
+    "line": "lines",
+    "lines": "lines",
+    "行": "lines",
+    "cm": "cm",
+    "centimeter": "cm",
+    "centimeters": "cm",
+    "厘米": "cm",
+    "mm": "mm",
+    "millimeter": "mm",
+    "millimeters": "mm",
+    "毫米": "mm",
+    "in": "in",
+    "inch": "in",
+    "inches": "in",
+    "英寸": "in",
+    "auto": "auto",
+    "automatic": "auto",
+    "自动": "auto",
+}
 
 
 def normalize_font_size_token(text: str) -> str:
@@ -180,6 +220,25 @@ def parse_font_size_input(text: str) -> float:
     return float(numeric_token)
 
 
+def resolve_style_size_pt(style_config: Any, *, default: float | None = None) -> float | None:
+    size_pt = getattr(style_config, "size_pt", None)
+    try:
+        numeric = float(size_pt)
+    except (TypeError, ValueError):
+        numeric = None
+    if numeric is not None and numeric > 0:
+        return numeric
+
+    size_display = getattr(style_config, "size_display", "")
+    if size_display:
+        try:
+            return parse_font_size_input(str(size_display))
+        except (TypeError, ValueError):
+            pass
+
+    return default
+
+
 def normalize_line_spacing_type(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -220,9 +279,21 @@ def normalize_indent_unit(unit: Any) -> str:
     raw = str(unit or "").strip().lower()
     if raw in {"pt", "point", "points", "磅"}:
         return "pt"
-    if raw in {"cm", "centimeter", "centimeters"}:
+    if raw in {"cm", "centimeter", "centimeters", "厘米"}:
         return "cm"
     return "chars"
+
+
+def normalize_spacing_unit(unit: Any) -> str:
+    raw = str(unit or "").strip()
+    if not raw:
+        return "pt"
+    return SPACING_UNIT_ALIASES.get(raw.lower(), SPACING_UNIT_ALIASES.get(raw, "pt"))
+
+
+def spacing_unit_combo_label(unit: Any) -> str:
+    normalized = normalize_spacing_unit(unit)
+    return SPACING_UNIT_VALUE_TO_LABEL.get(normalized, normalized)
 
 
 def normalize_special_indent_mode(mode: Any) -> str:
@@ -242,6 +313,17 @@ def normalize_indent_value(value: Any) -> float:
     return max(0.0, numeric)
 
 
+def normalize_spacing_value(value: Any, unit: Any = "pt") -> float:
+    normalized_unit = normalize_spacing_unit(unit)
+    if normalized_unit == "auto":
+        return 0.0
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = 0.0
+    return max(0.0, numeric)
+
+
 def normalize_indent_size_pt(size_pt: Any) -> float:
     try:
         if isinstance(size_pt, str):
@@ -253,6 +335,21 @@ def normalize_indent_size_pt(size_pt: Any) -> float:
     return numeric if numeric > 0 else 12.0
 
 
+def spacing_editor_config(unit: Any) -> dict[str, float | int | bool]:
+    normalized = normalize_spacing_unit(unit)
+    if normalized == "lines":
+        return {"min": 0.0, "max": 10.0, "step": 0.5, "decimals": 1, "enabled": True}
+    if normalized == "cm":
+        return {"min": 0.0, "max": 10.0, "step": 0.1, "decimals": 2, "enabled": True}
+    if normalized == "mm":
+        return {"min": 0.0, "max": 100.0, "step": 0.1, "decimals": 1, "enabled": True}
+    if normalized == "in":
+        return {"min": 0.0, "max": 5.0, "step": 0.1, "decimals": 2, "enabled": True}
+    if normalized == "auto":
+        return {"min": 0.0, "max": 0.0, "step": 1.0, "decimals": 0, "enabled": False}
+    return {"min": 0.0, "max": 80.0, "step": 1.0, "decimals": 1, "enabled": True}
+
+
 def config_indent_value_to_pt(value: Any, size_pt: Any, unit: str = "chars") -> float:
     normalized_value = normalize_indent_value(value)
     normalized_unit = normalize_indent_unit(unit)
@@ -261,6 +358,33 @@ def config_indent_value_to_pt(value: Any, size_pt: Any, unit: str = "chars") -> 
     if normalized_unit == "cm":
         return normalized_value * CM_TO_PT
     return normalized_value * normalize_indent_size_pt(size_pt)
+
+
+def spacing_value_to_pt(value: Any, unit: Any) -> float | None:
+    normalized = normalize_spacing_unit(unit)
+    numeric = normalize_spacing_value(value, normalized)
+    if normalized == "pt":
+        return numeric
+    if normalized == "cm":
+        return numeric * CM_TO_PT
+    if normalized == "mm":
+        return numeric * MM_TO_PT
+    if normalized == "in":
+        return numeric * IN_TO_PT
+    return None
+
+
+def spacing_value_to_twips(value: Any, unit: Any) -> int | None:
+    pt_value = spacing_value_to_pt(value, unit)
+    if pt_value is None:
+        return None
+    return int(round(pt_value * 20))
+
+
+def spacing_value_to_line_hundredths(value: Any, unit: Any) -> int | None:
+    if normalize_spacing_unit(unit) != "lines":
+        return None
+    return int(round(normalize_spacing_value(value, unit) * 100))
 
 
 def resolve_pt_indent_value(value_pt: Any, unit: str, size_pt: Any) -> float:
@@ -275,6 +399,41 @@ def resolve_pt_indent_value(value_pt: Any, unit: str, size_pt: Any) -> float:
         return pt_value
     normalized_size = normalize_indent_size_pt(size_pt)
     return pt_value / normalized_size if normalized_size > 0 else pt_value
+
+
+def resolve_style_paragraph_spacing(style_config: Any, which: str) -> dict[str, float | str]:
+    if which not in {"before", "after"}:
+        raise ValueError(f"unsupported paragraph spacing slot: {which}")
+    unit = normalize_spacing_unit(getattr(style_config, f"space_{which}_unit", "pt"))
+    value = normalize_spacing_value(getattr(style_config, f"space_{which}_pt", 0.0), unit)
+    return {"value": value, "unit": unit}
+
+
+def resolve_spacing_render_pt(
+    value: Any,
+    unit: Any,
+    *,
+    line_height_pt: float | None = None,
+) -> float:
+    normalized = normalize_spacing_unit(unit)
+    numeric = normalize_spacing_value(value, normalized)
+    if normalized == "lines":
+        return numeric * max(0.0, float(line_height_pt or 0.0))
+    if normalized == "auto":
+        return 0.0
+    return float(spacing_value_to_pt(numeric, normalized) or 0.0)
+
+
+def format_spacing_value(value: Any, unit: Any) -> str:
+    normalized = normalize_spacing_unit(unit)
+    numeric = normalize_spacing_value(value, normalized)
+    if normalized == "auto":
+        return "自动"
+    if normalized == "lines":
+        return f"{numeric:g} 行"
+    if normalized == "pt":
+        return f"{numeric:g} 磅"
+    return f"{numeric:g} {normalized}"
 
 
 def resolve_style_special_indent(style_config: Any) -> dict[str, float | str]:

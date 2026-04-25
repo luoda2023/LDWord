@@ -44,6 +44,7 @@ class HeadingDetailState:
     chain_separator: str
     reference_core_style: str
     title_separator: str
+    start_at: int
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class HeadingEditorEnableState:
     chain_separator: bool
     reference_core_style: bool
     title_separator: bool
+    start_at: bool
     use_raw_toggle: bool
     raw_template: bool
 
@@ -105,6 +107,7 @@ def build_detail_state(level: int, binding) -> HeadingDetailState:
         chain_separator=getattr(binding, "chain_separator", None) or ".",
         reference_core_style=getattr(binding, "reference_core_style", None) or "arabic",
         title_separator=getattr(binding, "title_separator", None) or "",
+        start_at=getattr(binding, "start_at", 1) or 1,
     )
 
 
@@ -114,10 +117,10 @@ def should_show_chain_separator(chain_value: str | None) -> bool:
 
 def build_editor_enable_state(
     *,
-    is_custom_mode: bool,
+    is_binding_overridden: bool,
     use_raw_template: bool,
 ) -> HeadingEditorEnableState:
-    if not is_custom_mode:
+    if not is_binding_overridden:
         return HeadingEditorEnableState(
             prefix=False,
             core_style=False,
@@ -126,6 +129,7 @@ def build_editor_enable_state(
             chain_separator=False,
             reference_core_style=False,
             title_separator=False,
+            start_at=False,
             use_raw_toggle=False,
             raw_template=False,
         )
@@ -138,13 +142,14 @@ def build_editor_enable_state(
         chain_separator=True,
         reference_core_style=True,
         title_separator=True,
+        start_at=True,
         use_raw_toggle=True,
         raw_template=use_raw_template,
     )
 
 
 def build_expert_toggle_text(is_expanded: bool) -> str:
-    return "▴ 隐藏高级选项" if is_expanded else "▾ 显示更多高级选项"
+    return "▴ 收起表达式编辑" if is_expanded else "▾ 展开表达式编辑"
 
 
 def build_non_numbered_toggle_text(is_expanded: bool) -> str:

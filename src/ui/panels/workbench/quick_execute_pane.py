@@ -16,7 +16,7 @@ class QuickExecutePane(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        layout.setSpacing(4)
 
         self._title = QLabel("\u5feb\u901f\u6267\u884c")
         self._title.setObjectName("wb_quick_execute_title")

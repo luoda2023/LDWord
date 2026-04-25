@@ -70,6 +70,15 @@ def _materialize_value(type_hint: Any, value: Any) -> Any:
     if dataclass_type is not None and isinstance(value, Mapping):
         return dict_to_dataclass(dataclass_type, value)
 
+    list_item_type = _resolve_list_item_dataclass_type(type_hint)
+    if list_item_type is not None and isinstance(value, list):
+        return [
+            dict_to_dataclass(list_item_type, item)
+            if isinstance(item, Mapping)
+            else item
+            for item in value
+        ]
+
     dict_value_type = _resolve_dict_value_dataclass_type(type_hint)
     if dict_value_type is not None and isinstance(value, Mapping):
         return {
@@ -115,4 +124,19 @@ def _resolve_dict_value_dataclass_type(type_hint: Any) -> type | None:
     value_type = args[1]
     if isinstance(value_type, type) and is_dataclass(value_type):
         return value_type
+    return None
+
+
+def _resolve_list_item_dataclass_type(type_hint: Any) -> type | None:
+    origin = get_origin(type_hint)
+    if origin is not list:
+        return None
+
+    args = get_args(type_hint)
+    if len(args) != 1:
+        return None
+
+    item_type = args[0]
+    if isinstance(item_type, type) and is_dataclass(item_type):
+        return item_type
     return None

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from docx.shared import Cm
 
 from src.modules.base import BaseModule, ModuleMeta
+from src.shared.engine.ooxml_ops import qn, find
 
 if TYPE_CHECKING:
     from docx import Document
@@ -30,6 +31,15 @@ PAPER_SIZES: dict[str, tuple[float, float]] = {
     "LEGAL": (21.59, 35.56),
     "16K": (18.4, 26.0),
 }
+
+
+def _section_has_explicit_orientation(section) -> bool:
+    """Check whether a section's XML has an explicit w:orient attribute."""
+    sect_pr = section._sectPr
+    pg_sz = find(sect_pr, "w:pgSz")
+    if pg_sz is None:
+        return False
+    return pg_sz.get(qn("w:orient")) is not None
 
 
 class PageSetupModule(BaseModule):
@@ -62,18 +72,24 @@ class PageSetupModule(BaseModule):
             paper_key = "A4"
         paper_w, paper_h = PAPER_SIZES[paper_key]
 
+        # 模板默认方向
+        template_landscape = getattr(ps, "orientation", "portrait") == "landscape"
+
         for idx, section in enumerate(doc.sections):
             old_width = section.page_width
             old_top = section.top_margin
 
-            # 检测横向/纵向
-            is_landscape = (
-                section.page_width is not None
-                and section.page_height is not None
-                and section.page_width > section.page_height
-            )
+            # 判断该节方向：有显式 orient 属性 → 保留；否则 → 用模板默认
+            if _section_has_explicit_orientation(section):
+                is_landscape = (
+                    section.page_width is not None
+                    and section.page_height is not None
+                    and section.page_width > section.page_height
+                )
+            else:
+                is_landscape = template_landscape
 
-            # 设置纸张大小（保持横纵向）
+            # 设置纸张大小（按方向交换宽高）
             if is_landscape:
                 section.page_width = Cm(paper_h)
                 section.page_height = Cm(paper_w)
@@ -102,7 +118,9 @@ class PageSetupModule(BaseModule):
                 before=f"width={old_width}, top={old_top}",
                 after=(
                     f"paper={paper_key}, "
+                    f"orient={'landscape' if is_landscape else 'portrait'}, "
                     f"margin=({ps.margin.top_cm}/{ps.margin.bottom_cm}/"
                     f"{ps.margin.left_cm}/{ps.margin.right_cm})cm"
                 ),
             )
+

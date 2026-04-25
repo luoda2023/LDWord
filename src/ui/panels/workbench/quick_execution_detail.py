@@ -21,10 +21,16 @@ from src.qt_api import (
     QWidget,
     Signal,
 )
-from src.qt_api import QPainter, QPen, QColor, QIcon, QPropertyAnimation, QProgressBar
+from src.qt_api import QIcon, QPropertyAnimation, QProgressBar
+from src.shared.ui import DashedSeparator
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
 from src.shared.ui.feature_toggle_row import FeatureToggleRow
+from src.shared.engine.document_structure_preview import (
+    StructurePreviewItem,
+    analyze_document_structure,
+    suppression_selectors_before,
+)
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.theme import bind_theme, get_theme
 from src.ui.icons.catalog import get_icon
@@ -39,66 +45,20 @@ from .quick_execution_presenter import (
     build_ready_status,
     build_running_status,
 )
+from src.config.library import (
+    default_scene_descriptor,
+    get_template_entry,
+    list_scene_descriptors,
+    load_scene_from_library,
+)
 from src.config.scene import SceneWorkspace
 from .scene_presets import (
     LEGACY_FEATURE_GROUP_MAP,
     UI_CAPABILITY_GROUPS,
     UI_GROUP_MAP,
-    SCENE_METAS,
-    SCENE_META_MAP,
-    build_scene_summary,
-    create_scene,
     get_group_enabled,
     set_group_enabled,
 )
-
-
-class _DashedLine(QWidget):
-    """Horizontal dashed separator with built-in vertical margin."""
-
-    def __init__(self, color: str = "#CBD5E1", parent=None):
-        super().__init__(parent)
-        self._color = QColor(color)
-        self.setFixedHeight(13)  # 6px top + 1px line + 6px bottom
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
-
-    def set_color(self, color: str) -> None:
-        self._color = QColor(color)
-        self.update()
-
-    def paintEvent(self, _event) -> None:
-        p = QPainter(self)
-        pen = QPen(self._color, 1, Qt.CustomDashLine)
-        pen.setDashPattern([5, 3])
-        p.setPen(pen)
-        y = self.height() // 2
-        p.drawLine(0, y, self.width(), y)
-        p.end()
-
-
-class _DashedVLine(QWidget):
-    """Vertical dashed separator drawn via QPainter."""
-
-    def __init__(self, color: str = "#CBD5E1", parent=None):
-        super().__init__(parent)
-        self._color = QColor(color)
-        self.setFixedWidth(17)  # 8px left + 1px line + 8px right
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
-
-    def set_color(self, color: str) -> None:
-        self._color = QColor(color)
-        self.update()
-
-    def paintEvent(self, _event) -> None:
-        p = QPainter(self)
-        pen = QPen(self._color, 1, Qt.CustomDashLine)
-        pen.setDashPattern([5, 3])
-        p.setPen(pen)
-        x = self.width() // 2
-        p.drawLine(x, 0, x, self.height())
-        p.end()
 
 
 class QuickExecutionDetail(QWidget):
@@ -110,6 +70,8 @@ class QuickExecutionDetail(QWidget):
     execute_requested = Signal()
     cancel_requested = Signal()
     document_selected = Signal(str)
+    binding_changed = Signal(object, str)
+    scene_config_changed = Signal(object)
 
     FEATURE_DEFINITIONS = FEATURE_DEFINITIONS
     FEATURE_ID_ALIASES = LEGACY_FEATURE_GROUP_MAP
@@ -121,12 +83,21 @@ class QuickExecutionDetail(QWidget):
         self._execution_running = False
         self._last_result_status = "idle"
         self._known_execution_modules: list[str] = []
-        self._current_meta = SCENE_METAS[0]
-        self._current_scene: SceneWorkspace = create_scene(self._current_meta.scene_id)
+        self._structure_items: list[StructurePreviewItem] = []
+        self._binding_signal_blocked = False
+        self._scene_syncing = False
+        self._scene_descriptors = list_scene_descriptors()
+        initial_scene = default_scene_descriptor()
+        if initial_scene is None and self._scene_descriptors:
+            initial_scene = self._scene_descriptors[0]
+        if initial_scene is not None:
+            self._current_scene = load_scene_from_library(initial_scene.config_id)
+        else:
+            self._current_scene = SceneWorkspace(scene_id="custom", template_id="default")
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(12)
+        self._layout.setSpacing(4)
         self.setMinimumWidth(320)
         # Prevent vertical compression — scroll area must scroll, not squish
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -190,7 +161,7 @@ class QuickExecutionDetail(QWidget):
         row = QWidget(self)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(12)
+        row_layout.setSpacing(8)
 
         # Scene icon + label + combo
         self._scene_icon_label = QLabel(row)
@@ -202,13 +173,16 @@ class QuickExecutionDetail(QWidget):
         row_layout.addWidget(self._scene_text_label)
 
         self._scene_combo = StyledComboBox(self)
-        for s in SCENE_METAS:
-            self._scene_combo.addItem(s.name)
+        for descriptor in self._scene_descriptors:
+            self._scene_combo.addItem(descriptor.display_name, descriptor.config_id)
+            item_index = self._scene_combo.count() - 1
+            if descriptor.load_error:
+                self._scene_combo.setItemData(item_index, descriptor.load_error, Qt.ToolTipRole)
         self._scene_combo.currentIndexChanged.connect(self._on_scene_changed)
         row_layout.addWidget(self._scene_combo, 1)
 
         # Vertical dashed divider between scene & template
-        self._scene_tpl_divider = _DashedVLine(parent=row)
+        self._scene_tpl_divider = DashedSeparator(orientation="vertical", parent=row)
         row_layout.addWidget(self._scene_tpl_divider)
 
         # Template icon + label + combo
@@ -221,9 +195,7 @@ class QuickExecutionDetail(QWidget):
         row_layout.addWidget(self._tpl_text_label)
 
         self._template_combo = StyledComboBox(self)
-        self._template_combo.currentIndexChanged.connect(
-            lambda *_: self._emit_summary_changed()
-        )
+        self._template_combo.currentIndexChanged.connect(self._on_template_changed)
         row_layout.addWidget(self._template_combo, 1)
 
         self._scene_card.add_widget(row)
@@ -273,7 +245,7 @@ class QuickExecutionDetail(QWidget):
         strategy_row = QWidget(self._advanced_container)
         strategy_layout = QHBoxLayout(strategy_row)
         strategy_layout.setContentsMargins(0, 0, 0, 0)
-        strategy_layout.setSpacing(12)
+        strategy_layout.setSpacing(8)
 
         strategy_label = QLabel("结构策略", strategy_row)
         strategy_label.setObjectName("wb_v2_section_title")
@@ -282,7 +254,7 @@ class QuickExecutionDetail(QWidget):
         self._strategy_rebuild = QRadioButton("重建编号体系（推荐）", strategy_row)
         self._strategy_preserve = QRadioButton("保留原编号，仅修复样式", strategy_row)
         self._strategy_rebuild.setChecked(True)
-        self._strategy_rebuild.toggled.connect(lambda *_: self._emit_summary_changed())
+        self._strategy_rebuild.toggled.connect(self._on_strategy_changed)
         strategy_layout.addWidget(self._strategy_rebuild)
         strategy_layout.addWidget(self._strategy_preserve)
         strategy_layout.addStretch(1)
@@ -290,8 +262,38 @@ class QuickExecutionDetail(QWidget):
         adv_layout.addWidget(strategy_row)
 
         # Dashed separator: strategy / zones
-        self._sep_strategy_zones = _DashedLine(parent=self._advanced_container)
+        self._sep_strategy_zones = DashedSeparator(orientation="horizontal", parent=self._advanced_container)
         adv_layout.addWidget(self._sep_strategy_zones)
+
+        # ── Document structure preview / page-number start ──
+        structure_row = QWidget(self._advanced_container)
+        structure_layout = QHBoxLayout(structure_row)
+        structure_layout.setContentsMargins(0, 0, 0, 0)
+        structure_layout.setSpacing(8)
+
+        structure_title = QLabel("页码从", structure_row)
+        structure_title.setObjectName("wb_v2_section_title")
+        structure_layout.addWidget(structure_title)
+
+        self._page_start_combo = StyledComboBox(structure_row)
+        self._page_start_combo.addItem("自动判断", -1)
+        self._page_start_combo.currentIndexChanged.connect(self._on_page_start_changed)
+        structure_layout.addWidget(self._page_start_combo, 1)
+
+        self._structure_refresh_btn = QPushButton("重新识别", structure_row)
+        self._structure_refresh_btn.setFlat(True)
+        self._structure_refresh_btn.setCursor(Qt.PointingHandCursor)
+        self._structure_refresh_btn.clicked.connect(lambda: self._refresh_structure_preview(self.document_path()))
+        structure_layout.addWidget(self._structure_refresh_btn)
+        adv_layout.addWidget(structure_row)
+
+        self._structure_status_label = QLabel("选择文档后可确认页码起点", self._advanced_container)
+        self._structure_status_label.setObjectName("wb_v2_structure_status")
+        self._structure_status_label.setWordWrap(True)
+        adv_layout.addWidget(self._structure_status_label)
+
+        self._sep_structure_zones = DashedSeparator(orientation="horizontal", parent=self._advanced_container)
+        adv_layout.addWidget(self._sep_structure_zones)
 
         # ── Processing scope (zones) ──
         zones_header = QHBoxLayout()
@@ -321,7 +323,7 @@ class QuickExecutionDetail(QWidget):
         adv_layout.addWidget(self._zones_container)
 
         # Dashed separator: zones / features
-        self._sep_zones_features = _DashedLine(parent=self._advanced_container)
+        self._sep_zones_features = DashedSeparator(orientation="horizontal", parent=self._advanced_container)
         adv_layout.addWidget(self._sep_zones_features)
 
         # ── Feature toggles (2-column grid with vertical divider) ──
@@ -354,7 +356,7 @@ class QuickExecutionDetail(QWidget):
             grid.addWidget(row, r, c, Qt.AlignVCenter)
 
         # Vertical divider between two columns
-        self._features_vdiv = _DashedVLine(parent=features_grid)
+        self._features_vdiv = DashedSeparator(orientation="vertical", parent=features_grid)
         grid.addWidget(self._features_vdiv, 0, 1, num_rows, 1)
 
         adv_layout.addWidget(features_grid)
@@ -381,7 +383,7 @@ class QuickExecutionDetail(QWidget):
         row = QWidget(self)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(12)
+        row_layout.setSpacing(8)
 
         # Radio buttons
         self._output_default_radio = QRadioButton("默认", row)
@@ -487,7 +489,7 @@ class QuickExecutionDetail(QWidget):
         # Left: Execute button
         self._execute_btn = QPushButton("开始执行", self)
         self._execute_btn.setObjectName("wb_v2_execute_btn")
-        self._execute_btn.setFixedHeight(44)
+        self._execute_btn.setFixedHeight(get_theme().control_height_lg)
         self._execute_btn.setCursor(Qt.PointingHandCursor)
         self._execute_btn.setIcon(get_icon("play", 16, "#FFFFFF"))
         apply_button_variant(self._execute_btn, "primary")
@@ -497,7 +499,7 @@ class QuickExecutionDetail(QWidget):
         # Right: Compact status panel (fixed height = button height)
         self._exec_status_area = QWidget(exec_row)
         self._exec_status_area.setObjectName("wb_v2_exec_status_area")
-        self._exec_status_area.setFixedHeight(44)
+        self._exec_status_area.setFixedHeight(get_theme().control_height_lg)
         status_layout = QVBoxLayout(self._exec_status_area)
         status_layout.setContentsMargins(0, 0, 0, 0)
         status_layout.setSpacing(0)
@@ -540,42 +542,73 @@ class QuickExecutionDetail(QWidget):
     # ═══════════════════════════════════════════════════════════════════════
 
     def _on_scene_changed(self, index: int) -> None:
-        if 0 <= index < len(SCENE_METAS):
-            self._current_meta = SCENE_METAS[index]
-            self._current_scene = create_scene(self._current_meta.scene_id)
+        descriptor = self._scene_descriptors[index] if 0 <= index < len(self._scene_descriptors) else None
+        if descriptor is not None and descriptor.load_error:
+            if self._current_scene is not None:
+                restore_index = self._find_scene_index(self._current_scene.scene_id)
+                if restore_index >= 0 and restore_index != index:
+                    blocked = self._scene_combo.blockSignals(True)
+                    self._scene_combo.setCurrentIndex(restore_index)
+                    self._scene_combo.blockSignals(blocked)
+            self._append_exec_log("error", f"场景“{descriptor.name}”加载失败：{descriptor.load_error}")
+            return
+
+        scene_id = str(self._scene_combo.itemData(index) or "").strip()
+        if not scene_id and 0 <= index < len(self._scene_descriptors):
+            scene_id = self._scene_descriptors[index].config_id
+        if scene_id:
+            self._current_scene = load_scene_from_library(scene_id)
             self._apply_scene(self._current_scene)
             self._emit_summary_changed()
+            self._emit_binding_changed()
 
     def _apply_scene(self, scene: SceneWorkspace) -> None:
         """Apply a scene: update templates, zones, capabilities, strategy."""
-        meta = self._current_meta
+        self._scene_syncing = True
+        try:
+            scene_index = self._find_scene_index(scene.scene_id)
+            if scene_index >= 0:
+                was_blocked = self._scene_combo.blockSignals(True)
+                self._scene_combo.setCurrentIndex(scene_index)
+                self._scene_combo.blockSignals(was_blocked)
 
-        # Update template combo
-        was_blocked = self._template_combo.blockSignals(True)
-        self._template_combo.clear()
-        for t in meta.compatible_templates:
-            self._template_combo.addItem(t.name)
-        self._template_combo.blockSignals(was_blocked)
+            # Update template combo
+            was_blocked = self._template_combo.blockSignals(True)
+            self._template_combo.clear()
+            template_ids = list(scene.compatible_template_ids or [])
+            if not template_ids:
+                seed = str(scene.template_id or scene.default_template_id or "").strip()
+                if seed:
+                    template_ids.append(seed)
+            for template_id in template_ids:
+                entry = get_template_entry(template_id)
+                label = entry.name if entry is not None else template_id
+                self._template_combo.addItem(label, template_id)
+            for index in range(self._template_combo.count()):
+                if self._template_combo.itemData(index) == scene.template_id:
+                    self._template_combo.setCurrentIndex(index)
+                    break
+            self._template_combo.blockSignals(was_blocked)
 
-        # Update strategy radio
-        if scene.strict_mode:
-            self._strategy_rebuild.setChecked(True)
-        else:
-            self._strategy_preserve.setChecked(True)
+            # Update strategy radio
+            self._strategy_rebuild.setChecked(bool(scene.strict_mode))
+            self._strategy_preserve.setChecked(not bool(scene.strict_mode))
 
-        # Update zones
-        self._rebuild_zones(scene)
+            # Update zones
+            self._rebuild_zones(scene)
 
-        # Update capability toggles
-        for group_id, row in self._feature_rows.items():
-            group = UI_GROUP_MAP.get(group_id)
-            enabled = get_group_enabled(scene, group) if group else False
-            was_blocked_row = row.blockSignals(True)
-            row.set_checked(enabled)
-            row.blockSignals(was_blocked_row)
+            # Update capability toggles
+            for group_id, row in self._feature_rows.items():
+                group = UI_GROUP_MAP.get(group_id)
+                enabled = get_group_enabled(scene, group) if group else False
+                was_blocked_row = row.blockSignals(True)
+                row.set_checked(enabled)
+                row.blockSignals(was_blocked_row)
 
-        # Update summary
-        self._update_summary_label()
+            # Update summary
+            self._update_summary_label()
+        finally:
+            self._scene_syncing = False
 
     def _rebuild_zones(self, scene: SceneWorkspace) -> None:
         """Rebuild the zone checkbox grid from SceneWorkspace.format_scope.sections."""
@@ -597,7 +630,7 @@ class QuickExecutionDetail(QWidget):
             label = zone_labels.get(zone_id, zone_id)
             cb = QCheckBox(label, self._zones_container)
             cb.setChecked(enabled)
-            cb.toggled.connect(lambda *_: self._update_summary_label())
+            cb.toggled.connect(lambda checked, zid=zone_id: self._on_zone_toggled(zid, checked))
             self._zone_checks[zone_id] = cb
             self._zones_flow.addWidget(cb)
 
@@ -610,6 +643,13 @@ class QuickExecutionDetail(QWidget):
     def _zones_clear_all(self) -> None:
         for cb in self._zone_checks.values():
             cb.setChecked(False)
+
+    def _on_zone_toggled(self, zone_id: str, checked: bool) -> None:
+        self._current_scene.format_scope.sections[zone_id] = bool(checked)
+        self._update_summary_label()
+        self._emit_summary_changed()
+        if not self._scene_syncing:
+            self.scene_config_changed.emit(self._current_scene)
 
     def _update_summary_label(self) -> None:
         scene = self._current_scene
@@ -626,7 +666,7 @@ class QuickExecutionDetail(QWidget):
         cap_count = len(enabled_caps)
         cap_text = "·".join(enabled_caps) if enabled_caps else "无"
 
-        summary = f"{strategy_text} · {enabled_zones}/{total_zones}个分区 · {cap_count}项功能"
+        summary = f"{strategy_text} · {self._page_start_summary_text()} · {enabled_zones}/{total_zones}个分区 · {cap_count}项功能"
         self._summary_label.setText(summary)
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -659,14 +699,34 @@ class QuickExecutionDetail(QWidget):
 
     def _on_file_selected(self, file_path: str) -> None:
         if file_path:
+            self._refresh_structure_preview(file_path)
             self.document_selected.emit(file_path)
         self._emit_summary_changed()
 
     def _on_file_cleared(self) -> None:
+        self._clear_structure_preview()
         self._emit_summary_changed()
 
     def _on_feature_row_toggled(self, feature_id: str, enabled: bool) -> None:
+        group = UI_GROUP_MAP.get(feature_id)
+        if group is not None:
+            set_group_enabled(self._current_scene, group, bool(enabled))
         self.feature_toggled.emit(feature_id, bool(enabled))
+        self._update_summary_label()
+        self._emit_summary_changed()
+        if not self._scene_syncing:
+            self.scene_config_changed.emit(self._current_scene)
+
+    def _on_strategy_changed(self, checked: bool) -> None:
+        if self._scene_syncing:
+            return
+        self._current_scene.strict_mode = self._strategy_rebuild.isChecked()
+        self._update_summary_label()
+        self._emit_summary_changed()
+        self.scene_config_changed.emit(self._current_scene)
+
+    def _on_page_start_changed(self, _index: int) -> None:
+        self._update_structure_status()
         self._update_summary_label()
         self._emit_summary_changed()
 
@@ -693,6 +753,7 @@ class QuickExecutionDetail(QWidget):
                 self._drop_area.clear()
         finally:
             self._drop_area.blockSignals(was_blocked)
+        self._refresh_structure_preview(cleaned)
         self._emit_summary_changed()
 
     def set_strategy_context(
@@ -703,16 +764,22 @@ class QuickExecutionDetail(QWidget):
         strict_mode: bool | None = None,
     ) -> None:
         """Legacy-compat setter; maps strict_mode → strategy."""
-        if scene_name:
-            for idx, s in enumerate(SCENE_METAS):
-                if s.name == scene_name:
-                    self._scene_combo.setCurrentIndex(idx)
-                    break
-        if template_name:
-            self._ensure_combo_value(template_name)
-        if strict_mode is not None:
-            self._strategy_rebuild.setChecked(bool(strict_mode))
-            self._strategy_preserve.setChecked(not bool(strict_mode))
+        self._binding_signal_blocked = True
+        self._scene_syncing = True
+        try:
+            if scene_name:
+                for idx, descriptor in enumerate(self._scene_descriptors):
+                    if descriptor.name == scene_name:
+                        self._scene_combo.setCurrentIndex(idx)
+                        break
+            if template_name:
+                self._ensure_combo_value(template_name)
+            if strict_mode is not None:
+                self._strategy_rebuild.setChecked(bool(strict_mode))
+                self._strategy_preserve.setChecked(not bool(strict_mode))
+        finally:
+            self._binding_signal_blocked = False
+            self._scene_syncing = False
         self._emit_summary_changed()
 
     def set_execute_enabled(self, enabled: bool) -> None:
@@ -809,8 +876,28 @@ class QuickExecutionDetail(QWidget):
     def current_scene_id(self) -> str:
         return self._current_scene.scene_id
 
+    def current_scene(self) -> SceneWorkspace:
+        return self._current_scene
+
+    def current_template_id(self) -> str:
+        template_id = str(self._template_combo.currentData() or "").strip()
+        if template_id:
+            return template_id
+        return str(self._current_scene.template_id or "").strip()
+
     def current_strategy(self) -> str:
         return "rebuild" if self._strategy_rebuild.isChecked() else "preserve"
+
+    def runtime_template_overrides(self) -> dict[str, object]:
+        selected_index = self._current_page_start_index()
+        if selected_index < 0 or not self._structure_items:
+            return {}
+        return {
+            "header_footer.suppress_header_footer_selectors": suppression_selectors_before(
+                self._structure_items,
+                selected_index,
+            )
+        }
 
     def navigation_snapshot(self) -> dict[str, str]:
         return build_navigation_snapshot(
@@ -836,8 +923,99 @@ class QuickExecutionDetail(QWidget):
             if self._template_combo.itemText(index).strip() == target:
                 self._template_combo.setCurrentIndex(index)
                 return
-        self._template_combo.addItem(target)
+        self._template_combo.addItem(target, self.current_template_id() or target)
         self._template_combo.setCurrentIndex(self._template_combo.count() - 1)
+
+    def _find_scene_index(self, scene_id: str) -> int:
+        target = str(scene_id or "").strip()
+        if not target:
+            return -1
+        for index in range(self._scene_combo.count()):
+            if str(self._scene_combo.itemData(index) or "").strip() == target:
+                return index
+        return -1
+
+    def _on_template_changed(self, _index: int) -> None:
+        template_id = str(self._template_combo.currentData() or "").strip()
+        if template_id:
+            self._current_scene.template_id = template_id
+        self._emit_summary_changed()
+        if not self._scene_syncing:
+            self._emit_binding_changed()
+
+    def _emit_binding_changed(self) -> None:
+        if self._binding_signal_blocked:
+            return
+        self.binding_changed.emit(self._current_scene, self.current_template_id())
+
+    def _refresh_structure_preview(self, file_path: str) -> None:
+        cleaned = str(file_path or "").strip()
+        if not cleaned:
+            self._clear_structure_preview()
+            return
+
+        path = Path(cleaned)
+        if not path.exists() or path.suffix.lower() != ".docx":
+            self._set_structure_items([], status="当前文档暂时无法识别结构")
+            return
+
+        try:
+            items = analyze_document_structure(path)
+        except Exception as exc:
+            self._set_structure_items([], status=f"结构识别失败：{exc}")
+            return
+
+        status = f"已识别 {len(items)} 个内容块，可按需调整页码起点" if items else "未识别到可选内容块"
+        self._set_structure_items(items, status=status)
+
+    def _clear_structure_preview(self) -> None:
+        self._set_structure_items([], status="选择文档后可确认页码起点")
+
+    def _set_structure_items(self, items: list[StructurePreviewItem], *, status: str) -> None:
+        self._structure_items = list(items)
+        was_blocked = self._page_start_combo.blockSignals(True)
+        try:
+            self._page_start_combo.clear()
+            self._page_start_combo.addItem("自动判断", -1)
+            for index, item in enumerate(self._structure_items):
+                self._page_start_combo.addItem(item.display_text, index)
+        finally:
+            self._page_start_combo.blockSignals(was_blocked)
+        self._structure_status_label.setText(status)
+        self._update_summary_label()
+
+    def _update_structure_status(self) -> None:
+        selected_index = self._current_page_start_index()
+        if selected_index < 0:
+            if self._structure_items:
+                self._structure_status_label.setText(
+                    f"已识别 {len(self._structure_items)} 个内容块，可按需调整页码起点"
+                )
+            else:
+                self._structure_status_label.setText("选择文档后可确认页码起点")
+            return
+
+        if 0 <= selected_index < len(self._structure_items):
+            item = self._structure_items[selected_index]
+            hidden_count = len(suppression_selectors_before(self._structure_items, selected_index))
+            self._structure_status_label.setText(
+                f"页眉页码将从“{item.display_text}”开始，之前 {hidden_count} 个内容块留空"
+            )
+
+    def _page_start_summary_text(self) -> str:
+        selected_index = self._current_page_start_index()
+        if selected_index < 0:
+            return "页码自动"
+        if 0 <= selected_index < len(self._structure_items):
+            return f"页码从{self._structure_items[selected_index].label}"
+        return "页码自动"
+
+    def _current_page_start_index(self) -> int:
+        data = self._page_start_combo.currentData()
+        try:
+            return int(data)
+        except (TypeError, ValueError):
+            return -1
 
     def _active_template_label(self) -> str:
         label = self._template_combo.currentText().strip()
@@ -900,7 +1078,7 @@ class QuickExecutionDetail(QWidget):
             )
         if hasattr(self, "_adv_header_title"):
             self._adv_header_title.setStyleSheet(
-                f"font-size: {t.font_size_lg}px; font-weight: 600; "
+                f"font-size: {t.font_size_lg}px; font-weight: {t.font_weight_emphasis}; "
                 f"color: {t.primary}; background: transparent;"
             )
 
@@ -911,7 +1089,7 @@ class QuickExecutionDetail(QWidget):
         # Section titles
         for title_label in self.findChildren(QLabel, "wb_v2_section_title"):
             title_label.setStyleSheet(
-                f"font-size: {t.font_size_md}px; font-weight: 600; color: {t.text_primary};"
+                f"font-size: {t.font_size_md}px; font-weight: {t.font_weight_emphasis}; color: {t.text_primary};"
             )
 
         # Separator
@@ -921,7 +1099,7 @@ class QuickExecutionDetail(QWidget):
         # Scene/template card title (primary color)
         if hasattr(self, "_scene_card_title"):
             self._scene_card_title.setStyleSheet(
-                f"font-size: {t.font_size_lg}px; font-weight: 600; "
+                f"font-size: {t.font_size_lg}px; font-weight: {t.font_weight_emphasis}; "
                 f"color: {t.primary}; background: transparent;"
             )
         if hasattr(self, "_scene_card_icon"):
@@ -932,7 +1110,7 @@ class QuickExecutionDetail(QWidget):
         # Scene/template row labels
         for lbl in self.findChildren(QLabel, "scene_tpl_label"):
             lbl.setStyleSheet(
-                f"font-size: {t.font_size_md}px; font-weight: {t.font_weight_bold}; "
+                f"font-size: {t.font_size_md}px; font-weight: {t.font_weight_emphasis}; "
                 f"color: {t.text_secondary}; background: transparent;"
             )
 
@@ -972,7 +1150,7 @@ class QuickExecutionDetail(QWidget):
         # Output card header (same style as scene card)
         if hasattr(self, "_output_card_title"):
             self._output_card_title.setStyleSheet(
-                f"font-size: {t.font_size_lg}px; font-weight: 600; "
+                f"font-size: {t.font_size_lg}px; font-weight: {t.font_weight_emphasis}; "
                 f"color: {t.primary}; background: transparent;"
             )
         if hasattr(self, "_output_card_icon"):
@@ -996,7 +1174,7 @@ class QuickExecutionDetail(QWidget):
             )
         if hasattr(self, "_exec_card_title"):
             self._exec_card_title.setStyleSheet(
-                f"font-size: {t.font_size_lg}px; font-weight: 600; "
+                f"font-size: {t.font_size_lg}px; font-weight: {t.font_weight_emphasis}; "
                 f"color: {t.primary}; background: transparent;"
             )
 
@@ -1032,7 +1210,7 @@ class QuickExecutionDetail(QWidget):
         # Log title
         if hasattr(self, "_log_title"):
             self._log_title.setStyleSheet(
-                f"font-size: {t.font_size_md}px; font-weight: 600; "
+                f"font-size: {t.font_size_md}px; font-weight: {t.font_weight_emphasis}; "
                 f"color: {t.text_primary}; background: transparent;"
             )
 

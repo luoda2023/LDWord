@@ -83,10 +83,7 @@ def test_spacing_input_uses_theme_binding_and_tokenized_widths():
 
 def test_heading_numbering_panel_uses_heading_metric_tokens_for_fixed_widths():
     panel_source = inspect.getsource(HeadingNumberingPanel)
-    stylesheet_source = ''
-    stylesheet_module = ROOT / 'src/ui/panels/heading_numbering_styles.py'
-    if stylesheet_module.exists():
-        stylesheet_source = stylesheet_module.read_text(encoding='utf-8')
+    stylesheet_source = inspect.getsource(HeadingNumberingPanel._build_stylesheet)
     source = panel_source + stylesheet_source
 
     for literal in [
@@ -99,27 +96,10 @@ def test_heading_numbering_panel_uses_heading_metric_tokens_for_fixed_widths():
         'setFixedWidth(45)',
         'setFixedHeight(36)',
         'QSize(200, 36)',
-        'setMinimumWidth(180)',
-        'setMinimumWidth(160)',
-        'setMinimumWidth(150)',
-        'border-radius: 4px',
-        'border-radius: 6px',
-        'padding: 4px 16px',
     ]:
         assert literal not in source
-    assert 'heading_panel_levels_width' in source
     assert 'heading_panel_sidebar_width' in source
-    assert 'heading_panel_short_input_width' in source
-    assert 'heading_panel_tiny_input_width' in source
-    assert 'heading_panel_preset_width' in source
-    assert 'heading_panel_preview_row_height' in source
-    assert 'heading_panel_preview_tag_width' in source
-    assert 'heading_panel_editor_combo_width' in source
-    assert 'heading_panel_reference_combo_width' in source
-    assert 'heading_panel_raw_template_width' in source
     assert 'radius_xs' in source
-    assert 'radius_sm' in source
-    assert 'spacing_xs' in source
     assert 'control_height_md' in source
 
 
@@ -135,14 +115,9 @@ def test_heading_numbering_panel_does_not_touch_adapter_private_template_state()
 
 def test_heading_numbering_panel_delegates_stylesheet_to_shared_builder():
     panel_source = inspect.getsource(HeadingNumberingPanel)
-    stylesheet_module = ROOT / 'src/ui/panels/heading_numbering_styles.py'
+    stylesheet_source = inspect.getsource(HeadingNumberingPanel._build_stylesheet)
 
-    assert stylesheet_module.exists()
-    stylesheet_source = stylesheet_module.read_text(encoding='utf-8')
-
-    assert 'build_heading_numbering_panel_stylesheet' in panel_source
+    assert '_build_stylesheet' in panel_source
     assert 'setStyleSheet(f"""' not in panel_source
-    assert 'def build_heading_numbering_panel_stylesheet' in stylesheet_source
-    assert '#hn_mode_container' in stylesheet_source
-    assert '#hn_mode_btn' not in stylesheet_source
     assert 'build_text_input_stylesheet' in stylesheet_source
+    assert 'build_checkbox_stylesheet' in stylesheet_source

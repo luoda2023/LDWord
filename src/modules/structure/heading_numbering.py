@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
+from src.config.heading_normalize import CHAIN_NUMBER_STYLE_BY_CORE, CURRENT_CORE_STYLE_ALIASES
 from src.modules.base import BaseModule, ModuleMeta
 from src.shared.engine.numbering import format_number
 from src.shared.engine.ooxml_ops import qn, find_or_create
@@ -157,7 +158,7 @@ def _format_level_number(
             if src_binding:
                 # current 段用自己的 display 样式, parent 段用被引用时的 reference 样式
                 style_key = src_binding.display_core_style if is_current else src_binding.reference_core_style
-                fmt = _PLACEHOLDER_FORMAT.get(style_key, fallback_fmt)
+                fmt = _resolve_core_style_format(style_key, fallback_fmt)
         chain_parts.append(format_number(value, fmt))
     chain_str = binding.chain_separator.join(chain_parts)
 
@@ -181,6 +182,14 @@ def _replace_placeholders(template: str, n: int) -> str:
         return format_number(n, fmt)
 
     return _PLACEHOLDER_RE.sub(_replacer, template)
+
+
+def _resolve_core_style_format(style_key: str | None, fallback: str = "arabic") -> str:
+    raw = str(style_key or "").strip()
+    if not raw:
+        return fallback
+    normalized = CURRENT_CORE_STYLE_ALIASES.get(raw, raw)
+    return CHAIN_NUMBER_STYLE_BY_CORE.get(normalized, fallback)
 
 
 # ── 模块主体 ────────────────────────────────────

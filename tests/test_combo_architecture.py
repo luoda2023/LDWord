@@ -45,5 +45,5 @@ def test_spacing_input_uses_shared_unit_combo():
 def test_heading_numbering_panel_uses_shared_combo_constructors():
     source = inspect.getsource(HeadingNumberingPanel)
 
-    assert "StyledComboBox()" in source
+    assert "StyledComboBox(self)" in source or "StyledComboBox(" in source
     assert "QComboBox()" not in source

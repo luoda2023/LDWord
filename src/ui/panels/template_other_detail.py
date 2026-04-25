@@ -5,7 +5,7 @@ from __future__ import annotations
 from src.config.template import TemplateConfig
 from src.qt_api import QHBoxLayout, QLabel, QVBoxLayout, QWidget, QSizePolicy, Signal
 from src.shared.ui.card import Card
-from src.shared.ui.form_row import FormRow
+from src.shared.ui.template_form_layout import template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 
@@ -22,7 +22,7 @@ class OtherDetail(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(4)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self._card = Card(parent=self)
@@ -39,42 +39,39 @@ class OtherDetail(QWidget):
     def _build_header(self) -> None:
         header = QWidget(self)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 4)
+        header_layout.setContentsMargins(0, 0, 0, 6)
         header_layout.setSpacing(6)
         self._header_icon = QLabel(header)
         self._header_icon.setFixedSize(18, 18)
         header_layout.addWidget(self._header_icon)
-        title = QLabel("其他参数", header)
+        title = QLabel("输出设置", header)
         title.setObjectName("tpl_card_title")
         header_layout.addWidget(title)
         header_layout.addStretch(1)
         self._card.add_widget(header)
 
-        self._desc = QLabel("编辑水印开关以及导出输出项。")
+        self._desc = QLabel("选择文档处理完成后的输出项。")
         self._desc.setObjectName("tpl_other_desc")
         self._desc.setWordWrap(True)
         self._card.add_widget(self._desc)
 
     def _build_form(self) -> None:
-        self._watermark_toggle = ToggleSwitch(self, checked=False)
-        self._watermark_toggle.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(FormRow("启用水印", self._watermark_toggle, parent=self._card))
 
         self._final_docx_toggle = ToggleSwitch(self, checked=True)
         self._final_docx_toggle.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(FormRow("最终稿 DOCX", self._final_docx_toggle, parent=self._card))
+        self._card.add_widget(template_form_row("最终稿 DOCX", self._final_docx_toggle, parent=self._card))
 
         self._compare_docx_toggle = ToggleSwitch(self, checked=True)
         self._compare_docx_toggle.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(FormRow("对比稿 DOCX", self._compare_docx_toggle, parent=self._card))
+        self._card.add_widget(template_form_row("对比稿 DOCX", self._compare_docx_toggle, parent=self._card))
 
         self._report_json_toggle = ToggleSwitch(self, checked=True)
         self._report_json_toggle.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(FormRow("JSON 报告", self._report_json_toggle, parent=self._card))
+        self._card.add_widget(template_form_row("JSON 报告", self._report_json_toggle, parent=self._card))
 
         self._report_markdown_toggle = ToggleSwitch(self, checked=True)
         self._report_markdown_toggle.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(FormRow("Markdown 报告", self._report_markdown_toggle, parent=self._card))
+        self._card.add_widget(template_form_row("Markdown 报告", self._report_markdown_toggle, parent=self._card))
 
     def _build_hint(self) -> None:
         self._footer_note = QLabel("颜色、旋转角度与更多输出项会在后续继续补充。")
@@ -88,7 +85,6 @@ class OtherDetail(QWidget):
             return
         self._is_syncing = True
         try:
-            self._watermark_toggle.setChecked(template.watermark.enabled)
             self._final_docx_toggle.setChecked(template.output.final_docx)
             self._compare_docx_toggle.setChecked(template.output.compare_docx)
             self._report_json_toggle.setChecked(template.output.report_json)
@@ -100,7 +96,7 @@ class OtherDetail(QWidget):
         if self._is_syncing or self._current_template is None:
             return
 
-        self._current_template.watermark.enabled = self._watermark_toggle.isChecked()
+
         output = self._current_template.output
         output.final_docx = self._final_docx_toggle.isChecked()
         output.compare_docx = self._compare_docx_toggle.isChecked()
@@ -116,7 +112,7 @@ class OtherDetail(QWidget):
         theme = get_theme()
         for widget in self.findChildren(QLabel, "tpl_card_title"):
             widget.setStyleSheet(
-                f"font-size: {theme.font_size_md}px; font-weight: {theme.font_weight_bold}; color: {theme.primary};"
+                f"font-size: {theme.font_size_lg}px; font-weight: {theme.font_weight_emphasis}; color: {theme.primary}; background: transparent;"
             )
         self._desc.setStyleSheet(f"font-size: {theme.font_size_sm}px; color: {theme.text_secondary};")
         self._footer_note.setStyleSheet(f"font-size: {theme.font_size_sm}px; color: {theme.text_hint};")
@@ -124,7 +120,7 @@ class OtherDetail(QWidget):
         try:
             from src.ui.icons.catalog import get_icon
 
-            self._header_icon.setPixmap(get_icon("settings", 16, theme.primary).pixmap(16, 16))
+            self._header_icon.setPixmap(get_icon("settings", 18, theme.primary).pixmap(18, 18))
         except Exception:
             self._header_icon.setText("设")
 

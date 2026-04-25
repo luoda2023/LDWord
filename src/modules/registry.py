@@ -36,6 +36,9 @@ from src.modules.insert.watermark import WatermarkModule
 # ── 特殊 ────────────────────────────────────────
 from src.modules.special.chem_typography import ChemTypographyModule
 from src.modules.validate.md_cleanup import MdCleanupModule
+from src.modules.validate.whitespace_normalize import WhitespaceNormalizeModule
+from src.modules.validate.validation import ValidationModule
+from src.modules.special.citation_link import CitationLinkModule
 from src.modules.special.equation_table_format import EquationTableFormatModule
 from src.modules.special.reference_format import ReferenceFormatModule
 
@@ -66,6 +69,9 @@ ALL_MODULES: list[type[BaseModule]] = [
     # 特殊
     ChemTypographyModule,
     MdCleanupModule,
+    WhitespaceNormalizeModule,
+    ValidationModule,
+    CitationLinkModule,
     EquationTableFormatModule,
     ReferenceFormatModule,
 ]

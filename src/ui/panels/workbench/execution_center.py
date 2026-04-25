@@ -118,7 +118,10 @@ class ExecutionCenter(QWidget):
     def set_result_state(self, state: ExecutionResultState) -> None:
         self._execution_running = False
         self._status_label.setText(self._friendly_status(state.status))
-        self.set_summary(state.summary)
+        summary_text = state.summary
+        if state.diagnostics_summary:
+            summary_text = f"{summary_text}\n\n{state.diagnostics_summary}"
+        self.set_summary(summary_text)
         self._sync_action_buttons()
 
     def _sync_action_buttons(self) -> None:

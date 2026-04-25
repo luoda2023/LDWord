@@ -1,8 +1,15 @@
+"""Tests for heading numbering logic + panel architecture after refactoring.
+
+Tests are grouped into:
+  1. Pure logic tests (heading_numbering_logic.py) — unchanged from before.
+  2. Adapter capability tests — new per-level override/inherit helpers.
+  3. Panel architecture tests — verify the new fixed-layout structure.
+"""
+
 import inspect
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -10,6 +17,10 @@ sys.path.insert(0, str(ROOT))
 from src.ui.adapters.heading_numbering_adapter import HeadingNumberingAdapter
 from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
 
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 1. Pure logic tests
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_helpers():
     from src.ui.heading_numbering_logic import (
@@ -77,10 +88,11 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
     assert format_csv_items(["参考文献", "致谢", "摘要"]) == "参考文献, 致谢, 摘要"
     assert format_csv_items([]) == ""
 
-    locked = build_editor_enable_state(is_custom_mode=False, use_raw_template=False)
+    # Parameter renamed: is_custom_mode → is_binding_overridden
+    locked = build_editor_enable_state(is_binding_overridden=False, use_raw_template=False)
     assert all(value is False for value in locked.__dict__.values())
 
-    custom_plain = build_editor_enable_state(is_custom_mode=True, use_raw_template=False)
+    custom_plain = build_editor_enable_state(is_binding_overridden=True, use_raw_template=False)
     assert custom_plain.prefix is True
     assert custom_plain.core_style is True
     assert custom_plain.suffix is True
@@ -91,7 +103,7 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
     assert custom_plain.use_raw_toggle is True
     assert custom_plain.raw_template is False
 
-    custom_raw = build_editor_enable_state(is_custom_mode=True, use_raw_template=True)
+    custom_raw = build_editor_enable_state(is_binding_overridden=True, use_raw_template=True)
     assert custom_raw.prefix is False
     assert custom_raw.core_style is False
     assert custom_raw.suffix is False
@@ -102,8 +114,8 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
     assert custom_raw.use_raw_toggle is True
     assert custom_raw.raw_template is True
 
-    assert build_expert_toggle_text(False) == "▾ 显示更多高级选项"
-    assert build_expert_toggle_text(True) == "▴ 隐藏高级选项"
+    assert build_expert_toggle_text(False) == "▾ 展开表达式编辑"
+    assert build_expert_toggle_text(True) == "▴ 收起表达式编辑"
     assert build_non_numbered_toggle_text(False) == "▸ 非编号标题 (忽略以下列表中的内容)"
     assert build_non_numbered_toggle_text(True) == "▾ 非编号标题 (忽略以下列表中的内容)"
 
@@ -119,26 +131,12 @@ def test_panel_and_adapter_delegate_heading_numbering_pure_logic_to_shared_modul
     assert "compose_display_template" in panel_source
     assert "build_detail_state" in panel_source
     assert "build_editor_enable_state" in panel_source
-    assert "build_expert_toggle_text" in panel_source
-    assert "build_non_numbered_toggle_text" in panel_source
     assert "should_show_chain_separator" in panel_source
     assert "parse_csv_items" in panel_source
     assert "format_csv_items" in panel_source
-    assert "_CORE_TO_PH" not in panel_source
-    assert "_PH_TO_CORE" not in panel_source
-    assert "def _split_template" not in panel_source
-    assert 'text.split(",")' not in panel_source
-    assert '", ".join(' not in panel_source
-    assert '!= "current_only"' not in panel_source
-    assert '.setEnabled(not checked)' not in panel_source
-    assert '.setEnabled(is_custom)' not in panel_source
-    assert 'if is_custom and not self._use_raw_cb.isChecked()' not in panel_source
-    assert '显示更多高级选项" if not vis else "▴ 隐藏高级选项"' not in panel_source
-    assert '"▾" if vis else "▸"' not in panel_source
 
     assert "from src.ui.heading_numbering_logic import" in adapter_module_source
     assert "default_chain_value" in adapter_source
-    assert '".join(["parent"] * (lv - 1)) + ".current"' not in adapter_source
 
     assert "STYLE_OPTIONS" in helper_source
     assert "def compose_display_template" in helper_source
@@ -147,315 +145,111 @@ def test_panel_and_adapter_delegate_heading_numbering_pure_logic_to_shared_modul
     assert "def build_chain_options" in helper_source
     assert "def build_detail_state" in helper_source
     assert "def build_editor_enable_state" in helper_source
-    assert "def build_expert_toggle_text" in helper_source
-    assert "def build_non_numbered_toggle_text" in helper_source
     assert "def should_show_chain_separator" in helper_source
     assert "def parse_csv_items" in helper_source
     assert "def format_csv_items" in helper_source
 
 
-def test_heading_numbering_panel_decomposes_professional_editor_build_into_small_helpers():
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 2. New panel architecture tests (fixed three-section layout)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def test_panel_has_fixed_three_section_layout():
+    """Panel must have summary, scheme, level-editor, and nn sections — no QStackedWidget."""
     panel_source = inspect.getsource(HeadingNumberingPanel)
-    editor_builder_source = inspect.getsource(HeadingNumberingPanel._build_professional_editor)
+    module_source = (ROOT / "src/ui/panels/heading_numbering_panel.py").read_text(encoding="utf-8")
 
-    assert "def _build_editor_number_style_row" in panel_source
-    assert "def _build_editor_affix_row" in panel_source
-    assert "def _build_editor_chain_row" in panel_source
-    assert "def _build_editor_toc_row" in panel_source
-    assert "def _build_editor_expert_section" in panel_source
+    # Must have these four sections
+    assert "_build_summary_card" in panel_source
+    assert "_build_scheme_section" in panel_source
+    assert "_build_level_editor" in panel_source
+    assert "_build_non_numbered_section" in panel_source
 
-    assert "self._build_editor_number_style_row" in editor_builder_source
-    assert "self._build_editor_affix_row" in editor_builder_source
-    assert "self._build_editor_chain_row" in editor_builder_source
-    assert "self._build_editor_toc_row" in editor_builder_source
-    assert "self._build_editor_expert_section" in editor_builder_source
+    # Must NOT have old mode-switching infrastructure
+    assert "QStackedWidget" not in module_source
+    assert "_MODE_SIMPLE" not in module_source
+    assert "_MODE_ADVANCED" not in module_source
+    assert "_is_custom_mode" not in module_source
+    assert "_mode_segment" not in module_source
+    assert "_format_jump_btn" not in module_source
+    assert "_activate_custom_mode" not in module_source
+    assert "_activate_preset_mode" not in module_source
 
-    assert "StyledComboBox()" not in editor_builder_source
-    assert 'QCheckBox("此级别在目录中显示")' not in editor_builder_source
 
-
-def test_heading_numbering_panel_further_decomposes_professional_editor_shell():
+def test_panel_has_inspector_structure_without_override_actions():
+    """Panel should use inspector summaries + expandable detail areas, not override actions."""
     panel_source = inspect.getsource(HeadingNumberingPanel)
-    editor_builder_source = inspect.getsource(HeadingNumberingPanel._build_professional_editor)
 
-    assert "def _build_editor_detail_header" in panel_source
-    assert "def _build_editor_form_container" in panel_source
-    assert "def _build_editor_divider" in panel_source
+    # Old override/inherit elements must be absent
+    assert "_numbering_source_label" not in panel_source
+    assert "_numbering_action_btn" not in panel_source
+    assert "_numbering_inherit_summary" not in panel_source
+    assert "_on_numbering_action_clicked" not in panel_source
+    assert "_style_action_btn" not in panel_source
+    assert "_style_inherit_summary" not in panel_source
+    assert "_on_style_action_clicked" not in panel_source
 
-    assert "self._build_editor_detail_header" in editor_builder_source
-    assert "self._build_editor_form_container" in editor_builder_source
-    assert "self._build_editor_divider" in editor_builder_source
+    # Inspector structure should be present
+    assert "_build_detail_panel_inspector" in panel_source
+    assert "_build_result_strip" in panel_source
+    assert "_build_numbering_block" in panel_source
+    assert "_build_output_block" in panel_source
+    assert "_build_style_inspector" in panel_source
+    assert "_build_expert_inspector" in panel_source
+    assert "_style_toggle_btn" in panel_source
+    assert "_expert_toggle_btn" in panel_source
 
-    assert 'QLabel("级别配置")' not in editor_builder_source
-    assert "QWidget()" not in editor_builder_source
-    assert "QFrame()" not in editor_builder_source
+
+def test_panel_no_minipage_preview():
+    """MiniPagePreview should have been removed."""
+    module_source = (ROOT / "src/ui/panels/heading_numbering_panel.py").read_text(encoding="utf-8")
+
+    assert "_HeadingMiniPagePreview" not in module_source
+    assert "_ClickablePreviewRow" not in module_source
+    assert "_page_preview" not in module_source
 
 
-def test_heading_numbering_panel_decomposes_detail_sync_into_small_helpers():
+def test_panel_uses_inline_preview_in_format_card():
+    """InlineHeadingPreview should exist inside the heading format card."""
     panel_source = inspect.getsource(HeadingNumberingPanel)
-    detail_sync_source = inspect.getsource(HeadingNumberingPanel._sync_detail_pane)
 
-    assert "def _sync_detail_basic_fields" in panel_source
-    assert "def _sync_detail_chain_fields" in panel_source
-    assert "def _sync_detail_advanced_fields" in panel_source
-    assert "def _reset_detail_raw_toggle" in panel_source
-
-    assert "self._sync_detail_basic_fields" in detail_sync_source
-    assert "self._sync_detail_chain_fields" in detail_sync_source
-    assert "self._sync_detail_advanced_fields" in detail_sync_source
-    assert "self._reset_detail_raw_toggle" in detail_sync_source
-
-    assert "self._chain_cb.clear()" not in detail_sync_source
-    assert "self._use_raw_cb.setChecked(False)" not in detail_sync_source
+    assert "_InlineHeadingPreview" in panel_source or "_inline_preview" in panel_source
+    assert "_refresh_inline_preview" in panel_source
 
 
-def test_heading_numbering_panel_decomposes_advanced_list_rebuild_into_small_helpers():
+def test_panel_sidebar_is_pure_navigation():
+    """Sidebar should not have per-level enable/disable checkboxes."""
     panel_source = inspect.getsource(HeadingNumberingPanel)
-    rebuild_source = inspect.getsource(HeadingNumberingPanel._rebuild_advanced_list)
-
-    assert "def _append_advanced_level_item" in panel_source
-    assert "def _build_advanced_level_row" in panel_source
-    assert "def _sync_advanced_list_current_row" in panel_source
-
-    assert "self._append_advanced_level_item" in rebuild_source
-    assert "self._sync_advanced_list_current_row" in rebuild_source
-
-    assert "QListWidgetItem()" not in rebuild_source
-    assert "QCheckBox()" not in rebuild_source
-
-
-def test_heading_numbering_panel_source_keeps_readable_utf8_literals():
-    panel_module_source = (ROOT / "src/ui/panels/heading_numbering_panel.py").read_text(encoding="utf-8")
-
-    assert 'QLabel("级别配置")' in panel_module_source
-    assert 'QCheckBox("此级别在目录中显示")' in panel_module_source
-    assert 'QPushButton("▸ 显示更多高级选项")' in panel_module_source
-    assert 'self._small_label("作为被引用的父级时显示形式:")' in panel_module_source
-    assert 'self._small_label("编号后跟随的缩进字符:")' in panel_module_source
-    assert 'QCheckBox("覆盖上方逻辑，直接编辑原始编号字符串模式")' in panel_module_source
-    assert 'QLabel(f"级别 {level}")' in panel_module_source
-    assert '"—"' in panel_module_source
-
-
-def test_heading_numbering_panel_decomposes_simple_preview_rebuild_into_small_helpers():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    preview_source = inspect.getsource(HeadingNumberingPanel._rebuild_simple_preview)
-
-    assert "def _append_simple_preview_row" in panel_source
-    assert "def _build_simple_preview_row" in panel_source
-    assert "def _apply_simple_preview_disabled_state" in panel_source
-
-    assert "self._append_simple_preview_row" in preview_source
-
-    assert 'QCheckBox("生成到 TOC 目录")' not in preview_source
-    assert 'QFrame()' not in preview_source
-
-
-def test_heading_numbering_panel_decomposes_expert_section_build_into_small_helpers():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    expert_builder_source = inspect.getsource(HeadingNumberingPanel._build_editor_expert_section)
-
-    assert "def _build_editor_reference_style_row" in panel_source
-    assert "def _build_editor_title_separator_row" in panel_source
-    assert "def _build_editor_raw_template_row" in panel_source
-
-    assert "self._build_editor_reference_style_row" in expert_builder_source
-    assert "self._build_editor_title_separator_row" in expert_builder_source
-    assert "self._build_editor_raw_template_row" in expert_builder_source
-
-    assert 'QCheckBox("覆盖上方逻辑，直接编辑原始编号字符串模式")' not in expert_builder_source
-    assert 'self._small_label("作为被引用的父级时显示形式:")' not in expert_builder_source
-
-
-def test_heading_numbering_panel_decomposes_advanced_view_build_into_small_helpers():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    advanced_view_source = inspect.getsource(HeadingNumberingPanel._build_advanced_view)
-
-    assert "def _build_advanced_list_sidebar" in panel_source
-    assert "def _build_advanced_detail_panel" in panel_source
-
-    assert "self._build_advanced_list_sidebar" in advanced_view_source
-    assert "self._build_advanced_detail_panel" in advanced_view_source
-    assert "get_theme()" in advanced_view_source
-
-    assert 'QLabel("要修改的级别")' not in advanced_view_source
-    assert 'self._build_professional_editor(self._adv_detail_layout)' not in advanced_view_source
-
-
-def test_heading_numbering_panel_decomposes_preset_header_build_into_small_helpers():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    preset_header_source = inspect.getsource(HeadingNumberingPanel._build_preset_header)
-
-    assert "def _build_preset_selector_group" in panel_source
-    assert "def _build_levels_selector_group" in panel_source
-
-    assert "self._build_preset_selector_group" in preset_header_source
-    assert "self._build_levels_selector_group" in preset_header_source
-
-    assert 'self._label("编号库 (预设):")' not in preset_header_source
-    assert 'self._label("控制最大级数:")' not in preset_header_source
-
-
-def test_heading_numbering_panel_decomposes_mode_switcher_build_into_small_helpers():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    mode_switcher_source = inspect.getsource(HeadingNumberingPanel._build_mode_switcher)
-    panel_module_source = (ROOT / "src/ui/panels/heading_numbering_panel.py").read_text(encoding="utf-8")
-
-    assert "def _build_mode_button_container" in panel_source
-    assert "def _build_mode_buttons" in panel_source
-
-    assert "self._build_mode_button_container" in mode_switcher_source
-    assert "self._build_mode_buttons" in mode_switcher_source
-    assert "ThemedRadioButton" in panel_module_source
-
-    assert 'QPushButton("快速应用")' not in mode_switcher_source
-    assert 'QPushButton("自定义多级列表")' not in mode_switcher_source
-
-
-def test_heading_numbering_panel_decomposes_simple_preview_row_build_into_small_helpers():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    preview_row_source = inspect.getsource(HeadingNumberingPanel._build_simple_preview_row)
-
-    assert "def _build_simple_preview_labels" in panel_source
-    assert "def _build_simple_preview_checkbox" in panel_source
-    assert "def _layout_simple_preview_row" in panel_source
-
-    assert "self._build_simple_preview_labels" in preview_row_source
-    assert "self._build_simple_preview_checkbox" in preview_row_source
-    assert "self._layout_simple_preview_row" in preview_row_source
-
-    assert 'QCheckBox("生成到 TOC 目录")' not in preview_row_source
-    assert 'QLabel("这是一个示例标题内容")' not in preview_row_source
-
-
-def test_heading_numbering_panel_decomposes_non_numbered_section_build_into_small_helpers():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    non_numbered_source = inspect.getsource(HeadingNumberingPanel._build_non_numbered_section)
-
-    assert "def _build_non_numbered_toggle_button" in panel_source
-    assert "def _build_non_numbered_content_frame" in panel_source
-    assert "def _build_non_numbered_texts_input" in panel_source
-    assert "def _build_non_numbered_prefix_input" in panel_source
-
-    assert "self._build_non_numbered_toggle_button" in non_numbered_source
-    assert "self._build_non_numbered_content_frame" in non_numbered_source
-
-    assert 'QPushButton(build_non_numbered_toggle_text(False))' not in non_numbered_source
-    assert 'self._small_label("跳过包含以下完整文本的标题 (使用逗号分隔):")' not in non_numbered_source
-
-
-def test_heading_numbering_panel_decomposes_setup_ui_into_small_helpers():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    setup_source = inspect.getsource(HeadingNumberingPanel._setup_ui)
-
-    assert "def _initialize_panel_state" in panel_source
-    assert "def _build_scroll_content_host" in panel_source
-    assert "def _build_mode_stack_views" in panel_source
-
-    assert "self._initialize_panel_state" in setup_source
-    assert "self._build_scroll_content_host" in setup_source
-    assert "self._build_mode_stack_views" in setup_source
-
-    assert "self._adapter = HeadingNumberingAdapter(parent=self)" not in setup_source
-    assert "self._stack = QStackedWidget()" not in setup_source
-
-
-def test_heading_numbering_panel_decomposes_advanced_level_row_build_into_small_helpers():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    level_row_source = inspect.getsource(HeadingNumberingPanel._build_advanced_level_row)
-
-    assert "def _build_advanced_level_checkbox" in panel_source
-    assert "def _build_advanced_level_labels" in panel_source
-    assert "def _layout_advanced_level_row" in panel_source
-
-    assert "self._build_advanced_level_checkbox" in level_row_source
-    assert "self._build_advanced_level_labels" in level_row_source
-    assert "self._layout_advanced_level_row" in level_row_source
-
-    assert "QCheckBox()" not in level_row_source
-    assert 'QLabel(f"级别 {level}")' not in level_row_source
-
-
-def test_heading_numbering_panel_decomposes_editor_chain_row_build_into_small_helpers():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    chain_row_source = inspect.getsource(HeadingNumberingPanel._build_editor_chain_row)
-
-    assert "def _build_editor_chain_selector" in panel_source
-    assert "def _build_editor_chain_separator_fields" in panel_source
-    assert "def _layout_editor_chain_row" in panel_source
-
-    assert "self._build_editor_chain_selector" in chain_row_source
-    assert "self._build_editor_chain_separator_fields" in chain_row_source
-    assert "self._layout_editor_chain_row" in chain_row_source
-
-    assert "StyledComboBox()" not in chain_row_source
-    assert 'self._small_label("分隔符:")' not in chain_row_source
-
-
-def test_heading_numbering_panel_decomposes_editor_affix_row_build_into_small_helpers():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    affix_row_source = inspect.getsource(HeadingNumberingPanel._build_editor_affix_row)
-
-    assert "def _build_editor_prefix_field" in panel_source
-    assert "def _build_editor_suffix_field" in panel_source
-    assert "def _layout_editor_affix_row" in panel_source
-
-    assert "self._build_editor_prefix_field" in affix_row_source
-    assert "self._build_editor_suffix_field" in affix_row_source
-    assert "self._layout_editor_affix_row" in affix_row_source
-
-    assert 'self._small_label("前缀:")' not in affix_row_source
-    assert 'self._small_label("后缀:")' not in affix_row_source
-
-
-def test_heading_numbering_panel_further_decomposes_expert_section_shell():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    expert_source = inspect.getsource(HeadingNumberingPanel._build_editor_expert_section)
-
-    assert "def _build_editor_expert_toggle" in panel_source
-    assert "def _build_editor_expert_frame" in panel_source
-
-    assert "self._build_editor_expert_toggle" in expert_source
-    assert "self._build_editor_expert_frame" in expert_source
-
-    assert 'QPushButton("▸ 显示更多高级选项")' not in expert_source
-    assert 'QFrame()' not in expert_source
-
-
-def test_heading_numbering_panel_further_decomposes_detail_sync_flow():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    detail_sync_source = inspect.getsource(HeadingNumberingPanel._sync_detail_pane)
-
-    assert "def _resolve_selected_detail_binding" in panel_source
-    assert "def _finish_detail_sync" in panel_source
-
-    assert "self._resolve_selected_detail_binding" in detail_sync_source
-    assert "self._finish_detail_sync" in detail_sync_source
-
-    assert "self._adv_list.currentItem()" not in detail_sync_source
-    assert "self._sync_lock_state()" not in detail_sync_source
-
-
-def test_heading_numbering_panel_further_decomposes_simple_preview_row_shell():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    preview_row_source = inspect.getsource(HeadingNumberingPanel._build_simple_preview_row)
-
-    assert "def _build_simple_preview_row_shell" in panel_source
-    assert "def _build_simple_preview_spacer" in panel_source
-
-    assert "self._build_simple_preview_row_shell" in preview_row_source
-    assert "self._build_simple_preview_spacer" in preview_row_source
-
-    assert "QFrame()" not in preview_row_source
-    assert "QWidget()" not in preview_row_source
-
-
-def test_heading_numbering_panel_further_decomposes_simple_preview_row_state():
-    panel_source = inspect.getsource(HeadingNumberingPanel)
-    preview_row_source = inspect.getsource(HeadingNumberingPanel._build_simple_preview_row)
-
-    assert "def _apply_simple_preview_row_state" in panel_source
-
-    assert "self._apply_simple_preview_row_state" in preview_row_source
-
-    assert "self._apply_simple_preview_disabled_state" not in preview_row_source
+    module_source = (ROOT / "src/ui/panels/heading_numbering_panel.py").read_text(encoding="utf-8")
+
+    # Enable toggle is in the numbering card, not in sidebar
+    assert "_level_enabled_switch" in panel_source
+    assert "_build_level_row" in panel_source
+
+    # Sidebar row builder should not create checkboxes
+    row_source = inspect.getsource(HeadingNumberingPanel._build_level_row)
+    assert "QCheckBox" not in row_source
+
+
+def test_adapter_has_per_level_override_methods():
+    """Adapter must expose per-level override query/mutation methods."""
+    adapter_source = inspect.getsource(HeadingNumberingAdapter)
+
+    assert "def has_heading_style_override" in adapter_source
+    assert "def remove_heading_style_override" in adapter_source
+    assert "def is_level_binding_from_preset" in adapter_source
+    assert "def reset_level_binding_to_preset" in adapter_source
+    assert "def numbering_source_text" in adapter_source
+    assert "_last_applied_preset_key" in adapter_source
+
+
+def test_heading_style_semantics_has_remove():
+    """heading_style_semantics module must export remove_heading_style_override."""
+    from src.config.heading_style_semantics import (
+        ensure_heading_style_override,
+        remove_heading_style_override,
+        resolve_heading_style,
+        resolve_heading_style_source,
+    )
+
+    assert callable(remove_heading_style_override)

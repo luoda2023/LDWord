@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from src.config.style_semantics import line_spacing_display_label, resolve_style_special_indent
+from src.config.style_semantics import format_spacing_value, line_spacing_display_label, resolve_style_special_indent
+from src.config.table_style_presets import color_palette, color_variant, table_style_label
 from src.config.template import TemplateConfig
 
 
@@ -38,13 +39,13 @@ def _size_label(size_display: str, size_pt: float | None) -> str:
         return size_display
     if size_pt is None:
         return "默认字号"
-    return f"{size_pt:g}pt"
+    return f"{size_pt:g}磅"
 
 
 def _line_spacing_label(kind: str, value: float) -> str:
     label = line_spacing_display_label(kind)
     if label == "固定值":
-        return f"固定{value:g}pt"
+        return f"固定{value:g}磅"
     if kind in {"single", "one_half", "double"}:
         return label
     return f"{value:g}倍"
@@ -78,14 +79,14 @@ def _page_group_summary(cfg: TemplateConfig) -> str:
     page = cfg.page_setup
     margin = page.margin
     parts = [
-        f"{_paper_label(page.paper_size)} · 边距 {margin.top_cm:g}/{margin.bottom_cm:g}/{margin.left_cm:g}/{margin.right_cm:g}cm",
-        f"页眉{page.header_distance_cm:g}cm/页脚{page.footer_distance_cm:g}cm",
+        f"{_paper_label(page.paper_size)}  边距 {margin.top_cm:g}/{margin.bottom_cm:g}/{margin.left_cm:g}/{margin.right_cm:g}cm",
+        f"页眉{page.header_distance_cm:g}cm / 页脚{page.footer_distance_cm:g}cm",
     ]
     if page.gutter_cm:
         parts.append(f"装订线{page.gutter_cm:g}cm")
     if cfg.section.section_break_type:
         parts.append(str(cfg.section.section_break_type))
-    return " · ".join(parts)
+    return "，".join(parts)
 
 
 def _style_group_summary(cfg: TemplateConfig) -> str:
@@ -93,8 +94,8 @@ def _style_group_summary(cfg: TemplateConfig) -> str:
     if body is None:
         return "默认正文样式"
     return (
-        f"{body.font_cn}/{body.font_en} · {_size_label(body.size_display, body.size_pt)}"
-        f" · {_indent_label(body)} · 行距{_line_spacing_label(body.line_spacing_type, body.line_spacing_pt)}"
+        f"{body.font_cn}/{body.font_en}  {_size_label(body.size_display, body.size_pt)}"
+        f"，{_indent_label(body)}，行距{_line_spacing_label(body.line_spacing_type, body.line_spacing_pt)}"
     )
 
 
@@ -122,73 +123,168 @@ def _heading_numbering_flow(cfg: TemplateConfig) -> str:
 
 def _heading_group_summary(cfg: TemplateConfig) -> str:
     flow = _heading_numbering_flow(cfg)
-    return f"{flow} · 最多{cfg.heading_model.max_heading_levels}级"
+    return f"{flow}，最多{cfg.heading_model.max_heading_levels}级"
 
 
 def _table_group_summary(cfg: TemplateConfig) -> str:
     table = cfg.table
-    border_map = {
-        "three_line": "三线表",
-        "full_grid": "全框线",
-        "keep": "保留原样",
-    }
     layout_map = {
-        "smart": f"智能布局({table.smart_levels}级)",
+        "smart": "智能布局",
         "compact": "紧凑布局",
         "full": "撑满布局",
+        "keep": "布局保留原样",
     }
-    border = border_map.get(table.border_mode, table.border_mode or "默认边框")
-    layout = layout_map.get(table.layout_mode, table.layout_mode or "默认布局")
-    return f"{border} · {layout} · 图表{_numbering_label(cfg.caption.numbering_format)}"
+    table_alignment_map = {
+        None: "表格不调整",
+        "": "表格不调整",
+        "left": "表格左对齐",
+        "center": "表格居中",
+        "right": "表格右对齐",
+    }
+    style = table_style_label(table.border_mode)
+    if str(table.border_mode or "") == "color_table":
+        style = (
+            f"{style}"
+            f"({color_palette(getattr(table, 'color_table_accent', 'blue')).label}"
+            f"/{color_variant(getattr(table, 'color_table_variant', 'header_grid')).label})"
+        )
+    parts = [
+        style,
+        layout_map.get(table.layout_mode, table.layout_mode or "智能布局"),
+        table_alignment_map.get(getattr(table, "table_alignment", "center"), "表格居中"),
+    ]
+    parts.append("首行加粗" if bool(getattr(table, "first_row_bold", False)) else "不首行加粗")
+    parts.append("跨页重复表头" if table.repeat_header else "不跨页重复表头")
+    return " / ".join(parts)
 
 
-def _elements_group_summary(cfg: TemplateConfig) -> str:
-    header_footer = cfg.header_footer
-    mode_map = {
-        "styleref": f"STYLEREF {header_footer.styleref_level}级",
-        "fixed": f"固定页眉 {header_footer.header_text or '(空)'}",
+def _page_number_phase_scope_label(selectors: list[str]) -> str:
+    selector_map = {
+        "all_numbered_content": "全文",
+        "front_matter": "前置部分",
+        "body": "正文部分",
+        "back_matter": "后置部分",
+        "appendix": "附录",
+        "references": "参考文献",
+        "toc": "目录",
+    }
+    labels = [
+        selector_map.get(str(selector or ""), str(selector or ""))
+        for selector in selectors
+        if str(selector or "").strip()
+    ]
+    if not labels:
+        return "未设置范围"
+    if labels == ["全文"]:
+        return "全文"
+    return "+".join(labels)
+
+
+def _suppress_header_footer_summary(header) -> str:
+    selector_map = {
+        "pre_numbering": "封面及声明页留空",
+        "cover": "封面留空",
+        "statement": "声明页留空",
+        "authorization": "授权书留空",
+        "front_note": "说明页留空",
+    }
+    selectors = [
+        str(selector or "").strip()
+        for selector in (getattr(header, "suppress_header_footer_selectors", []) or [])
+        if str(selector or "").strip()
+    ]
+    if not selectors and getattr(header, "hide_cover_header_footer", False):
+        selectors = ["pre_numbering"]
+    labels = [selector_map.get(selector, f"{selector}留空") for selector in selectors]
+    return "+".join(labels)
+
+
+def _page_number_phase_summary(header) -> str:
+    page_format_map = {
+        "decimal": "阿拉伯",
+        "upperRoman": "大写罗马",
+        "lowerRoman": "小写罗马",
+    }
+    phases = list(getattr(header.page_number_plan, "phases", []) or [])
+    if not phases:
+        return "未设置页码规则"
+
+    parts = []
+    for phase in phases[:2]:
+        scope = _page_number_phase_scope_label(list(getattr(phase, "selectors", []) or []))
+        if not bool(getattr(phase, "visible", True)):
+            parts.append(f"{scope}隐藏")
+            continue
+        fmt = page_format_map.get(
+            str(getattr(phase, "number_format", "") or ""),
+            str(getattr(phase, "number_format", "") or "decimal"),
+        )
+        if str(getattr(phase, "start_mode", "") or "continue") == "restart":
+            start_value = max(1, int(getattr(phase, "start_value", 1) or 1))
+            parts.append(f"{scope}{fmt}({start_value})")
+        else:
+            parts.append(f"{scope}{fmt}(续号)")
+
+    if len(phases) > 2:
+        parts.append(f"+{len(phases) - 2}条规则")
+    return " / ".join(parts)
+
+
+def _header_footer_group_summary(cfg: TemplateConfig) -> str:
+    header = cfg.header_footer
+    header_map = {
+        "styleref": "跟随章节标题",
+        "fixed": "固定页眉",
         "none": "无页眉",
     }
-    toc = "目录关闭"
-    if cfg.toc.enabled:
-        toc = f"目录 {cfg.toc.max_level}级"
-    page_no = "有页码" if header_footer.page_number_enabled else "无页码"
-    return f"{mode_map.get(header_footer.header_mode, header_footer.header_mode)} · {page_no} · {toc}"
+    parts = [header_map.get(header.header_mode, header.header_mode or "跟随章节标题")]
+    parts.append("页眉线" if header.header_border else "无页眉线")
+    parts.append("页码开启" if header.page_number_enabled else "页码关闭")
+    if header.page_number_enabled:
+        parts.append(_page_number_phase_summary(header))
+    suppress_summary = _suppress_header_footer_summary(header)
+    if suppress_summary:
+        parts.append(suppress_summary)
+    return " / ".join(parts)
 
 
-def _formula_group_summary(cfg: TemplateConfig) -> str:
-    formula = cfg.formula_table
-    style = cfg.formula_style
-    enabled_parts = []
-    if style.unify_font:
-        enabled_parts.append("统一字体")
-    if style.unify_size:
-        enabled_parts.append("统一字号")
-    if style.unify_spacing:
-        enabled_parts.append("统一间距")
-    style_text = "/".join(enabled_parts) if enabled_parts else "保留原样"
-    size_text = formula.formula_font_size_display or f"{formula.formula_font_size_pt:g}"
-    return (
-        f"{formula.formula_font_name} {size_text}pt · {_numbering_label(cfg.equation_numbering.numbering_format)}"
-        f" · {style_text}"
-    )
+def _toc_group_summary(cfg: TemplateConfig) -> str:
+    toc = cfg.toc
+    mode_map = {
+        "word_native": "Word 自动目录",
+        "plain": "普通目录",
+    }
+    insert_map = {
+        "auto": "自动位置",
+        "after_cover": "封面后",
+        "0": "文档起始",
+    }
+    parts = ["目录开启" if toc.enabled else "目录关闭"]
+    if toc.enabled:
+        parts.append(mode_map.get(toc.mode, toc.mode or "Word 自动目录"))
+        parts.append(f"{toc.max_level}级")
+        parts.append(insert_map.get(str(toc.insert_position or "auto"), str(toc.insert_position or "auto")))
+    return " / ".join(parts)
 
 
 def _reference_group_summary(cfg: TemplateConfig) -> str:
     ref = cfg.reference_style
-    fonts = "跟随正文"
-    if ref.font_cn or ref.font_en:
-        fonts = f"{ref.font_cn or '-'} / {ref.font_en or '-'}"
-    size_text = f"{ref.size_pt:g}pt" if ref.size_pt else "跟随正文"
-    return f"{fonts} · {size_text} · 悬挂{ref.hanging_indent_cm:g}cm"
+    return f"悬挂缩进 {ref.hanging_indent_cm:g}cm / 段后 {format_spacing_value(ref.space_after_pt, 'pt')}"
 
 
-def _other_group_summary(cfg: TemplateConfig) -> str:
-    watermark = "水印关闭"
-    if cfg.watermark.enabled:
-        watermark = f"水印 {cfg.watermark.text or '已启用'}"
-    outputs = sum(1 for enabled in cfg.output.__dict__.values() if enabled)
-    return f"{watermark} · 输出{outputs}项"
+def _caption_group_summary(cfg: TemplateConfig) -> str:
+    caption = cfg.caption
+    mode_map = {
+        "chapter": "章节编号",
+        "global": "全局编号",
+    }
+    parts = [
+        f"{caption.figure_prefix}/{caption.table_prefix}",
+        mode_map.get(caption.numbering_mode, caption.numbering_mode or "章节编号"),
+    ]
+    parts.append("自动补题注" if caption.auto_insert else "手动题注")
+    parts.append("域编号" if caption.format_inserted else "纯文本编号")
+    return " / ".join(parts)
 
 
 TEMPLATE_PREVIEW_SPECS: tuple[TemplatePreviewGroupSpec, ...] = (
@@ -219,42 +315,42 @@ TEMPLATE_PREVIEW_SPECS: tuple[TemplatePreviewGroupSpec, ...] = (
     TemplatePreviewGroupSpec(
         group_id="table",
         detail_card_id="tpl_table",
-        label="表格题注",
+        label="表格",
         icon_name="table-2",
-        field_names=("table", "caption"),
+        field_names=("table",),
         summary_builder=_table_group_summary,
     ),
     TemplatePreviewGroupSpec(
-        group_id="elements",
-        detail_card_id="tpl_elements",
-        label="页眉目录",
+        group_id="header_footer",
+        detail_card_id="tpl_header_footer",
+        label="页眉与页脚",
         icon_name="panel-top",
-        field_names=("header_footer", "toc"),
-        summary_builder=_elements_group_summary,
+        field_names=("header_footer",),
+        summary_builder=_header_footer_group_summary,
     ),
     TemplatePreviewGroupSpec(
-        group_id="formula",
-        detail_card_id="tpl_formula",
-        label="公式",
-        icon_name="sigma",
-        field_names=("formula_table", "formula_style", "equation_numbering"),
-        summary_builder=_formula_group_summary,
+        group_id="toc",
+        detail_card_id="tpl_toc",
+        label="目录",
+        icon_name="scroll-text",
+        field_names=("toc",),
+        summary_builder=_toc_group_summary,
     ),
     TemplatePreviewGroupSpec(
         group_id="reference",
         detail_card_id="tpl_reference",
         label="参考文献",
         icon_name="book-open",
-        field_names=("reference_style",),
+        field_names=("reference_style", "styles"),
         summary_builder=_reference_group_summary,
     ),
     TemplatePreviewGroupSpec(
-        group_id="other",
-        detail_card_id="tpl_other",
-        label="其他",
-        icon_name="settings",
-        field_names=("watermark", "output"),
-        summary_builder=_other_group_summary,
+        group_id="caption",
+        detail_card_id="tpl_caption",
+        label="题注",
+        icon_name="image-plus",
+        field_names=("caption", "styles"),
+        summary_builder=_caption_group_summary,
     ),
 )
 

@@ -155,7 +155,7 @@ class AppTheme:
     button_padding_x: int = 14
     button_padding_y: int = 4
     button_height_md: int = 32
-    button_font_weight: int = 500
+    button_font_weight: int = 700
 
     input_radius: int = 6
     input_padding_x: int = 8
@@ -232,8 +232,13 @@ class AppTheme:
     combo_popup_padding: int = 4
     combo_popup_item_padding_x: int = 12
     combo_popup_item_padding_y: int = 6
-    combo_popup_offset_y: int = 2
+    combo_popup_offset_y: int = 4
     combo_popup_radius: int = 10
+    combo_popup_border_width: int = 1
+    combo_popup_shell_padding: int = 4
+    combo_popup_shadow_blur: int = 12
+    combo_popup_shadow_alpha: int = 14
+    combo_popup_shadow_offset_y: int = 3
 
     spin_button_width: int = 24
 
@@ -266,19 +271,19 @@ class AppTheme:
     style_preview_min_height: int = 60
     style_preview_padding: int = 12
 
-    card_padding_x: int = 20
-    card_padding_y: int = 20
-    card_padding_top: int = 16
-    card_padding_bottom: int = 20
-    card_spacing: int = 12
-    card_content_spacing: int = 4
+    card_padding_x: int = 16
+    card_padding_y: int = 16
+    card_padding_top: int = 12
+    card_padding_bottom: int = 14
+    card_spacing: int = 8
+    card_content_spacing: int = 2
 
     dialog_icon_container_size: int = 40
     dialog_icon_size: int = 24
     dialog_close_button_size: int = 32
 
     form_row_label_width: int = 120
-    form_row_height: int = 36
+    form_row_height: int = 30
 
     spacing_input_unit_width: int = 60
 
@@ -304,7 +309,7 @@ class AppTheme:
     shadow_offset_y_lg: int = 16         # 弹窗 Y 偏移
 
     # ━━ 字体 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    font_family: str = "'Microsoft YaHei', 'Segoe UI', 'Inter', '-apple-system', 'BlinkMacSystemFont', sans-serif"
+    font_family: str = "'Microsoft YaHei', 'Microsoft YaHei UI', 'Segoe UI Variable', 'Segoe UI', 'Inter', '-apple-system', 'BlinkMacSystemFont', sans-serif"
 
     font_size_xs: int = 11               # 角标、徽标
     font_size_sm: int = 12               # 辅助文字、脚注
@@ -314,6 +319,8 @@ class AppTheme:
     font_size_xxl: int = 20              # 页面标题
 
     font_weight_normal: int = 400
+    font_weight_medium: int = 500
+    font_weight_emphasis: int = 700
     font_weight_bold: int = 700
 
     # ━━ 间距 (px) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -325,9 +332,9 @@ class AppTheme:
     spacing_xxl: int = 32                # 弹窗级大留白
 
     # ━━ 控件高度 (px) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    control_height_sm: int = 28          # 紧凑型（表格内、工具栏）
-    control_height_md: int = 36          # 默认（输入框、按钮）
-    control_height_lg: int = 44          # 大号（主操作按钮）
+    control_height_sm: int = 24          # 紧凑型（表格内、工具栏）
+    control_height_md: int = 30          # 默认（输入框、按钮）
+    control_height_lg: int = 36          # 大号（主操作按钮）
 
     # ━━ 动画时长 (ms) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     anim_duration_fast: int = 100        # 微交互（hover、toggle）

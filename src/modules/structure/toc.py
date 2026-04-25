@@ -1,17 +1,17 @@
-"""
-toc — 目录生成模块
-
-在指定位置插入或更新 TOC（Table of Contents）域代码。
-"""
+"""TOC generation and formatting module."""
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
-from lxml import etree
+from docx.oxml import OxmlElement
 
 from src.modules.base import BaseModule, ModuleMeta
-from src.shared.engine.ooxml_ops import qn
+from src.shared.engine.document_text_heuristics import (
+    looks_like_numbered_toc_entry_with_page_suffix,
+    looks_like_toc_entry_line,
+)
 from src.shared.engine.field_builder import (
     build_complex_field,
     build_toc_instruction,
@@ -21,6 +21,14 @@ from src.shared.engine.field_refresh import (
     document_has_toc,
     ensure_update_fields_on_open,
 )
+from src.shared.engine.ooxml_ops import clone_element, find_or_create, qn
+from src.shared.engine.toc_style_ops import (
+    LEVEL_TO_WORD_STYLE,
+    TOC_HEADING_STYLE_CANDIDATES,
+    apply_toc_paragraph_style,
+    resolve_toc_style_config,
+    sync_toc_styles,
+)
 
 if TYPE_CHECKING:
     from docx import Document
@@ -29,22 +37,31 @@ if TYPE_CHECKING:
     from src.pipeline.tracker import ChangeTracker
 
 
+TOC_TITLE_TEXT = "\u76ee\u5f55"
+TOC_FIELD_PLACEHOLDER = "\u8bf7\u66f4\u65b0\u57df\u4ee5\u663e\u793a\u76ee\u5f55"
+TOC_TITLE_RE = re.compile(r"^(\u76ee\u5f55|\u76ee\s*\u5f55|contents|tableofcontents)$", re.IGNORECASE)
+TOC_LEVEL_STYLE_RE = re.compile(r"^(toc|\u76ee\u5f55)\s*(\d+)$", re.IGNORECASE)
+RE_TOC_CHAPTER_CN = re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+(?:\u7ae0|\u7bc7)")
+RE_TOC_SECTION_CN = re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+\u8282")
+RE_LEVEL2 = re.compile(r"^\d+\.\d+\.\d+(?:[\.、．])?\s*\S")
+RE_LEVEL1 = re.compile(r"^\d+\.\d+(?:[\.、．])?\s*\S")
+BACK_MATTER_TITLES = {
+    "references": "\u53c2\u8003\u6587\u732e",
+    "errata": "\u52d8\u8bef",
+    "appendix": "\u9644\u5f55",
+    "acknowledgment": "\u81f4\u8c22",
+    "resume": "\u4e2a\u4eba\u7b80\u5386",
+}
+
+
 class TocModule(BaseModule):
-    """目录生成模块。
-
-    职责：
-    - 在文档指定位置插入 TOC 域代码
-    - 更新已有 TOC 域
-    - 移除旧的手动目录
-    """
-
     meta = ModuleMeta(
         name="toc",
-        description="目录生成",
+        description="\u76ee\u5f55\u751f\u6210",
         category="structure",
         requires_config=("toc",),
         depends_on=("heading_numbering",),
-        consumes=("heading_map",),
+        consumes=("heading_map", "doc_tree"),
         enabled_by_default=True,
     )
 
@@ -56,131 +73,524 @@ class TocModule(BaseModule):
         context: PipelineContext,
     ) -> None:
         toc_cfg = config.toc
-
         if not toc_cfg.enabled:
             return
 
         max_level = toc_cfg.max_level
         insert_position = toc_cfg.insert_position
+        mode = str(getattr(toc_cfg, "mode", "word_native") or "word_native").strip().lower()
+        style_sync_count = sync_toc_styles(doc, config.styles)
+        existing_plain_range = _resolve_existing_toc_range(doc, context)
 
-        # 检查是否已有 TOC
-        has_existing_toc = _has_existing_toc(doc)
-
-        if has_existing_toc:
-            # 更新 TOC 标记（Word 打开时会自动更新域）
-            _mark_toc_for_update(doc)
-            ensure_update_fields_on_open(doc)
-            tracker.record(
-                rule_name=self.meta.name,
-                target="已有目录",
-                section="global",
-                change_type="format",
-                before="目录未更新",
-                after="已标记更新",
-            )
+        if mode == "plain":
+            entries = _collect_plain_toc_entries(doc, context, max_level=max_level)
+            if existing_plain_range is not None:
+                start, end = existing_plain_range
+                inserted = _replace_paragraph_toc_range_with_plain(doc, start, end, entries)
+                _format_inserted_plain_toc(doc, config, inserted, entries)
+                tracker.record(
+                    rule_name=self.meta.name,
+                    target=f"plain toc {len(entries)} entries",
+                    section="global",
+                    change_type="rebuild",
+                    before=f"range=({start},{end})",
+                    after="plain toc rebuilt",
+                )
+            else:
+                insert_idx = _find_insert_position(doc, insert_position, context)
+                if insert_idx is not None:
+                    inserted = _insert_plain_toc(doc, insert_idx, entries)
+                    _format_inserted_plain_toc(doc, config, inserted, entries)
+                    tracker.record(
+                        rule_name=self.meta.name,
+                        target=f"paragraph {insert_idx}",
+                        section="global",
+                        change_type="insert",
+                        before="no toc",
+                        after=f"plain toc ({len(entries)} entries)",
+                    )
         else:
-            # 插入新 TOC
-            insert_idx = _find_insert_position(doc, insert_position, context)
-            if insert_idx is not None:
-                _insert_toc(doc, insert_idx, max_level)
+            has_existing_toc = _has_existing_toc(doc)
+            if has_existing_toc:
+                updated_fields = _sync_toc_field_instructions(doc, max_level)
+                formatted_count = _format_existing_toc_paragraphs(doc, config, context)
                 ensure_update_fields_on_open(doc)
                 tracker.record(
                     rule_name=self.meta.name,
-                    target=f"段落 {insert_idx}",
+                    target="existing toc",
                     section="global",
-                    change_type="insert",
-                    before="无目录",
-                    after=f"已插入 TOC (1-{max_level} 级)",
+                    change_type="format",
+                    before="toc stale",
+                    after=f"depth=1-{max_level}, updated {updated_fields} fields and formatted {formatted_count} paragraphs",
                 )
+            else:
+                insert_idx = _find_insert_position(doc, insert_position, context)
+                if insert_idx is not None:
+                    _insert_toc(doc, insert_idx, max_level)
+                    _format_inserted_toc_title(doc, config, insert_idx)
+                    ensure_update_fields_on_open(doc)
+                    tracker.record(
+                        rule_name=self.meta.name,
+                        target=f"paragraph {insert_idx}",
+                        section="global",
+                        change_type="insert",
+                        before="no toc",
+                        after=f"native toc (1-{max_level})",
+                    )
+
+        if style_sync_count:
+            tracker.record(
+                rule_name=self.meta.name,
+                target=f"{style_sync_count} toc style defs",
+                section="global",
+                change_type="style",
+                before="toc styles unsynced",
+                after="toc title/entry styles synced",
+            )
 
 
 def _has_existing_toc(doc: Document) -> bool:
-    """检查文档是否已有 TOC 域代码。"""
     return document_has_toc(doc)
 
 
 def _mark_toc_for_update(doc: Document) -> None:
-    """标记目录域需要更新（设置 dirty flag）。"""
     body = doc.element.body
     for _kind, elem, instr in iter_field_instructions(body):
         if _is_toc_instruction(instr):
             elem.set(qn("w:dirty"), "true")
 
 
-def _find_insert_position(
-    doc: Document,
-    mode: str,
-    context: PipelineContext,
-) -> int | None:
-    """确定 TOC 插入位置。
+def _sync_toc_field_instructions(doc: Document, max_level: int) -> int:
+    body = doc.element.body
+    instruction = build_toc_instruction(max_level=max(1, int(max_level or 1)))
+    changed = 0
+    for kind, elem, instr in iter_field_instructions(body):
+        if not _is_toc_instruction(instr):
+            continue
+        elem.set(qn("w:dirty"), "true")
+        if kind == "simple":
+            if elem.get(qn("w:instr"), "") != instruction:
+                elem.set(qn("w:instr"), instruction)
+                changed += 1
+            continue
+        if _replace_complex_field_instruction(elem, instruction):
+            changed += 1
+    return changed
 
-    mode:
-    - "auto": 在第一个 heading 之前插入
-    - "after_cover": 在封面后插入
-    - 数字字符串: 指定段落索引
-    """
+
+def _replace_complex_field_instruction(begin_elem, instruction: str) -> bool:
+    begin_run = begin_elem.getparent()
+    if begin_run is None:
+        return False
+    container = begin_run.getparent()
+    if container is None:
+        return False
+
+    children = list(container)
+    try:
+        start_index = children.index(begin_run)
+    except ValueError:
+        return False
+
+    instr_nodes = []
+    nested_depth = 0
+    for child in children[start_index + 1:]:
+        fld_chars = list(child.iter(qn("w:fldChar")))
+        if any(
+            fld.get(qn("w:fldCharType")) in {"separate", "end"}
+            for fld in fld_chars
+            if nested_depth == 0
+        ):
+            break
+        instr_nodes.extend(child.iter(qn("w:instrText")))
+        for fld in fld_chars:
+            fld_type = fld.get(qn("w:fldCharType"))
+            if fld_type == "begin":
+                nested_depth += 1
+            elif fld_type == "end" and nested_depth > 0:
+                nested_depth -= 1
+
+    if not instr_nodes:
+        return False
+
+    current = "".join(node.text or "" for node in instr_nodes)
+    instr_nodes[0].text = instruction
+    for node in instr_nodes[1:]:
+        node.text = ""
+    return current != instruction
+
+
+def _norm_no_space(text: str) -> str:
+    return re.sub(r"\s+", "", text or "").strip()
+
+
+def _is_toc_title_paragraph(para) -> bool:
+    raw = _norm_no_space(para.text)
+    if not raw:
+        return False
+    if TOC_TITLE_RE.match(raw):
+        return True
+    style_name = str(para.style.name if para.style else "").strip()
+    return any(style_name == candidate for candidate in TOC_HEADING_STYLE_CANDIDATES)
+
+
+def _is_toc_level_style_para(para) -> bool:
+    style_name = str(para.style.name if para.style else "").strip()
+    style_id = str(getattr(para.style, "style_id", "") if para.style else "").strip()
+    return bool(TOC_LEVEL_STYLE_RE.match(style_name) or TOC_LEVEL_STYLE_RE.match(style_id))
+
+
+def _infer_toc_level_from_paragraph(para) -> str:
+    style_name = str(para.style.name if para.style else "").strip()
+    style_id = str(getattr(para.style, "style_id", "") if para.style else "").strip()
+    for value in (style_name, style_id):
+        match = TOC_LEVEL_STYLE_RE.match(value)
+        if match:
+            level_num = int(match.group(2))
+            if level_num <= 1:
+                return "heading1"
+            if level_num == 2:
+                return "heading2"
+            return "heading3"
+
+    raw = (para.text or "").strip()
+    if RE_TOC_SECTION_CN.match(raw):
+        return "heading2"
+    if RE_TOC_CHAPTER_CN.match(raw):
+        return "heading1"
+    if RE_LEVEL2.match(raw):
+        return "heading3"
+    if RE_LEVEL1.match(raw):
+        return "heading2"
+    return "heading1"
+
+
+def _fallback_toc_section(doc):
+    title_index = None
+    for index, para in enumerate(doc.paragraphs):
+        if _is_toc_title_paragraph(para):
+            title_index = index
+            break
+    if title_index is None:
+        return None
+
+    end = title_index + 1
+    entry_count = 0
+    for probe in range(title_index + 1, len(doc.paragraphs)):
+        para = doc.paragraphs[probe]
+        raw = (para.text or "").strip()
+        if not raw:
+            end = probe + 1
+            continue
+        if _is_toc_level_style_para(para) or looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
+            end = probe + 1
+            entry_count += 1
+            continue
+        break
+
+    if entry_count >= 1:
+        return (title_index, end)
+    return None
+
+
+def _toc_section_is_suspicious(doc: Document, start: int, end: int) -> bool:
+    total = len(doc.paragraphs)
+    if start < 0 or end <= start or start >= total:
+        return True
+
+    entry_like = 0
+    heading_like = 0
+    nonempty = 0
+    for index in range(max(0, start), min(total, end)):
+        para = doc.paragraphs[index]
+        raw = (para.text or "").strip()
+        if not raw:
+            continue
+        nonempty += 1
+        if _is_toc_title_paragraph(para):
+            continue
+        if _is_toc_level_style_para(para) or looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
+            entry_like += 1
+            continue
+        style_name = str(para.style.name if para.style else "").strip().lower()
+        if style_name.startswith("heading") or "\u6807\u9898" in style_name or raw.endswith(("\u3002", "\uff1b", "!", "\uff1f", ".", ";", ":")):
+            heading_like += 1
+
+    span = max(0, end - start)
+    span_ratio = span / max(total, 1)
+    if entry_like == 0:
+        return True
+    if heading_like >= 3 and entry_like == 0:
+        return True
+    if span_ratio >= 0.80 and (nonempty - entry_like) >= 2:
+        return True
+    return False
+
+
+def _resolve_existing_toc_range(doc: Document, context: PipelineContext) -> tuple[int, int] | None:
+    doc_tree = getattr(context, "doc_tree", None)
+    if doc_tree is not None:
+        toc_section = getattr(doc_tree, "get_section", lambda *_: None)("toc")
+        if toc_section is not None:
+            start = max(0, int(toc_section.start_index))
+            end = min(len(doc.paragraphs), int(toc_section.end_index))
+            if not _toc_section_is_suspicious(doc, start, end):
+                return (start, end)
+    return _fallback_toc_section(doc)
+
+
+def _format_existing_toc_paragraphs(doc: Document, config: ResolvedConfig, context: PipelineContext) -> int:
+    resolved_range = _resolve_existing_toc_range(doc, context)
+    if resolved_range is None:
+        return 0
+    start, end = resolved_range
+
+    formatted = 0
+    for index in range(start, end):
+        para = doc.paragraphs[index]
+        raw = (para.text or "").strip()
+        if not raw:
+            continue
+        if _is_toc_title_paragraph(para):
+            style_config = resolve_toc_style_config(config.styles, "toc_title")
+            if style_config is not None:
+                apply_toc_paragraph_style(para, style_config, is_title=True)
+                try:
+                    para.style = doc.styles[TOC_HEADING_STYLE_CANDIDATES[0]]
+                except Exception:
+                    pass
+                formatted += 1
+            continue
+
+        if _is_toc_level_style_para(para) or looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
+            level = _infer_toc_level_from_paragraph(para)
+            level_key = {
+                "heading1": "toc_chapter",
+                "heading2": "toc_level1",
+                "heading3": "toc_level2",
+            }.get(level, "toc_level2")
+            style_config = resolve_toc_style_config(config.styles, level_key)
+            if style_config is None:
+                continue
+            apply_toc_paragraph_style(para, style_config, is_title=False)
+            try:
+                para.style = doc.styles[LEVEL_TO_WORD_STYLE[level]]
+            except Exception:
+                pass
+            formatted += 1
+    return formatted
+
+
+def _format_inserted_toc_title(doc: Document, config: ResolvedConfig, insert_idx: int) -> None:
+    if insert_idx < 0 or insert_idx >= len(doc.paragraphs):
+        return
+    para = doc.paragraphs[insert_idx]
+    if not _is_toc_title_paragraph(para):
+        return
+    style_config = resolve_toc_style_config(config.styles, "toc_title")
+    if style_config is None:
+        return
+    apply_toc_paragraph_style(para, style_config, is_title=True)
+    try:
+        para.style = doc.styles[TOC_HEADING_STYLE_CANDIDATES[0]]
+    except Exception:
+        pass
+
+
+def _find_insert_position(doc: Document, mode: str, context: PipelineContext) -> int | None:
     if mode == "auto":
-        # 在第一个标题前插入
+        doc_tree = getattr(context, "doc_tree", None)
+        if doc_tree is not None:
+            toc_section = getattr(doc_tree, "get_section", lambda *_: None)("toc")
+            if toc_section is not None:
+                return toc_section.start_index
+            cover_section = getattr(doc_tree, "get_section", lambda *_: None)("cover")
+            if cover_section is not None and cover_section.end_index > 0:
+                return min(cover_section.end_index, len(doc.paragraphs))
+
         heading_map = context.heading_map
         if heading_map:
-            first_heading_idx = min(heading_map.keys())
-            return max(0, first_heading_idx)
+            return max(0, min(heading_map.keys()))
         return 0
 
     if mode == "after_cover":
-        # 简化：在第 2 段后插入
+        doc_tree = getattr(context, "doc_tree", None)
+        if doc_tree is not None:
+            cover_section = getattr(doc_tree, "get_section", lambda *_: None)("cover")
+            if cover_section is not None and cover_section.end_index > 0:
+                return min(cover_section.end_index, len(doc.paragraphs))
         return min(2, len(doc.paragraphs))
 
-    # 数字索引
     try:
         return int(mode)
     except ValueError:
         return 0
 
 
-def _insert_toc(doc: Document, position: int, max_level: int) -> None:
-    """在指定位置插入 TOC 段落。"""
+def _build_text_paragraph_element(text: str):
+    paragraph = OxmlElement("w:p")
+    run = OxmlElement("w:r")
+    text_el = OxmlElement("w:t")
+    paragraph.append(run)
+    run.append(text_el)
+    text_el.text = text
+    text_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    return paragraph
+
+
+def _insert_paragraph_elements(doc: Document, position: int, elements: list) -> list:
     body = doc.element.body
     paragraphs = body.findall(qn("w:p"))
-
-    # 创建 TOC 段落
-    toc_para = etree.Element(qn("w:p"))
-
-    # 段落属性：居中
-    pPr = etree.SubElement(toc_para, qn("w:pPr"))
-    jc = etree.SubElement(pPr, qn("w:jc"))
-    jc.set(qn("w:val"), "left")
-
-    # "目录"标题 Run
-    r_title = etree.SubElement(toc_para, qn("w:r"))
-    rPr = etree.SubElement(r_title, qn("w:rPr"))
-    b = etree.SubElement(rPr, qn("w:b"))
-    sz = etree.SubElement(rPr, qn("w:sz"))
-    sz.set(qn("w:val"), "32")  # 16 pt
-    t = etree.SubElement(r_title, qn("w:t"))
-    t.text = "目 录"
-
-    # TOC 域代码段落
-    toc_field_para = etree.Element(qn("w:p"))
-    instr = build_toc_instruction(max_level=max_level)
-    for elem in build_complex_field(
-        instr,
-        result_text="请更新域以显示目录",
-        mark_dirty=True,
-    ):
-        toc_field_para.append(elem)
-
-    # 插入到 body
     if position < len(paragraphs):
-        ref = paragraphs[position]
-        ref.addprevious(toc_para)
-        ref.addprevious(toc_field_para)
+        insert_at = list(body).index(paragraphs[position])
+        for offset, elem in enumerate(elements):
+            body.insert(insert_at + offset, elem)
     else:
-        body.append(toc_para)
-        body.append(toc_field_para)
+        for elem in elements:
+            body.append(elem)
+    return elements
+
+
+def _extract_trailing_section_break(paragraph_elements: list) -> object | None:
+    for para in reversed(paragraph_elements):
+        ppr = para.find(qn("w:pPr"))
+        if ppr is None:
+            continue
+        sect_pr = ppr.find(qn("w:sectPr"))
+        if sect_pr is not None:
+            return clone_element(sect_pr)
+    return None
+
+
+def _apply_section_break_to_last_paragraph(elements: list, sect_pr) -> None:
+    if not elements or sect_pr is None:
+        return
+    ppr = find_or_create(elements[-1], "w:pPr")
+    existing = ppr.find(qn("w:sectPr"))
+    if existing is not None:
+        ppr.remove(existing)
+    ppr.append(sect_pr)
+
+
+def _insert_toc(doc: Document, position: int, max_level: int) -> None:
+    title_para = _build_text_paragraph_element(TOC_TITLE_TEXT)
+    field_para = OxmlElement("w:p")
+    instr = build_toc_instruction(max_level=max_level)
+    for elem in build_complex_field(instr, result_text=TOC_FIELD_PLACEHOLDER, mark_dirty=True):
+        field_para.append(elem)
+    _insert_paragraph_elements(doc, position, [title_para, field_para])
+
+
+def _collect_plain_toc_entries(doc: Document, context: PipelineContext, *, max_level: int) -> list[dict]:
+    doc_tree = getattr(context, "doc_tree", None)
+    heading_map = getattr(context, "heading_map", None) or {}
+    entries: list[dict] = []
+    seen_para_indices: set[int] = set()
+
+    def push(level: str, title: str, para_index: int) -> None:
+        text = str(title or "").strip()
+        if not text or para_index < 0 or para_index >= len(doc.paragraphs):
+            return
+        if para_index in seen_para_indices:
+            return
+        seen_para_indices.add(para_index)
+        entries.append({"level": level, "title": text, "para_index": para_index})
+
+    if doc_tree is not None:
+        for sec_type, fallback_title in (("abstract_cn", "\u6458\u8981"), ("abstract_en", "Abstract")):
+            section = getattr(doc_tree, "get_section", lambda *_: None)(sec_type)
+            if section is None:
+                continue
+            para_index = int(getattr(section, "start_index", -1))
+            title = (doc.paragraphs[para_index].text or "").strip() if 0 <= para_index < len(doc.paragraphs) else fallback_title
+            push("heading1", title or fallback_title, para_index)
+
+    for para_index in sorted(heading_map):
+        level_num = int(heading_map[para_index])
+        if level_num < 1 or level_num > max_level:
+            continue
+        if doc_tree is not None:
+            sec_type = getattr(doc_tree, "get_section_for_paragraph", lambda *_: "body")(para_index)
+            if sec_type != "body":
+                continue
+        title = (doc.paragraphs[para_index].text or "").strip()
+        if title:
+            level = {1: "heading1", 2: "heading2"}.get(level_num, "heading3")
+            push(level, title, para_index)
+
+    if doc_tree is not None:
+        for sec_type, fallback_title in BACK_MATTER_TITLES.items():
+            section = getattr(doc_tree, "get_section", lambda *_: None)(sec_type)
+            if section is None:
+                continue
+            para_index = int(getattr(section, "start_index", -1))
+            title = (doc.paragraphs[para_index].text or "").strip() if 0 <= para_index < len(doc.paragraphs) else fallback_title
+            push("heading1", title or fallback_title, para_index)
+
+    return entries
+
+
+def _insert_plain_toc(doc: Document, position: int, entries: list[dict]) -> list:
+    elements = [_build_text_paragraph_element(TOC_TITLE_TEXT)]
+    for entry in entries:
+        elements.append(_build_text_paragraph_element(str(entry.get("title", "") or "").strip()))
+    return _insert_paragraph_elements(doc, position, elements)
+
+
+def _replace_paragraph_toc_range_with_plain(doc: Document, start: int, end: int, entries: list[dict]) -> list:
+    body = doc.element.body
+    paragraphs = body.findall(qn("w:p"))
+    if start < 0 or start >= len(paragraphs):
+        return _insert_plain_toc(doc, len(doc.paragraphs), entries)
+
+    existing_range = paragraphs[start:min(end, len(paragraphs))]
+    trailing_sect_pr = _extract_trailing_section_break(existing_range)
+    insert_at = list(body).index(paragraphs[start])
+    for para in existing_range:
+        body.remove(para)
+
+    elements = [_build_text_paragraph_element(TOC_TITLE_TEXT)]
+    for entry in entries:
+        elements.append(_build_text_paragraph_element(str(entry.get("title", "") or "").strip()))
+    _apply_section_break_to_last_paragraph(elements, trailing_sect_pr)
+    for offset, elem in enumerate(elements):
+        body.insert(insert_at + offset, elem)
+    return elements
+
+
+def _format_inserted_plain_toc(doc: Document, config: ResolvedConfig, inserted_elements: list, entries: list[dict]) -> None:
+    el_to_para = {para._element: para for para in doc.paragraphs}
+
+    title_para = el_to_para.get(inserted_elements[0]) if inserted_elements else None
+    if title_para is not None:
+        title_style = resolve_toc_style_config(config.styles, "toc_title")
+        if title_style is not None:
+            apply_toc_paragraph_style(title_para, title_style, is_title=True)
+            try:
+                title_para.style = doc.styles[TOC_HEADING_STYLE_CANDIDATES[0]]
+            except Exception:
+                pass
+
+    for elem, entry in zip(inserted_elements[1:], entries):
+        para = el_to_para.get(elem)
+        if para is None:
+            continue
+        level = str(entry.get("level", "heading3"))
+        level_key = {
+            "heading1": "toc_chapter",
+            "heading2": "toc_level1",
+            "heading3": "toc_level2",
+        }.get(level, "toc_level2")
+        style_config = resolve_toc_style_config(config.styles, level_key)
+        if style_config is None:
+            continue
+        apply_toc_paragraph_style(para, style_config, is_title=False)
+        try:
+            para.style = doc.styles[LEVEL_TO_WORD_STYLE.get(level, "TOC 3")]
+        except Exception:
+            pass
 
 
 def _is_toc_instruction(instr: str) -> bool:
-    """判断域代码指令是否为 TOC。"""
     normalized = " ".join((instr or "").upper().split())
     return normalized.startswith("TOC ")

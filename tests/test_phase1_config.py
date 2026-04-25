@@ -46,6 +46,8 @@ def test_scene_workspace():
     assert scene.is_module_enabled("md_cleanup") is False
     assert scene.is_module_enabled("reference_format") is True
     assert scene.format_scope.mode == "auto"
+    assert scene.format_scope.page_ranges_text == ""
+    assert scene.format_scope.sections["body"] is True
     print("  ✅ SceneWorkspace 实例化正确")
 
 
@@ -219,11 +221,11 @@ def test_module_switch_alias_normalization():
     )
     resolved = resolve_config(TemplateConfig(), scene)
 
-    assert "citation_link" not in scene.module_switches
     assert "equation_table_fmt" not in scene.module_switches
     assert scene.is_module_enabled("citation_link") is False
-    assert scene.is_module_enabled("reference_format") is False
-    assert resolved.is_module_enabled("reference_format") is False
+    assert scene.is_module_enabled("reference_format") is True
+    assert resolved.is_module_enabled("reference_format") is True
+    assert resolved.is_module_enabled("citation_link") is False
     assert resolved.is_module_enabled("equation_table_format") is True
     print("  ✅ 模块开关别名归一正确")
 
@@ -260,6 +262,9 @@ def test_load_template_normalizes_legacy_fields():
             },
         },
         "normal_table_layout_mode": "full",
+        "normal_table_border_mode": "color_table",
+        "color_table_accent": "green",
+        "color_table_variant": "header_grid_zebra",
         "update_header": False,
         "update_page_number": False,
         "update_header_line": False,
@@ -279,6 +284,9 @@ def test_load_template_normalizes_legacy_fields():
         template = load_template(tmp.name)
 
         assert template.table.layout_mode == "full"
+        assert template.table.border_mode == "color_table"
+        assert template.table.color_table_accent == "green"
+        assert template.table.color_table_variant == "header_grid_zebra"
         assert template.header_footer.header_mode == "none"
         assert template.header_footer.page_number_enabled is False
         assert template.header_footer.header_border is False
@@ -299,6 +307,111 @@ def test_load_template_normalizes_legacy_fields():
         print("  ✅ loader 可将 legacy template 归一到 canonical schema")
     finally:
         Path(tmp.name).unlink(missing_ok=True)
+
+
+def test_load_template_supports_nested_page_number_plan_schema():
+    from src.config.loader import load_template
+
+    payload = {
+        "name": "nested_page_number_plan",
+        "header_footer": {
+            "typography": {
+                "font_cn": "宋体",
+                "font_en": "Times New Roman",
+                "size_pt": 10.5,
+            },
+            "header": {
+                "mode": "fixed",
+                "fixed_text": "固定页眉",
+                "styleref_level": 2,
+                "border": False,
+                "hide_on_cover": False,
+            },
+            "footer": {
+                "content_mode": "none",
+                "hide_on_cover": False,
+            },
+            "page_number_plan": {
+                "validation_mode": "warn",
+                "on_missing_doc_tree": "warn_and_fallback",
+                "phases": [
+                    {
+                        "phase_id": "front",
+                        "selectors": ["front_matter"],
+                        "visible": True,
+                        "number_format": "lowerRoman",
+                        "start_mode": "restart",
+                        "start_value": 1,
+                    },
+                    {
+                        "phase_id": "body",
+                        "selectors": ["body", "back_matter"],
+                        "visible": True,
+                        "number_format": "decimal",
+                        "start_mode": "restart",
+                        "start_value": 3,
+                    },
+                ],
+            },
+        },
+    }
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w", encoding="utf-8")
+    try:
+        json.dump(payload, tmp, ensure_ascii=False, indent=2)
+        tmp.close()
+
+        template = load_template(tmp.name)
+        header_footer = template.header_footer
+
+        assert header_footer.header.mode == "fixed"
+        assert header_footer.header.fixed_text == "固定页眉"
+        assert header_footer.footer.content_mode == "none"
+        assert len(header_footer.page_number_plan.phases) == 2
+        assert header_footer.page_number_enabled is False
+        assert header_footer.front_matter_page_number_format == "lowerRoman"
+        assert header_footer.body_page_number_start == 3
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
+
+
+def test_save_template_round_trips_nested_page_number_plan_without_legacy_flat_fields():
+    from src.config.loader import load_template, save_template
+
+    template = TemplateConfig(name="roundtrip_page_number_plan")
+    header_footer = template.header_footer
+    header_footer.header_mode = "fixed"
+    header_footer.header_text = "固定页眉"
+    header_footer.hide_cover_header_footer = False
+    header_footer.front_matter_page_number_format = "lowerRoman"
+    header_footer.front_matter_page_number_start = 2
+    header_footer.body_page_number_format = "decimal"
+    header_footer.restart_body_page_number = False
+    header_footer.body_page_number_start = 3
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+    target = Path(tmp.name)
+    tmp.close()
+    try:
+        save_template(template, target)
+
+        raw = json.loads(target.read_text(encoding="utf-8"))
+        assert "page_number_plan" in raw["header_footer"]
+        assert "front_matter_page_number_format" not in raw["header_footer"]
+        assert "body_page_number_format" not in raw["header_footer"]
+        assert "page_number_enabled" not in raw["header_footer"]
+
+        reloaded = load_template(target)
+        reloaded_hf = reloaded.header_footer
+        assert reloaded_hf.header.mode == "fixed"
+        assert reloaded_hf.header.fixed_text == "固定页眉"
+        assert reloaded_hf.hide_cover_header_footer is False
+        assert reloaded_hf.front_matter_page_number_format == "lowerRoman"
+        assert reloaded_hf.front_matter_page_number_start == 2
+        assert reloaded_hf.restart_body_page_number is False
+        assert reloaded_hf.body_page_number_start == 3
+    finally:
+        target.unlink(missing_ok=True)
 
 
 def test_load_template_lifts_legacy_heading_alias_into_heading_numbering():
@@ -328,6 +441,46 @@ def test_load_template_lifts_legacy_heading_alias_into_heading_numbering():
         assert template.heading_numbering.level_bindings["heading2"].display_template == "{chain}"
         assert template.heading_numbering.level_bindings["heading1"].title_separator == " "
         print("  ✅ legacy top-level heading 已在 migration 层归一到 heading_numbering")
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
+
+
+def test_load_template_preserves_special_indent_schema_and_legacy_fields():
+    from src.config.loader import load_template
+
+    payload = {
+        "styles": {
+            "normal": {
+                "font_cn": "宋体",
+                "special_indent_mode": "first_line",
+                "special_indent_value": 2,
+                "special_indent_unit": "chars",
+            },
+            "heading1": {
+                "font_cn": "黑体",
+                "hanging_indent_chars": 1.5,
+                "hanging_indent_unit": "chars",
+            },
+        }
+    }
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w", encoding="utf-8")
+    try:
+        json.dump(payload, tmp, ensure_ascii=False, indent=2)
+        tmp.close()
+
+        template = load_template(tmp.name)
+
+        assert template.styles["normal"].special_indent_mode == "first_line"
+        assert template.styles["normal"].special_indent_value == 2
+        assert template.styles["normal"].special_indent_unit == "chars"
+        assert template.styles["normal"].first_line_indent_chars == 2
+        assert template.styles["normal"].first_line_indent_unit == "chars"
+
+        assert template.styles["heading1"].special_indent_mode == "hanging"
+        assert template.styles["heading1"].special_indent_value == 1.5
+        assert template.styles["heading1"].special_indent_unit == "chars"
+        assert template.styles["heading1"].hanging_indent_chars == 1.5
     finally:
         Path(tmp.name).unlink(missing_ok=True)
 
@@ -378,12 +531,14 @@ def test_load_scene_normalizes_legacy_capabilities_and_overrides():
         assert scene.is_module_enabled("section_format") is True
         assert scene.is_module_enabled("toc") is True
         assert scene.is_module_enabled("reference_format") is False
+        assert scene.is_module_enabled("citation_link") is False
         assert scene.is_module_enabled("chem_typography") is True
         assert scene.strict_mode is False
         assert scene.citation_link.auto_number_reference_entries is False
         assert scene.chem_typography.allow_tokens == ["H2O"]
         assert scene.template_overrides["table.layout_mode"] == "full"
-        assert scene.template_overrides["header_footer.page_number_enabled"] is False
+        assert "header_footer.page_number_enabled" not in scene.template_overrides
+        assert scene.header_footer.page_number_enabled is False
         print("  ✅ loader 可将 legacy scene capabilities/pipeline/enabled 归一")
     finally:
         Path(tmp.name).unlink(missing_ok=True)
@@ -407,6 +562,7 @@ def test_normalize_scene_payload_treats_legacy_pipeline_as_explicit_enabled_list
     assert switches["header_footer"] is False
     assert switches["table_format"] is False
     assert switches["reference_format"] is False
+    assert switches["citation_link"] is False
     print("  ? legacy pipeline keeps only explicitly listed modules")
 
 
@@ -438,6 +594,38 @@ def test_load_scene_accepts_overrides_alias():
     finally:
         Path(tmp.name).unlink(missing_ok=True)
 
+
+def test_save_load_scene_preserves_header_footer_and_toc_on_scene_top_level():
+    from src.config.loader import load_scene, save_scene
+
+    scene = SceneWorkspace(name="scene_roundtrip")
+    scene.header_footer.header_mode = "fixed"
+    scene.header_footer.header_text = "固定页眉"
+    scene.header_footer.page_number_enabled = False
+    scene.header_footer.front_matter_page_number_format = "lowerRoman"
+    scene.header_footer.body_page_number_start = 5
+    scene.toc.enabled = False
+    scene.toc.max_level = 4
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+    target = Path(tmp.name)
+    tmp.close()
+    try:
+        save_scene(scene, target)
+        reloaded = load_scene(target)
+
+        assert reloaded.header_footer.header_mode == "fixed"
+        assert reloaded.header_footer.header_text == "固定页眉"
+        assert reloaded.header_footer.page_number_enabled is False
+        assert reloaded.header_footer.front_matter_page_number_format == "lowerRoman"
+        assert reloaded.header_footer.body_page_number_start == 5
+        assert reloaded.toc.enabled is False
+        assert reloaded.toc.max_level == 4
+        assert "header_footer.page_number_enabled" not in reloaded.template_overrides
+        assert "toc.enabled" not in reloaded.template_overrides
+    finally:
+        target.unlink(missing_ok=True)
+
 def test_resolve_config_normalizes_legacy_override_keys():
     """resolve_config() 应先归一 legacy override key，再进入 provenance / merge。"""
     scene = SceneWorkspace(
@@ -453,17 +641,68 @@ def test_resolve_config_normalizes_legacy_override_keys():
     resolved = resolve_config(TemplateConfig(), scene)
 
     assert resolved.table.layout_mode == "full"
-    assert resolved.header_footer.page_number_enabled is False
+    assert resolved.header_footer.page_number_enabled is True
     assert resolved.styles["normal"].size_display == "五号"
     assert resolved.styles["normal"].size_pt == 10.5
     assert resolved.styles["normal"].line_spacing_type == "exact"
     assert resolved.styles["normal"].line_spacing_pt == 18
     assert resolved.styles["normal"].left_indent_chars == 0.8
     assert resolved.styles["normal"].left_indent_unit == "cm"
-    assert resolved.get_with_source("header_footer.page_number_enabled").source == "scene"
+    assert resolved.get_with_source("header_footer.page_number_enabled").source == "template"
     assert resolved.get_with_source("styles.normal.line_spacing_pt").source == "scene"
     assert resolved.get_with_source("header_footer.update_page_number") is None
     print("  ✅ resolve_config 可归一 legacy override dotted-key")
+
+
+def test_resolve_config_ignores_legacy_page_number_alias_for_new_nested_override_keys():
+    scene = SceneWorkspace(
+        template_overrides={
+            "header_footer.footer.content_mode": "none",
+            "header_footer.page_number_plan.phases": [
+                {
+                    "phase_id": "front",
+                    "selectors": ["front_matter"],
+                    "visible": True,
+                    "number_format": "lowerRoman",
+                    "start_mode": "restart",
+                    "start_value": 1,
+                },
+                {
+                    "phase_id": "body",
+                    "selectors": ["body", "back_matter"],
+                    "visible": True,
+                    "number_format": "decimal",
+                    "start_mode": "restart",
+                    "start_value": 5,
+                },
+            ],
+        }
+    )
+
+    resolved = resolve_config(TemplateConfig(), scene)
+
+    assert resolved.header_footer.page_number_enabled is True
+    assert resolved.header_footer.front_matter_page_number_format == "upperRoman"
+    assert resolved.header_footer.body_page_number_start == 1
+    assert resolved.get_with_source("header_footer.page_number_enabled").source == "template"
+
+
+def test_resolve_config_keeps_non_page_number_header_footer_scene_overrides():
+    scene = SceneWorkspace(
+        template_overrides={
+            "header_footer.header.mode": "fixed",
+            "header_footer.header.fixed_text": "场景页眉",
+            "header_footer.footer.content_mode": "none",
+        }
+    )
+
+    resolved = resolve_config(TemplateConfig(), scene)
+
+    assert resolved.header_footer.header_mode == "fixed"
+    assert resolved.header_footer.header_text == "场景页眉"
+    assert resolved.header_footer.page_number_enabled is True
+    assert resolved.get_with_source("header_footer.header_mode").source == "scene"
+    assert resolved.get_with_source("header_footer.page_number_enabled").source == "template"
 
 
 if __name__ == "__main__":

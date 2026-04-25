@@ -60,6 +60,8 @@ class WorkbenchExecutionController:
                 report_paths=list(payload.get("report_paths") or []),
                 failed_count=int(payload.get("failed_count") or 0),
                 error_text=str(payload.get("error_text") or ""),
+                diagnostics_count=int(payload.get("diagnostics_count") or 0),
+                diagnostics_summary=str(payload.get("diagnostics_summary") or ""),
             )
 
         self._quick_execution_detail.set_execution_result(result_state)
@@ -118,6 +120,8 @@ class WorkbenchExecutionController:
                 report_paths=[],
                 failed_count=0,
                 error_text="",
+                diagnostics_count=0,
+                diagnostics_summary="",
             )
         )
 
@@ -189,6 +193,8 @@ class WorkbenchExecutionController:
         progress_widget.append_log("info", result_state.summary)
         if result_state.output_path:
             progress_widget.append_log("info", f"输出文件：{result_state.output_path}")
+        if result_state.diagnostics_summary:
+            progress_widget.append_log("warning", result_state.diagnostics_summary)
         if result_state.error_text:
             progress_widget.append_log("error", result_state.error_text)
         if hasattr(self._execution_history_detail, "set_summary"):

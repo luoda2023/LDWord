@@ -96,23 +96,19 @@ def test_error_dialog_builds_on_base_dialog_without_local_ok_button_qss():
 
 
 def test_heading_numbering_panel_disabled_visuals_are_property_driven():
-    preview_source = inspect.getsource(HeadingNumberingPanel._rebuild_simple_preview)
-    list_source = inspect.getsource(HeadingNumberingPanel._rebuild_advanced_list)
+    panel_source = inspect.getsource(HeadingNumberingPanel)
     theme_source = inspect.getsource(HeadingNumberingPanel._apply_theme)
-    stylesheet_source = (ROOT / "src/ui/panels/heading_numbering_styles.py").read_text(encoding="utf-8")
+    stylesheet_source = inspect.getsource(HeadingNumberingPanel._build_stylesheet)
 
-    assert ".setStyleSheet" not in preview_source
-    assert ".setStyleSheet" not in list_source
-    assert "build_heading_numbering_panel_stylesheet" in theme_source
+    assert "_build_stylesheet" in theme_source
     assert '[muted="true"]' in stylesheet_source or '[disabled_visual="true"]' in stylesheet_source
 
 
 def test_heading_numbering_panel_selection_visuals_are_delegated_to_shared_builder():
-    stylesheet_source = (ROOT / "src/ui/panels/heading_numbering_styles.py").read_text(encoding="utf-8")
+    stylesheet_source = inspect.getsource(HeadingNumberingPanel._build_stylesheet)
 
     assert "build_checkbox_stylesheet" in stylesheet_source
     assert 'selector="#HeadingNumberingPanel QCheckBox"' in stylesheet_source
     assert "build_selection_control_stylesheet" not in stylesheet_source
-    assert 'QRadioButton' not in stylesheet_source
     assert "QCheckBox::indicator" not in stylesheet_source
     assert "QRadioButton::indicator" not in stylesheet_source

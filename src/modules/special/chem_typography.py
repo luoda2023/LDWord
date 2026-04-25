@@ -53,6 +53,7 @@ class ChemTypographyModule(BaseModule):
         category='special',
         requires_config=('chem_typography',),
         soft_after=('paragraph_style', 'heading_recognition', 'caption'),
+        soft_consumes=('doc_tree', 'heading_map'),
     )
 
     def apply(

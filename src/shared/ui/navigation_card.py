@@ -161,7 +161,7 @@ class NavigationCard(Card):
         title_color = t.text_on_primary if self._selected else t.text_primary
         self._title.setStyleSheet(
             f"font-size: {t.font_size_md}px; "
-            f"font-weight: {t.font_weight_bold if self._selected else t.font_weight_normal}; "
+            f"font-weight: {t.font_weight_emphasis if self._selected else t.font_weight_normal}; "
             f"color: {title_color};"
         )
 

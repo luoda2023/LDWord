@@ -45,6 +45,8 @@ class ExecutionWorker(QObject):
             failed_items = list(result.get("failed_items") or [])
             failed_count = int(result.get("failed_count") or len(failed_items))
             error_text = str(result.get("error_text") or result.get("error") or "")
+            diagnostics_count = int(result.get("diagnostics_count") or 0)
+            diagnostics_summary = str(result.get("diagnostics_summary") or "")
         else:
             output_path = str(getattr(result, "output_path", "") or "")
             output_paths = getattr(result, "output_paths", None)
@@ -54,6 +56,8 @@ class ExecutionWorker(QObject):
             error_text = str(
                 getattr(result, "error_text", "") or getattr(result, "error", "") or ""
             )
+            diagnostics_count = int(getattr(result, "diagnostics_count", 0) or 0)
+            diagnostics_summary = str(getattr(result, "diagnostics_summary", "") or "")
 
         if not output_path and isinstance(output_paths, Mapping):
             output_path = str(output_paths.get("final") or "")
@@ -66,6 +70,8 @@ class ExecutionWorker(QObject):
             "report_paths": report_paths,
             "failed_count": failed_count,
             "error_text": error_text,
+            "diagnostics_count": diagnostics_count,
+            "diagnostics_summary": diagnostics_summary,
         }
 
     def _failure_payload(self, error_text: str) -> dict[str, object]:
@@ -75,6 +81,8 @@ class ExecutionWorker(QObject):
             "report_paths": [],
             "failed_count": 0,
             "error_text": error_text,
+            "diagnostics_count": 0,
+            "diagnostics_summary": "",
         }
 
     def run(self) -> None:

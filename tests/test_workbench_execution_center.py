@@ -39,6 +39,8 @@ def test_execution_result_state_defaults_are_safe():
     assert state.output_path == ""
     assert state.report_paths == []
     assert state.failed_count == 0
+    assert state.diagnostics_count == 0
+    assert state.diagnostics_summary == ""
 
 
 def test_recent_run_state_defaults_are_safe():
@@ -50,6 +52,8 @@ def test_recent_run_state_defaults_are_safe():
     assert state.output_label == ""
     assert state.report_label == ""
     assert state.error_summary == ""
+    assert state.diagnostics_count == 0
+    assert state.diagnostics_summary == ""
 
 
 def test_readiness_state_defaults_to_blocked():
@@ -330,6 +334,8 @@ def test_execution_adapter_builds_success_result_state():
         report_paths=["C:/tmp/report.json", "C:/tmp/report.md"],
         failed_count=0,
         error_text="",
+        diagnostics_count=1,
+        diagnostics_summary="诊断提示（1）\n- [equation_table_format] 1 个公式编号: skipped",
     )
 
     assert isinstance(state, ExecutionResultState)
@@ -338,6 +344,8 @@ def test_execution_adapter_builds_success_result_state():
     assert state.output_path.endswith("out.docx")
     assert len(state.report_paths) == 2
     assert state.failed_count == 0
+    assert state.diagnostics_count == 1
+    assert "诊断提示（1）" in state.diagnostics_summary
 
 
 def test_execution_adapter_builds_recent_run_state_from_result():
@@ -357,6 +365,24 @@ def test_execution_adapter_builds_recent_run_state_from_result():
     assert "2" in recent.summary
     assert recent.output_label.endswith("out.docx")
     assert recent.title == "最近结果"
+
+
+def test_execution_center_includes_diagnostics_in_summary_box():
+    _app()
+    center = ExecutionCenter()
+
+    result = ExecutionResultState(
+        status="success",
+        summary="执行成功",
+        diagnostics_count=1,
+        diagnostics_summary="诊断提示（1）\n- [equation_table_format] 1 个公式编号: skipped",
+    )
+
+    center.set_result_state(result)
+
+    assert center._summary_box.toPlainText() == (
+        "执行成功\n\n诊断提示（1）\n- [equation_table_format] 1 个公式编号: skipped"
+    )
 
 
 def test_execution_adapter_builds_failed_result_summary():

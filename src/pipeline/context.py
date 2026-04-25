@@ -24,6 +24,7 @@ class PipelineContext:
     doc_tree: Any | None = None
     heading_map: dict[int, int] | None = None
     caption_counters: dict[str, int] | None = None
+    validation_issues: list[Any] | None = None
     entity_values: dict[str, str] | None = None
     source_values: dict[str, str] | None = None
     inserted_images: list[dict[str, Any]] | None = None

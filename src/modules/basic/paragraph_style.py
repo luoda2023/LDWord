@@ -8,15 +8,16 @@ from typing import TYPE_CHECKING
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
 
+from src.config.heading_style_semantics import resolve_heading_style, resolve_non_numbered_heading_style
+from src.modules.structure.heading_numbering import _should_skip_numbering
+from src.config.section_semantics import style_key_for_section
 from src.config.style_semantics import (
-    config_indent_value_to_pt,
-    normalize_line_spacing_type,
-    parse_font_size_input,
-    resolve_line_spacing_value,
-    resolve_style_special_indent,
+    resolve_style_size_pt,
 )
 from src.modules.base import BaseModule, ModuleMeta
 from src.shared.engine.font_resolver import resolve_font
+from src.shared.engine.indent_ops import apply_style_config_indents
+from src.shared.engine.line_spacing_ops import apply_line_spacing, apply_paragraph_spacing, sync_spacing_ooxml
 from src.shared.engine.run_ops import set_run_east_asian_font
 from src.shared.engine.style_ops import apply_style_text_format
 
@@ -44,6 +45,7 @@ class ParagraphStyleModule(BaseModule):
         category="basic",
         requires_config=("styles",),
         soft_after=("heading_recognition",),
+        soft_consumes=("doc_tree",),
         enabled_by_default=True,
     )
 
@@ -56,6 +58,8 @@ class ParagraphStyleModule(BaseModule):
     ) -> None:
         styles_cfg = config.styles
         max_levels = config.heading_model.max_heading_levels
+        non_numbered = set(config.heading_model.non_numbered_title_texts or [])
+        non_numbered_pfx = list(config.heading_model.non_numbered_prefixes or [])
         style_definition_count = _sync_heading_style_definitions(doc, config)
         count = 0
 
@@ -71,8 +75,13 @@ class ParagraphStyleModule(BaseModule):
                     style_key = "normal"
 
             style_config = styles_cfg.get(style_key)
-            if not style_config and style_key.startswith("heading") and style_key != "heading":
-                style_config = styles_cfg.get("heading")
+            if style_key.startswith("heading") and style_key != "heading":
+                if _should_skip_numbering(para, non_numbered, non_numbered_pfx):
+                    style_config = resolve_non_numbered_heading_style(config, include_body_fallback=True)
+                else:
+                    style_config = resolve_heading_style(styles_cfg, level_num, include_body_fallback=True)
+            elif style_key == "heading":
+                style_config = styles_cfg.get("heading") or styles_cfg.get("body") or styles_cfg.get("normal")
             if not style_config:
                 style_config = styles_cfg.get("normal")
             if not style_config:
@@ -124,12 +133,9 @@ def _resolve_style_key(para: Paragraph, context: PipelineContext) -> str:
     doc_tree = context.doc_tree
     if doc_tree is not None:
         section_type = doc_tree.get_section_for_paragraph(_get_para_index(para))
-        if section_type == "references":
-            return "references_body"
-        if section_type in ("abstract_cn", "abstract_en"):
-            return "abstract_body"
-        if section_type == "appendix":
-            return "appendix_body"
+        mapped_style_key = style_key_for_section(section_type)
+        if mapped_style_key:
+            return mapped_style_key
 
     return "normal"
 
@@ -161,7 +167,7 @@ def _sync_heading_style_definitions(doc: Document, config: ResolvedConfig) -> in
 
     for level in range(1, 9):
         style_key = f"heading{level}"
-        style_config = styles_cfg.get(style_key) or styles_cfg.get("heading")
+        style_config = resolve_heading_style(styles_cfg, level, include_body_fallback=True)
         if style_config is None:
             continue
 
@@ -187,15 +193,7 @@ def _sync_heading_style_definitions(doc: Document, config: ResolvedConfig) -> in
 
 
 def _resolve_size_pt(style_config) -> float | None:
-    size_pt = style_config.size_pt
-    if size_pt is None:
-        size_text = style_config.size_display
-        if size_text:
-            try:
-                size_pt = parse_font_size_input(size_text)
-            except (TypeError, ValueError):
-                size_pt = None
-    return size_pt
+    return resolve_style_size_pt(style_config)
 
 
 def _apply_font(para: Paragraph, style_config, size_pt: float | None) -> bool:
@@ -233,56 +231,31 @@ def _apply_spacing(para: Paragraph, style_config) -> bool:
     changed = False
     pf = para.paragraph_format
 
-    if style_config.space_before_pt is not None:
-        pf.space_before = Pt(style_config.space_before_pt)
-        changed = True
-    if style_config.space_after_pt is not None:
-        pf.space_after = Pt(style_config.space_after_pt)
-        changed = True
+    apply_paragraph_spacing(pf, style_config, para._element)
+    changed = True
 
     if style_config.line_spacing_pt is not None:
-        line_kind = normalize_line_spacing_type(style_config.line_spacing_type)
-        line_value = resolve_line_spacing_value(line_kind, style_config.line_spacing_pt)
-        if line_kind == "exact":
-            pf.line_spacing = Pt(line_value)
-        else:
-            pf.line_spacing = line_value
+        apply_line_spacing(pf, style_config.line_spacing_type, style_config.line_spacing_pt)
         changed = True
+    if changed:
+        sync_spacing_ooxml(
+            para._element,
+            space_before_pt=style_config.space_before_pt,
+            space_before_unit=getattr(style_config, "space_before_unit", "pt"),
+            space_after_pt=style_config.space_after_pt,
+            space_after_unit=getattr(style_config, "space_after_unit", "pt"),
+            line_spacing_type=style_config.line_spacing_type,
+            line_spacing_value=style_config.line_spacing_pt,
+        )
 
     return changed
 
 
 def _apply_indent(para: Paragraph, style_config, size_pt: float | None) -> bool:
-    pf = para.paragraph_format
-    effective_pt = size_pt or 12.0
-
-    left_pt = config_indent_value_to_pt(
-        getattr(style_config, "left_indent_chars", 0.0),
-        effective_pt,
-        getattr(style_config, "left_indent_unit", "chars"),
+    apply_style_config_indents(
+        para.paragraph_format,
+        para._element,
+        style_config,
+        size_pt=size_pt,
     )
-    right_pt = config_indent_value_to_pt(
-        getattr(style_config, "right_indent_chars", 0.0),
-        effective_pt,
-        getattr(style_config, "right_indent_unit", "chars"),
-    )
-    pf.left_indent = Pt(left_pt)
-    pf.right_indent = Pt(right_pt)
-
-    special = resolve_style_special_indent(style_config)
-    special_mode = str(special["mode"])
-    special_pt = config_indent_value_to_pt(
-        special["value"],
-        effective_pt,
-        str(special["unit"]),
-    )
-
-    if special_mode == "hanging" and special_pt > 0:
-        pf.left_indent = Pt(max(left_pt, special_pt))
-        pf.first_line_indent = Pt(-special_pt)
-    elif special_mode == "first_line" and special_pt > 0:
-        pf.first_line_indent = Pt(special_pt)
-    else:
-        pf.first_line_indent = Pt(0)
-
     return True

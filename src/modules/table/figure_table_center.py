@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from src.modules.base import BaseModule, ModuleMeta
+from src.shared.engine.media_ops import paragraph_has_image
 from src.shared.engine.ooxml_ops import qn, find_or_create
 
 if TYPE_CHECKING:
@@ -52,7 +53,7 @@ class FigureTableCenterModule(BaseModule):
 
         # 1. 图片段落居中
         for i, para in enumerate(doc.paragraphs):
-            if _para_has_image(para):
+            if paragraph_has_image(para):
                 _center_paragraph(para)
                 fig_count += 1
 
@@ -70,23 +71,6 @@ class FigureTableCenterModule(BaseModule):
                 before="(mixed)",
                 after="居中对齐",
             )
-
-
-# ── 判断与操作 ───────────────────────────────────
-
-def _para_has_image(para: Paragraph) -> bool:
-    """判断段落是否包含图片。"""
-    drawing_ns = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-    pict_ns = "urn:schemas-microsoft-com:vml"
-
-    for elem in para._element.iter():
-        if elem.tag.endswith("}drawing") or elem.tag.endswith("}pict"):
-            return True
-        if elem.tag == f"{{{drawing_ns}}}inline":
-            return True
-        if elem.tag == f"{{{drawing_ns}}}anchor":
-            return True
-    return False
 
 
 def _center_paragraph(para: Paragraph) -> None:

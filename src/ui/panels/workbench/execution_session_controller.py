@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from src.config.scene import SceneWorkspace
 from src.config.template import TemplateConfig
 
+from .diagnostics import log_best_effort_shutdown_failure
 from .execution_runtime import ThreadedExecutionHandle, WorkbenchProductionRunner
 from .execution_worker import ExecutionWorker
 
@@ -39,6 +40,7 @@ class WorkbenchExecutionSessionController:
         *,
         template: TemplateConfig | None,
         scene: SceneWorkspace | None,
+        session_overrides: dict[str, object] | None = None,
     ) -> ExecutionBuildResult:
         if self._active_worker is not None:
             return ExecutionBuildResult(
@@ -54,6 +56,7 @@ class WorkbenchExecutionSessionController:
             doc_path=doc_path,
             template=template or TemplateConfig(),
             scene=scene or SceneWorkspace(),
+            session_overrides=session_overrides,
         )
         worker = ExecutionWorker(runner, parent=None)
         return ExecutionBuildResult(
@@ -80,8 +83,8 @@ class WorkbenchExecutionSessionController:
         if callable(request_cancel):
             try:
                 request_cancel()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_best_effort_shutdown_failure("execution session controller", "request_cancel", exc)
 
         shutdown = getattr(worker, "shutdown", None)
         if callable(shutdown):
@@ -93,10 +96,14 @@ class WorkbenchExecutionSessionController:
                         shutdown()
                     else:
                         shutdown(int(timeout_ms))
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                except Exception as exc:
+                    log_best_effort_shutdown_failure(
+                        "execution session controller",
+                        "worker.shutdown",
+                        exc,
+                    )
+            except Exception as exc:
+                log_best_effort_shutdown_failure("execution session controller", "worker.shutdown", exc)
 
         thread = getattr(worker, "_thread", None)
         is_running = getattr(thread, "isRunning", None) if thread is not None else None
@@ -106,7 +113,8 @@ class WorkbenchExecutionSessionController:
         if callable(is_running):
             try:
                 return not bool(is_running())
-            except Exception:
+            except Exception as exc:
+                log_best_effort_shutdown_failure("execution session controller", "worker.isRunning", exc)
                 return False
         return True
 

@@ -41,7 +41,7 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         self._idle_container.setObjectName("wb_v2_drop_idle")
         idle_layout = QHBoxLayout(self._idle_container)
         idle_layout.setContentsMargins(16, 16, 16, 16)
-        idle_layout.setSpacing(12)
+        idle_layout.setSpacing(8)
 
         self._idle_icon = QLabel("W", self._idle_container)
         self._idle_icon.setFixedSize(36, 36)
@@ -55,7 +55,6 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
 
         self._hint_title = QLabel(self._idle_container)
         self._hint_title.setObjectName("wb_v2_drop_title")
-        self._hint_title.setTextFormat(Qt.RichText)
 
         self._hint_label = QLabel("或点击右侧按钮从本地选择", self._idle_container)
         self._hint_label.setObjectName("wb_v2_drop_hint")
@@ -73,7 +72,7 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         self._selected_container = QWidget(self)
         selected_layout = QHBoxLayout(self._selected_container)
         selected_layout.setContentsMargins(16, 16, 16, 16)
-        selected_layout.setSpacing(12)
+        selected_layout.setSpacing(8)
 
         self._file_icon = QLabel("W", self._selected_container)
         self._file_icon.setFixedSize(36, 36)
@@ -182,7 +181,8 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         )
 
         self._hint_title.setStyleSheet(
-            f"font-size: {theme.font_size_md}px; background: transparent;"
+            f"font-size: {theme.font_size_md}px; font-weight: {theme.font_weight_emphasis}; "
+            f"color: {theme.text_primary}; background: transparent;"
         )
         self._hint_label.setStyleSheet(
             f"font-size: {theme.font_size_sm}px; color: {theme.text_hint}; background: transparent;"
@@ -194,7 +194,7 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
             f"background: {theme.primary}; border-radius: 6px;"
         )
         self._file_name_label.setStyleSheet(
-            f"font-size: {theme.font_size_md}px; font-weight: bold; "
+            f"font-size: {theme.font_size_md}px; font-weight: {theme.font_weight_emphasis}; "
             f"color: {theme.text_primary}; background: transparent;"
         )
         self._file_path_label.setStyleSheet(
@@ -218,12 +218,9 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         )
         self._refresh_style()
 
-    def _build_title_html(self, title: str, suffix: str = "") -> str:
-        theme = get_theme()
-        html = f'<span style="font-weight:600; color:{theme.text_primary}">{title}</span>'
-        if suffix:
-            html += f' <span style="color:{theme.text_hint}">（{suffix}）</span>'
-        return html
+    @staticmethod
+    def _build_title_text(title: str, suffix: str = "") -> str:
+        return f"{title}（{suffix}）" if suffix else title
 
     def _refresh_style(self) -> None:
         theme = get_theme()
@@ -239,13 +236,13 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
             hover_bg.setAlphaF(0.06)
             surface_bg = hover_bg.name(QColor.HexArgb)
             border_color = theme.primary
-            self._hint_title.setText(self._build_title_html("松开以加载文件"))
+            self._hint_title.setText(self._build_title_text("松开以加载文件"))
             self._hint_label.setText("文件将被立即载入")
         else:
             surface_bg = theme.bg_card
             border_color = theme.border
             self._hint_title.setText(
-                self._build_title_html("拖拽文件至此处", "支持格式：.docx")
+                self._build_title_text("拖拽文件至此处", "支持格式：.docx")
             )
             self._hint_label.setText("或点击右侧按钮从本地选择")
 

@@ -120,6 +120,8 @@ def _apply_three_line(table: Table, outer_pt: float, inner_pt: float) -> None:
     outer_eighth = max(1, int(outer_pt * 8))
     inner_eighth = max(1, int(inner_pt * 8))
 
+    clear_cell_border_overrides(tbl)
+
     for side in ("left", "right", "insideH", "insideV"):
         border = find_or_create(borders, f"w:{side}")
         border.set(qn("w:val"), "none")
@@ -145,19 +147,54 @@ def _apply_three_line(table: Table, outer_pt: float, inner_pt: float) -> None:
         border.set(qn("w:color"), "000000")
 
 
+def clear_cell_border_overrides(tbl_el) -> None:
+    """移除单元格级边框覆盖，让表格级边框策略重新接管。"""
+    for tc in tbl_el.iter(qn("w:tc")):
+        tc_pr = tc.find(qn("w:tcPr"))
+        if tc_pr is None:
+            continue
+        tc_borders = tc_pr.find(qn("w:tcBorders"))
+        if tc_borders is not None:
+            tc_pr.remove(tc_borders)
+
+
 def _apply_no_border(table: Table) -> None:
     """无边框。"""
     tbl = table._element
     tblPr = find_or_create(tbl, "w:tblPr")
+    for tag in ("w:tblStyle", "w:tblLook"):
+        old = tblPr.find(qn(tag))
+        if old is not None:
+            tblPr.remove(old)
     borders = find_or_create(tblPr, "w:tblBorders")
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         border = find_or_create(borders, f"w:{side}")
         border.set(qn("w:val"), "none")
         border.set(qn("w:sz"), "0")
 
+    for cell in table._element.iter(qn("w:tc")):
+        tc_pr = find_or_create(cell, "w:tcPr")
+        tc_borders = find_or_create(tc_pr, "w:tcBorders")
+        for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            border = find_or_create(tc_borders, f"w:{side}")
+            border.set(qn("w:val"), "none")
+            border.set(qn("w:sz"), "0")
+
 
 def set_repeat_header_row(table: Table, row: int = 0) -> None:
     """设置重复标题行（跨页时重复表头）。"""
     tr = table.rows[row]._element
     trPr = find_or_create(tr, "w:trPr")
-    find_or_create(trPr, "w:tblHeader")
+    header = find_or_create(trPr, "w:tblHeader")
+    header.set(qn("w:val"), "1")
+
+
+def clear_repeat_header_row(table: Table, row: int = 0) -> None:
+    """移除重复标题行标记。"""
+    if row < 0 or row >= len(table.rows):
+        return
+    tr_pr = table.rows[row]._element.find(qn("w:trPr"))
+    if tr_pr is None:
+        return
+    for header in list(tr_pr.findall(qn("w:tblHeader"))):
+        tr_pr.remove(header)

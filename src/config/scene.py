@@ -2,7 +2,8 @@
 SceneWorkspace — 场景工作区
 
 定义「做什么事」的功能开关、排版范围、模块开关、批量预设。
-不包含排版参数（那些在 TemplateConfig 中）。
+同时包含功能专属配置（开关 ON 时才生效的参数）。
+基础排版参数在 TemplateConfig 中。
 """
 
 from __future__ import annotations
@@ -13,13 +14,25 @@ from src.config.migration import (
     normalize_module_name,
     normalize_module_switches,
 )
+from src.config.feature_configs import (
+    HeaderFooterConfig,
+    TocConfig,
+    CaptionConfig,
+    FormulaTableConfig,
+    FormulaStyleConfig,
+    EquationNumberingConfig,
+    ReferenceStyleConfig,
+    WatermarkConfig,
+    TableConfig,
+    OutputConfig,
+)
 
 
 @dataclass
 class FormatScopeConfig:
     """排版作用域（决定处理文档的哪些部分）。"""
-    mode: str = "auto"                      # "auto" | "manual"
-    page_ranges_text: str = ""              # 手动模式: 页码范围
+    mode: str = "auto"
+    page_ranges_text: str = ""
     body_start_index: int | None = None
     body_start_page: int | None = None
     body_start_keyword: str = ""
@@ -117,50 +130,89 @@ class BatchPreset:
 
 @dataclass
 class SceneWorkspace:
-    """场景工作区 — 定义「做什么事」。
+    """场景工作区 — 定义「做什么事」+「如何做这件事」。
 
-    包含：功能开关、排版范围、模块细项配置、批量预设。
-    不包含排版参数（那些在 TemplateConfig 中定义）。
+    包含：功能开关、排版范围、模块细项配置、功能专属参数、批量预设。
+    基础排版参数（页面、字体、标题编号）在 TemplateConfig 中。
     """
 
-    # ── 元信息 ─────────────────────────────────────
+    # ── 元信息 ─────────────────────────────
     name: str = ""
     description: str = ""
     category: str = "general"
     category_label: str = "通用文档"
+    scene_id: str = ""
     template_id: str = ""               # 绑定的模板 ID
+    default_template_id: str = ""
+    compatible_template_ids: list[str] = field(default_factory=list)
 
-    # ── 排版范围 ───────────────────────────────────
+    # ── 排版范围 ───────────────────────────
     format_scope: FormatScopeConfig = field(default_factory=FormatScopeConfig)
     available_sections: list[str] = field(default_factory=lambda: [
         "body", "references", "errata", "acknowledgment", "appendix",
         "resume", "abstract_cn", "abstract_en", "toc",
     ])
 
-    # ── 模块开关 ───────────────────────────────────
-    # 每个 key 对应 modules/base.py 中 ModuleMeta.name
+    # ── 模块开关 ───────────────────────────
     module_switches: dict[str, bool] = field(
         default_factory=lambda: dict(get_default_module_switches())
     )
 
-    # ── 模块细项配置（仅需要细项的模块） ──────────────
+    # ── 模块细项配置（行为参数） ────────────────
     md_cleanup: MdCleanupOptions = field(default_factory=MdCleanupOptions)
     whitespace: WhitespaceOptions = field(default_factory=WhitespaceOptions)
     citation_link: CitationLinkOptions = field(default_factory=CitationLinkOptions)
     formula_convert: FormulaConvertOptions = field(default_factory=FormulaConvertOptions)
     chem_typography: ChemTypographyOptions = field(default_factory=ChemTypographyOptions)
 
-    # ── 模板参数覆盖（场景级） ────────────────────────
+    # ── 功能专属配置（开关 ON 时才生效的参数） ────
+    table: TableConfig = field(default_factory=TableConfig)
+    header_footer: HeaderFooterConfig = field(default_factory=HeaderFooterConfig)
+    toc: TocConfig = field(default_factory=TocConfig)
+    caption: CaptionConfig = field(default_factory=CaptionConfig)
+    formula_table: FormulaTableConfig = field(default_factory=FormulaTableConfig)
+    formula_style: FormulaStyleConfig = field(default_factory=FormulaStyleConfig)
+    equation_numbering: EquationNumberingConfig = field(default_factory=EquationNumberingConfig)
+    reference_style: ReferenceStyleConfig = field(default_factory=ReferenceStyleConfig)
+    watermark: WatermarkConfig = field(default_factory=WatermarkConfig)
+
+    # ── 分区样式变体（开启分区后的细项样式） ────
+    # key = style_variant_semantics 中的 variant key，如 "references_body"
+    # 值 = StyleConfig 对象。缺席表示“跟随正文”。
+    section_styles: dict = field(default_factory=dict)
+
+    # ── 输出配置 ─────────────────────
+    output: OutputConfig = field(default_factory=OutputConfig)
+
+    # ── 模板参数覆盖（场景级） ────────────────
     template_overrides: dict = field(default_factory=dict)
 
-    # ── 批量预设 ───────────────────────────────────
+    # ── 批量预设 ───────────────────────────
     batch_preset: BatchPreset | None = None
 
-    # ── 管线配置 ───────────────────────────────────
+    # ── 管线配置 ───────────────────────────
     strict_mode: bool = True
 
     def __post_init__(self) -> None:
         self.module_switches = normalize_module_switches(self.module_switches)
+        self.scene_id = str(self.scene_id or "").strip()
+        self.template_id = str(self.template_id or "").strip()
+        self.default_template_id = str(self.default_template_id or "").strip()
+
+        compatible_ids = [str(item or "").strip() for item in self.compatible_template_ids]
+        self.compatible_template_ids = [item for item in compatible_ids if item]
+
+        if not self.default_template_id and self.template_id:
+            self.default_template_id = self.template_id
+        if not self.template_id and self.default_template_id:
+            self.template_id = self.default_template_id
+        if not self.compatible_template_ids:
+            seed = self.template_id or self.default_template_id
+            self.compatible_template_ids = [seed] if seed else []
+        elif self.template_id and self.template_id not in self.compatible_template_ids:
+            self.compatible_template_ids.insert(0, self.template_id)
+        elif not self.template_id and self.compatible_template_ids:
+            self.template_id = self.compatible_template_ids[0]
 
     def is_module_enabled(self, module_name: str) -> bool:
         """查询模块是否在本场景中启用。"""

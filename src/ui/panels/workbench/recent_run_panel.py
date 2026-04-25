@@ -34,7 +34,10 @@ class RecentRunPanel(Card):
 
     def set_state(self, state: RecentRunState) -> None:
         self._status_label.setText(self._STATUS_LABELS.get(state.status, self._STATUS_LABELS["idle"]))
-        self.set_summary(state.summary)
+        summary_text = state.summary
+        if state.diagnostics_summary:
+            summary_text = f"{summary_text}\n{state.diagnostics_summary}"
+        self.set_summary(summary_text)
         meta_parts = []
         if state.output_label:
             meta_parts.append(f"输出: {state.output_label}")

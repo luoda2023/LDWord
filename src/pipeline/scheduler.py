@@ -74,6 +74,11 @@ def validate_schema_contract(
                 errors.append(
                     f"Module '{mod.meta.name}' consumes context key '{key}' that is not declared on PipelineContext."
                 )
+        for key in mod.meta.soft_consumes:
+            if key not in context_fields:
+                errors.append(
+                    f"Module '{mod.meta.name}' soft-consumes context key '{key}' that is not declared on PipelineContext."
+                )
         for key in mod.meta.provides:
             if key not in context_fields:
                 errors.append(
@@ -148,14 +153,19 @@ def select_enabled_modules(
 def compute_dirty_modules(
     changed_config_sections: set[str],
     modules: list,
+    *,
+    seed_dirty_modules: set[str] | None = None,
 ) -> set[str]:
-    """Compute dirty modules from changed config section names."""
-    if not changed_config_sections:
+    """Compute dirty modules from config changes and optional dirty-module seeds."""
+    if not changed_config_sections and not seed_dirty_modules:
         return set()
 
     name_to_mod = {m.meta.name: m for m in modules}
 
-    dirty: set[str] = set()
+    dirty: set[str] = {
+        name for name in (seed_dirty_modules or set())
+        if name in name_to_mod
+    }
     for mod in modules:
         if any(section in changed_config_sections for section in mod.meta.requires_config):
             dirty.add(mod.meta.name)
@@ -170,7 +180,8 @@ def compute_dirty_modules(
         for mod in modules:
             if mod.meta.name in dirty:
                 continue
-            if any(key in dirty_provides for key in mod.meta.consumes):
+            consumed = tuple(mod.meta.consumes) + tuple(mod.meta.soft_consumes)
+            if any(key in dirty_provides for key in consumed):
                 dirty.add(mod.meta.name)
                 changed = True
 

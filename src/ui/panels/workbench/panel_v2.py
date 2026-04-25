@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+
+from src.config.library import get_scene_entry, get_template_entry, load_template_from_library
 from src.config.scene import SceneWorkspace
 
 from src.config.template import TemplateConfig
@@ -57,6 +60,10 @@ from .strategy_card import StrategyCard
 
 from .styles import apply_workbench_v2_shell_theme
 
+
+logger = logging.getLogger(__name__)
+
+
 class WorkbenchPanel(BasePanel):
 
     """Master-detail workbench panel."""
@@ -102,6 +109,8 @@ class WorkbenchPanel(BasePanel):
 
         self._create_navigation_cards()
 
+        self._bootstrap_strategy_context()
+
         self._refresh_strategy_summary()
 
         self._sync_dynamic_cards()
@@ -123,6 +132,8 @@ class WorkbenchPanel(BasePanel):
         self._current_template: TemplateConfig | None = None
 
         self._current_scene: SceneWorkspace | None = None
+
+        self._scene_dirty = self.bridge.is_scene_dirty()
 
         self._template_dirty = self.bridge.is_template_dirty()
 
@@ -172,7 +183,7 @@ class WorkbenchPanel(BasePanel):
 
         self._detail_layout = QVBoxLayout(self._detail_container)
 
-        self._detail_layout.setContentsMargins(20, 12, 20, 20)
+        self._detail_layout.setContentsMargins(16, 10, 16, 16)
 
         self._detail_layout.setSpacing(0)
 
@@ -293,6 +304,66 @@ class WorkbenchPanel(BasePanel):
 
         self._navigation.add_fixed_cards()
 
+    def _bootstrap_strategy_context(self) -> None:
+
+        if self.bridge.current_scene() is not None:
+
+            self._current_scene = self.bridge.current_scene()
+
+        else:
+
+            self._current_scene = self._quick_execution_detail.current_scene()
+
+            scene_entry = get_scene_entry(self._current_scene.scene_id)
+
+            self.bridge.set_current_scene(
+
+                self._current_scene,
+
+                config_id=self._current_scene.scene_id,
+
+                path=str(scene_entry.path) if scene_entry is not None else "",
+
+                source="library" if scene_entry is not None else "builtin",
+
+                emit_signal=False,
+
+            )
+
+        if self.bridge.current_template() is not None:
+
+            self._current_template = self.bridge.current_template()
+
+        else:
+
+            template_id = self._quick_execution_detail.current_template_id()
+
+            if template_id:
+
+                template_entry = get_template_entry(template_id)
+
+                self._current_template = load_template_from_library(template_id)
+
+                self.bridge.set_current_template(
+
+                    self._current_template,
+
+                    config_id=template_id,
+
+                    path=str(template_entry.path) if template_entry is not None else "",
+
+                    source="library" if template_entry is not None else "builtin",
+
+                    emit_signal=False,
+
+                )
+
+        self._config_management_detail.set_current_scene(self._current_scene)
+
+        if self._current_template is not None:
+
+            self._config_management_detail.set_current_template(self._current_template)
+
     def _connect_signals(self) -> None:
 
         self.bridge.template_changed.connect(self.on_template_changed)
@@ -300,6 +371,8 @@ class WorkbenchPanel(BasePanel):
         self.bridge.scene_changed.connect(self.on_scene_changed)
 
         self.bridge.document_loaded.connect(self._on_document_loaded)
+
+        self.bridge.scene_dirty_changed.connect(self._on_scene_dirty_changed)
 
         self.bridge.template_dirty_changed.connect(self._on_template_dirty_changed)
 
@@ -309,7 +382,11 @@ class WorkbenchPanel(BasePanel):
 
         self._quick_execution_detail.feature_config_requested.connect(self._open_feature_card)
 
-        self._quick_execution_detail.summary_changed.connect(self._refresh_quick_execute_card)
+        self._quick_execution_detail.summary_changed.connect(self._on_quick_summary_changed)
+
+        self._quick_execution_detail.binding_changed.connect(self._on_quick_binding_changed)
+
+        self._quick_execution_detail.scene_config_changed.connect(self._on_quick_scene_config_changed)
 
         self._quick_execution_detail.execute_requested.connect(self._execute_requested)
 
@@ -341,6 +418,8 @@ class WorkbenchPanel(BasePanel):
 
             execution_worker=self._execution_worker,
 
+            scene_dirty=self._scene_dirty,
+
             template_dirty=self._template_dirty,
 
         )
@@ -363,15 +442,15 @@ class WorkbenchPanel(BasePanel):
 
             strategy_state=self._strategy_state,
 
+            scene_dirty=self._scene_dirty,
+
             template_dirty=self._template_dirty,
 
         )
 
     def _refresh_strategy_summary(self) -> None:
 
-        self._strategy_state = self._strategy_adapter.build_summary(self._current_template, self._current_scene)
-
-        self._strategy_card.set_state(self._strategy_state)
+        self._sync_strategy_state()
 
         self._quick_execution_detail.set_strategy_context(
 
@@ -382,6 +461,12 @@ class WorkbenchPanel(BasePanel):
             strict_mode=self._strategy_state.strict_mode if self._strategy_state.source_type == "scene" else None,
 
         )
+
+    def _sync_strategy_state(self) -> None:
+
+        self._strategy_state = self._strategy_adapter.build_summary(self._current_template, self._current_scene)
+
+        self._strategy_card.set_state(self._strategy_state)
 
     def _on_quick_detail_document_selected(self, file_path: str) -> None:
 
@@ -396,6 +481,91 @@ class WorkbenchPanel(BasePanel):
     def _on_feature_toggled(self, _feature_id: str, _enabled: bool) -> None:
 
         self._sync_dynamic_cards()
+
+    def _on_quick_summary_changed(self) -> None:
+
+        self._sync_strategy_state()
+
+        self._refresh_quick_execute_card()
+
+        self._refresh_config_management_card()
+
+    def _on_quick_binding_changed(self, scene: SceneWorkspace, template_id: str) -> None:
+
+        self._current_scene = scene
+
+        scene_entry = get_scene_entry(scene.scene_id)
+
+        self.bridge.clear_scene_dirty()
+
+        self.bridge.set_current_scene(
+
+            scene,
+
+            config_id=scene.scene_id,
+
+            path=str(scene_entry.path) if scene_entry is not None else "",
+
+            source="library" if scene_entry is not None else "builtin",
+
+        )
+
+        template_id = str(template_id or "").strip()
+
+        if template_id:
+
+            template_entry = get_template_entry(template_id)
+
+            try:
+
+                template = load_template_from_library(template_id)
+
+            except Exception as exc:
+
+                logger.warning(
+                    "Workbench quick binding ignored template load failure for %s: %s",
+                    template_id,
+                    exc,
+                    exc_info=exc,
+                )
+
+                template = None
+
+            if template is not None:
+
+                self.bridge.clear_template_dirty()
+
+                self.bridge.set_current_template(
+
+                    template,
+
+                    config_id=template_id,
+
+                    path=str(template_entry.path) if template_entry is not None else "",
+
+                    source="library" if template_entry is not None else "builtin",
+
+                )
+
+    def _on_quick_scene_config_changed(self, scene: SceneWorkspace) -> None:
+
+        self._current_scene = scene
+
+        scene_entry = get_scene_entry(scene.scene_id)
+
+        self.bridge.set_current_scene(
+
+            scene,
+
+            config_id=scene.scene_id,
+
+            path=str(scene_entry.path) if scene_entry is not None else "",
+
+            source="library" if scene_entry is not None else "builtin",
+
+        )
+
+        self.bridge.mark_scene_dirty()
 
     def _sync_dynamic_cards(self) -> None:
 
@@ -435,7 +605,15 @@ class WorkbenchPanel(BasePanel):
 
         self._current_scene = scene
 
+        self._config_management_detail.set_current_scene(scene)
+
         self._refresh_strategy_summary()
+
+        self._refresh_fixed_cards()
+
+    def _on_scene_dirty_changed(self, dirty: bool) -> None:
+
+        self._scene_dirty = bool(dirty)
 
         self._refresh_fixed_cards()
 
@@ -482,6 +660,8 @@ class WorkbenchPanel(BasePanel):
             template=self._current_template,
 
             scene=self._current_scene,
+
+            session_overrides=self._quick_execution_detail.runtime_template_overrides(),
 
         )
 

@@ -1,7 +1,7 @@
 """
 Phase 5 集成测试 — 全链 E2E
 
-1. 注册表完整性 (19 模块)
+1. 注册表完整性 (22 模块)
 2. 拓扑排序验证
 3. 数据流验证
 4. 全链 Pipeline 执行（真实 docx）
@@ -19,23 +19,23 @@ from docx import Document
 
 
 def test_registry_completeness():
-    """注册表包含 19 个模块且名称唯一"""
+    """注册表包含 22 个模块且名称唯一"""
     from src.modules.registry import ALL_MODULES, create_all_modules, list_module_names
 
-    assert len(ALL_MODULES) == 19, f"期望 19 个模块, 实际 {len(ALL_MODULES)}"
+    assert len(ALL_MODULES) == 22, f"期望 22 个模块, 实际 {len(ALL_MODULES)}"
 
     modules = create_all_modules()
-    assert len(modules) == 19
+    assert len(modules) == 22
 
     names = list_module_names()
-    assert len(names) == 19
-    assert len(set(names)) == 19, f"名称不唯一: {names}"
+    assert len(names) == 22
+    assert len(set(names)) == 22, f"名称不唯一: {names}"
 
     # 检查分类覆盖
     categories = set(m.meta.category for m in modules)
     expected = {"basic", "structure", "table", "fill", "insert", "special", "validate"}
     assert categories == expected, f"分类不完整: {categories} vs {expected}"
-    print(f"  ✅ 注册表完整: 19 模块, 7 分类")
+    print("  registry complete: 22 modules, 7 categories")
 
 
 def test_topological_sort():
@@ -84,7 +84,7 @@ def test_dirty_module_propagation():
 
 
 def test_full_pipeline_e2e():
-    """全链 E2E: 19 模块管线执行"""
+    """全链 E2E: 22 模块管线执行"""
     from src.modules.registry import create_all_modules
     from src.config.template import TemplateConfig
     from src.config.scene import SceneWorkspace

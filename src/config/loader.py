@@ -34,6 +34,36 @@ def load_scene(path: str | Path) -> "SceneWorkspace":
     return dict_to_dataclass(SceneWorkspace, normalize_scene_payload(data))
 
 
+def save_scene(scene: "SceneWorkspace", path: str | Path) -> Path:
+    """Save SceneWorkspace to a YAML or JSON file."""
+    target = Path(path)
+    suffix = target.suffix.lower()
+    data = asdict(scene)
+
+    if suffix in (".yaml", ".yml"):
+        try:
+            import yaml
+        except ImportError as exc:
+            raise ImportError(
+                "PyYAML is required to save YAML config files: pip install pyyaml"
+            ) from exc
+        payload = yaml.safe_dump(
+            data,
+            allow_unicode=True,
+            sort_keys=False,
+        )
+    elif suffix == ".json":
+        payload = json.dumps(data, ensure_ascii=False, indent=2)
+    else:
+        raise ValueError(
+            f"Unsupported config file format: {target.suffix} (expected .yaml/.yml/.json)"
+        )
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(payload, encoding="utf-8")
+    return target
+
+
 def save_template(template: "TemplateConfig", path: str | Path) -> Path:
     """Save TemplateConfig to a YAML or JSON file."""
     target = Path(path)
