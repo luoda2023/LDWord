@@ -19,10 +19,26 @@ tests/output/
 *_报告.json
 *_报告.md
 
-# Runtime logs
+# Runtime logs / crash dumps
 crash.log
 demo_crash.log
 alavette_form.log
+*.log
+crash*.txt
+error*.txt
+diag*.txt
+test_results.txt
+
+# Local UI/debug captures and scratch scripts
+/*.png
+/_*.py
+/screenshot_*.py
+/take_screenshot.py
+/test_dashed.py
+/test_config.txt
+/tmp_preview_audit/
+/Untitled-*.txt
+*.bak
 
 # IDE
 .idea/
