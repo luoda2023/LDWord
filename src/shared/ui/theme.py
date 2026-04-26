@@ -330,6 +330,11 @@ class AppTheme:
     spacing_lg: int = 16
     spacing_xl: int = 24
     spacing_xxl: int = 32                # 弹窗级大留白
+    master_detail_nav_width: int = 260
+    master_detail_margin_x: int = 16
+    master_detail_margin_top: int = 10
+    master_detail_margin_bottom: int = 16
+    master_detail_detail_spacing: int = 0
 
     # ━━ 控件高度 (px) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     control_height_sm: int = 24          # 紧凑型（表格内、工具栏）

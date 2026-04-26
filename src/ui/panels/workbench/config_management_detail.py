@@ -46,24 +46,25 @@ class _SceneExportSection(QWidget):
         self._scene_status.setWordWrap(True)
         self._layout.addWidget(self._scene_status)
 
-        self._scene_export_card = Card("Save Current Scene", parent=self)
+        self._scene_export_card = Card(parent=self)
+        self._scene_export_card.set_header("保存当前场景", icon_name="save")
 
         actions = QWidget(self._scene_export_card)
         actions_layout = QHBoxLayout(actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(10)
 
-        self._scene_save_btn = QPushButton("Save Scene File", actions)
+        self._scene_save_btn = QPushButton("保存场景文件", actions)
         apply_button_variant(self._scene_save_btn, "primary")
         self._scene_save_btn.clicked.connect(self._save_scene_file)
         actions_layout.addWidget(self._scene_save_btn, 1)
 
-        self._scene_save_as_btn = QPushButton("Save Scene As", actions)
+        self._scene_save_as_btn = QPushButton("场景另存为", actions)
         apply_button_variant(self._scene_save_as_btn, "secondary")
         self._scene_save_as_btn.clicked.connect(self._save_scene_as)
         actions_layout.addWidget(self._scene_save_as_btn, 1)
 
-        self._scene_export_status = QLabel("No scene is currently available to save.", self._scene_export_card)
+        self._scene_export_status = QLabel("当前还没有可保存的场景。", self._scene_export_card)
         self._scene_export_status.setWordWrap(True)
 
         self._scene_path_label = QLabel("", self._scene_export_card)
@@ -93,7 +94,7 @@ class _SceneExportSection(QWidget):
         return self._scene_dirty
 
     def navigation_snapshot(self) -> dict[str, str]:
-        scene_label = self._scene_name or self._scene_id or "Current Scene"
+        scene_label = self._scene_name or self._scene_id or "当前场景"
         return {
             "subtitle": f"{scene_label} 有未保存的更改",
             "badge_text": "未保存",
@@ -114,8 +115,8 @@ class _SceneExportSection(QWidget):
         except Exception as exc:
             log_best_effort_state_sync_failure("scene export section", "scene_id assignment", exc)
 
-        self._scene_export_status.setText(f"Saved current scene: {saved_path.name}")
-        self._scene_path_label.setText(f"Saved to: {saved_path}")
+        self._scene_export_status.setText(f"已保存当前场景：{saved_path.name}")
+        self._scene_path_label.setText(f"保存到：{saved_path}")
 
         if self._bridge is not None:
             self._bridge.set_current_scene(
@@ -142,7 +143,7 @@ class _SceneExportSection(QWidget):
 
     def _save_scene_file(self) -> None:
         if self._current_scene is None:
-            self._scene_export_status.setText("No scene is currently available to save.")
+            self._scene_export_status.setText("当前还没有可保存的场景。")
             return
 
         if self._scene_path:
@@ -153,12 +154,12 @@ class _SceneExportSection(QWidget):
 
     def _save_scene_as(self) -> None:
         if self._current_scene is None:
-            self._scene_export_status.setText("No scene is currently available to save.")
+            self._scene_export_status.setText("当前还没有可保存的场景。")
             return
 
         file_path, _selected = QFileDialog.getSaveFileName(
             self,
-            "Save Scene Config",
+            "保存场景配置",
             self._default_scene_save_path(),
             "Config Files (*.json *.yaml *.yml);;JSON Files (*.json);;YAML Files (*.yaml *.yml)",
         )
@@ -183,22 +184,22 @@ class _SceneExportSection(QWidget):
         self.changed.emit()
 
     def _refresh_state(self) -> None:
-        scene_label = self._scene_name or self._scene_id or "Current Scene"
+        scene_label = self._scene_name or self._scene_id or "当前场景"
 
         if self._current_scene is None:
             self._scene_save_btn.setEnabled(False)
             self._scene_save_as_btn.setEnabled(False)
-            self._scene_status.setText("No editable scene has been loaded into the current session yet.")
+            self._scene_status.setText("当前会话还没有载入可编辑场景。")
         elif self._scene_dirty:
             self._scene_save_btn.setEnabled(True)
             self._scene_save_as_btn.setEnabled(True)
-            self._scene_status.setText(f"{scene_label} has unsaved changes. Save the scene file when you are ready.")
+            self._scene_status.setText(f"{scene_label} 有未保存的更改，可在确认后保存场景文件。")
         else:
             self._scene_save_btn.setEnabled(True)
             self._scene_save_as_btn.setEnabled(True)
-            self._scene_status.setText(f"{scene_label} currently has no unsaved changes.")
+            self._scene_status.setText(f"{scene_label} 当前没有未保存的更改。")
 
-        self._scene_path_label.setText(f"Path: {self._scene_path}" if self._scene_path else "")
+        self._scene_path_label.setText(f"路径：{self._scene_path}" if self._scene_path else "")
         self._apply_theme()
 
     def _apply_theme(self) -> None:
@@ -236,24 +237,25 @@ class _TemplateExportSection(QWidget):
         self._template_status.setWordWrap(True)
         self._layout.addWidget(self._template_status)
 
-        self._template_export_card = Card("Save Current Template", parent=self)
+        self._template_export_card = Card(parent=self)
+        self._template_export_card.set_header("保存当前模板", icon_name="save")
 
         actions = QWidget(self._template_export_card)
         actions_layout = QHBoxLayout(actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(10)
 
-        self._template_export_btn = QPushButton("Save Template File", self._template_export_card)
+        self._template_export_btn = QPushButton("保存模板文件", self._template_export_card)
         apply_button_variant(self._template_export_btn, "primary")
         self._template_export_btn.clicked.connect(self._save_template_file)
         actions_layout.addWidget(self._template_export_btn, 1)
 
-        self._template_save_as_btn = QPushButton("Save Template As", self._template_export_card)
+        self._template_save_as_btn = QPushButton("模板另存为", self._template_export_card)
         apply_button_variant(self._template_save_as_btn, "secondary")
         self._template_save_as_btn.clicked.connect(self._save_template_as)
         actions_layout.addWidget(self._template_save_as_btn, 1)
 
-        self._template_export_status = QLabel("No template is currently available to save.", self._template_export_card)
+        self._template_export_status = QLabel("当前还没有可保存的模板。", self._template_export_card)
         self._template_export_status.setWordWrap(True)
 
         self._last_save_path_label = QLabel("", self._template_export_card)
@@ -282,7 +284,7 @@ class _TemplateExportSection(QWidget):
         return self._template_dirty
 
     def navigation_snapshot(self) -> dict[str, str]:
-        template_label = self._template_name or self._template_id or "Current Template"
+        template_label = self._template_name or self._template_id or "当前模板"
         return {
             "subtitle": f"{template_label} 有未保存的更改",
             "badge_text": "未保存",
@@ -299,8 +301,8 @@ class _TemplateExportSection(QWidget):
         self._template_source = "library" if is_template_library_path(saved_path) else "file"
         self._template_id = self._template_id or saved_path.stem
 
-        self._template_export_status.setText(f"Saved current template: {saved_path.name}")
-        self._last_save_path_label.setText(f"Saved to: {saved_path}")
+        self._template_export_status.setText(f"已保存当前模板：{saved_path.name}")
+        self._last_save_path_label.setText(f"保存到：{saved_path}")
 
         if self._bridge is not None:
             self._bridge.set_current_template(
@@ -327,7 +329,7 @@ class _TemplateExportSection(QWidget):
 
     def _save_template_file(self) -> None:
         if self._current_template is None:
-            self._template_export_status.setText("No template is currently available to save.")
+            self._template_export_status.setText("当前还没有可保存的模板。")
             return
 
         if self._template_path:
@@ -338,12 +340,12 @@ class _TemplateExportSection(QWidget):
 
     def _save_template_as(self) -> None:
         if self._current_template is None:
-            self._template_export_status.setText("No template is currently available to save.")
+            self._template_export_status.setText("当前还没有可保存的模板。")
             return
 
         file_path, _selected = QFileDialog.getSaveFileName(
             self,
-            "Save Template Config",
+            "保存模板配置",
             self._default_template_save_path(),
             "Config Files (*.json *.yaml *.yml);;JSON Files (*.json);;YAML Files (*.yaml *.yml)",
         )
@@ -368,22 +370,22 @@ class _TemplateExportSection(QWidget):
         self.changed.emit()
 
     def _refresh_state(self) -> None:
-        template_label = self._template_name or self._template_id or "Current Template"
+        template_label = self._template_name or self._template_id or "当前模板"
 
         if self._current_template is None:
             self._template_export_btn.setEnabled(False)
             self._template_save_as_btn.setEnabled(False)
-            self._template_status.setText("No editable template has been loaded into the current session yet.")
+            self._template_status.setText("当前会话还没有载入可编辑模板。")
         elif self._template_dirty:
             self._template_export_btn.setEnabled(True)
             self._template_save_as_btn.setEnabled(True)
-            self._template_status.setText(f"{template_label} has unsaved changes. Save the template file when you are ready.")
+            self._template_status.setText(f"{template_label} 有未保存的更改，可在确认后保存模板文件。")
         else:
             self._template_export_btn.setEnabled(True)
             self._template_save_as_btn.setEnabled(True)
-            self._template_status.setText(f"{template_label} currently has no unsaved changes.")
+            self._template_status.setText(f"{template_label} 当前没有未保存的更改。")
 
-        self._last_save_path_label.setText(f"Path: {self._template_path}" if self._template_path else "")
+        self._last_save_path_label.setText(f"路径：{self._template_path}" if self._template_path else "")
         self._apply_theme()
 
     def _apply_theme(self) -> None:
@@ -440,20 +442,21 @@ class _SessionConfigSection(QWidget):
         }
 
     def _build_save_card(self) -> None:
-        self._save_card = Card("Save Session Config", parent=self)
+        self._save_card = Card(parent=self)
+        self._save_card.set_header("保存会话配置", icon_name="save")
 
         self._name_input = QLineEdit(self._save_card)
-        self._name_input.setPlaceholderText("Config name")
+        self._name_input.setPlaceholderText("配置名称")
 
         self._desc_input = QTextEdit(self._save_card)
-        self._desc_input.setPlaceholderText("Description (optional)")
+        self._desc_input.setPlaceholderText("描述（可选）")
         self._desc_input.setMaximumHeight(88)
 
-        self._save_btn = QPushButton("Save Config", self._save_card)
+        self._save_btn = QPushButton("保存配置", self._save_card)
         apply_button_variant(self._save_btn, "primary")
         self._save_btn.clicked.connect(self._save_current_config)
 
-        self._save_status = QLabel("No session config has been saved yet.", self._save_card)
+        self._save_status = QLabel("还没有保存任何会话配置。", self._save_card)
 
         self._save_card.add_widget(self._name_input)
         self._save_card.add_widget(self._desc_input)
@@ -463,14 +466,15 @@ class _SessionConfigSection(QWidget):
         self._layout.addWidget(self._save_card)
 
     def _build_list_card(self) -> None:
-        self._list_card = Card("Session Configs", parent=self)
+        self._list_card = Card(parent=self)
+        self._list_card.set_header("会话配置", icon_name="scroll-text")
 
         self._config_list = ConfigListWidget(self._list_card)
         self._config_list.config_loaded.connect(self._on_config_loaded)
         self._config_list.config_deleted.connect(self._on_config_deleted)
 
         self._list_status = QLabel(
-            "Session configs currently live only in memory; persistent storage can be added later.",
+            "会话配置当前仅保存在内存中，后续可接入持久化存储。",
             self._list_card,
         )
 
@@ -481,7 +485,7 @@ class _SessionConfigSection(QWidget):
     def _save_current_config(self) -> None:
         name = self._name_input.text().strip()
         if not name:
-            self._save_status.setText("Please enter a config name first.")
+            self._save_status.setText("请先输入配置名称。")
             return
 
         self._config_counter += 1
@@ -492,12 +496,12 @@ class _SessionConfigSection(QWidget):
         self._config_list.add_config(config_id, name, description, timestamp)
         self._name_input.clear()
         self._desc_input.clear()
-        self._save_status.setText(f"Saved config: {name}")
+        self._save_status.setText(f"已保存配置：{name}")
         self.changed.emit()
 
     def _on_config_loaded(self, config_id: str) -> None:
         self._loaded_config_name = self._config_list.config_name(config_id) or config_id
-        self._list_status.setText(f"Loaded config: {self._loaded_config_name}")
+        self._list_status.setText(f"已载入配置：{self._loaded_config_name}")
         self.changed.emit()
 
     def _on_config_deleted(self, config_id: str) -> None:
@@ -505,7 +509,7 @@ class _SessionConfigSection(QWidget):
         self._config_list.remove_config(config_id)
         if deleted_name == self._loaded_config_name:
             self._loaded_config_name = ""
-        self._list_status.setText(f"Deleted config: {deleted_name}")
+        self._list_status.setText(f"已删除配置：{deleted_name}")
         self.changed.emit()
 
     def _apply_theme(self) -> None:
@@ -532,7 +536,7 @@ class ConfigManagementDetail(QWidget):
         self._layout.setSpacing(16)
 
         self._intro = QLabel(
-            "Manage the current scene file, template file, and in-session execution drafts in one place.",
+            "集中管理当前场景文件、模板文件和会话内执行草稿。",
             self,
         )
         self._intro.setWordWrap(True)

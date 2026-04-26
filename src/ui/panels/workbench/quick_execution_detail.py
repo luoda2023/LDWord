@@ -26,6 +26,7 @@ from src.shared.ui import DashedSeparator
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
 from src.shared.ui.feature_toggle_row import FeatureToggleRow
+from src.shared.ui.flow_layout import FlowLayout
 from src.shared.engine.document_structure_preview import (
     StructurePreviewItem,
     analyze_document_structure,
@@ -143,19 +144,7 @@ class QuickExecutionDetail(QWidget):
 
     def _build_scene_section(self) -> None:
         """Build the scene + template cascade selectors."""
-        # ── Section header: icon + title ──
-        header = QWidget(self)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 6)
-        header_layout.setSpacing(6)
-        self._scene_card_icon = QLabel(header)
-        self._scene_card_icon.setFixedSize(18, 18)
-        header_layout.addWidget(self._scene_card_icon)
-        self._scene_card_title = QLabel("场景与模板", header)
-        self._scene_card_title.setObjectName("scene_card_title")
-        header_layout.addWidget(self._scene_card_title)
-        header_layout.addStretch(1)
-        self._scene_card.add_widget(header)
+        self._scene_card.set_header("场景与模板", icon_name="boxes")
 
         # ── Single row: 场景 [combo] | 模板 [combo] ──
         row = QWidget(self)
@@ -181,9 +170,7 @@ class QuickExecutionDetail(QWidget):
         self._scene_combo.currentIndexChanged.connect(self._on_scene_changed)
         row_layout.addWidget(self._scene_combo, 1)
 
-        # Vertical dashed divider between scene & template
-        self._scene_tpl_divider = DashedSeparator(orientation="vertical", parent=row)
-        row_layout.addWidget(self._scene_tpl_divider)
+        row_layout.addSpacing(10)
 
         # Template icon + label + combo
         self._tpl_icon_label = QLabel(row)
@@ -319,32 +306,25 @@ class QuickExecutionDetail(QWidget):
 
         # Zone checkboxes container (flow layout)
         self._zones_container = QWidget(self._advanced_container)
-        self._zones_flow = _FlowLayout(self._zones_container, h_spacing=12, v_spacing=4)
+        self._zones_flow = FlowLayout(self._zones_container, h_spacing=12, v_spacing=4)
         adv_layout.addWidget(self._zones_container)
 
         # Dashed separator: zones / features
         self._sep_zones_features = DashedSeparator(orientation="horizontal", parent=self._advanced_container)
         adv_layout.addWidget(self._sep_zones_features)
 
-        # ── Feature toggles (2-column grid with vertical divider) ──
+        # ── Feature toggles (wrapping flow) ──
         features_title = QLabel("处理功能", self._advanced_container)
         features_title.setObjectName("wb_v2_section_title")
         adv_layout.addWidget(features_title)
 
-        from src.qt_api import QGridLayout
         features_grid = QWidget(self._advanced_container)
-        grid = QGridLayout(features_grid)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(0)
-        grid.setVerticalSpacing(2)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 0)  # divider column — fixed width
-        grid.setColumnStretch(2, 1)
-        grid.setColumnMinimumWidth(1, 20)  # divider column width
+        self._features_flow = FlowLayout(features_grid, h_spacing=16, v_spacing=6)
 
-        num_rows = (len(UI_CAPABILITY_GROUPS) + 1) // 2
-        for i, ui_group in enumerate(UI_CAPABILITY_GROUPS):
+        for ui_group in UI_CAPABILITY_GROUPS:
             row = FeatureToggleRow(ui_group.label, parent=features_grid)
+            row.setMinimumWidth(260)
+            row.setMaximumWidth(360)
             row.toggled.connect(
                 lambda enabled, gid=ui_group.group_id: self._on_feature_row_toggled(gid, enabled)
             )
@@ -352,12 +332,7 @@ class QuickExecutionDetail(QWidget):
                 lambda gid=ui_group.group_id: self._on_feature_config_requested(gid)
             )
             self._feature_rows[ui_group.group_id] = row
-            r, c = i // 2, (i % 2) * 2  # columns 0 and 2 (1 is divider)
-            grid.addWidget(row, r, c, Qt.AlignVCenter)
-
-        # Vertical divider between two columns
-        self._features_vdiv = DashedSeparator(orientation="vertical", parent=features_grid)
-        grid.addWidget(self._features_vdiv, 0, 1, num_rows, 1)
+            self._features_flow.addWidget(row)
 
         adv_layout.addWidget(features_grid)
 
@@ -365,19 +340,7 @@ class QuickExecutionDetail(QWidget):
 
     def _build_output_section(self) -> None:
         """Build the output directory section – matches scene card style."""
-        # ── Section header: icon + title ──
-        header = QWidget(self)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 6)
-        header_layout.setSpacing(6)
-        self._output_card_icon = QLabel(header)
-        self._output_card_icon.setFixedSize(18, 18)
-        header_layout.addWidget(self._output_card_icon)
-        self._output_card_title = QLabel("输出目录", header)
-        self._output_card_title.setObjectName("output_card_title")
-        header_layout.addWidget(self._output_card_title)
-        header_layout.addStretch(1)
-        self._output_card.add_widget(header)
+        self._output_card.set_header("输出目录", icon_name="square-arrow-out-up-right")
 
         # ── Row: ○ 默认  ○ 自定义  [browse btn] ──
         row = QWidget(self)
@@ -453,7 +416,7 @@ class QuickExecutionDetail(QWidget):
         self._custom_output_dir = folder
         display = Path(folder).name or folder
         self._output_browse_btn.setText(display)
-        self._output_browse_btn.setIcon(get_icon("folder-open", 16, "#64748B"))
+        self._output_browse_btn.setIcon(get_icon("folder-open", 16, get_theme().icon_primary))
         # Auto-switch to custom mode if not already
         if not self._output_custom_radio.isChecked():
             self._output_custom_radio.setChecked(True)
@@ -464,21 +427,7 @@ class QuickExecutionDetail(QWidget):
         return self._custom_output_dir
 
     def _build_execute_area(self) -> None:
-        # ── Card header: icon + "执行输出" ──
-        header = QWidget(self)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(8)
-
-        self._exec_card_icon = QLabel(header)
-        self._exec_card_icon.setFixedSize(20, 20)
-        header_layout.addWidget(self._exec_card_icon)
-
-        self._exec_card_title = QLabel("执行输出", header)
-        self._exec_card_title.setObjectName("wb_v2_card_header")
-        header_layout.addWidget(self._exec_card_title)
-        header_layout.addStretch(1)
-        self._execution_card.add_widget(header)
+        self._execution_card.set_header("执行输出", icon_name="terminal")
 
         # ── Row: [Button LEFT] + [Status panel RIGHT, fixed height] ──
         exec_row = QWidget(self)
@@ -491,7 +440,7 @@ class QuickExecutionDetail(QWidget):
         self._execute_btn.setObjectName("wb_v2_execute_btn")
         self._execute_btn.setFixedHeight(get_theme().control_height_lg)
         self._execute_btn.setCursor(Qt.PointingHandCursor)
-        self._execute_btn.setIcon(get_icon("play", 16, "#FFFFFF"))
+        self._execute_btn.setIcon(get_icon("play", 16, get_theme().text_on_primary))
         apply_button_variant(self._execute_btn, "primary")
         self._execute_btn.clicked.connect(self.execute_requested.emit)
         exec_row_layout.addWidget(self._execute_btn, 4)
@@ -802,9 +751,11 @@ class QuickExecutionDetail(QWidget):
         safe = _html.escape(str(message))
         t = get_theme()
         colors = {
-            "info": t.text_secondary, "warning": "#D97706",
-            "error": "#DC2626", "critical": "#DC2626",
-            "success": "#16A34A",
+            "info": t.text_secondary,
+            "warning": t.warning,
+            "error": t.error,
+            "critical": t.error_pressed,
+            "success": t.success,
         }
         c = colors.get(level.lower(), t.text_primary)
         self._exec_log.append(f'<span style="color: {c};">{safe}</span>')
@@ -845,7 +796,7 @@ class QuickExecutionDetail(QWidget):
         if state.error_text:
             self._append_exec_log("error", state.error_text)
         self._execute_btn.setText("开始执行")
-        self._execute_btn.setIcon(get_icon("play", 16, "#FFFFFF"))
+        self._execute_btn.setIcon(get_icon("play", 16, get_theme().text_on_primary))
         self._execute_btn.setEnabled(True)
         apply_button_variant(self._execute_btn, "primary")
         self.summary_changed.emit()
@@ -866,7 +817,7 @@ class QuickExecutionDetail(QWidget):
         self._last_result_status = "idle"
         self._execution_running = False
         self._execute_btn.setText("开始执行")
-        self._execute_btn.setIcon(get_icon("play", 16, "#FFFFFF"))
+        self._execute_btn.setIcon(get_icon("play", 16, get_theme().text_on_primary))
         apply_button_variant(self._execute_btn, "primary")
         self._emit_summary_changed()
 
@@ -1096,17 +1047,6 @@ class QuickExecutionDetail(QWidget):
         for sep in self.findChildren(QFrame, "wb_v2_adv_sep"):
             sep.setStyleSheet(f"background: {t.border_light}; max-height: 1px;")
 
-        # Scene/template card title (primary color)
-        if hasattr(self, "_scene_card_title"):
-            self._scene_card_title.setStyleSheet(
-                f"font-size: {t.font_size_lg}px; font-weight: {t.font_weight_emphasis}; "
-                f"color: {t.primary}; background: transparent;"
-            )
-        if hasattr(self, "_scene_card_icon"):
-            self._scene_card_icon.setPixmap(
-                get_icon("boxes", 18, t.primary).pixmap(18, 18)
-            )
-
         # Scene/template row labels
         for lbl in self.findChildren(QLabel, "scene_tpl_label"):
             lbl.setStyleSheet(
@@ -1124,19 +1064,13 @@ class QuickExecutionDetail(QWidget):
                 get_icon("scroll-text", 16, t.text_hint).pixmap(16, 16)
             )
 
-        # Scene/template vertical dashed divider
-        if hasattr(self, "_scene_tpl_divider"):
-            self._scene_tpl_divider.set_color(t.text_hint)
-
-        # Dashed separators — use text_hint for clear visibility
-        dashed_color = t.text_hint
+        # Dashed separators stay subtle; spacing carries the main grouping.
+        dashed_color = t.divider
         for w in (getattr(self, '_sep_strategy_zones', None),
+                  getattr(self, '_sep_structure_zones', None),
                   getattr(self, '_sep_zones_features', None)):
             if w:
                 w.set_color(dashed_color)
-        if hasattr(self, "_features_vdiv"):
-            self._features_vdiv.set_color(dashed_color)
-
         # Zone buttons
         if hasattr(self, "_zones_select_all_btn"):
             flat_btn_qss = f"font-size: {t.font_size_sm}px; color: {t.primary}; border: none; padding: 2px 6px;"
@@ -1147,17 +1081,6 @@ class QuickExecutionDetail(QWidget):
         if hasattr(self, "_zone_checks"):
             self._apply_zone_styles()
 
-        # Output card header (same style as scene card)
-        if hasattr(self, "_output_card_title"):
-            self._output_card_title.setStyleSheet(
-                f"font-size: {t.font_size_lg}px; font-weight: {t.font_weight_emphasis}; "
-                f"color: {t.primary}; background: transparent;"
-            )
-        if hasattr(self, "_output_card_icon"):
-            self._output_card_icon.setPixmap(
-                get_icon("square-arrow-out-up-right", 18, t.primary).pixmap(18, 18)
-            )
-
         # Output browse button (styled like scene combo area)
         if hasattr(self, "_output_browse_btn"):
             self._output_browse_btn.setStyleSheet(
@@ -1166,21 +1089,14 @@ class QuickExecutionDetail(QWidget):
                 f"padding: 6px 12px; background: {t.bg_card}; text-align: left; }}"
                 f"QPushButton:hover {{ border-color: {t.primary}; color: {t.primary}; }}"
             )
-
-        # Execute card header
-        if hasattr(self, "_exec_card_icon"):
-            self._exec_card_icon.setPixmap(
-                get_icon("terminal", 18, t.primary).pixmap(18, 18)
-            )
-        if hasattr(self, "_exec_card_title"):
-            self._exec_card_title.setStyleSheet(
-                f"font-size: {t.font_size_lg}px; font-weight: {t.font_weight_emphasis}; "
-                f"color: {t.primary}; background: transparent;"
-            )
+            if self._custom_output_dir:
+                self._output_browse_btn.setIcon(get_icon("folder-open", 16, t.icon_primary))
 
         # Execute button
         if hasattr(self, "_execute_btn"):
             apply_button_variant(self._execute_btn, "primary")
+            if not self._execution_running:
+                self._execute_btn.setIcon(get_icon("play", 16, t.text_on_primary))
 
         # Exec status area (right of button)
         if hasattr(self, "_exec_status_area"):
@@ -1228,20 +1144,3 @@ class QuickExecutionDetail(QWidget):
             )
 
         self._emit_summary_changed()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  Flow layout helper for zone checkboxes
-# ═══════════════════════════════════════════════════════════════════════════
-
-class _FlowLayout(QHBoxLayout):
-    """Simplified horizontal flow that wraps (using QHBoxLayout as base,
-    actual wrapping delegated to the container's word-wrap behavior).
-    For a true flow, we just use a grid-like horizontal layout here."""
-
-    def __init__(self, parent=None, h_spacing: int = 8, v_spacing: int = 4):
-        super().__init__(parent)
-        self.setContentsMargins(0, 0, 0, 0)
-        self.setSpacing(h_spacing)
-        self._h_spacing = h_spacing
-        self._v_spacing = v_spacing

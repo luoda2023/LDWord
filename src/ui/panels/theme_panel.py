@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from src.qt_api import (
     QColor, QColorDialog, QDialog, QFont, QFrame, QHBoxLayout,
-    QLabel, QLayout, QLayoutItem, QLineEdit, QPainter, QPainterPath,
-    QPoint, QPushButton, QRect, QRectF, QSize, QVBoxLayout, QWidget, Qt, Signal,
+    QLabel, QLineEdit, QPainter, QPainterPath,
+    QPushButton, QRect, QRectF, QVBoxLayout, QWidget, Qt, Signal,
 )
 
 from src.shared.ui.theme import (
@@ -21,6 +21,7 @@ from src.shared.ui.theme import (
     get_theme, set_theme, bind_theme,
 )
 from src.shared.ui.custom_themes import CustomThemeStore
+from src.shared.ui.flow_layout import FlowLayout
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.ui.base_panel import BasePanel
 
@@ -48,81 +49,6 @@ def _theme_signature(theme: AppTheme) -> tuple[tuple[str, object], ...]:
 
 def _themes_match(left: AppTheme, right: AppTheme) -> bool:
     return _theme_signature(left) == _theme_signature(right)
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# FlowLayout — 自适应流式布局
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-class _FlowLayout(QLayout):
-    """类似 CSS flexbox wrap 的流式布局。"""
-
-    def __init__(self, parent=None, h_spacing=14, v_spacing=14):
-        super().__init__(parent)
-        self._items: list[QLayoutItem] = []
-        self._h_spacing = h_spacing
-        self._v_spacing = v_spacing
-
-    def addItem(self, item: QLayoutItem):
-        self._items.append(item)
-
-    def count(self):
-        return len(self._items)
-
-    def itemAt(self, index):
-        if 0 <= index < len(self._items):
-            return self._items[index]
-        return None
-
-    def takeAt(self, index):
-        if 0 <= index < len(self._items):
-            return self._items.pop(index)
-        return None
-
-    def hasHeightForWidth(self):
-        return True
-
-    def heightForWidth(self, width):
-        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
-
-    def setGeometry(self, rect):
-        super().setGeometry(rect)
-        self._do_layout(rect, test_only=False)
-
-    def sizeHint(self):
-        return self.minimumSize()
-
-    def minimumSize(self):
-        size = QSize()
-        for item in self._items:
-            size = size.expandedTo(item.minimumSize())
-        m = self.contentsMargins()
-        size += QSize(m.left() + m.right(), m.top() + m.bottom())
-        return size
-
-    def _do_layout(self, rect, test_only=False):
-        x = rect.x()
-        y = rect.y()
-        line_height = 0
-        right_edge = rect.x() + rect.width()
-
-        for item in self._items:
-            item_size = item.sizeHint()
-            next_x = x + item_size.width() + self._h_spacing
-
-            if next_x - self._h_spacing > right_edge and line_height > 0:
-                x = rect.x()
-                y += line_height + self._v_spacing
-                line_height = 0
-
-            if not test_only:
-                item.setGeometry(QRect(QPoint(x, y), item_size))
-
-            x += item_size.width() + self._h_spacing
-            line_height = max(line_height, item_size.height())
-
-        return y + line_height - rect.y()
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ThemeSwatchCard — 预览卡片
@@ -686,7 +612,7 @@ class ThemePanel(BasePanel):
 
         # ── 内置预设区 ──
         preset_container = QWidget(self)
-        self._preset_flow = _FlowLayout(preset_container, h_spacing=14, v_spacing=14)
+        self._preset_flow = FlowLayout(preset_container, h_spacing=14, v_spacing=14)
 
         self._cards: dict[str, _ThemeSwatchCard] = {}
         for key, label, preset in _PRESETS:
@@ -710,7 +636,7 @@ class ThemePanel(BasePanel):
 
         # ── 自定义主题区 ──
         custom_container = QWidget(self)
-        self._custom_flow = _FlowLayout(custom_container, h_spacing=14, v_spacing=14)
+        self._custom_flow = FlowLayout(custom_container, h_spacing=14, v_spacing=14)
 
         # 加载已保存的自定义主题
         self._store = CustomThemeStore()

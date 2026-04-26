@@ -36,6 +36,7 @@ test_results.txt
 /take_screenshot.py
 /test_dashed.py
 /test_config.txt
+/.ui_audit_screenshots/
 /tmp_preview_audit/
 /Untitled-*.txt
 *.bak

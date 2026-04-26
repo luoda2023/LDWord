@@ -29,6 +29,7 @@ class FormRow(QWidget):
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(0, 2, 0, 2)
         self._layout.setSpacing(4)
+        self._layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         self._label = QLabel(label)
         self._label.setAlignment(self._label_alignment)

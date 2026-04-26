@@ -7,9 +7,9 @@ from src.config.scene import SceneWorkspace
 
 from src.config.template import TemplateConfig
 
-from src.qt_api import QFileDialog, QFrame, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget, Qt
+from src.qt_api import QFileDialog, QWidget
 
-from src.shared.ui import DynamicNavigationRail
+from src.shared.ui import MasterDetailShell
 
 from src.shared.ui.theme import bind_theme, get_theme
 
@@ -151,45 +151,18 @@ class WorkbenchPanel(BasePanel):
 
     def _build_shell_widgets(self) -> None:
 
-        self._layout = QHBoxLayout(self)
-
-        self._layout.setContentsMargins(0, 0, 0, 0)
-
-        self._layout.setSpacing(0)
-
-        self._nav_rail = DynamicNavigationRail(parent=self)
-
-        self._nav_rail.setObjectName("wb_v2_navigation")
-
-        self._nav_rail.setFixedWidth(260)
-
-        self._layout.addWidget(self._nav_rail)
-
-        self._detail_scroll = QScrollArea(self)
-
-        self._detail_scroll.setObjectName("wb_v2_detail")
-
-        self._detail_scroll.setWidgetResizable(True)
-
-        self._detail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        self._detail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-
-        self._detail_scroll.setFrameShape(QFrame.NoFrame)
-
-        self._detail_container = QWidget(self._detail_scroll)
-
-        self._detail_container.setObjectName("wb_v2_detail_content")
-
-        self._detail_layout = QVBoxLayout(self._detail_container)
-
-        self._detail_layout.setContentsMargins(16, 10, 16, 16)
-
-        self._detail_layout.setSpacing(0)
-
-        self._detail_scroll.setWidget(self._detail_container)
-
-        self._layout.addWidget(self._detail_scroll, 1)
+        self._shell = MasterDetailShell(
+            self,
+            panel_name="WorkbenchPanel",
+            nav_object_name="wb_v2_navigation",
+            detail_object_name="wb_v2_detail",
+            detail_content_object_name="wb_v2_detail_content",
+        )
+        self._layout = self._shell.layout
+        self._nav_rail = self._shell.nav_rail
+        self._detail_scroll = self._shell.detail_scroll
+        self._detail_container = self._shell.detail_container
+        self._detail_layout = self._shell.detail_layout
 
     def _build_detail_panes(self) -> None:
 

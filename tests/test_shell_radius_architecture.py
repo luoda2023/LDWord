@@ -29,7 +29,7 @@ def test_shell_radius_token_drives_window_dialog_and_shell_edge_rounding():
     dialog_module = (ROOT / "src/shared/ui/base_dialog.py").read_text(encoding="utf-8")
     title_source = inspect.getsource(TitleBar._apply_theme)
     sidebar_source = inspect.getsource(Sidebar._apply_theme)
-    workbench_styles = (ROOT / "src/ui/panels/workbench/styles.py").read_text(encoding="utf-8")
+    master_detail_shell = (ROOT / "src/shared/ui/master_detail_shell.py").read_text(encoding="utf-8")
     theme_panel_source = (ROOT / "src/ui/panels/theme_panel.py").read_text(encoding="utf-8")
     theme_source = (ROOT / "src/shared/ui/theme.py").read_text(encoding="utf-8")
 
@@ -38,5 +38,5 @@ def test_shell_radius_token_drives_window_dialog_and_shell_edge_rounding():
     assert "radius=t.shell_radius" in dialog_module
     assert "border-top-left-radius: {t.shell_radius}px;" in title_source
     assert "border-bottom-left-radius: {t.shell_radius}px;" in sidebar_source
-    assert "theme.shell_radius" in workbench_styles
+    assert "theme.shell_radius" in master_detail_shell
     assert "t.shell_radius" in theme_panel_source

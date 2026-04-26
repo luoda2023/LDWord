@@ -8,7 +8,7 @@ from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.styled_combo_box import StyledComboBox
-from src.shared.ui.template_form_layout import template_form_row
+from src.shared.ui.template_form_layout import TemplateFormStack, template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 
@@ -79,38 +79,41 @@ class FormulaDetail(QWidget):
         self._card.add_widget(self._desc)
 
     def _build_form(self) -> None:
+        rows = []
+
         self._font_combo = FontCombo(lang="en", parent=self)
         self._font_combo.font_changed.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("公式字体", self._font_combo, parent=self._card))
+        rows.append(template_form_row("公式字体", self._font_combo, parent=self._card))
 
         self._size_combo = SizeCombo(self)
         self._size_combo.size_changed.connect(self._on_form_edited)
         self._size_combo.currentTextChanged.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("公式字号", self._size_combo, parent=self._card))
+        rows.append(template_form_row("公式字号", self._size_combo, parent=self._card))
 
         self._alignment_combo = StyledComboBox(self)
         for value, label in _ALIGNMENT_OPTIONS:
             self._alignment_combo.addItem(label, value)
         self._alignment_combo.currentIndexChanged.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("块对齐", self._alignment_combo, parent=self._card))
+        rows.append(template_form_row("块对齐", self._alignment_combo, parent=self._card))
 
         self._numbering_combo = StyledComboBox(self)
         for value, label in _NUMBERING_OPTIONS:
             self._numbering_combo.addItem(label, value)
         self._numbering_combo.currentIndexChanged.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("编号方式", self._numbering_combo, parent=self._card))
+        rows.append(template_form_row("编号方式", self._numbering_combo, parent=self._card))
 
         self._unify_font = ToggleSwitch(self, checked=True)
         self._unify_font.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("统一字体", self._unify_font, parent=self._card))
+        rows.append(template_form_row("统一字体", self._unify_font, parent=self._card))
 
         self._unify_size = ToggleSwitch(self, checked=True)
         self._unify_size.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("统一字号", self._unify_size, parent=self._card))
+        rows.append(template_form_row("统一字号", self._unify_size, parent=self._card))
 
         self._unify_spacing = ToggleSwitch(self, checked=True)
         self._unify_spacing.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("统一间距", self._unify_spacing, parent=self._card))
+        rows.append(template_form_row("统一间距", self._unify_spacing, parent=self._card))
+        self._card.add_widget(TemplateFormStack(rows, parent=self._card))
 
     def _build_hint(self) -> None:
         self._footer_note = QLabel("更细的公式表格参数会在后续迭代继续补充。")

@@ -15,7 +15,7 @@ from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
-from src.shared.ui.template_form_layout import template_form_row
+from src.shared.ui.template_form_layout import TemplateFormStack, template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 
@@ -121,68 +121,71 @@ class CaptionDetail(QWidget):
         self._card.add_widget(self._desc)
 
     def _build_form(self) -> None:
+        rows = []
+
         self._figure_prefix_edit = QLineEdit(self)
         self._figure_prefix_edit.textChanged.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("图前缀", self._figure_prefix_edit, parent=self._card))
+        rows.append(template_form_row("图前缀", self._figure_prefix_edit, parent=self._card))
 
         self._table_prefix_edit = QLineEdit(self)
         self._table_prefix_edit.textChanged.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("表前缀", self._table_prefix_edit, parent=self._card))
+        rows.append(template_form_row("表前缀", self._table_prefix_edit, parent=self._card))
 
         self._separator_edit = QLineEdit(self)
         self._separator_edit.textChanged.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("分隔符", self._separator_edit, parent=self._card))
+        rows.append(template_form_row("分隔符", self._separator_edit, parent=self._card))
 
         self._placeholder_edit = QLineEdit(self)
         self._placeholder_edit.textChanged.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("占位文本", self._placeholder_edit, parent=self._card))
+        rows.append(template_form_row("占位文本", self._placeholder_edit, parent=self._card))
 
         self._numbering_mode_combo = StyledComboBox(self)
         for value, label in NUMBERING_MODE_OPTIONS:
             self._numbering_mode_combo.addItem(label, value)
         self._numbering_mode_combo.currentIndexChanged.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("编号模式", self._numbering_mode_combo, parent=self._card))
+        rows.append(template_form_row("编号模式", self._numbering_mode_combo, parent=self._card))
 
         self._numbering_format_combo = StyledComboBox(self)
         for value, label in NUMBERING_FORMAT_OPTIONS:
             self._numbering_format_combo.addItem(label, value)
         self._numbering_format_combo.currentIndexChanged.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("编号格式", self._numbering_format_combo, parent=self._card))
+        rows.append(template_form_row("编号格式", self._numbering_format_combo, parent=self._card))
 
         self._auto_insert_toggle = ToggleSwitch(self, checked=True)
         self._auto_insert_toggle.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("自动补题注", self._auto_insert_toggle, parent=self._card))
+        rows.append(template_form_row("自动补题注", self._auto_insert_toggle, parent=self._card))
 
         self._format_inserted_toggle = ToggleSwitch(self, checked=False)
         self._format_inserted_toggle.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("域代码编号", self._format_inserted_toggle, parent=self._card))
+        rows.append(template_form_row("域代码编号", self._format_inserted_toggle, parent=self._card))
 
         self._font_cn_combo = FontCombo(lang="cn", parent=self)
         self._font_cn_combo.font_changed.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("中文字体", self._font_cn_combo, parent=self._card))
+        rows.append(template_form_row("中文字体", self._font_cn_combo, parent=self._card))
 
         self._font_en_combo = FontCombo(lang="en", parent=self)
         self._font_en_combo.font_changed.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("英文字体", self._font_en_combo, parent=self._card))
+        rows.append(template_form_row("英文字体", self._font_en_combo, parent=self._card))
 
         self._size_combo = SizeCombo(self)
         self._size_combo.size_changed.connect(self._on_form_edited)
         self._size_combo.currentTextChanged.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("字号", self._size_combo, parent=self._card))
+        rows.append(template_form_row("字号", self._size_combo, parent=self._card))
 
         self._alignment_combo = StyledComboBox(self)
         for value, label in ALIGNMENT_OPTIONS:
             self._alignment_combo.addItem(label, value)
         self._alignment_combo.currentIndexChanged.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("题注对齐", self._alignment_combo, parent=self._card))
+        rows.append(template_form_row("题注对齐", self._alignment_combo, parent=self._card))
 
         self._space_before_input = SpacingInput(unit="pt", min_val=0.0, max_val=40.0, step=1.0, decimals=1, units=SPACING_UNIT_OPTIONS, show_unit=True, unit_inline=True, parent=self)
         self._space_before_input.value_changed.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("段前", self._space_before_input, suffix_widget=QLabel("", self), parent=self._card))
+        rows.append(template_form_row("段前", self._space_before_input, suffix_widget=QLabel("", self), parent=self._card))
 
         self._space_after_input = SpacingInput(unit="pt", min_val=0.0, max_val=40.0, step=1.0, decimals=1, units=SPACING_UNIT_OPTIONS, show_unit=True, unit_inline=True, parent=self)
         self._space_after_input.value_changed.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("段后", self._space_after_input, suffix_widget=QLabel("", self), parent=self._card))
+        rows.append(template_form_row("段后", self._space_after_input, suffix_widget=QLabel("", self), parent=self._card))
+        self._card.add_widget(TemplateFormStack(rows, parent=self._card))
 
     def _build_hint(self) -> None:
         self._footer_note = QLabel("当前编辑的是共享 caption 样式；图/表独立题注样式后续再细化。")

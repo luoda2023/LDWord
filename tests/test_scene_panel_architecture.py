@@ -25,6 +25,18 @@ def test_scene_panel_page_elements_detail_defers_page_number_editing_to_template
     assert "self._page_elem.set_scene(self._current_scene, template)" in source
 
 
+def test_scene_panel_uses_shared_card_header_and_flow_scope_layout():
+    source = (ROOT / "src/ui/panels/scene_panel.py").read_text(encoding="utf-8")
+
+    assert "_make_card_header" not in source
+    assert "_apply_cached_header_theme" not in source
+    assert "QGridLayout" not in source
+    assert "FlowLayout" in source
+    assert '.set_header("当前场景", icon_name="target")' in source
+    assert '.set_header("处理范围", icon_name="map-pin")' in source
+    assert '.set_header("功能开关", icon_name="toggle-right")' in source
+
+
 def test_scene_panel_page_elements_detail_shows_template_owned_page_number_summary():
     app = _app()
     bridge = PanelBridge()

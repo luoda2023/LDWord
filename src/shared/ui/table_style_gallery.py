@@ -371,6 +371,17 @@ class ColorTableGallery(QWidget):
                 return key
         return "header_grid"
 
+    def set_label_width(self, width: int | None) -> None:
+        self._label_width_override = width
+        self._apply_theme()
+
+    @property
+    def label_width(self) -> int | None:
+        return self._label_width_override
+
+    def preferred_label_width(self) -> int:
+        return self._label.fontMetrics().horizontalAdvance(self._label.text())
+
     def _emit_selection(self) -> None:
         palette_key = self.selected_palette()
         for button in self._variant_buttons.values():

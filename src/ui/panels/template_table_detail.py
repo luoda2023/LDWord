@@ -27,7 +27,6 @@ from src.qt_api import (
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
-from src.shared.ui.form_row import FormRow
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
@@ -35,6 +34,7 @@ from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
 from src.shared.ui.table_style_gallery import ColorTableGallery
 from src.shared.ui.template_form_layout import (
     TemplateFormGrid,
+    TemplateFormStack,
     TemplateSplitColumns,
     template_form_row,
 )
@@ -214,29 +214,43 @@ class TableCaptionDetail(QWidget):
             card.add_widget(desc)
 
     def _build_border_layout_form(self) -> None:
+        rows = []
+
         self._border_combo = StyledComboBox(self)
         for value, label in TABLE_STYLE_OPTIONS_UI:
             self._border_combo.addItem(label, value)
         self._border_combo.currentIndexChanged.connect(self._on_form_edited)
-        self._border_row = self._form_row("边框样式", self._border_combo, parent=self._border_layout_card)
+        self._border_row = self._form_row(
+            "边框样式",
+            self._border_combo,
+            parent=self._border_layout_card,
+        )
 
         self._layout_combo = StyledComboBox(self)
         for value, label in LAYOUT_OPTIONS:
             self._layout_combo.addItem(label, value)
         self._layout_combo.currentIndexChanged.connect(self._on_form_edited)
-        layout_row = self._form_row("布局", self._layout_combo, parent=self._border_layout_card)
-        self._border_layout_card.add_widget(self._pair_row(self._border_row, layout_row))
+        layout_row = self._form_row(
+            "布局",
+            self._layout_combo,
+            parent=self._border_layout_card,
+        )
+        rows.append(self._pair_row(self._border_row, layout_row))
 
         self._smart_levels_combo = StyledComboBox(self)
         for level in TABLE_SMART_LEVEL_OPTIONS:
             self._smart_levels_combo.addItem(f"{level} 级", level)
         self._smart_levels_combo.currentIndexChanged.connect(self._on_form_edited)
-        self._smart_levels_row = self._form_row("智能层级", self._smart_levels_combo, parent=self._border_layout_card)
-        self._border_layout_card.add_widget(self._smart_levels_row)
+        self._smart_levels_row = self._form_row(
+            "智能层级",
+            self._smart_levels_combo,
+            parent=self._border_layout_card,
+        )
+        rows.append(self._smart_levels_row)
 
-        self._color_gallery = ColorTableGallery(self._border_layout_card, label_width=72)
+        self._color_gallery = ColorTableGallery(self._border_layout_card)
         self._color_gallery.selection_changed.connect(self._on_color_table_selected)
-        self._border_layout_card.add_widget(self._color_gallery)
+        rows.append(self._color_gallery)
 
         self._border_width_input = SpacingInput(unit="pt", min_val=0.1, max_val=6.0, step=0.1, decimals=1, units=("pt",), show_unit=False, parent=self)
         self._border_width_input.value_changed.connect(self._on_form_edited)
@@ -248,7 +262,7 @@ class TableCaptionDetail(QWidget):
             suffix_widget=border_width_suffix,
             parent=self._border_layout_card,
         )
-        self._border_layout_card.add_widget(self._border_width_row)
+        rows.append(self._border_width_row)
 
         self._header_width_input = SpacingInput(unit="pt", min_val=0.1, max_val=6.0, step=0.1, decimals=1, units=("pt",), show_unit=False, parent=self)
         self._header_width_input.value_changed.connect(self._on_form_edited)
@@ -272,14 +286,19 @@ class TableCaptionDetail(QWidget):
             parent=self._border_layout_card,
         )
         self._three_line_width_pair = self._pair_row(self._header_width_row, self._bottom_width_row)
-        self._border_layout_card.add_widget(self._three_line_width_pair)
+        rows.append(self._three_line_width_pair)
 
         self._line_spacing_combo = StyledComboBox(self)
         for value, label in LINE_SPACING_OPTIONS:
             self._line_spacing_combo.addItem(label, value)
         self._line_spacing_combo.currentIndexChanged.connect(self._on_form_edited)
-        self._line_spacing_row = self._form_row("表格行距", self._line_spacing_combo, parent=self._border_layout_card)
-        self._border_layout_card.add_widget(self._line_spacing_row)
+        self._line_spacing_row = self._form_row(
+            "表格行距",
+            self._line_spacing_combo,
+            parent=self._border_layout_card,
+        )
+        rows.append(self._line_spacing_row)
+        self._border_layout_card.add_widget(TemplateFormStack(rows, parent=self._border_layout_card))
 
     def _build_typography_form(self) -> None:
         self._font_cn_combo = FontCombo(lang="cn", parent=self)
@@ -330,12 +349,19 @@ class TableCaptionDetail(QWidget):
         widget: QWidget,
         *,
         suffix_widget: QWidget | None = None,
+        label_width: int | None = None,
         parent,
-    ) -> FormRow:
-        return template_form_row(label, widget, suffix_widget=suffix_widget, parent=parent)
+    ) -> QWidget:
+        return template_form_row(
+            label,
+            widget,
+            suffix_widget=suffix_widget,
+            label_width=label_width,
+            parent=parent,
+        )
 
     def _pair_row(self, *rows: QWidget) -> TemplateFormGrid:
-        return TemplateFormGrid([rows], parent=self, column_gap=12, show_row_separators=False)
+        return TemplateFormGrid([rows], parent=self, column_gap=12)
 
     def _sync_layout_dependent_state(self) -> None:
         is_smart = str(self._layout_combo.currentData() or "smart") == "smart"

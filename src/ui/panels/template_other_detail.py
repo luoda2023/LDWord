@@ -5,7 +5,7 @@ from __future__ import annotations
 from src.config.template import TemplateConfig
 from src.qt_api import QHBoxLayout, QLabel, QVBoxLayout, QWidget, QSizePolicy, Signal
 from src.shared.ui.card import Card
-from src.shared.ui.template_form_layout import template_form_row
+from src.shared.ui.template_form_layout import TemplateFormStack, template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 
@@ -56,22 +56,24 @@ class OtherDetail(QWidget):
         self._card.add_widget(self._desc)
 
     def _build_form(self) -> None:
+        rows = []
 
         self._final_docx_toggle = ToggleSwitch(self, checked=True)
         self._final_docx_toggle.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("最终稿 DOCX", self._final_docx_toggle, parent=self._card))
+        rows.append(template_form_row("最终稿 DOCX", self._final_docx_toggle, parent=self._card))
 
         self._compare_docx_toggle = ToggleSwitch(self, checked=True)
         self._compare_docx_toggle.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("对比稿 DOCX", self._compare_docx_toggle, parent=self._card))
+        rows.append(template_form_row("对比稿 DOCX", self._compare_docx_toggle, parent=self._card))
 
         self._report_json_toggle = ToggleSwitch(self, checked=True)
         self._report_json_toggle.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("JSON 报告", self._report_json_toggle, parent=self._card))
+        rows.append(template_form_row("JSON 报告", self._report_json_toggle, parent=self._card))
 
         self._report_markdown_toggle = ToggleSwitch(self, checked=True)
         self._report_markdown_toggle.toggled_signal.connect(self._on_form_edited)
-        self._card.add_widget(template_form_row("Markdown 报告", self._report_markdown_toggle, parent=self._card))
+        rows.append(template_form_row("Markdown 报告", self._report_markdown_toggle, parent=self._card))
+        self._card.add_widget(TemplateFormStack(rows, parent=self._card))
 
     def _build_hint(self) -> None:
         self._footer_note = QLabel("颜色、旋转角度与更多输出项会在后续继续补充。")

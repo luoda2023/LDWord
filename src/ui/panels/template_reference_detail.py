@@ -47,7 +47,6 @@ from src.shared.ui.button_style import apply_button_variant, build_button_styles
 from src.shared.ui.card import Card
 from src.shared.ui.flow_section import FlowSection
 from src.shared.ui.font_combo import FontCombo
-from src.shared.ui.form_row import FormRow
 from src.shared.ui.paragraph_style_inputs import IndentInput, SpecialIndentInput
 from src.shared.ui.segmented_control import SegmentedControl
 from src.shared.ui.size_combo import SizeCombo
@@ -419,11 +418,11 @@ class ReferenceDetail(QWidget):
         *,
         suffix_widget: QWidget | None = None,
         parent,
-    ) -> FormRow:
+    ) -> QWidget:
         return template_form_row(label, widget, suffix_widget=suffix_widget, parent=parent)
 
     def _pair_row(self, *widgets: QWidget) -> TemplateFormGrid:
-        return TemplateFormGrid([widgets], parent=self, show_row_separators=False)
+        return TemplateFormGrid([widgets], parent=self)
 
     def _set_combo_by_data(self, combo: StyledComboBox, target) -> None:
         for index in range(combo.count()):

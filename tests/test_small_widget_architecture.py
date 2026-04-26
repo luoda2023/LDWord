@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.shared.ui.card import Card
+from src.shared.ui.design_system_card import DesignSystemCard
 from src.shared.ui.collapsible_section import CollapsibleSection
 from src.shared.ui.icon_button import IconButton
 from src.shared.ui.module_step_list import ModuleStepItem, ModuleStepList
@@ -92,9 +93,10 @@ def test_module_step_widgets_bind_theme_and_use_tokenized_metrics():
 
 
 def test_card_and_collapsible_section_layout_metrics_are_tokenized():
-    card_source = inspect.getsource(Card)
+    card_source = inspect.getsource(DesignSystemCard)
     section_source = inspect.getsource(CollapsibleSection)
 
+    assert issubclass(Card, DesignSystemCard)
     assert '20, 16, 20, 20' not in card_source
     assert 'setFixedHeight(32)' not in section_source
     assert 'card_padding_x' in card_source or 'card_padding_y' in card_source

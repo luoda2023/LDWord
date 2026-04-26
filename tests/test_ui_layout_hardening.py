@@ -234,6 +234,16 @@ def test_heading_panel_detail_rows_keep_text_to_control_gap_compact():
         app.processEvents()
 
 
+def test_heading_panel_uses_shared_template_form_row_baseline():
+    source = (ROOT / "src/ui/panels/heading_numbering_panel.py").read_text(encoding="utf-8")
+
+    assert "from src.shared.ui.form_row import FormRow" not in source
+    assert "FormRow(" not in source
+    assert "template_form_row(" in source
+    assert "template_form_pair_row(" in source
+    assert "_build_pair_row(" not in source
+
+
 def test_heading_panel_combo_and_input_controls_share_same_height():
     app = _app()
     panel = HeadingNumberingPanel(PanelBridge())

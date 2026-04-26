@@ -6,7 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.qt_api import QApplication, QScrollArea, QVBoxLayout, QWidget
+from src.qt_api import QApplication, QScrollArea, QVBoxLayout, QWidget, Qt
+from src.shared.ui.form_row import FormRow
+from src.shared.ui.template_form_layout import TemplateFormStack
 from src.ui.bridge import PanelBridge
 from src.ui.panels.workbench.detail_controller import WorkbenchDetailController
 from src.ui.panels.workbench.feature_detail_panes import (
@@ -121,3 +123,41 @@ def test_workbench_panel_uses_semantic_capability_detail_panes():
         assert panel._quick_fill_detail is panel._content_fill_detail
     finally:
         panel.close()
+
+
+def test_workbench_feature_detail_panes_use_shared_template_form_baseline():
+    source = (ROOT / "src/ui/panels/workbench/feature_detail_panes.py").read_text(encoding="utf-8")
+
+    assert "from src.shared.ui.form_row import FormRow" not in source
+    assert "FormRow(" not in source
+    assert "TemplateFormStack" in source
+    assert "template_form_row(" in source
+    assert '= Card("' not in source
+
+
+def test_workbench_feature_detail_rows_share_card_label_baseline():
+    app = _app()
+    detail = TableChartDetailPane()
+
+    try:
+        detail.resize(1000, 700)
+        detail.show()
+        app.processEvents()
+
+        assert detail.findChildren(TemplateFormStack)
+
+        row_map = {row.label_text: row for row in detail.findChildren(FormRow)}
+        for labels in (
+            ("题注样式", "题注间距"),
+            ("图表居中", "续表延续题注"),
+        ):
+            label_widths = {row_map[label].label_width for label in labels}
+            assert len(label_widths) == 1
+            for label in labels:
+                row = row_map[label]
+                assert row._label.alignment() & Qt.AlignLeft
+                assert not (row._label.alignment() & Qt.AlignRight)
+                assert row.layout().spacing() == 4
+    finally:
+        detail.close()
+        app.processEvents()

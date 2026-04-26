@@ -123,6 +123,15 @@ def test_quick_execution_detail_uses_shared_legacy_feature_group_map():
     assert "FEATURE_ID_ALIASES = {" not in module_source
 
 
+def test_quick_execution_feature_toggles_use_wrapping_flow_layout():
+    module_source = (ROOT / "src/ui/panels/workbench/quick_execution_detail.py").read_text(encoding="utf-8")
+
+    assert "self._features_flow = FlowLayout(" in module_source
+    assert "self._features_flow.addWidget(row)" in module_source
+    assert "QGridLayout" not in module_source
+    assert "_features_vdiv" not in module_source
+
+
 def test_shared_dashed_separator_is_exported_for_reuse():
     separator_path = ROOT / "src/shared/ui/dashed_separator.py"
     assert separator_path.exists()
@@ -140,5 +149,7 @@ def test_quick_execution_detail_uses_shared_dashed_separator_instead_of_private_
     assert "from src.shared.ui import DashedSeparator" in module_source
     assert "class _DashedLine" not in module_source
     assert "class _DashedVLine" not in module_source
-    assert "DashedSeparator(orientation=\"vertical\"" in module_source
+    assert "DashedSeparator(orientation=\"vertical\"" not in module_source
     assert "DashedSeparator(orientation=\"horizontal\"" in module_source
+    assert "_sep_structure_zones" in module_source
+    assert "dashed_color = t.divider" in module_source

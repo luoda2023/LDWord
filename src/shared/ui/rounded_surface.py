@@ -40,9 +40,13 @@ class RoundedSurfaceFrame(QFrame):
         border_width: float = 0.0,
         border_style=Qt.SolidLine,
     ) -> None:
-        self._background = QColor(background)
+        self._background = QColor(Qt.transparent) if str(background).lower() == "transparent" else QColor(background)
         self._radius = int(radius)
-        self._border_color = QColor(border_color) if border_color else QColor(Qt.transparent)
+        self._border_color = (
+            QColor(Qt.transparent)
+            if not border_color or str(border_color).lower() == "transparent"
+            else QColor(border_color)
+        )
         self._border_width = float(max(0.0, border_width))
         self._border_style = border_style
         self.update()

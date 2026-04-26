@@ -8,7 +8,6 @@ from src.config.template import TemplateConfig
 from src.qt_api import QLineEdit, QWidget
 from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
-from src.shared.ui.form_row import FormRow
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.template_form_layout import (
@@ -151,6 +150,7 @@ class HeaderFooterDetailSection:
                 self._page_number_row,
                 self._header_border_row,
                 self._hide_cover_row,
+                column_stretches=(0, 0, 0),
             )
         )
 
@@ -170,11 +170,20 @@ class HeaderFooterDetailSection:
         *,
         suffix_widget: QWidget | None = None,
         parent,
-    ) -> FormRow:
+    ) -> QWidget:
         return template_form_row(label, widget, suffix_widget=suffix_widget, parent=parent)
 
-    def _pair_row(self, *widgets: QWidget) -> TemplateFormGrid:
-        return TemplateFormGrid([widgets], parent=self._owner, column_gap=12, show_row_separators=False)
+    def _pair_row(
+        self,
+        *widgets: QWidget,
+        column_stretches: tuple[int, ...] | None = None,
+    ) -> TemplateFormGrid:
+        return TemplateFormGrid(
+            [widgets],
+            parent=self._owner,
+            column_gap=12,
+            column_stretches=column_stretches,
+        )
 
     def _set_combo_by_data(self, combo: StyledComboBox, target) -> None:
         for index in range(combo.count()):

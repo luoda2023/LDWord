@@ -3,18 +3,22 @@ from __future__ import annotations
 from src.qt_api import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, Signal
 
 from src.shared.ui.button_style import apply_button_variant
-from src.shared.ui.card import Card
+from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.shared.ui.search_input import SearchInput
 from src.shared.ui.theme import bind_theme, get_theme
 
 
-class _ConfigItemCard(Card):
+class _ConfigItemCard(RoundedSurfaceFrame):
     def __init__(self, config_id: str, name: str, description: str, updated_at: str, parent=None):
         super().__init__(parent=parent)
         self.config_id = config_id
         self.name = str(name or "")
         self.description = str(description or "")
         self.updated_at = str(updated_at or "")
+
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(12, 10, 12, 10)
+        self._layout.setSpacing(6)
 
         self._name_label = QLabel(self.name, self)
         self._desc_label = QLabel(self.description, self)
@@ -34,11 +38,11 @@ class _ConfigItemCard(Card):
         action_row.addWidget(self._delete_button)
         action_row.addStretch(1)
 
-        self.add_widget(self._name_label)
+        self._layout.addWidget(self._name_label)
         if self.description:
-            self.add_widget(self._desc_label)
-        self.add_widget(self._time_label)
-        self.add_layout(action_row)
+            self._layout.addWidget(self._desc_label)
+        self._layout.addWidget(self._time_label)
+        self._layout.addLayout(action_row)
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
@@ -51,10 +55,15 @@ class _ConfigItemCard(Card):
         return needle in haystack
 
     def _apply_theme(self) -> None:
-        super()._apply_theme()
         if not hasattr(self, "_name_label"):
             return
         t = get_theme()
+        self.configure_surface(
+            background=t.bg_hover,
+            radius=t.radius_sm,
+            border_color=t.border_light,
+            border_width=1.0,
+        )
         self._name_label.setStyleSheet(
             f"font-size: {t.font_size_md}px; font-weight: {t.font_weight_bold}; color: {t.text_primary};"
         )

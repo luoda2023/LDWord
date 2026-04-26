@@ -22,7 +22,6 @@ from src.shared.engine.toc_style_ops import resolve_toc_style_config
 from src.shared.ui.card import Card
 from src.shared.ui.flow_section import FlowSection
 from src.shared.ui.font_combo import FontCombo
-from src.shared.ui.form_row import FormRow
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
@@ -195,8 +194,6 @@ class TocDetailSection:
             parent=self._owner,
         )
         space_before.value_changed.connect(lambda *_args, role=role_key: self._on_toc_style_edited(role))
-        before_suffix = QLabel("pt", self._owner)
-        before_suffix.setObjectName("tpl_style_unit")
 
         space_after = SpacingInput(
             unit="pt",
@@ -210,8 +207,6 @@ class TocDetailSection:
             parent=self._owner,
         )
         space_after.value_changed.connect(lambda *_args, role=role_key: self._on_toc_style_edited(role))
-        after_suffix = QLabel("pt", self._owner)
-        after_suffix.setObjectName("tpl_style_unit")
 
         left_indent = SpacingInput(
             unit="chars",
@@ -230,33 +225,30 @@ class TocDetailSection:
         bold_widget = self._build_toggle_chip("加粗", bold_toggle)
 
         section.add_widget(
-            self._pair_row(
-                self._form_row("中文字体", font_cn, parent=section),
-                self._form_row("英文字体", font_en, parent=section),
-            )
-        )
-        section.add_widget(
-            self._pair_row(
-                self._form_row("字号", size_combo, parent=section),
-                self._form_row("字形", bold_widget, parent=section),
-            )
-        )
-        section.add_widget(
-            self._pair_row(
-                self._form_row("对齐", alignment_combo, parent=section),
-                self._form_row("左缩进", left_indent, suffix_widget=indent_suffix, parent=section),
-            )
-        )
-        section.add_widget(
-            self._pair_row(
-                self._form_row("行距类型", line_type_combo, parent=section),
-                self._form_row("行距值", line_value, suffix_widget=line_suffix, parent=section),
-            )
-        )
-        section.add_widget(
-            self._pair_row(
-                self._form_row("段前", space_before, suffix_widget=before_suffix, parent=section),
-                self._form_row("段后", space_after, suffix_widget=after_suffix, parent=section),
+            TemplateFormGrid(
+                [
+                    (
+                        self._form_row("中文字体", font_cn, parent=section),
+                        self._form_row("英文字体", font_en, parent=section),
+                    ),
+                    (
+                        self._form_row("字号", size_combo, parent=section),
+                        self._form_row("字形", bold_widget, parent=section),
+                    ),
+                    (
+                        self._form_row("对齐", alignment_combo, parent=section),
+                        self._form_row("左缩进", left_indent, suffix_widget=indent_suffix, parent=section),
+                    ),
+                    (
+                        self._form_row("行距类型", line_type_combo, parent=section),
+                        self._form_row("行距值", line_value, suffix_widget=line_suffix, parent=section),
+                    ),
+                    (
+                        self._form_row("段前", space_before, parent=section),
+                        self._form_row("段后", space_after, parent=section),
+                    ),
+                ],
+                parent=self._owner,
             )
         )
 
@@ -296,11 +288,11 @@ class TocDetailSection:
         *,
         suffix_widget: QWidget | None = None,
         parent,
-    ) -> FormRow:
+    ) -> QWidget:
         return template_form_row(label, widget, suffix_widget=suffix_widget, parent=parent)
 
     def _pair_row(self, *widgets: QWidget) -> TemplateFormGrid:
-        return TemplateFormGrid([widgets], parent=self._owner, show_row_separators=False)
+        return TemplateFormGrid([widgets], parent=self._owner)
 
     def effective_style(self, role_key: str) -> StyleConfig:
         template = self._owner._current_template

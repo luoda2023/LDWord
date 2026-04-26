@@ -17,15 +17,13 @@ from src.qt_api import (
     Qt,
     Signal,
 )
-from src.shared.ui import DashedSeparator
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
-from src.shared.ui.form_row import FormRow
 from src.shared.ui.inline_alert import InlineAlert
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
-from src.shared.ui.template_form_layout import template_form_row
+from src.shared.ui.template_form_layout import TemplateSplitColumns, template_form_row
 from src.shared.ui.themed_radio_button import ThemedRadioButton
 from src.shared.ui.theme import bind_theme, get_theme
 
@@ -279,14 +277,15 @@ class PageSetupDetail(QWidget):
             self._section_break_combo.addItem(label, value)
         self._section_break_combo.currentIndexChanged.connect(self._on_form_edited)
         self._paper_card.add_widget(
-            self._build_split_form_columns(
+            TemplateSplitColumns(
                 [
-                    self._build_form_row("纸张", self._paper_combo, parent=self._paper_card, label_width=72),
+                    self._build_form_row("纸张", self._paper_combo, parent=self._paper_card),
                 ],
                 [
-                    self._build_form_row("分节方式", self._section_break_combo, parent=self._paper_card, label_width=72),
+                    self._build_form_row("分节方式", self._section_break_combo, parent=self._paper_card),
                 ],
                 parent=self._paper_card,
+                gutter_padding=14,
             )
         )
         self._paper_card.add_widget(
@@ -294,13 +293,12 @@ class PageSetupDetail(QWidget):
                 "方向",
                 self._build_direction_selector(parent=self._paper_card),
                 parent=self._paper_card,
-                label_width=72,
             )
         )
 
     def _build_margin_controls(self) -> None:
         self._margin_card.add_widget(
-            self._build_split_form_columns(
+            TemplateSplitColumns(
                 [
                     self._build_spacing_form_row("上边距", "top_cm", parent=self._margin_card),
                     self._build_spacing_form_row("左边距", "left_cm", parent=self._margin_card),
@@ -310,6 +308,7 @@ class PageSetupDetail(QWidget):
                     self._build_spacing_form_row("右边距", "right_cm", parent=self._margin_card),
                 ],
                 parent=self._margin_card,
+                gutter_padding=14,
             )
         )
         self._margin_card.add_widget(
@@ -318,7 +317,7 @@ class PageSetupDetail(QWidget):
 
     def _build_header_footer_controls(self) -> None:
         self._header_footer_card.add_widget(
-            self._build_split_form_columns(
+            TemplateSplitColumns(
                 [
                     self._build_spacing_form_row("页眉距离", "header_distance_cm", parent=self._header_footer_card),
                 ],
@@ -326,6 +325,7 @@ class PageSetupDetail(QWidget):
                     self._build_spacing_form_row("页脚距离", "footer_distance_cm", parent=self._header_footer_card),
                 ],
                 parent=self._header_footer_card,
+                gutter_padding=14,
             )
         )
 
@@ -383,71 +383,9 @@ class PageSetupDetail(QWidget):
         widget: QWidget,
         *,
         parent,
-        label_width: int = 72,
-    ) -> FormRow:
+        label_width: int | None = None,
+    ) -> QWidget:
         return template_form_row(label, widget, label_width=label_width, parent=parent)
-
-    def _build_form_pair_row(
-        self,
-        left_spec: tuple[str, QWidget],
-        right_spec: tuple[str, QWidget],
-        *,
-        label_width: int = 72,
-    ) -> QWidget:
-        row = QWidget(self)
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        layout.addWidget(
-            self._build_form_row(left_spec[0], left_spec[1], parent=row, label_width=label_width),
-            1,
-        )
-        layout.addWidget(
-            self._build_form_row(right_spec[0], right_spec[1], parent=row, label_width=label_width),
-            1,
-        )
-        return row
-
-    def _build_split_form_columns(
-        self,
-        left_widgets: list[QWidget],
-        right_widgets: list[QWidget],
-        *,
-        parent,
-        gutter_padding: int = 14,
-    ) -> QWidget:
-        container = QWidget(parent)
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        left_column = QWidget(container)
-        left_layout = QVBoxLayout(left_column)
-        left_layout.setContentsMargins(0, 0, gutter_padding, 0)
-        left_layout.setSpacing(0)
-        for widget in left_widgets:
-            left_layout.addWidget(widget)
-
-        divider = DashedSeparator(orientation="vertical", parent=container)
-
-        right_column = QWidget(container)
-        right_layout = QVBoxLayout(right_column)
-        right_layout.setContentsMargins(gutter_padding, 0, 0, 0)
-        right_layout.setSpacing(0)
-        right_label_width = max(
-            (widget.preferred_label_width() for widget in right_widgets if isinstance(widget, FormRow)),
-            default=0,
-        )
-        for widget in right_widgets:
-            if isinstance(widget, FormRow):
-                widget.set_label_alignment(Qt.AlignLeft | Qt.AlignVCenter)
-                widget.set_label_width(right_label_width)
-            right_layout.addWidget(widget)
-
-        layout.addWidget(left_column, 1)
-        layout.addWidget(divider, 0)
-        layout.addWidget(right_column, 1)
-        return container
 
     def _build_direction_selector(self, *, parent) -> QWidget:
         row = QWidget(parent)
@@ -459,25 +397,12 @@ class PageSetupDetail(QWidget):
         layout.addStretch(1)
         return row
 
-    def _build_spacing_form_row(self, label: str, field_name: str, *, parent) -> FormRow:
+    def _build_spacing_form_row(self, label: str, field_name: str, *, parent) -> QWidget:
         spacing = self._build_spacing_input(field_name)
         suffix = QLabel("cm", parent)
         suffix.setObjectName("tpl_page_unit")
         self._unit_labels.append(suffix)
-        return template_form_row(label, spacing, suffix_widget=suffix, label_width=72, parent=parent)
-
-    def _build_spacing_pair_row(
-        self,
-        left_spec: tuple[str, str],
-        right_spec: tuple[str, str],
-    ) -> QWidget:
-        row = QWidget(self)
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        layout.addWidget(self._build_spacing_form_row(*left_spec, parent=row), 1)
-        layout.addWidget(self._build_spacing_form_row(*right_spec, parent=row), 1)
-        return row
+        return template_form_row(label, spacing, suffix_widget=suffix, parent=parent)
 
     # ------------------------------------------------------------------
     # Public API

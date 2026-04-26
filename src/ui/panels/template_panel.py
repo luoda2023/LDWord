@@ -50,7 +50,6 @@ from src.qt_api import (
     QPen,
     QRectF,
     QPushButton,
-    QScrollArea,
     QSize,
     QSizePolicy,
     QVBoxLayout,
@@ -59,7 +58,7 @@ from src.qt_api import (
     Signal,
 )
 
-from src.shared.ui import DynamicNavigationRail, NavigationCard, Toast
+from src.shared.ui import MasterDetailShell, NavigationCard, Toast
 from src.shared.ui.button_style import apply_button_variant
 from src.shared.ui.card import Card
 from src.shared.ui.style_preview_utils import (
@@ -1610,13 +1609,13 @@ class ImportExportDetail(QWidget):
         btn_lay.setContentsMargins(0, 8, 0, 0)
         btn_lay.setSpacing(8)
 
-        self._import_btn = QPushButton("📥  导入模板")
+        self._import_btn = QPushButton("导入模板")
         self._import_btn.setCursor(Qt.PointingHandCursor)
         apply_button_variant(self._import_btn, "primary")
         self._import_btn.clicked.connect(self.import_requested.emit)
         btn_lay.addWidget(self._import_btn, 1)
 
-        self._export_btn = QPushButton("📤  另存为")
+        self._export_btn = QPushButton("另存为")
         self._export_btn.setCursor(Qt.PointingHandCursor)
         apply_button_variant(self._export_btn, "secondary")
         self._export_btn.clicked.connect(self.save_as_requested.emit)
@@ -1630,7 +1629,7 @@ class ImportExportDetail(QWidget):
         r_lay.setContentsMargins(0, 4, 0, 0)
         r_lay.setSpacing(8)
 
-        self._reset_btn = QPushButton("♻️  恢复为内置默认模板")
+        self._reset_btn = QPushButton("恢复为内置默认模板")
         self._reset_btn.setCursor(Qt.PointingHandCursor)
         apply_button_variant(self._reset_btn, "secondary")
         self._reset_btn.clicked.connect(self.reset_requested.emit)
@@ -1663,6 +1662,9 @@ class ImportExportDetail(QWidget):
         try:
             from src.ui.icons.catalog import get_icon
             self._hdr_icon.setPixmap(get_icon("folder-open", 18, t.primary).pixmap(18, 18))
+            self._import_btn.setIcon(get_icon("folder-open", 16, t.text_on_primary))
+            self._export_btn.setIcon(get_icon("download", 16, t.primary))
+            self._reset_btn.setIcon(get_icon("refresh-ccw", 16, t.primary))
         except Exception:
             pass
 
@@ -1772,32 +1774,18 @@ class TemplatePanel(BasePanel):
                     self._current_template_source = "builtin"
             self._remember_persisted_template_state(self._current_template)
 
-        # ── Shell: HBox → NavRail + DetailScroll ──
-        self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(0)
-
-        # Left: navigation rail
-        self._nav_rail = DynamicNavigationRail(parent=self)
-        self._nav_rail.setObjectName("tpl_navigation")
-        self._nav_rail.setFixedWidth(260)
-        self._layout.addWidget(self._nav_rail)
-
-        # Right: scrollable detail
-        self._detail_scroll = QScrollArea(self)
-        self._detail_scroll.setObjectName("tpl_detail")
-        self._detail_scroll.setWidgetResizable(True)
-        self._detail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._detail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self._detail_scroll.setFrameShape(QFrame.NoFrame)
-
-        self._detail_container = QWidget(self._detail_scroll)
-        self._detail_container.setObjectName("tpl_detail_content")
-        self._detail_layout = QVBoxLayout(self._detail_container)
-        self._detail_layout.setContentsMargins(16, 10, 16, 16)
-        self._detail_layout.setSpacing(0)
-        self._detail_scroll.setWidget(self._detail_container)
-        self._layout.addWidget(self._detail_scroll, 1)
+        self._shell = MasterDetailShell(
+            self,
+            panel_name="TemplatePanel",
+            nav_object_name="tpl_navigation",
+            detail_object_name="tpl_detail",
+            detail_content_object_name="tpl_detail_content",
+        )
+        self._layout = self._shell.layout
+        self._nav_rail = self._shell.nav_rail
+        self._detail_scroll = self._shell.detail_scroll
+        self._detail_container = self._shell.detail_container
+        self._detail_layout = self._shell.detail_layout
 
         # ── Build detail panes ──
         self._overview_detail = TemplateOverviewDetail()
@@ -2255,29 +2243,7 @@ class TemplatePanel(BasePanel):
 
     def _apply_theme(self) -> None:
         t = get_theme()
-        radius = t.shell_radius
-
-        self.setStyleSheet(
-            f"#TemplatePanel {{ background: {t.bg_window}; border-bottom-right-radius: {radius}px; }}"
-        )
-        self._nav_rail.setStyleSheet(
-            f"#tpl_navigation {{ background: {t.bg_nav_rail}; }}"
-        )
-        self._detail_scroll.setStyleSheet(
-            f"#tpl_detail {{ border: none; background: {t.bg_window}; "
-            f"border-bottom-right-radius: {radius}px; }}"
-        )
-        self._detail_container.setStyleSheet(
-            f"#tpl_detail_content {{ background: {t.bg_window}; "
-            f"border-bottom-right-radius: {radius}px; }}"
-        )
-        viewport = self._detail_scroll.viewport()
-        if viewport:
-            viewport.setObjectName("tpl_detail_viewport")
-            viewport.setStyleSheet(
-                f"#tpl_detail_viewport {{ background: {t.bg_window}; "
-                f"border-bottom-right-radius: {radius}px; }}"
-            )
+        self._shell.apply_theme(t)
 
         # Propagate to details
         self._overview_detail.apply_theme()

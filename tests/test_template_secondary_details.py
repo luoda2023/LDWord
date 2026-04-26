@@ -5,13 +5,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.qt_api import QApplication, Qt
+from src.qt_api import QApplication, Qt, QVBoxLayout, QWidget
 from src.config.template import TemplateConfig
+from src.shared.ui.dashed_separator import DashedSeparator
+from src.shared.ui.flow_layout import FlowLayout
 from src.shared.ui.form_row import FormRow
 from src.shared.ui.table_style_gallery import ColorTableGallery
-from src.shared.ui.template_form_layout import TemplateFormGrid, TemplateSplitColumns
+from src.shared.ui.template_form_layout import TemplateFormGrid, TemplateSplitColumns, template_form_row
+from src.shared.ui.toggle_switch import ToggleSwitch
 from src.ui.bridge import PanelBridge
+from src.ui.panels.template_caption_detail import CaptionDetail
 from src.ui.panels.template_elements_detail import ElementsDetail
+from src.ui.panels.template_elements_page_plan import PageSelectorEditor, SUPPRESS_HEADER_FOOTER_SELECTOR_OPTIONS
+from src.ui.panels.template_formula_detail import FormulaDetail
+from src.ui.panels.template_other_detail import OtherDetail
 from src.ui.panels.template_table_detail import TableCaptionDetail
 from src.ui.panels.template_panel import TemplatePanel
 
@@ -33,6 +40,7 @@ def test_table_and_elements_details_reuse_shared_controls():
     assert "_build_summary_card()" in table_source
     assert "_build_editor_column(self)" in table_source
     assert "TemplateFormGrid" in table_source
+    assert "TemplateFormStack" in table_source
     assert "TemplateSplitColumns" in table_source
     assert "template_form_row" in table_source
     assert "_pair_row(first_row_bold_row, repeat_header_row, self._table_alignment_row)" in table_source
@@ -49,6 +57,7 @@ def test_table_and_elements_details_reuse_shared_controls():
     assert "StyledSpinBox(" in page_plan_source
     assert "TemplateFormGrid" in header_footer_source
     assert "TemplateSplitColumns" in header_footer_source
+    assert "column_stretches=(0, 0, 0)" in header_footer_source
     assert "template_form_row" in header_footer_source
     assert "SummaryGrid(" in elements_source
     assert "_sync_dependent_state" in elements_source
@@ -94,6 +103,143 @@ def test_template_table_typography_uses_main_form_baseline():
         app.processEvents()
 
 
+def test_template_table_border_layout_uses_one_label_baseline():
+    app = _app()
+    detail = TableCaptionDetail()
+
+    try:
+        detail.set_template(TemplateConfig())
+        detail.resize(1280, 900)
+        detail.show()
+        app.processEvents()
+
+        row_map = {row.label_text: row for row in detail.findChildren(FormRow)}
+        labels = ("边框样式", "布局", "智能层级", "外线宽", "表头下线", "表格行距")
+        label_widths = {row_map[label].label_width for label in labels}
+
+        assert len(label_widths) == 1
+        label_width = label_widths.pop()
+        assert detail._color_gallery._label_width_override == label_width
+        assert detail._color_gallery._label.width() == label_width
+        assert row_map["外线宽"].widget.x() == row_map["边框样式"].widget.x()
+        assert row_map["表头下线"].widget.x() == row_map["布局"].widget.x()
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_template_form_grid_packs_short_fixed_controls_when_requested():
+    app = _app()
+    host = QWidget()
+    rows = [
+        template_form_row("页码", ToggleSwitch(host), parent=host),
+        template_form_row("页眉线", ToggleSwitch(host), parent=host),
+        template_form_row("起始前留空", ToggleSwitch(host), parent=host),
+    ]
+    grid = TemplateFormGrid(
+        [rows],
+        parent=host,
+        column_gap=12,
+        column_stretches=(0, 0, 0),
+    )
+    host_layout = QVBoxLayout(host)
+    host_layout.addWidget(grid)
+
+    try:
+        host.resize(900, 120)
+        host.show()
+        app.processEvents()
+
+        assert len({row.label_width for row in rows}) == 1
+        assert all(row.widget.x() <= row.label_width + 12 for row in rows)
+        assert rows[2].mapTo(host, rows[2].rect().topRight()).x() < 460
+    finally:
+        host.close()
+        app.processEvents()
+
+
+def test_template_form_grid_defaults_to_no_horizontal_separators():
+    _app()
+    host = QWidget()
+    grid = TemplateFormGrid(
+        [
+            [
+                template_form_row("中文字体", QWidget(host), parent=host),
+                template_form_row("字号", QWidget(host), parent=host),
+            ],
+            [
+                template_form_row("英文字体", QWidget(host), parent=host),
+                template_form_row("字形", QWidget(host), parent=host),
+            ],
+        ],
+        parent=host,
+    )
+    host_layout = QVBoxLayout(host)
+    host_layout.addWidget(grid)
+
+    try:
+        assert not grid.findChildren(DashedSeparator)
+    finally:
+        host.close()
+
+
+def test_template_form_grid_can_opt_into_horizontal_separators():
+    _app()
+    host = QWidget()
+    grid = TemplateFormGrid(
+        [
+            [template_form_row("对齐", QWidget(host), parent=host)],
+            [template_form_row("左缩进", QWidget(host), parent=host)],
+        ],
+        parent=host,
+        show_row_separators=True,
+    )
+    host_layout = QVBoxLayout(host)
+    host_layout.addWidget(grid)
+
+    try:
+        separators = grid.findChildren(DashedSeparator)
+        assert [separator.orientation() for separator in separators] == ["horizontal"]
+    finally:
+        host.close()
+
+
+def test_template_split_columns_use_spacing_without_divider_by_default():
+    _app()
+    host = QWidget()
+    split = TemplateSplitColumns(
+        [template_form_row("宸︿晶", QWidget(host), parent=host)],
+        [template_form_row("鍙充晶", QWidget(host), parent=host)],
+        parent=host,
+    )
+    host_layout = QVBoxLayout(host)
+    host_layout.addWidget(split)
+
+    try:
+        assert not split.findChildren(DashedSeparator)
+    finally:
+        host.close()
+
+
+def test_template_split_columns_can_opt_into_vertical_divider():
+    _app()
+    host = QWidget()
+    split = TemplateSplitColumns(
+        [template_form_row("宸︿晶", QWidget(host), parent=host)],
+        [template_form_row("鍙充晶", QWidget(host), parent=host)],
+        parent=host,
+        show_divider=True,
+    )
+    host_layout = QVBoxLayout(host)
+    host_layout.addWidget(split)
+
+    try:
+        separators = split.findChildren(DashedSeparator)
+        assert [separator.orientation() for separator in separators] == ["vertical"]
+    finally:
+        host.close()
+
+
 def test_template_elements_header_footer_uses_main_form_baseline():
     app = _app()
     detail = ElementsDetail()
@@ -107,9 +253,13 @@ def test_template_elements_header_footer_uses_main_form_baseline():
         assert detail.findChildren(TemplateSplitColumns)
         assert detail.findChildren(TemplateFormGrid)
 
-        row_map = {row.label_text: row for row in detail.findChildren(FormRow)}
-        for label in ("中文字体", "英文字体", "字号", "留空范围"):
-            row = row_map[label]
+        rows = (
+            detail._header_footer_detail._font_cn_row,
+            detail._header_footer_detail._font_en_row,
+            detail._header_footer_detail._size_row,
+            detail._header_footer_detail._suppress_selector_row,
+        )
+        for row in rows:
             visible_gap = row.widget.x() - row.preferred_label_width()
             assert row._label.alignment() & Qt.AlignLeft
             assert not (row._label.alignment() & Qt.AlignRight)
@@ -117,6 +267,76 @@ def test_template_elements_header_footer_uses_main_form_baseline():
             assert visible_gap <= 20
     finally:
         detail.close()
+        app.processEvents()
+
+
+def test_template_caption_formula_other_details_share_single_label_baseline():
+    app = _app()
+    details = (
+        (CaptionDetail(), ("图前缀", "表前缀", "编号模式", "段前", "段后")),
+        (FormulaDetail(), ("公式字体", "公式字号", "块对齐", "编号方式", "统一间距")),
+        (OtherDetail(), ("最终稿 DOCX", "对比稿 DOCX", "JSON 报告", "Markdown 报告")),
+    )
+
+    try:
+        for detail, labels in details:
+            detail.set_template(TemplateConfig())
+            detail.resize(1024, 800)
+            detail.show()
+            app.processEvents()
+
+            row_map = {row.label_text: row for row in detail.findChildren(FormRow)}
+            label_widths = {row_map[label].label_width for label in labels}
+
+            assert len(label_widths) == 1
+    finally:
+        for detail, _labels in details:
+            detail.close()
+        app.processEvents()
+
+
+def test_template_toc_style_editor_uses_section_level_baseline():
+    app = _app()
+    detail = ElementsDetail()
+
+    try:
+        detail.set_template(TemplateConfig())
+        detail.resize(1280, 900)
+        detail.show()
+        app.processEvents()
+
+        section = detail._toc_detail._toc_style_controls["toc"]["section"]
+        row_map = {row.label_text: row for row in section.findChildren(FormRow)}
+        labels = ("中文字体", "英文字体", "字号", "字形", "对齐", "左缩进", "行距类型", "行距值", "段前", "段后")
+
+        x_positions = {row_map[label].widget.x() for label in labels}
+        assert len(x_positions) == 1
+
+        label_widths = {row_map[label].label_width for label in labels}
+        assert len(label_widths) == 1
+        assert row_map["段前"]._suffix is None
+        assert row_map["段后"]._suffix is None
+        assert detail._toc_detail._toc_style_controls["toc"]["space_before"].unit_combo.isVisible()
+        assert detail._toc_detail._toc_style_controls["toc"]["space_after"].unit_combo.isVisible()
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_page_selector_editor_uses_flow_chips_instead_of_fixed_grid():
+    app = _app()
+    editor = PageSelectorEditor(options=SUPPRESS_HEADER_FOOTER_SELECTOR_OPTIONS)
+
+    try:
+        editor.resize(760, 180)
+        editor.show()
+        app.processEvents()
+
+        assert isinstance(editor._chips_layout, FlowLayout)
+        assert editor._chips_layout.count() == len(SUPPRESS_HEADER_FOOTER_SELECTOR_OPTIONS)
+        assert all(button.width() < 220 for button in editor._selector_buttons.values())
+    finally:
+        editor.close()
         app.processEvents()
 
 

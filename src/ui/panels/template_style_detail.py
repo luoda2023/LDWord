@@ -35,14 +35,12 @@ from src.qt_api import (
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
-from src.shared.ui.form_row import FormRow
 from src.shared.ui.paragraph_style_inputs import IndentInput, SpecialIndentInput
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
 from src.shared.ui.template_form_layout import (
-    TemplateFormGrid,
     TemplateSplitColumns,
     template_form_row,
 )
@@ -279,7 +277,7 @@ class StyleDetail(QWidget):
         parent,
         label_width: int | None = None,
         suffix_widget: QWidget | None = None,
-    ) -> FormRow:
+    ) -> QWidget:
         return template_form_row(
             label,
             widget,
@@ -316,7 +314,6 @@ class StyleDetail(QWidget):
                     self._build_form_row("字形", self._build_emphasis_widget(), parent=self._text_card),
                 ],
                 parent=self._text_card,
-                gutter_padding=22,
             )
         )
 
@@ -338,16 +335,14 @@ class StyleDetail(QWidget):
         self._right_indent.value_changed.connect(self._on_form_edited)
 
         self._alignment_indent_card.add_widget(
-            TemplateFormGrid(
+            TemplateSplitColumns(
                 [
-                    (
-                        self._build_form_row("对齐", self._alignment_combo, parent=self._alignment_indent_card),
-                        self._build_form_row("特殊缩进", self._special_indent, parent=self._alignment_indent_card),
-                    ),
-                    (
-                        self._build_form_row("左缩进", self._left_indent, parent=self._alignment_indent_card),
-                        self._build_form_row("右缩进", self._right_indent, parent=self._alignment_indent_card),
-                    ),
+                    self._build_form_row("对齐", self._alignment_combo, parent=self._alignment_indent_card),
+                    self._build_form_row("左缩进", self._left_indent, parent=self._alignment_indent_card),
+                ],
+                [
+                    self._build_form_row("特殊缩进", self._special_indent, parent=self._alignment_indent_card),
+                    self._build_form_row("右缩进", self._right_indent, parent=self._alignment_indent_card),
                 ],
                 parent=self._alignment_indent_card,
             )
@@ -409,34 +404,32 @@ class StyleDetail(QWidget):
         self._unit_labels.append(self._space_after_suffix)
 
         self._spacing_card.add_widget(
-            TemplateFormGrid(
+            TemplateSplitColumns(
                 [
-                    (
-                        self._build_form_row(
-                            "行距类型",
-                            self._line_type_combo,
-                            parent=self._spacing_card,
-                        ),
-                        self._build_form_row(
-                            "行距值",
-                            self._line_value,
-                            suffix_widget=self._line_value_suffix,
-                            parent=self._spacing_card,
-                        ),
+                    self._build_form_row(
+                        "行距类型",
+                        self._line_type_combo,
+                        parent=self._spacing_card,
                     ),
-                    (
-                        self._build_form_row(
-                            "段前",
-                            self._space_before,
-                            suffix_widget=self._space_before_suffix,
-                            parent=self._spacing_card,
-                        ),
-                        self._build_form_row(
-                            "段后",
-                            self._space_after,
-                            suffix_widget=self._space_after_suffix,
-                            parent=self._spacing_card,
-                        ),
+                    self._build_form_row(
+                        "段前",
+                        self._space_before,
+                        suffix_widget=self._space_before_suffix,
+                        parent=self._spacing_card,
+                    ),
+                ],
+                [
+                    self._build_form_row(
+                        "行距值",
+                        self._line_value,
+                        suffix_widget=self._line_value_suffix,
+                        parent=self._spacing_card,
+                    ),
+                    self._build_form_row(
+                        "段后",
+                        self._space_after,
+                        suffix_widget=self._space_after_suffix,
+                        parent=self._spacing_card,
                     ),
                 ],
                 parent=self._spacing_card,

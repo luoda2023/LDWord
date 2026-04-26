@@ -94,6 +94,8 @@ def test_page_setup_detail_reuses_shared_spacing_input_control():
 
     assert "SummaryGrid(" in source
     assert "SpacingInput(" in source
+    assert "TemplateSplitColumns(" in source
+    assert "def _build_split_form_columns" not in source
     assert "InlineAlert(" in source
     assert 'QPushButton("恢复"' in source
     assert 'QPushButton("保存"' in source
@@ -105,12 +107,11 @@ def test_page_setup_detail_reuses_shared_spacing_input_control():
     assert "页面预览" not in source
 
 
-def test_page_setup_detail_uses_three_shared_dashed_separators_for_split_columns():
+def test_page_setup_detail_split_columns_use_spacing_without_dashed_separators():
     _app()
     detail = PageSetupDetail()
     try:
-        separators = detail.findChildren(DashedSeparator)
-        assert len(separators) == 3
+        assert not detail.findChildren(DashedSeparator)
     finally:
         detail.close()
 

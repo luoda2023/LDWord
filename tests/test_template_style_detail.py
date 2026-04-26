@@ -122,7 +122,7 @@ def test_style_detail_reuses_shared_controls():
     assert "IndentInput(" in source
     assert "ToggleSwitch(" in source
     assert "TemplateSplitColumns(" in source
-    assert "TemplateFormGrid(" in source
+    assert "TemplateFormGrid(" not in source
     assert "template_form_row(" in source
     assert "_build_split_form_columns" not in source
     assert "_build_stacked_form_rows" not in source
@@ -154,12 +154,9 @@ def test_style_detail_organizes_body_controls_into_cards():
         assert isinstance(detail._alignment_indent_card, Card)
         assert isinstance(detail._spacing_card, Card)
         assert detail.findChildren(TemplateSplitColumns)
-        assert len(detail.findChildren(TemplateFormGrid)) >= 2
+        assert not detail.findChildren(TemplateFormGrid)
         assert not hasattr(detail, "_paragraph_card")
-        assert len(detail.findChildren(DashedSeparator)) == 3
-        assert [sep.orientation() for sep in detail._text_card.findChildren(DashedSeparator)] == ["vertical"]
-        assert [sep.orientation() for sep in detail._alignment_indent_card.findChildren(DashedSeparator)] == ["horizontal"]
-        assert [sep.orientation() for sep in detail._spacing_card.findChildren(DashedSeparator)] == ["horizontal"]
+        assert not detail.findChildren(DashedSeparator)
         assert not hasattr(detail, "_advanced_indent_toggle")
         assert not hasattr(detail, "_advanced_indent_body")
         assert not hasattr(detail, "_indent_note")

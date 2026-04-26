@@ -31,24 +31,21 @@ from src.config.style_variant_semantics import (
 )
 from src.qt_api import (
     QCheckBox,
-    QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QRadioButton,
     QSizePolicy,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
     Qt,
     Signal,
 )
 
-from src.shared.ui import DynamicNavigationRail, NavigationCard
+from src.shared.ui import FlowLayout, MasterDetailShell, NavigationCard
 from src.shared.ui.card import Card
-from src.shared.ui.form_row import FormRow
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.table_style_gallery import ColorTableGallery
+from src.shared.ui.template_form_layout import TemplateFormStack, template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 from src.shared.ui.feature_toggle_row import FeatureToggleRow
@@ -120,47 +117,6 @@ _GROUP_TO_CARD: dict[str, str] = {
     "cleanup":       "scn_cleanup",
     "content_fill":  "scn_content",
 }
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  Helpers
-# ═══════════════════════════════════════════════════════════════════════
-
-def _make_card_header(icon_name: str, title: str, parent: QWidget) -> tuple[QWidget, QLabel, QLabel]:
-    """Returns (header_widget, icon_label, title_label) for direct caching."""
-    hdr = QWidget(parent)
-    lay = QHBoxLayout(hdr)
-    lay.setContentsMargins(0, 0, 0, 6)
-    lay.setSpacing(6)
-    icon_lbl = QLabel(hdr)
-    icon_lbl.setFixedSize(18, 18)
-    icon_lbl.setObjectName(f"scn_hdr_icon_{icon_name}")
-    lay.addWidget(icon_lbl)
-    title_lbl = QLabel(title, hdr)
-    title_lbl.setObjectName("scn_card_title")
-    lay.addWidget(title_lbl)
-    lay.addStretch(1)
-    return hdr, icon_lbl, title_lbl
-
-
-def _apply_cached_header_theme(
-    icon_labels: list[tuple[str, QLabel]],
-    title_labels: list[QLabel],
-    t,
-) -> None:
-    """Lightweight theme update using cached refs — no findChildren."""
-    title_ss = (
-        f"font-size: {t.font_size_lg}px; font-weight: {t.font_weight_emphasis}; "
-        f"color: {t.primary}; background: transparent;"
-    )
-    for lbl in title_labels:
-        lbl.setStyleSheet(title_ss)
-    try:
-        from src.ui.icons.catalog import get_icon
-        for icon_key, lbl in icon_labels:
-            lbl.setPixmap(get_icon(icon_key, 18, t.primary).pixmap(18, 18))
-    except Exception:
-        pass
 
 
 def _set_combo_by_data(combo: StyledComboBox, target) -> None:
@@ -269,20 +225,13 @@ class _SimpleFormDetail(QWidget):
         self._icon_name = icon_name
         self._is_syncing = False
 
-        # Cached refs for O(1) theme update
-        self._cached_icons: list[tuple[str, QLabel]] = []
-        self._cached_titles: list[QLabel] = []
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self._card = Card(parent=self)
-        hdr, icon_lbl, title_lbl = _make_card_header(icon_name, title, self)
-        self._cached_icons.append((icon_name, icon_lbl))
-        self._cached_titles.append(title_lbl)
-        self._card.add_widget(hdr)
+        self._card.set_header(title, icon_name=icon_name)
 
         self._desc_label = QLabel(description)
         self._desc_label.setObjectName("scn_form_desc")
@@ -300,8 +249,10 @@ class _SimpleFormDetail(QWidget):
 
     def _apply_theme(self) -> None:
         t = get_theme()
-        _apply_cached_header_theme(self._cached_icons, self._cached_titles, t)
         self._desc_label.setStyleSheet(f"font-size: {t.font_size_sm}px; color: {t.text_secondary};")
+
+    def _add_form_stack(self, rows: list[QWidget]) -> None:
+        self._card.add_widget(TemplateFormStack(rows, parent=self._card))
 
 
 # ── 场景概览 ────────────────────────────────────────
@@ -317,20 +268,13 @@ class _SceneOverviewDetail(QWidget):
         self._current_scene: SceneWorkspace | None = None
         self._scene_descriptors = list(scene_descriptors)
 
-        # Cached refs for O(1) theme update
-        self._cached_icons: list[tuple[str, QLabel]] = []
-        self._cached_titles: list[QLabel] = []
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         card = Card(parent=self)
-        hdr, icon_lbl, title_lbl = _make_card_header("target", "当前场景", self)
-        self._cached_icons.append(("target", icon_lbl))
-        self._cached_titles.append(title_lbl)
-        card.add_widget(hdr)
+        card.set_header("当前场景", icon_name="target")
 
         # Scene selector
         self._combo = StyledComboBox(self)
@@ -340,12 +284,12 @@ class _SceneOverviewDetail(QWidget):
             if descriptor.load_error:
                 self._combo.setItemData(item_index, descriptor.load_error, Qt.ToolTipRole)
         self._combo.currentIndexChanged.connect(self.scene_changed.emit)
-        card.add_widget(FormRow("场景预设", self._combo, parent=card))
+        card.add_widget(template_form_row("场景预设", self._combo, parent=card))
 
         # Template binding
         self._tpl_combo = StyledComboBox(self)
         self._tpl_combo.currentIndexChanged.connect(self._on_tpl_changed)
-        card.add_widget(FormRow("关联模板", self._tpl_combo, parent=card))
+        card.add_widget(template_form_row("关联模板", self._tpl_combo, parent=card))
 
         # Strategy
         strategy_row = QWidget(self)
@@ -359,7 +303,7 @@ class _SceneOverviewDetail(QWidget):
         s_lay.addWidget(self._rebuild_radio)
         s_lay.addWidget(self._preserve_radio)
         s_lay.addStretch(1)
-        card.add_widget(FormRow("编号策略", strategy_row, parent=card))
+        card.add_widget(template_form_row("编号策略", strategy_row, parent=card))
 
         # Description
         self._desc = QLabel("", self)
@@ -450,7 +394,6 @@ class _SceneOverviewDetail(QWidget):
         t = get_theme()
         self._desc.setStyleSheet(f"font-size: {t.font_size_sm}px; color: {t.text_secondary};")
         self._summary.setStyleSheet(f"font-size: {t.font_size_sm}px; color: {t.text_hint};")
-        _apply_cached_header_theme(self._cached_icons, self._cached_titles, t)
 
 
 # ── 处理范围 ────────────────────────────────────────
@@ -466,9 +409,6 @@ class _ScopeDetail(QWidget):
         self._current_template = None
         self._is_syncing = False
 
-        # Cached refs
-        self._cached_icons: list[tuple[str, QLabel]] = []
-        self._cached_titles: list[QLabel] = []
         self._desc_labels: list[QLabel] = []
         self._form_labels: list[QLabel] = []
         self._variant_labels: list[QLabel] = []
@@ -479,17 +419,14 @@ class _ScopeDetail(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         card = Card(parent=self)
-        hdr, icon_lbl, title_lbl = _make_card_header("map-pin", "处理范围", self)
-        self._cached_icons.append(("map-pin", icon_lbl))
-        self._cached_titles.append(title_lbl)
-        card.add_widget(hdr)
+        card.set_header("处理范围", icon_name="map-pin")
 
         desc = QLabel("选择本场景要处理的文档区域。有独立样式需求的分区可开启自定义。")
         desc.setWordWrap(True)
         self._desc_labels.append(desc)
         card.add_widget(desc)
 
-        # Section checkboxes (3×3 grid)
+        # Section checkboxes
         self._zone_checks: dict[str, QCheckBox] = {}
         zone_labels = {
             "body": "正文", "references": "参考文献", "acknowledgment": "致谢",
@@ -497,16 +434,14 @@ class _ScopeDetail(QWidget):
             "toc": "目录", "errata": "勘误页", "resume": "个人简历",
         }
         zones_widget = QWidget(self)
-        zones_grid = QGridLayout(zones_widget)
-        zones_grid.setContentsMargins(0, 6, 0, 0)
-        zones_grid.setHorizontalSpacing(16)
-        zones_grid.setVerticalSpacing(4)
+        self._zones_flow = FlowLayout(zones_widget, h_spacing=16, v_spacing=4)
+        self._zones_flow.setContentsMargins(0, 6, 0, 0)
 
-        for i, (zone_id, label) in enumerate(zone_labels.items()):
+        for zone_id, label in zone_labels.items():
             cb = QCheckBox(label, zones_widget)
             cb.toggled.connect(self._on_edited)
             self._zone_checks[zone_id] = cb
-            zones_grid.addWidget(cb, i // 3, i % 3)
+            self._zones_flow.addWidget(cb)
 
         card.add_widget(zones_widget)
 
@@ -606,7 +541,6 @@ class _ScopeDetail(QWidget):
 
     def _apply_theme(self) -> None:
         t = get_theme()
-        _apply_cached_header_theme(self._cached_icons, self._cached_titles, t)
         desc_ss = f"font-size: {t.font_size_sm}px; color: {t.text_secondary};"
         for lbl in self._desc_labels:
             lbl.setStyleSheet(desc_ss)
@@ -633,20 +567,13 @@ class _FeaturesDetail(QWidget):
         self._current_scene: SceneWorkspace | None = None
         self._is_syncing = False
 
-        # Cached refs
-        self._cached_icons: list[tuple[str, QLabel]] = []
-        self._cached_titles: list[QLabel] = []
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         card = Card(parent=self)
-        hdr, icon_lbl, title_lbl = _make_card_header("toggle-right", "功能开关", self)
-        self._cached_icons.append(("toggle-right", icon_lbl))
-        self._cached_titles.append(title_lbl)
-        card.add_widget(hdr)
+        card.set_header("功能开关", icon_name="toggle-right")
 
         self._desc_label = QLabel("开启功能后，对应的配置卡片会出现在左侧导航中。")
         self._desc_label.setWordWrap(True)
@@ -691,7 +618,6 @@ class _FeaturesDetail(QWidget):
 
     def _apply_theme(self) -> None:
         t = get_theme()
-        _apply_cached_header_theme(self._cached_icons, self._cached_titles, t)
         self._desc_label.setStyleSheet(f"font-size: {t.font_size_sm}px; color: {t.text_secondary};")
 
 
@@ -705,47 +631,50 @@ class _TableChartDetail(_SimpleFormDetail):
         self._current_scene: SceneWorkspace | None = None
 
         _BORDER_MODES = tuple((option.key, option.label) for option in TABLE_STYLE_OPTIONS)
+        rows = []
+
         self._border = StyledComboBox(self)
         for val, lbl in _BORDER_MODES:
             self._border.addItem(lbl, val)
         self._border.currentIndexChanged.connect(self._on_edited)
-        self._card.add_widget(FormRow("边框样式", self._border, parent=self._card))
+        rows.append(template_form_row("边框样式", self._border, parent=self._card))
 
         self._color_gallery = ColorTableGallery(self._card)
         self._color_gallery.selection_changed.connect(self._on_edited)
-        self._card.add_widget(self._color_gallery)
+        rows.append(self._color_gallery)
 
         _LAYOUT_MODES = (("smart", "智能布局"), ("compact", "紧凑布局"), ("full", "撑满布局"), ("keep", "保留原样"))
         self._layout_mode = StyledComboBox(self)
         for val, lbl in _LAYOUT_MODES:
             self._layout_mode.addItem(lbl, val)
         self._layout_mode.currentIndexChanged.connect(self._on_edited)
-        self._card.add_widget(FormRow("布局模式", self._layout_mode, parent=self._card))
+        rows.append(template_form_row("布局模式", self._layout_mode, parent=self._card))
 
         self._repeat_header = ToggleSwitch(self, checked=False)
         self._repeat_header.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("跨页重复表头", self._repeat_header, parent=self._card))
+        rows.append(template_form_row("跨页重复表头", self._repeat_header, parent=self._card))
 
         _NUMBERING = (("chapter", "按章编号"), ("global", "全局编号"))
         self._caption_mode = StyledComboBox(self)
         for val, lbl in _NUMBERING:
             self._caption_mode.addItem(lbl, val)
         self._caption_mode.currentIndexChanged.connect(self._on_edited)
-        self._card.add_widget(FormRow("题注编号", self._caption_mode, parent=self._card))
+        rows.append(template_form_row("题注编号", self._caption_mode, parent=self._card))
 
         self._fig_prefix = StyledComboBox(self)
         for p in ("图", "Fig.", "Figure"):
             self._fig_prefix.addItem(p)
         self._fig_prefix.setEditable(True)
         self._fig_prefix.currentIndexChanged.connect(self._on_edited)
-        self._card.add_widget(FormRow("图前缀", self._fig_prefix, parent=self._card))
+        rows.append(template_form_row("图前缀", self._fig_prefix, parent=self._card))
 
         self._tbl_prefix = StyledComboBox(self)
         for p in ("表", "Tab.", "Table"):
             self._tbl_prefix.addItem(p)
         self._tbl_prefix.setEditable(True)
         self._tbl_prefix.currentIndexChanged.connect(self._on_edited)
-        self._card.add_widget(FormRow("表前缀", self._tbl_prefix, parent=self._card))
+        rows.append(template_form_row("表前缀", self._tbl_prefix, parent=self._card))
+        self._add_form_stack(rows)
 
     def set_scene(self, scene: SceneWorkspace) -> None:
         self._current_scene = scene
@@ -798,11 +727,15 @@ class _PageElementsDetail(_SimpleFormDetail):
         for val, lbl in _HEADER_MODES:
             self._header_mode.addItem(lbl, val)
         self._header_mode.currentIndexChanged.connect(self._on_edited)
-        self._card.add_widget(FormRow("页眉模式", self._header_mode, parent=self._card))
+        self._add_form_stack([
+            template_form_row("页眉模式", self._header_mode, parent=self._card),
+        ])
 
         self._page_number_owner = QLabel("模板控制", self)
         self._page_number_owner.setObjectName("scn_page_number_owner")
-        self._card.add_widget(FormRow("页码来源", self._page_number_owner, parent=self._card))
+        self._add_form_stack([
+            template_form_row("页码来源", self._page_number_owner, parent=self._card),
+        ])
 
         self._page_number_summary = QLabel("", self)
         self._page_number_summary.setObjectName("scn_page_number_summary")
@@ -822,17 +755,18 @@ class _PageElementsDetail(_SimpleFormDetail):
 
         self._header_border = ToggleSwitch(self, checked=True)
         self._header_border.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("页眉横线", self._header_border, parent=self._card))
+        rows = [template_form_row("页眉横线", self._header_border, parent=self._card)]
 
         self._toc_enabled = ToggleSwitch(self, checked=True)
         self._toc_enabled.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("启用目录", self._toc_enabled, parent=self._card))
+        rows.append(template_form_row("启用目录", self._toc_enabled, parent=self._card))
 
         self._toc_depth = StyledComboBox(self)
         for lvl in range(1, 7):
             self._toc_depth.addItem(f"{lvl} 级", lvl)
         self._toc_depth.currentIndexChanged.connect(self._on_edited)
-        self._card.add_widget(FormRow("目录深度", self._toc_depth, parent=self._card))
+        rows.append(template_form_row("目录深度", self._toc_depth, parent=self._card))
+        self._add_form_stack(rows)
 
     def set_scene(self, scene: SceneWorkspace, template=None) -> None:
         self._current_scene = scene
@@ -918,19 +852,20 @@ class _FormulaDetail(_SimpleFormDetail):
         for f in ("Times New Roman", "Cambria Math", "Latin Modern Math"):
             self._font_combo.addItem(f)
         self._font_combo.currentIndexChanged.connect(self._on_edited)
-        self._card.add_widget(FormRow("公式字体", self._font_combo, parent=self._card))
+        rows = [template_form_row("公式字体", self._font_combo, parent=self._card)]
 
         self._unify_font = ToggleSwitch(self, checked=True)
         self._unify_font.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("统一字体", self._unify_font, parent=self._card))
+        rows.append(template_form_row("统一字体", self._unify_font, parent=self._card))
 
         self._unify_size = ToggleSwitch(self, checked=True)
         self._unify_size.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("统一字号", self._unify_size, parent=self._card))
+        rows.append(template_form_row("统一字号", self._unify_size, parent=self._card))
 
         self._unify_spacing = ToggleSwitch(self, checked=True)
         self._unify_spacing.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("统一间距", self._unify_spacing, parent=self._card))
+        rows.append(template_form_row("统一间距", self._unify_spacing, parent=self._card))
+        self._add_form_stack(rows)
 
     def set_scene(self, scene: SceneWorkspace) -> None:
         self._current_scene = scene
@@ -966,11 +901,12 @@ class _CitationDetail(_SimpleFormDetail):
 
         self._auto_number = ToggleSwitch(self, checked=True)
         self._auto_number.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("自动编号", self._auto_number, parent=self._card))
+        rows = [template_form_row("自动编号", self._auto_number, parent=self._card)]
 
         self._superscript = ToggleSwitch(self, checked=False)
         self._superscript.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("上标页码", self._superscript, parent=self._card))
+        rows.append(template_form_row("上标页码", self._superscript, parent=self._card))
+        self._add_form_stack(rows)
 
     def set_scene(self, scene: SceneWorkspace) -> None:
         self._current_scene = scene
@@ -1000,15 +936,16 @@ class _CleanupDetail(_SimpleFormDetail):
 
         self._fix_breaks = ToggleSwitch(self, checked=True)
         self._fix_breaks.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("段落修复", self._fix_breaks, parent=self._card))
+        rows = [template_form_row("段落修复", self._fix_breaks, parent=self._card)]
 
         self._remove_empty = ToggleSwitch(self, checked=True)
         self._remove_empty.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("空行清理", self._remove_empty, parent=self._card))
+        rows.append(template_form_row("空行清理", self._remove_empty, parent=self._card))
 
         self._normalize_spaces = ToggleSwitch(self, checked=True)
         self._normalize_spaces.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("空格规范", self._normalize_spaces, parent=self._card))
+        rows.append(template_form_row("空格规范", self._normalize_spaces, parent=self._card))
+        self._add_form_stack(rows)
 
     def set_scene(self, scene: SceneWorkspace) -> None:
         self._current_scene = scene
@@ -1043,7 +980,7 @@ class _ContentDetail(_SimpleFormDetail):
 
         self._watermark_enabled = ToggleSwitch(self, checked=False)
         self._watermark_enabled.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("启用水印", self._watermark_enabled, parent=self._card))
+        self._card.add_widget(template_form_row("启用水印", self._watermark_enabled, parent=self._card))
 
     def set_scene(self, scene: SceneWorkspace) -> None:
         self._current_scene = scene
@@ -1071,19 +1008,20 @@ class _OutputDetail(_SimpleFormDetail):
 
         self._final_docx = ToggleSwitch(self, checked=True)
         self._final_docx.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("最终 DOCX", self._final_docx, parent=self._card))
+        rows = [template_form_row("最终 DOCX", self._final_docx, parent=self._card)]
 
         self._compare_docx = ToggleSwitch(self, checked=True)
         self._compare_docx.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("对比 DOCX", self._compare_docx, parent=self._card))
+        rows.append(template_form_row("对比 DOCX", self._compare_docx, parent=self._card))
 
         self._report_json = ToggleSwitch(self, checked=True)
         self._report_json.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("报告 JSON", self._report_json, parent=self._card))
+        rows.append(template_form_row("报告 JSON", self._report_json, parent=self._card))
 
         self._report_md = ToggleSwitch(self, checked=True)
         self._report_md.toggled_signal.connect(self._on_edited)
-        self._card.add_widget(FormRow("报告 Markdown", self._report_md, parent=self._card))
+        rows.append(template_form_row("报告 Markdown", self._report_md, parent=self._card))
+        self._add_form_stack(rows)
 
     def set_scene(self, scene: SceneWorkspace) -> None:
         self._current_scene = scene
@@ -1135,32 +1073,18 @@ class ScenePanel(BasePanel):
                 self._current_scene = SceneWorkspace(scene_id="custom", template_id="default")
                 self._current_scene_source = "runtime"
 
-        # Shell: HBox → NavRail + DetailScroll
-        self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(0)
-
-        # Left: navigation rail
-        self._nav_rail = DynamicNavigationRail(parent=self)
-        self._nav_rail.setObjectName("scn_navigation")
-        self._nav_rail.setFixedWidth(260)
-        self._layout.addWidget(self._nav_rail)
-
-        # Right: scrollable detail
-        self._detail_scroll = QScrollArea(self)
-        self._detail_scroll.setObjectName("scn_detail")
-        self._detail_scroll.setWidgetResizable(True)
-        self._detail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._detail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self._detail_scroll.setFrameShape(QFrame.NoFrame)
-
-        self._detail_container = QWidget(self._detail_scroll)
-        self._detail_container.setObjectName("scn_detail_content")
-        self._detail_layout = QVBoxLayout(self._detail_container)
-        self._detail_layout.setContentsMargins(16, 10, 16, 16)
-        self._detail_layout.setSpacing(0)
-        self._detail_scroll.setWidget(self._detail_container)
-        self._layout.addWidget(self._detail_scroll, 1)
+        self._shell = MasterDetailShell(
+            self,
+            panel_name="ScenePanel",
+            nav_object_name="scn_navigation",
+            detail_object_name="scn_detail",
+            detail_content_object_name="scn_detail_content",
+        )
+        self._layout = self._shell.layout
+        self._nav_rail = self._shell.nav_rail
+        self._detail_scroll = self._shell.detail_scroll
+        self._detail_container = self._shell.detail_container
+        self._detail_layout = self._shell.detail_layout
 
         # Build detail panes
         self._overview = _SceneOverviewDetail(self._scene_descriptors)
@@ -1371,29 +1295,7 @@ class ScenePanel(BasePanel):
 
     def _apply_theme(self) -> None:
         t = get_theme()
-        radius = t.shell_radius
-
-        self.setStyleSheet(
-            f"#ScenePanel {{ background: {t.bg_window}; border-bottom-right-radius: {radius}px; }}"
-        )
-        self._nav_rail.setStyleSheet(
-            f"#scn_navigation {{ background: {t.bg_nav_rail}; }}"
-        )
-        self._detail_scroll.setStyleSheet(
-            f"#scn_detail {{ border: none; background: {t.bg_window}; "
-            f"border-bottom-right-radius: {radius}px; }}"
-        )
-        self._detail_container.setStyleSheet(
-            f"#scn_detail_content {{ background: {t.bg_window}; "
-            f"border-bottom-right-radius: {radius}px; }}"
-        )
-        viewport = self._detail_scroll.viewport()
-        if viewport:
-            viewport.setObjectName("scn_detail_viewport")
-            viewport.setStyleSheet(
-                f"#scn_detail_viewport {{ background: {t.bg_window}; "
-                f"border-bottom-right-radius: {radius}px; }}"
-            )
+        self._shell.apply_theme(t)
 
         # Propagate to details
         for detail in self._detail_map.values():

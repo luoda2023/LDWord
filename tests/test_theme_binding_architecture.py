@@ -19,7 +19,7 @@ def test_bind_theme_source_registers_auto_cleanup():
 
 def test_theme_aware_widgets_use_bind_theme_helper():
     target_files = [
-        "src/shared/ui/card.py",
+        "src/shared/ui/design_system_card.py",
         "src/shared/ui/collapsible_section.py",
         "src/shared/ui/form_row.py",
         "src/shared/ui/icon_button.py",

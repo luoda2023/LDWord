@@ -190,7 +190,7 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         apply_button_variant(self._browse_btn, "secondary")
 
         self._file_icon.setStyleSheet(
-            f"font-size: 16px; color: #ffffff; font-weight: bold; "
+            f"font-size: 16px; color: {theme.text_on_primary}; font-weight: bold; "
             f"background: {theme.primary}; border-radius: 6px;"
         )
         self._file_name_label.setStyleSheet(

@@ -1,42 +1,24 @@
 from __future__ import annotations
 
+from src.shared.ui.master_detail_shell import apply_master_detail_shell_theme
 from src.shared.ui.theme import AppTheme
 
 
 def apply_workbench_v2_shell_theme(panel, nav_rail, detail_scroll, detail_container, *, theme: AppTheme) -> None:
     """Apply the V2 master-detail shell styling."""
-    radius = theme.shell_radius
-    nav_background = theme.bg_nav_rail
-    if not nav_background or nav_background == theme.bg_card:
-        nav_background = theme.bg_sidebar
-    panel.setStyleSheet(
-        f"#WorkbenchPanel {{ background: {theme.bg_window}; border-bottom-right-radius: {radius}px; }}"
+    nav_background = theme.bg_nav_rail or theme.bg_card
+    if hasattr(panel, "_shell"):
+        panel._shell.apply_theme(theme)
+        return
+    apply_master_detail_shell_theme(
+        panel,
+        nav_rail,
+        detail_scroll,
+        detail_container,
+        theme=theme,
+        panel_name="WorkbenchPanel",
+        nav_background=nav_background,
     )
-    nav_rail.setStyleSheet(
-        f"""
-        #wb_v2_navigation {{
-            background: {nav_background};
-        }}
-        """
-    )
-    detail_scroll.setStyleSheet(
-        f"""
-        #wb_v2_detail {{
-            border: none;
-            background: {theme.bg_window};
-            border-bottom-right-radius: {radius}px;
-        }}
-        """
-    )
-    detail_container.setStyleSheet(
-        f"#wb_v2_detail_content {{ background: {theme.bg_window}; border-bottom-right-radius: {radius}px; }}"
-    )
-    viewport = detail_scroll.viewport()
-    if viewport is not None:
-        viewport.setObjectName("wb_v2_detail_viewport")
-        viewport.setStyleSheet(
-            f"#wb_v2_detail_viewport {{ background: {theme.bg_window}; border-bottom-right-radius: {radius}px; }}"
-        )
 
 
 def build_workbench_stylesheet(t: AppTheme) -> str:
@@ -59,7 +41,7 @@ def build_workbench_stylesheet(t: AppTheme) -> str:
         }}
 
         #wb_navigation_rail {{
-            background: {t.bg_sidebar};
+            background: {t.bg_nav_rail};
             border-radius: {t.radius_md}px;
             border: 1px solid {t.border};
             padding: 8px;

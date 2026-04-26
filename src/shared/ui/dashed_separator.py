@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.qt_api import QColor, QPainter, QPen, QSizePolicy, QWidget, Qt
+from src.qt_api import QColor, QPainter, QPen, QSize, QSizePolicy, QWidget, Qt
 
 from src.shared.ui.theme import bind_theme, get_theme
 
@@ -14,14 +14,14 @@ class DashedSeparator(QWidget):
         super().__init__(parent)
         self._orientation = "vertical" if orientation == "vertical" else "horizontal"
         self._uses_theme_color = color is None
-        self._color = QColor(color or get_theme().text_hint)
+        self._color = QColor(color or get_theme().divider)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self._apply_geometry()
         bind_theme(self, self._on_theme_changed)
 
     def _apply_geometry(self) -> None:
         if self._orientation == "vertical":
-            self.setFixedWidth(17)  # 8px padding + 1px line + 8px padding
+            self.setFixedWidth(13)  # 6px padding + 1px line + 6px padding
             self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         else:
             self.setFixedHeight(13)  # 6px padding + 1px line + 6px padding
@@ -29,7 +29,7 @@ class DashedSeparator(QWidget):
 
     def _on_theme_changed(self) -> None:
         if self._uses_theme_color:
-            self._color = QColor(get_theme().text_hint)
+            self._color = QColor(get_theme().divider)
         self.update()
 
     def set_color(self, color: str) -> None:
@@ -42,6 +42,12 @@ class DashedSeparator(QWidget):
 
     def orientation(self) -> str:
         return self._orientation
+
+    def sizeHint(self) -> QSize:
+        return QSize(13, 13)
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)

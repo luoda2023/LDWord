@@ -8,15 +8,15 @@ from typing import TYPE_CHECKING
 
 from src.config.feature_configs import default_continuous_page_number_phases
 from src.config.template import PageNumberPhaseConfig, TemplateConfig
-from src.qt_api import QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget, Signal
+from src.qt_api import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget, Signal
 from src.shared.engine.page_number_planner import (
     collect_static_page_number_diagnostics,
     format_page_number_diagnostic_text,
 )
 from src.shared.ui.button_style import apply_button_variant
 from src.shared.ui.card import Card
+from src.shared.ui.flow_layout import FlowLayout
 from src.shared.ui.flow_section import FlowSection
-from src.shared.ui.form_row import FormRow
 from src.shared.ui.inline_alert import InlineAlert
 from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.styled_combo_box import StyledComboBox
@@ -219,20 +219,17 @@ class PageSelectorEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        chips = QWidget(self)
-        chips_layout = QGridLayout(chips)
-        chips_layout.setContentsMargins(0, 0, 0, 0)
-        chips_layout.setHorizontalSpacing(6)
-        chips_layout.setVerticalSpacing(6)
+        self._chips = QWidget(self)
+        self._chips_layout = FlowLayout(self._chips, h_spacing=8, v_spacing=8)
 
-        for index, (selector, label) in enumerate(self._options):
-            button = QPushButton(label, chips)
+        for selector, label in self._options:
+            button = QPushButton(label, self._chips)
             button.setCheckable(True)
             button.clicked.connect(self._emit_changed)
             self._selector_buttons[selector] = button
-            chips_layout.addWidget(button, index // 4, index % 4)
+            self._chips_layout.addWidget(button)
 
-        layout.addWidget(chips)
+        layout.addWidget(self._chips)
 
         self._custom_edit = QLineEdit(self)
         self._custom_edit.setPlaceholderText("输入其他分区名称，多个值用逗号分隔")
@@ -293,8 +290,9 @@ class PageSelectorEditor(QWidget):
             f"background: {theme.bg_card};"
             f"color: {theme.text_secondary};"
             f"border: 1px solid {theme.border};"
-            f"border-radius: {theme.radius_full}px;"
-            f"padding: {theme.button_padding_y}px {theme.button_padding_x}px;"
+            f"border-radius: {theme.radius_sm}px;"
+            f"min-height: {theme.control_height_sm}px;"
+            f"padding: 2px {theme.button_padding_x}px;"
             f"font-size: {theme.font_size_sm}px;"
             f"}}"
             f"QPushButton:hover {{"
@@ -443,11 +441,11 @@ class PageNumberPlanSection:
         *,
         suffix_widget: QWidget | None = None,
         parent,
-    ) -> FormRow:
+    ) -> QWidget:
         return template_form_row(label, widget, suffix_widget=suffix_widget, parent=parent)
 
     def _pair_row(self, *widgets: QWidget) -> TemplateFormGrid:
-        return TemplateFormGrid([widgets], parent=self._owner, column_gap=12, show_row_separators=False)
+        return TemplateFormGrid([widgets], parent=self._owner, column_gap=12)
 
     def _build_page_number_spin(self) -> StyledSpinBox:
         spin = StyledSpinBox(self._owner)

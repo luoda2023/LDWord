@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.qt_api import QApplication, Qt
+from src.shared.ui.theme import get_theme
 from src.ui.bridge import PanelBridge
 from src.ui.panels.workbench.panel_v2 import WorkbenchPanel
 
@@ -26,9 +27,10 @@ def test_workbench_navigation_rail_renders_its_own_surface_background():
 
         image = panel.grab().toImage()
         left_bg = image.pixelColor(120, 350).name()
-        right_bg = image.pixelColor(520, 350).name()
+        theme = get_theme()
 
-        assert left_bg != right_bg
+        assert left_bg == theme.bg_nav_rail.lower()
+        assert left_bg != theme.bg_sidebar.lower()
     finally:
         panel.close()
         app.processEvents()

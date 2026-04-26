@@ -59,6 +59,7 @@ class NavigationCard(Card):
         super().__init__(parent=parent)
         self._key = key
         self._selected = False
+        self._hovered = False
         self._disabled = False
         self._icon_name = icon_name
         self._full_subtitle = ""
@@ -126,23 +127,13 @@ class NavigationCard(Card):
         # --- Card container (WeChat style: no border, no shadow) ---
         if self._selected:
             bg = t.primary
-            hover_bg = t.primary_hover
+        elif self._hovered:
+            bg = t.bg_hover
         else:
             bg = "transparent"
-            hover_bg = t.bg_hover
 
-        self.setStyleSheet(
-            f"""
-            NavigationCard {{
-                background: {bg};
-                border: none;
-                border-radius: {t.radius_md}px;
-            }}
-            NavigationCard:hover {{
-                background: {hover_bg};
-            }}
-            """
-        )
+        self.set_card_surface(background=bg, border_color="transparent", border_width=0.0, shadow=False)
+        self.setStyleSheet("")
 
         if self._selected:
             icon_bg = "rgba(255, 255, 255, 0.2)"
@@ -262,9 +253,13 @@ class NavigationCard(Card):
 
     def enterEvent(self, event):  # noqa: N802
         if not self._disabled:
+            self._hovered = True
             self.setCursor(Qt.PointingHandCursor)
+            self._apply_navigation_theme()
         return super().enterEvent(event)
 
     def leaveEvent(self, event):  # noqa: N802
+        self._hovered = False
         self.unsetCursor()
+        self._apply_navigation_theme()
         return super().leaveEvent(event)
