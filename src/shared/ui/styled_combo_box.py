@@ -7,7 +7,7 @@ from __future__ import annotations
 from src.qt_api import QComboBox, QListView, QPoint, QRect, QRectF, QColor, QPainter, QPen, Qt
 
 from src.shared.ui.combo_popup_panel import ComboPopupPanel
-from src.shared.ui.sizing import apply_size_class
+from src.shared.ui.sizing import apply_size_class, resolved_control_height
 from src.shared.ui.theme import bind_theme, get_theme
 
 
@@ -93,6 +93,9 @@ class StyledComboBox(QComboBox):
 
     @staticmethod
     def build_combo_stylesheet(object_name: str, theme) -> str:
+        height_sm = resolved_control_height(theme, "sm")
+        height_md = resolved_control_height(theme, "md")
+        height_lg = resolved_control_height(theme, "lg")
         return f"""
             #{object_name} {{
                 background: {theme.bg_input};
@@ -128,16 +131,22 @@ class StyledComboBox(QComboBox):
                 image: none;
             }}
             #{object_name}[sizeClass="sm"] {{
-                min-height: {theme.control_height_sm}px;
-                max-height: {theme.control_height_sm}px;
+                min-height: {height_sm}px;
+                max-height: {height_sm}px;
+                padding-top: 0px;
+                padding-bottom: 0px;
             }}
             #{object_name}[sizeClass="md"] {{
-                min-height: {theme.control_height_md}px;
-                max-height: {theme.control_height_md}px;
+                min-height: {height_md}px;
+                max-height: {height_md}px;
+                padding-top: 0px;
+                padding-bottom: 0px;
             }}
             #{object_name}[sizeClass="lg"] {{
-                min-height: {theme.control_height_lg}px;
-                max-height: {theme.control_height_lg}px;
+                min-height: {height_lg}px;
+                max-height: {height_lg}px;
+                padding-top: 0px;
+                padding-bottom: 0px;
             }}
             #{object_name}[inline="true"] {{
                 background: transparent;

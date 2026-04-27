@@ -6,7 +6,7 @@ from src.qt_api import QHBoxLayout, QSizePolicy, QWidget, Signal
 
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.styled_spin_box import StyledSpinBox
-from src.shared.ui.sizing import apply_size_class
+from src.shared.ui.sizing import apply_size_class, resolved_control_height
 from src.shared.ui.theme import bind_theme, get_theme
 
 
@@ -78,10 +78,9 @@ class SpacingInput(QWidget):
             self._unit.setMaximumWidth(16777215)
         else:
             self._unit.setFixedWidth(t.spacing_input_unit_width)
-        content_heights = [self._spin.sizeHint().height(), self._spin.minimumSizeHint().height()]
-        if self._show_unit:
-            content_heights.extend([self._unit.sizeHint().height(), self._unit.minimumSizeHint().height()])
-        self.setMinimumHeight(max([t.control_height_md, *content_heights]))
+        height = resolved_control_height(t, "md")
+        self.setMinimumHeight(height)
+        self.setMaximumHeight(height)
         self.updateGeometry()
 
     def _emit(self, *_):

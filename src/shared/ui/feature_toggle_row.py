@@ -51,7 +51,8 @@ class FeatureToggleRow(QWidget):
             f"QPushButton:disabled {{ color: {t.text_hint}; }}"
         )
         self._config_button.setMinimumHeight(0)
-        self._config_button.setFixedHeight(24)
+        self._config_button.setMinimumHeight(24)
+        self._config_button.setMaximumHeight(24)
 
     def _on_toggled(self, checked: bool) -> None:
         self._config_button.setEnabled(bool(checked))

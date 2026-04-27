@@ -29,6 +29,7 @@ _EXPORT_MAP: dict[str, tuple[str, str]] = {
     "FlowLayout": (".flow_layout", "FlowLayout"),
     "FontCombo": (".font_combo", "FontCombo"),
     "InlineAlert": (".inline_alert", "InlineAlert"),
+    "InspectorForm": (".inspector_form", "InspectorForm"),
     "LogStreamWidget": (".log_stream_widget", "LogStreamWidget"),
     "MarkdownPreview": (".markdown_preview", "MarkdownPreview"),
     "MasterDetailShell": (".master_detail_shell", "MasterDetailShell"),
@@ -36,6 +37,7 @@ _EXPORT_MAP: dict[str, tuple[str, str]] = {
     "ModuleStatusList": (".module_status_list", "ModuleStatusList"),
     "NavigationCard": (".navigation_card", "NavigationCard"),
     "NumberingPreset": (".numbering_preset", "NumberingPreset"),
+    "OptionToggleChip": (".option_toggle_chip", "OptionToggleChip"),
     "Pagination": (".pagination", "Pagination"),
     "Result": (".result", "Result"),
     "SearchInput": (".search_input", "SearchInput"),
@@ -66,6 +68,8 @@ _EXPORT_MAP: dict[str, tuple[str, str]] = {
     "build_button_stylesheet": (".button_style", "build_button_stylesheet"),
     "build_checkbox_stylesheet": (".selection_control_style", "build_checkbox_stylesheet"),
     "build_text_input_stylesheet": (".input_style", "build_text_input_stylesheet"),
+    "normalize_form_control_heights": (".sizing", "normalize_form_control_heights"),
+    "resolved_control_height": (".sizing", "resolved_control_height"),
     "template_form_row": (".template_form_layout", "template_form_row"),
 }
 

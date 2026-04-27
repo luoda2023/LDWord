@@ -20,6 +20,9 @@ def test_feature_toggle_row_config_button_tracks_checked_state():
 
     assert row.is_checked() is False
     assert row.config_button().isEnabled() is False
+    assert "setFixedHeight(" not in Path(
+        ROOT / "src/shared/ui/feature_toggle_row.py"
+    ).read_text(encoding="utf-8")
 
     row.set_checked(True)
     assert row.is_checked() is True

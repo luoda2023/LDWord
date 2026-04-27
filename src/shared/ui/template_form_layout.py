@@ -127,6 +127,8 @@ class TemplateSplitColumns(QWidget):
         show_divider: bool = False,
     ):
         super().__init__(parent)
+        self._left_widgets = tuple(left_widgets)
+        self._right_widgets = tuple(right_widgets)
         self._left_column = self._build_column(left_widgets, right_padding=gutter_padding)
         self._right_column = self._build_column(right_widgets, left_padding=gutter_padding)
         self._divider = DashedSeparator(orientation="vertical", parent=self) if show_divider else None
@@ -192,6 +194,9 @@ class TemplateSplitColumns(QWidget):
     def _apply_theme(self) -> None:
         if self._divider is not None:
             self._divider.set_color(get_theme().divider)
+
+    def template_form_label_controls(self) -> list[QWidget]:
+        return _iter_template_label_controls([*self._left_widgets, *self._right_widgets])
 
 
 class TemplateFormGrid(QWidget):

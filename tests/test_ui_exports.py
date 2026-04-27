@@ -13,10 +13,12 @@ from src.shared.ui import (
     FileDropZone,
     FontCombo,
     FlowSection,
+    InspectorForm,
     LogStreamWidget,
     ModuleStatusList,
     NavigationCard,
     NumberingPreset,
+    OptionToggleChip,
     SearchInput,
     SizeCombo,
     StyledComboBox,
@@ -43,6 +45,8 @@ def test_shared_ui_exports_include_unified_controls():
     assert ThemedSlider.__name__ == "ThemedSlider"
     assert Badge.__name__ == "Badge"
     assert NavigationCard.__name__ == "NavigationCard"
+    assert OptionToggleChip.__name__ == "OptionToggleChip"
+    assert InspectorForm.__name__ == "InspectorForm"
     assert DynamicNavigationRail.__name__ == "DynamicNavigationRail"
     assert ExecutionFeedbackWidget.__name__ == "ExecutionFeedbackWidget"
     assert FlowSection.__name__ == "FlowSection"
