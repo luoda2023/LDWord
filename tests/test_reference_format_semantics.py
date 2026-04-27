@@ -83,6 +83,8 @@ def test_reference_format_syncs_spacing_indent_and_removes_numbering():
         special_indent_unit="cm",
         hanging_indent_chars=0.74,
         hanging_indent_unit="cm",
+        bold=True,
+        italic=True,
     )
 
     _format_reference_entry(para, style)
@@ -101,6 +103,8 @@ def test_reference_format_syncs_spacing_indent_and_removes_numbering():
     assert ind.get(qn("w:hangingChars")) is None
     assert num_pr is None
     assert para.runs[0].font.size.pt == 10.5
+    assert para.runs[0].font.bold is True
+    assert para.runs[0].font.italic is True
 
 
 def test_reference_format_syncs_rule_spacing_unit_to_ooxml():

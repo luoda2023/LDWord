@@ -91,6 +91,8 @@ def _normalize_toc_heading_style(doc, style, style_config) -> None:
         font_cn=style_config.font_cn,
         font_en=style_config.font_en,
         size_pt=style_config.size_pt,
+        bold=style_config.bold,
+        italic=style_config.italic,
     )
 
 
@@ -115,6 +117,8 @@ def _apply_toc_entry_style(style, style_config) -> None:
         font_cn=style_config.font_cn,
         font_en=style_config.font_en,
         size_pt=style_config.size_pt,
+        bold=style_config.bold,
+        italic=style_config.italic,
     )
 
 
@@ -157,6 +161,8 @@ def apply_toc_paragraph_style(para, style_config, *, is_title: bool = False) -> 
             set_run_east_asian_font(run, style_config.font_cn)
         if style_config.size_pt:
             run.font.size = Pt(style_config.size_pt)
+        run.font.bold = bool(style_config.bold)
+        run.font.italic = bool(style_config.italic)
 
 
 def sync_toc_styles(doc, styles_cfg: dict) -> int:

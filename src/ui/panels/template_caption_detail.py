@@ -18,6 +18,7 @@ from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.template_form_layout import TemplateFormStack, template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
+from src.shared.ui.typography_controls import build_emphasis_widget
 
 
 NUMBERING_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
@@ -172,6 +173,18 @@ class CaptionDetail(QWidget):
         self._size_combo.currentTextChanged.connect(self._on_form_edited)
         rows.append(template_form_row("字号", self._size_combo, parent=self._card))
 
+        self._bold_switch = ToggleSwitch(self, checked=False)
+        self._bold_switch.toggled_signal.connect(self._on_form_edited)
+        self._italic_switch = ToggleSwitch(self, checked=False)
+        self._italic_switch.toggled_signal.connect(self._on_form_edited)
+        rows.append(
+            template_form_row(
+                "字形",
+                build_emphasis_widget(self, self._bold_switch, self._italic_switch),
+                parent=self._card,
+            )
+        )
+
         self._alignment_combo = StyledComboBox(self)
         for value, label in ALIGNMENT_OPTIONS:
             self._alignment_combo.addItem(label, value)
@@ -222,6 +235,8 @@ class CaptionDetail(QWidget):
             self._font_cn_combo.set_font_name(style.font_cn or "")
             self._font_en_combo.set_font_name(style.font_en or "")
             self._size_combo.set_pt(style.size_pt or 12.0)
+            self._bold_switch.setChecked(bool(style.bold))
+            self._italic_switch.setChecked(bool(style.italic))
             self._set_combo_by_data(self._alignment_combo, style.alignment)
             self._sync_spacing_input(self._space_before_input, resolve_style_paragraph_spacing(style, "before"))
             self._sync_spacing_input(self._space_after_input, resolve_style_paragraph_spacing(style, "after"))
@@ -275,6 +290,8 @@ class CaptionDetail(QWidget):
         if pt is not None:
             style.size_pt = pt
             style.size_display = f"{pt:g}"
+        style.bold = self._bold_switch.isChecked()
+        style.italic = self._italic_switch.isChecked()
         style.alignment = str(self._alignment_combo.currentData() or "center")
         style.space_before_pt = self._space_before_input.value()
         style.space_before_unit = self._space_before_input.unit()

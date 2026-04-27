@@ -153,6 +153,12 @@ def _table_group_summary(cfg: TemplateConfig) -> str:
         layout_map.get(table.layout_mode, table.layout_mode or "智能布局"),
         table_alignment_map.get(getattr(table, "table_alignment", "center"), "表格居中"),
     ]
+    emphasis_parts: list[str] = []
+    if bool(getattr(table, "bold", False)):
+        emphasis_parts.append("加粗")
+    if bool(getattr(table, "italic", False)):
+        emphasis_parts.append("斜体")
+    parts.append(f"字形{'、'.join(emphasis_parts) if emphasis_parts else '常规'}")
     parts.append("首行加粗" if bool(getattr(table, "first_row_bold", False)) else "不首行加粗")
     parts.append("跨页重复表头" if table.repeat_header else "不跨页重复表头")
     return " / ".join(parts)

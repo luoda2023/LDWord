@@ -43,6 +43,26 @@ def _build_compactable_table(doc: Document):
     return table
 
 
+def test_table_format_applies_generic_emphasis_to_all_table_runs():
+    doc = Document()
+    table = _build_weighted_table(doc)
+
+    config = ResolvedConfig()
+    config.table.layout_mode = "keep"
+    config.table.border_mode = "keep"
+    config.table.bold = True
+    config.table.italic = True
+
+    TableFormatModule().apply(doc, config, ChangeTracker(), PipelineContext())
+
+    header_run = table.cell(0, 0).paragraphs[0].runs[0]
+    body_run = table.cell(1, 1).paragraphs[0].runs[0]
+    assert header_run.font.bold is True
+    assert body_run.font.bold is True
+    assert header_run.font.italic is True
+    assert body_run.font.italic is True
+
+
 def _table_layout_type(table) -> str | None:
     layout = table._element.find(qn("w:tblPr"))
     if layout is None:

@@ -701,6 +701,8 @@ class TemplateStylePreview(QWidget):
         except AttributeError:
             font.setFamily(families[-1])
         font.setPixelSize(max(7, int(round(float(table_cfg.size_pt or 10.5) * pt_to_px))))
+        font.setBold(bool(getattr(table_cfg, "bold", False)))
+        font.setItalic(bool(getattr(table_cfg, "italic", False)))
 
         border_mode = str(getattr(table_cfg, "border_mode", "") or "three_line").lower()
         palette = color_palette(getattr(table_cfg, "color_table_accent", "blue"))
@@ -708,7 +710,7 @@ class TemplateStylePreview(QWidget):
 
         header_font = QFont(font)
         header_has_fill = border_mode == "color_table" and variant.header_fill
-        header_font.setBold(bool(getattr(table_cfg, "first_row_bold", False)) or header_has_fill)
+        header_font.setBold(bool(getattr(table_cfg, "bold", False)) or bool(getattr(table_cfg, "first_row_bold", False)) or header_has_fill)
 
         line_spacing_factor = _table_line_spacing_factor(getattr(table_cfg, "line_spacing_mode", "single"))
         metrics = QFontMetricsF(font)
@@ -849,6 +851,8 @@ class TemplateStylePreview(QWidget):
         size_pt = float(getattr(cfg.header_footer, "size_pt", None) or 9.0)
         header_size = max(8, int(round(size_pt * pt_to_px)))
         header_font.setPixelSize(header_size)
+        header_font.setBold(bool(getattr(cfg.header_footer, "bold", False)))
+        header_font.setItalic(bool(getattr(cfg.header_footer, "italic", False)))
         family = str(
             getattr(cfg.header_footer, "font_cn", None)
             or getattr(cfg.header_footer, "font_en", None)

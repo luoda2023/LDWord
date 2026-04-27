@@ -6,10 +6,14 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.config.loader import load_template, save_template
+from src.config.style_variant_semantics import enable_variant_override
+from src.config.template import TemplateConfig
 from src.qt_api import QApplication
+from src.shared.ui.form_row import FormRow
 from src.shared.ui.toast import Toast
 from src.ui.bridge import PanelBridge
 from src.ui.panels.template_panel import TemplatePanel
+from src.ui.panels.template_reference_detail import ReferenceDetail
 
 
 def _app():
@@ -27,6 +31,38 @@ def test_reference_and_caption_details_reuse_shared_controls():
     assert "apply_button_variant(self._save_btn, \"primary\")" in reference_source
     assert "StyledComboBox(" in caption_source
     assert "ToggleSwitch(" in caption_source
+
+
+def test_reference_detail_style_sections_use_one_grid_baseline():
+    app = _app()
+    template = TemplateConfig()
+    enable_variant_override(template, "references_body")
+    detail = ReferenceDetail()
+
+    try:
+        detail.set_template(template)
+        detail.resize(900, 900)
+        detail.show()
+        app.processEvents()
+
+        text_rows = {
+            row.label_text: row
+            for row in detail._text_section.findChildren(FormRow)
+            if row.isVisible()
+        }
+        assert text_rows["字号"].widget.x() == text_rows["中文字体"].widget.x()
+        assert text_rows["字形"].widget.x() == text_rows["英文字体"].widget.x()
+
+        spacing_rows = {
+            row.label_text: row
+            for row in detail._spacing_section.findChildren(FormRow)
+            if row.isVisible()
+        }
+        assert spacing_rows["段前"].widget.x() == spacing_rows["行距类型"].widget.x()
+        assert spacing_rows["段后"].widget.x() == spacing_rows["行距值"].widget.x()
+    finally:
+        detail.close()
+        app.processEvents()
 
 
 def test_template_panel_reference_detail_updates_preview_and_dirty_state():
@@ -134,6 +170,8 @@ def test_template_panel_caption_detail_updates_shared_caption_style():
     try:
         panel._caption_detail._font_en_combo.set_font_name("Arial")
         panel._caption_detail._size_combo.set_pt(11)
+        panel._caption_detail._bold_switch.click()
+        panel._caption_detail._italic_switch.click()
         panel._caption_detail._alignment_combo.setCurrentIndex(
             panel._caption_detail._alignment_combo.findData("left")
         )
@@ -141,6 +179,8 @@ def test_template_panel_caption_detail_updates_shared_caption_style():
 
         assert panel._current_template.styles["caption"].font_en == "Arial"
         assert panel._current_template.styles["caption"].size_pt == 11
+        assert panel._current_template.styles["caption"].bold is True
+        assert panel._current_template.styles["caption"].italic is True
         assert panel._current_template.styles["caption"].alignment == "left"
         assert bridge.is_template_dirty() is True
     finally:

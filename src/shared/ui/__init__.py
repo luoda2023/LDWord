@@ -61,6 +61,7 @@ _EXPORT_MAP: dict[str, tuple[str, str]] = {
     "ThemedRadioButton": (".themed_radio_button", "ThemedRadioButton"),
     "ThemedSlider": (".themed_slider", "ThemedSlider"),
     "Toast": (".toast", "Toast"),
+    "GlobalTooltipController": (".tooltip", "GlobalTooltipController"),
     "Typography": (".typography", "Typography"),
     "TypingIndicator": (".typing_indicator", "TypingIndicator"),
     "apply_button_variant": (".button_style", "apply_button_variant"),
@@ -68,9 +69,12 @@ _EXPORT_MAP: dict[str, tuple[str, str]] = {
     "build_button_stylesheet": (".button_style", "build_button_stylesheet"),
     "build_checkbox_stylesheet": (".selection_control_style", "build_checkbox_stylesheet"),
     "build_text_input_stylesheet": (".input_style", "build_text_input_stylesheet"),
+    "install_global_tooltip": (".tooltip", "install_global_tooltip"),
     "normalize_form_control_heights": (".sizing", "normalize_form_control_heights"),
     "resolved_control_height": (".sizing", "resolved_control_height"),
+    "set_global_tooltip": (".tooltip", "set_global_tooltip"),
     "template_form_row": (".template_form_layout", "template_form_row"),
+    "tooltip_position_for": (".tooltip", "tooltip_position_for"),
 }
 
 __all__ = list(_EXPORT_MAP)

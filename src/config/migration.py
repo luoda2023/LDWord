@@ -148,6 +148,10 @@ def _add_header_footer_compat_aliases(flat: dict[str, Any]) -> None:
         flat.setdefault("header_footer.font_en", flat["header_footer.typography.font_en"])
     if "header_footer.typography.size_pt" in flat:
         flat.setdefault("header_footer.size_pt", flat["header_footer.typography.size_pt"])
+    if "header_footer.typography.bold" in flat:
+        flat.setdefault("header_footer.bold", flat["header_footer.typography.bold"])
+    if "header_footer.typography.italic" in flat:
+        flat.setdefault("header_footer.italic", flat["header_footer.typography.italic"])
 
     if "header_footer.footer.content_mode" in flat:
         footer_mode = str(
@@ -292,6 +296,8 @@ _HEADER_FOOTER_TOP_LEVEL_KEYS = (
     "font_cn",
     "font_en",
     "size_pt",
+    "bold",
+    "italic",
     "update_header",
     "update_page_number",
     "update_header_line",
@@ -594,6 +600,10 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
         typography["font_en"] = normalized["font_en"]
     if "size_pt" in normalized and "size_pt" not in typography:
         typography["size_pt"] = normalized["size_pt"]
+    if "bold" in normalized and "bold" not in typography:
+        typography["bold"] = bool(normalized["bold"])
+    if "italic" in normalized and "italic" not in typography:
+        typography["italic"] = bool(normalized["italic"])
 
     if "mode" not in header:
         header_text = str(normalized.get("header_text", "") or "").strip()

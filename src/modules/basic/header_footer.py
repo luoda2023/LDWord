@@ -247,8 +247,10 @@ def _format_header_footer_font(section, hf_cfg) -> None:
     font_cn = hf_cfg.font_cn
     font_en = hf_cfg.font_en
     size_pt = hf_cfg.size_pt
+    bold = bool(getattr(hf_cfg, "bold", False))
+    italic = bool(getattr(hf_cfg, "italic", False))
 
-    if not any((font_cn, font_en, size_pt)):
+    if not any((font_cn, font_en, size_pt, bold, italic)):
         return
 
     from docx.shared import Pt
@@ -262,6 +264,8 @@ def _format_header_footer_font(section, hf_cfg) -> None:
                     set_run_east_asian_font(run, font_cn)
                 if size_pt:
                     run.font.size = Pt(size_pt)
+                run.font.bold = bold
+                run.font.italic = italic
 
 
 def _add_field_to_paragraph(para, instr: str) -> None:

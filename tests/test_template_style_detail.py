@@ -251,16 +251,21 @@ def test_style_detail_sections_keep_left_right_groups_near_equal_width():
         app.processEvents()
 
 
-def test_style_detail_field_labels_stay_left_aligned():
+def test_style_detail_field_labels_follow_column_alignment():
     _app()
     detail = StyleDetail()
 
     try:
         row_map = {row.label_text: row for row in detail.findChildren(FormRow)}
 
-        for label in ("中文字体", "英文字体", "字号", "字形", "对齐", "特殊缩进", "左缩进", "右缩进", "行距类型", "行距值", "段前", "段后"):
+        leading_labels = ("中文字体", "英文字体", "对齐", "左缩进", "行距类型", "段前")
+        trailing_labels = ("字号", "字形", "特殊缩进", "右缩进", "行距值", "段后")
+        for label in leading_labels:
             assert row_map[label]._label.alignment() & Qt.AlignLeft
             assert not (row_map[label]._label.alignment() & Qt.AlignRight)
+        for label in trailing_labels:
+            assert row_map[label]._label.alignment() & Qt.AlignRight
+            assert not (row_map[label]._label.alignment() & Qt.AlignLeft)
     finally:
         detail.close()
 

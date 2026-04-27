@@ -40,6 +40,7 @@ from src.shared.ui.template_form_layout import (
 )
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
+from src.shared.ui.typography_controls import build_emphasis_widget
 
 
 TABLE_STYLE_OPTIONS_UI: tuple[tuple[str, str], ...] = tuple(
@@ -316,6 +317,16 @@ class TableCaptionDetail(QWidget):
         self._size_combo.currentTextChanged.connect(self._on_form_edited)
         size_row = self._form_row("字号", self._size_combo, parent=self._typography_form)
 
+        self._bold_toggle = ToggleSwitch(self, checked=False)
+        self._bold_toggle.toggled_signal.connect(self._on_form_edited)
+        self._italic_toggle = ToggleSwitch(self, checked=False)
+        self._italic_toggle.toggled_signal.connect(self._on_form_edited)
+        emphasis_row = self._form_row(
+            "字形",
+            build_emphasis_widget(self, self._bold_toggle, self._italic_toggle),
+            parent=self._typography_form,
+        )
+
         self._alignment_combo = StyledComboBox(self)
         for value, label in ALIGNMENT_OPTIONS:
             self._alignment_combo.addItem(label, value)
@@ -324,7 +335,8 @@ class TableCaptionDetail(QWidget):
         self._typography_form.add_grid(
             [
                 [font_cn_row, size_row],
-                [font_en_row, alignment_row],
+                [font_en_row, emphasis_row],
+                [alignment_row],
             ]
         )
         self._typography_card.add_widget(self._typography_form)
@@ -363,7 +375,7 @@ class TableCaptionDetail(QWidget):
         )
 
     def _pair_row(self, *rows: QWidget) -> TemplateFormGrid:
-        return TemplateFormGrid([rows], parent=self, column_gap=12)
+        return TemplateFormGrid([rows], parent=self)
 
     def _sync_layout_dependent_state(self) -> None:
         is_smart = str(self._layout_combo.currentData() or "smart") == "smart"
@@ -433,6 +445,8 @@ class TableCaptionDetail(QWidget):
             self._font_cn_combo.set_font_name(table.font_cn or "")
             self._font_en_combo.set_font_name(table.font_en or "")
             self._size_combo.set_pt(table.size_pt or 12.0)
+            self._bold_toggle.setChecked(bool(getattr(table, "bold", False)))
+            self._italic_toggle.setChecked(bool(getattr(table, "italic", False)))
             self._set_combo_by_data(self._alignment_combo, table.cell_alignment)
             self._first_row_bold_toggle.setChecked(bool(getattr(table, "first_row_bold", False)))
             self._repeat_header_toggle.setChecked(table.repeat_header)
@@ -495,7 +509,7 @@ class TableCaptionDetail(QWidget):
                     key="type",
                     label="字体与对齐",
                     value=f"{table.font_cn or '-'} / {table.font_en or '-'}",
-                    detail=f"字号 {size_text}  单元格 {alignment_label}",
+                    detail=f"字号 {size_text}  字形 {self._emphasis_summary_text(table)}  单元格 {alignment_label}",
                     column_span=3,
                 ),
                 SummaryGridItem(
@@ -515,6 +529,14 @@ class TableCaptionDetail(QWidget):
             "不调整",
         )
         return f"{first_row_text} / {repeat_header_text} / 表格{table_alignment_label}"
+
+    def _emphasis_summary_text(self, table) -> str:
+        parts: list[str] = []
+        if bool(getattr(table, "bold", False)):
+            parts.append("加粗")
+        if bool(getattr(table, "italic", False)):
+            parts.append("斜体")
+        return "、".join(parts) if parts else "常规"
 
     def _width_summary_text(self, table) -> tuple[str, str]:
         border_mode = str(getattr(table, "border_mode", "") or "three_line")
@@ -563,6 +585,8 @@ class TableCaptionDetail(QWidget):
         table.font_cn = self._font_cn_combo.selected_font() or None
         table.font_en = self._font_en_combo.selected_font() or None
         table.size_pt = self._size_combo.current_pt()
+        table.bold = self._bold_toggle.isChecked()
+        table.italic = self._italic_toggle.isChecked()
         table.cell_alignment = str(self._alignment_combo.currentData() or "") or None
         table.first_row_bold = self._first_row_bold_toggle.isChecked()
         table.repeat_header = self._repeat_header_toggle.isChecked()

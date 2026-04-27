@@ -5,14 +5,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.qt_api import QApplication, Qt, QVBoxLayout, QWidget
+from src.qt_api import QApplication, QBoxLayout, QPushButton, Qt, QVBoxLayout, QWidget
 from src.config.template import TemplateConfig
+from src.shared.ui.adaptive_pair_row import AdaptivePairRow
 from src.shared.ui.dashed_separator import DashedSeparator
 from src.shared.ui.flow_layout import FlowLayout
 from src.shared.ui.form_row import FormRow
 from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.table_style_gallery import ColorTableGallery
 from src.shared.ui.template_form_layout import TemplateFormGrid, TemplateSplitColumns, template_form_row
+from src.shared.ui.theme import LIGHT
 from src.shared.ui.toggle_switch import ToggleSwitch
 from src.ui.bridge import PanelBridge
 from src.ui.panels.template_caption_detail import CaptionDetail
@@ -61,10 +63,12 @@ def test_table_and_elements_details_reuse_shared_controls():
     assert ".add_pair(" in header_footer_source
     assert ".add_grid(" in header_footer_source
     assert ".add_split_columns(" not in header_footer_source
-    assert "column_stretches=(0, 0, 0)" in header_footer_source
+    assert "_page_toggle_group" in header_footer_source
+    assert "column_stretches=(0, 0, 0)" not in header_footer_source
     assert "template_form_row" in header_footer_source
     assert "SummaryGrid(" in elements_source
     assert "_sync_dependent_state" in elements_source
+    assert "findChildren(QLineEdit)" not in elements_source
     assert "class HeaderFooterDetailSection" in header_footer_source
     assert "PageNumberPlanSection(owner)" in header_footer_source
     assert "class PageNumberPlanSection" in page_plan_source
@@ -95,20 +99,32 @@ def test_template_table_typography_uses_main_form_baseline():
         assert not detail._typography_card.findChildren(TemplateSplitColumns)
 
         row_map = {row.label_text: row for row in detail.findChildren(FormRow)}
-        for label in ("中文字体", "英文字体", "字号", "对齐"):
+        for label in ("中文字体", "英文字体"):
             row = row_map[label]
             visible_gap = row.widget.x() - row.label_width
             assert row._label.alignment() & Qt.AlignLeft
             assert not (row._label.alignment() & Qt.AlignRight)
             assert row.layout().spacing() == 4
             assert visible_gap <= 20
+        for label in ("字号", "字形"):
+            row = row_map[label]
+            visible_gap = row.widget.x() - row.label_width
+            assert row._label.alignment() & Qt.AlignRight
+            assert not (row._label.alignment() & Qt.AlignLeft)
+            assert row.layout().spacing() == 4
+            assert visible_gap <= 20
+        alignment_row = row_map["对齐"]
+        assert alignment_row._label.alignment() & Qt.AlignLeft
+        assert not (alignment_row._label.alignment() & Qt.AlignRight)
         font_cn_top = row_map["中文字体"].mapTo(detail, row_map["中文字体"].rect().topLeft()).y()
         size_top = row_map["字号"].mapTo(detail, row_map["字号"].rect().topLeft()).y()
         font_en_top = row_map["英文字体"].mapTo(detail, row_map["英文字体"].rect().topLeft()).y()
+        emphasis_top = row_map["字形"].mapTo(detail, row_map["字形"].rect().topLeft()).y()
         alignment_top = row_map["对齐"].mapTo(detail, row_map["对齐"].rect().topLeft()).y()
         assert abs(font_cn_top - size_top) <= 4
-        assert abs(font_en_top - alignment_top) <= 4
+        assert abs(font_en_top - emphasis_top) <= 4
         assert font_en_top > font_cn_top
+        assert alignment_top > font_en_top
     finally:
         detail.close()
         app.processEvents()
@@ -150,7 +166,7 @@ def test_template_form_grid_packs_short_fixed_controls_when_requested():
     grid = TemplateFormGrid(
         [rows],
         parent=host,
-        column_gap=12,
+        column_gap=LIGHT.form_grid_compact_column_gap,
         column_stretches=(0, 0, 0),
     )
     host_layout = QVBoxLayout(host)
@@ -164,6 +180,99 @@ def test_template_form_grid_packs_short_fixed_controls_when_requested():
         assert len({row.label_width for row in rows}) == 1
         assert all(row.widget.x() <= row.label_width + 12 for row in rows)
         assert rows[2].mapTo(host, rows[2].rect().topRight()).x() < 460
+    finally:
+        host.close()
+        app.processEvents()
+
+
+def test_template_form_grid_defaults_to_standard_column_gap():
+    app = _app()
+    host = QWidget()
+    left = template_form_row("Left", QWidget(host), parent=host)
+    right = template_form_row("Right", QWidget(host), parent=host)
+    grid = TemplateFormGrid([[left, right]], parent=host)
+    host_layout = QVBoxLayout(host)
+    host_layout.addWidget(grid)
+
+    try:
+        host.resize(900, 120)
+        host.show()
+        app.processEvents()
+
+        assert grid._column_gap == LIGHT.form_grid_column_gap
+        assert left._label.alignment() & Qt.AlignLeft
+        assert right._label.alignment() & Qt.AlignRight
+        left_right = left.mapTo(host, left.rect().topRight()).x()
+        right_left = right.mapTo(host, right.rect().topLeft()).x()
+        assert right_left - left_right >= LIGHT.form_grid_column_gap - 1
+    finally:
+        host.close()
+        app.processEvents()
+
+
+def test_adaptive_pair_row_ignores_hidden_children_when_resolving_direction():
+    app = _app()
+    left = QPushButton("long long long control")
+    right = QPushButton("long long long control")
+    optional = QPushButton("long long long control")
+    row = AdaptivePairRow(left, right, optional, spacing=12)
+
+    try:
+        row.resize(620, 120)
+        row.show()
+        app.processEvents()
+
+        assert row.layout().direction() == QBoxLayout.TopToBottom
+
+        optional.hide()
+        app.processEvents()
+        assert row.layout().direction() == QBoxLayout.LeftToRight
+    finally:
+        row.close()
+        app.processEvents()
+
+
+def test_inspector_form_standard_grid_uses_standard_column_gap():
+    app = _app()
+    host = QWidget()
+    form = InspectorForm(parent=host)
+    left = template_form_row("Left", QWidget(host), parent=form)
+    right = template_form_row("Right", QWidget(host), parent=form)
+    grid = form.add_grid([[left, right]])
+    host_layout = QVBoxLayout(host)
+    host_layout.addWidget(form)
+
+    try:
+        host.resize(900, 120)
+        host.show()
+        app.processEvents()
+
+        assert grid._column_gap == LIGHT.form_grid_column_gap
+    finally:
+        host.close()
+        app.processEvents()
+
+
+def test_inspector_form_keeps_short_fixed_pairs_compact():
+    app = _app()
+    host = QWidget()
+    form = InspectorForm(parent=host)
+    rows = [
+        template_form_row("A", ToggleSwitch(host), parent=form),
+        template_form_row("B", ToggleSwitch(host), parent=form),
+        template_form_row("C", ToggleSwitch(host), parent=form),
+    ]
+    grid = form.add_pair(*rows, column_stretches=(0, 0, 0))
+    host_layout = QVBoxLayout(host)
+    host_layout.addWidget(form)
+
+    try:
+        host.resize(900, 120)
+        host.show()
+        app.processEvents()
+
+        assert grid._column_gap == LIGHT.form_grid_compact_column_gap
+        assert all(row._label.alignment() & Qt.AlignLeft for row in rows)
     finally:
         host.close()
         app.processEvents()
@@ -262,7 +371,7 @@ def test_inspector_form_normalizes_single_grid_and_split_rows_in_one_scope():
     grid_left = template_form_row("Longer label", QWidget(form), parent=form)
     grid_right = template_form_row("B", QWidget(form), parent=form)
     reserved_left = template_form_row("Reserved left", QWidget(form), parent=form)
-    form.add_grid(
+    grid = form.add_grid(
         [
             [grid_left, grid_right],
             [reserved_left, None],
@@ -280,6 +389,8 @@ def test_inspector_form_normalizes_single_grid_and_split_rows_in_one_scope():
         rows = (single_row, grid_left, grid_right, reserved_left, split_left, split_right)
         expected = max(row.preferred_label_width() for row in rows)
         assert {row.label_width for row in rows} == {expected}
+        assert len(grid._rows[1]) == 1
+        assert reserved_left.width() == grid.width()
     finally:
         host.close()
         app.processEvents()
@@ -305,13 +416,19 @@ def test_template_elements_header_footer_uses_main_form_baseline():
             detail._header_footer_detail._font_cn_row,
             detail._header_footer_detail._font_en_row,
             detail._header_footer_detail._size_row,
+            detail._header_footer_detail._emphasis_row,
+            detail._header_footer_detail._suppress_selector_row,
+        )
+        toggle_rows = (
             detail._header_footer_detail._page_number_row,
             detail._header_footer_detail._header_border_row,
             detail._header_footer_detail._hide_cover_row,
-            detail._header_footer_detail._suppress_selector_row,
         )
         expected_label_width = max(row.preferred_label_width() for row in rows)
         assert {row.label_width for row in rows} == {expected_label_width}
+        expected_toggle_label_width = max(row.preferred_label_width() for row in toggle_rows)
+        assert {row.label_width for row in toggle_rows} == {expected_toggle_label_width}
+        assert detail._header_footer_detail._page_toggle_group.layout().direction() == QBoxLayout.LeftToRight
         assert detail._header_footer_detail._suppress_selector_row._label.alignment() & Qt.AlignTop
         font_cn_top = detail._header_footer_detail._font_cn_row.mapTo(
             detail, detail._header_footer_detail._font_cn_row.rect().topLeft()
@@ -322,16 +439,51 @@ def test_template_elements_header_footer_uses_main_form_baseline():
         font_en_top = detail._header_footer_detail._font_en_row.mapTo(
             detail, detail._header_footer_detail._font_en_row.rect().topLeft()
         ).y()
+        emphasis_top = detail._header_footer_detail._emphasis_row.mapTo(
+            detail, detail._header_footer_detail._emphasis_row.rect().topLeft()
+        ).y()
         assert abs(font_cn_top - size_top) <= 4
+        assert abs(font_en_top - emphasis_top) <= 4
         assert font_en_top > font_cn_top
-        for row in rows:
+        assert len(detail._header_footer_detail._typography_grid._rows[1]) == 2
+        assert detail._header_footer_detail._font_en_row.width() == detail._header_footer_detail._font_cn_row.width()
+        trailing_rows = {
+            detail._header_footer_detail._styleref_level_row,
+            detail._header_footer_detail._header_text_row,
+            detail._header_footer_detail._size_row,
+            detail._header_footer_detail._emphasis_row,
+        }
+        for row in (*rows, *toggle_rows):
             if row.isHidden():
                 continue
             visible_gap = row.widget.x() - row.label_width
-            assert row._label.alignment() & Qt.AlignLeft
-            assert not (row._label.alignment() & Qt.AlignRight)
+            if row in trailing_rows:
+                assert row._label.alignment() & Qt.AlignRight
+                assert not (row._label.alignment() & Qt.AlignLeft)
+            else:
+                assert row._label.alignment() & Qt.AlignLeft
+                assert not (row._label.alignment() & Qt.AlignRight)
             assert row.layout().spacing() == 4
             assert visible_gap <= 20
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_header_footer_hidden_fixed_text_row_does_not_force_stacked_layout():
+    app = _app()
+    detail = ElementsDetail()
+
+    try:
+        detail.set_template(TemplateConfig())
+        detail.resize(700, 800)
+        detail.show()
+        app.processEvents()
+
+        row = detail._header_footer_detail._header_mode_pair.findChild(AdaptivePairRow)
+        assert row is not None
+        assert detail._header_footer_detail._header_text_row.isHidden()
+        assert row.layout().direction() == QBoxLayout.LeftToRight
     finally:
         detail.close()
         app.processEvents()
@@ -383,8 +535,49 @@ def test_template_toc_style_editor_uses_section_level_baseline():
         assert len(label_widths) == 1
         assert row_map["段前"]._suffix is None
         assert row_map["段后"]._suffix is None
+        assert "italic" in detail._toc_detail._toc_style_controls["toc"]
         assert detail._toc_detail._toc_style_controls["toc"]["space_before"].unit_combo.isVisible()
         assert detail._toc_detail._toc_style_controls["toc"]["space_after"].unit_combo.isVisible()
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_template_elements_theme_does_not_restyle_embedded_combo_editors():
+    app = _app()
+    detail = ElementsDetail()
+
+    def assert_embedded_editor_style(widget) -> None:
+        editor = widget.lineEdit()
+        assert editor is not None
+        qss = editor.styleSheet()
+        assert "border: none;" in qss
+        assert "padding: 0;" in qss
+        assert "border: 1px solid" not in qss
+        assert "padding: 4px" not in qss
+
+    try:
+        detail.set_template(TemplateConfig())
+        detail.resize(1280, 900)
+        detail.show()
+        detail.apply_theme()
+        app.processEvents()
+
+        assert "border: 1px solid" in detail._header_text_edit.styleSheet()
+
+        assert_embedded_editor_style(detail._header_footer_detail._font_cn_combo)
+        assert_embedded_editor_style(detail._header_footer_detail._font_en_combo)
+        assert_embedded_editor_style(detail._header_footer_detail._size_combo)
+
+        toc_controls = detail._toc_detail._toc_style_controls["toc"]
+        assert_embedded_editor_style(toc_controls["font_cn"])
+        assert_embedded_editor_style(toc_controls["font_en"])
+        assert_embedded_editor_style(toc_controls["size"])
+
+        spin_editor = toc_controls["space_before"].spin_box.lineEdit()
+        assert "border: none;" in spin_editor.styleSheet()
+        assert "padding: 0;" in spin_editor.styleSheet()
+        assert "border: 1px solid" not in spin_editor.styleSheet()
     finally:
         detail.close()
         app.processEvents()
@@ -443,6 +636,14 @@ def test_template_panel_elements_detail_summary_and_dependent_state():
         assert "全文" in phase_row.section._toggle_button.text()
         assert detail._header_text_row.isHidden() is True
         assert detail._styleref_level_row.isHidden() is False
+
+        detail._bold_toggle.click()
+        detail._italic_toggle.click()
+        app.processEvents()
+
+        assert panel._current_template.header_footer.bold is True
+        assert panel._current_template.header_footer.italic is True
+        assert "\u52a0\u7c97\u3001\u659c\u4f53" in detail._summary_grid.detail_for("header")
 
         detail._header_mode_combo.setCurrentIndex(detail._header_mode_combo.findData("fixed"))
         detail._header_text_edit.setText("固定页眉")
@@ -684,14 +885,19 @@ def test_template_panel_table_detail_supports_width_font_and_alignment_fields():
         panel._table_detail._alignment_combo.setCurrentIndex(
             panel._table_detail._alignment_combo.findData("center")
         )
+        panel._table_detail._bold_toggle.click()
+        panel._table_detail._italic_toggle.click()
         app.processEvents()
 
         assert panel._current_template.table.border_width_pt == 1.5
         assert panel._current_template.table.font_en == "Arial"
+        assert panel._current_template.table.bold is True
+        assert panel._current_template.table.italic is True
         assert panel._current_template.table.table_alignment == "right"
         assert panel._current_template.table.cell_alignment == "center"
         assert "表格右对齐" not in panel._table_detail._summary_grid._items[0].value
         assert "表格右对齐" in panel._table_detail._summary_grid._items[3].value
+        assert "字形 加粗、斜体" in panel._table_detail._summary_grid._items[2].detail
         assert bridge.is_template_dirty() is True
     finally:
         panel.close()
@@ -897,6 +1103,17 @@ def test_template_panel_elements_detail_supports_custom_phase_rows():
         new_phase = detail._page_phase_rows[-1]
         assert new_phase.section.is_expanded() is True
         assert new_phase.phase_id_edit.isHidden() is True
+        start_value_grids = [
+            grid
+            for grid in new_phase.section.findChildren(TemplateFormGrid)
+            if any(
+                getattr(cell, "widget", None) is new_phase.start_value_spin
+                for row in grid._rows
+                for cell in row
+            )
+        ]
+        assert len(start_value_grids) == 1
+        assert [len(row) for row in start_value_grids[0]._rows] == [1]
         assert new_phase.section._toggle_button.text() == "规则 2：未选择范围"
         new_phase.phase_id_edit.setText("appendix")
         app.processEvents()

@@ -12,7 +12,12 @@ from src.shared.ui.theme import bind_theme, get_theme
 
 
 class FeatureToggleRow(QWidget):
-    """Toggle + config action row for optional module features."""
+    """Feature-level toggle plus config action.
+
+    Use this for optional modules or sections where enabling the feature exposes
+    configuration. Do not use it for simple typography/form booleans; use
+    ``OptionToggleChip`` for those compact fields.
+    """
 
     toggled = Signal(bool)
     config_clicked = Signal()

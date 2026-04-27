@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from src.qt_api import QBoxLayout, QSizePolicy, QWidget
+from src.qt_api import QBoxLayout, QEvent, QSizePolicy, QWidget
 
 
 class AdaptivePairRow(QWidget):
@@ -33,6 +33,7 @@ class AdaptivePairRow(QWidget):
                 policy = widget.sizePolicy()
                 policy.setHorizontalPolicy(QSizePolicy.Maximum)
                 widget.setSizePolicy(policy)
+            widget.installEventFilter(self)
             self._layout.addWidget(widget, int(stretch))
         if self._widgets and all(int(stretch) <= 0 for stretch in self._stretches):
             self._layout.addStretch(1)
@@ -47,6 +48,13 @@ class AdaptivePairRow(QWidget):
         self._sync_direction()
         super().showEvent(event)
 
+    def eventFilter(self, watched, event) -> bool:
+        if watched in self._widgets and event.type() in (QEvent.Show, QEvent.Hide):
+            self._last_stacked = None
+            self._sync_direction()
+            self.updateGeometry()
+        return super().eventFilter(watched, event)
+
     def _sync_direction(self) -> None:
         stacked = self.width() < self._stack_breakpoint()
         if stacked == self._last_stacked:
@@ -59,6 +67,7 @@ class AdaptivePairRow(QWidget):
         widths = [
             max(widget.minimumSizeHint().width(), widget.sizeHint().width())
             for widget in self._widgets
+            if not widget.isHidden()
         ]
         if not widths:
             return 0

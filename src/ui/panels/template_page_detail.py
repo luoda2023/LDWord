@@ -306,7 +306,7 @@ class PageSetupDetail(QWidget):
                 ],
                 [
                     self._build_spacing_form_row("装订线", "gutter_cm", parent=self._margin_form),
-                    None,
+                    self._margin_form.placeholder_cell(),
                 ],
             ]
         )

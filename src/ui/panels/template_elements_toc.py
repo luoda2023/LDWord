@@ -22,12 +22,12 @@ from src.shared.engine.toc_style_ops import resolve_toc_style_config
 from src.shared.ui.card import Card
 from src.shared.ui.flow_section import FlowSection
 from src.shared.ui.font_combo import FontCombo
-from src.shared.ui.option_toggle_chip import OptionToggleChip
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.template_form_layout import TemplateFormGrid, template_form_row
 from src.shared.ui.toggle_switch import ToggleSwitch
+from src.shared.ui.typography_controls import build_emphasis_widget
 
 if TYPE_CHECKING:
     from src.ui.panels.template_elements_detail import ElementsDetail
@@ -156,6 +156,8 @@ class TocDetailSection:
 
         bold_toggle = ToggleSwitch(self._owner, checked=False)
         bold_toggle.toggled_signal.connect(lambda *_args, role=role_key: self._on_toc_style_edited(role))
+        italic_toggle = ToggleSwitch(self._owner, checked=False)
+        italic_toggle.toggled_signal.connect(lambda *_args, role=role_key: self._on_toc_style_edited(role))
 
         alignment_combo = StyledComboBox(self._owner)
         for value, label in TOC_ALIGNMENT_OPTIONS:
@@ -223,7 +225,7 @@ class TocDetailSection:
         indent_suffix = QLabel("字", self._owner)
         indent_suffix.setObjectName("tpl_style_unit")
 
-        bold_widget = OptionToggleChip("加粗", bold_toggle, variant="inline", parent=self._owner)
+        emphasis_widget = build_emphasis_widget(self._owner, bold_toggle, italic_toggle)
 
         section.add_widget(
             TemplateFormGrid(
@@ -234,7 +236,7 @@ class TocDetailSection:
                     ),
                     (
                         self._form_row("字号", size_combo, parent=section),
-                        self._form_row("字形", bold_widget, parent=section),
+                        self._form_row("字形", emphasis_widget, parent=section),
                     ),
                     (
                         self._form_row("对齐", alignment_combo, parent=section),
@@ -259,6 +261,7 @@ class TocDetailSection:
             "font_en": font_en,
             "size": size_combo,
             "bold": bold_toggle,
+            "italic": italic_toggle,
             "alignment": alignment_combo,
             "line_type": line_type_combo,
             "line_value": line_value,
@@ -325,6 +328,7 @@ class TocDetailSection:
         controls["font_en"].set_font_name(style.font_en or "")
         controls["size"].set_pt(style.size_pt or 12.0)
         controls["bold"].setChecked(bool(style.bold))
+        controls["italic"].setChecked(bool(style.italic))
         _set_combo_by_data(controls["alignment"], style.alignment or "left")
 
         line_kind = normalize_line_spacing_type(style.line_spacing_type)
@@ -382,6 +386,7 @@ class TocDetailSection:
             style.size_display = display_font_size_with_name(pt)
 
         style.bold = controls["bold"].isChecked()
+        style.italic = controls["italic"].isChecked()
         style.alignment = str(controls["alignment"].currentData() or "left")
 
         line_kind = normalize_line_spacing_type(controls["line_type"].currentData() or "multiple")

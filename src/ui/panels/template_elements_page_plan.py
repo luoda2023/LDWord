@@ -21,7 +21,7 @@ from src.shared.ui.inline_alert import InlineAlert
 from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.styled_spin_box import StyledSpinBox
-from src.shared.ui.template_form_layout import TemplateFormGrid, template_form_row
+from src.shared.ui.template_form_layout import TemplateFormGrid, compact_form_column_gap, template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 
@@ -445,7 +445,7 @@ class PageNumberPlanSection:
         return template_form_row(label, widget, suffix_widget=suffix_widget, parent=parent)
 
     def _pair_row(self, *widgets: QWidget) -> TemplateFormGrid:
-        return TemplateFormGrid([widgets], parent=self._owner, column_gap=12)
+        return TemplateFormGrid([widgets], parent=self._owner, column_gap=compact_form_column_gap())
 
     def _build_page_number_spin(self) -> StyledSpinBox:
         spin = StyledSpinBox(self._owner)
@@ -506,7 +506,6 @@ class PageNumberPlanSection:
         section.add_widget(
             self._pair_row(
                 self._form_row("起始值", start_value_spin, parent=section),
-                QWidget(section),
             )
         )
 

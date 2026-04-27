@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from src.qt_api import QButtonGroup, QPushButton, QSize, QVBoxLayout, QWidget, Signal, Qt
 
 from src.shared.ui.theme import get_theme, bind_theme
+from src.shared.ui.tooltip import set_global_tooltip
 from src.ui.icons.catalog import get_icon, SIDEBAR_ICONS
 from src.ui.panel_registry import MAIN_SPECS, BOTTOM_SPECS
 
@@ -26,7 +27,7 @@ class _NavButton(QPushButton):
     def __init__(self, nav_id: str, tooltip: str, parent=None):
         super().__init__(parent)
         self.nav_id = nav_id
-        self.setToolTip(tooltip)
+        set_global_tooltip(self, tooltip, placement="right", role="nav", delay_ms=80)
         self.setCheckable(True)
         self.setFixedSize(40, 40)
         self.setCursor(Qt.PointingHandCursor)

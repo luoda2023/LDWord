@@ -14,11 +14,12 @@ OptionToggleChipVariant = Literal["contained", "inline"]
 
 
 class OptionToggleChip(QWidget):
-    """Label + ``ToggleSwitch`` primitive for compact boolean choices.
+    """Label + ``ToggleSwitch`` primitive for compact form-row booleans.
 
     Use this when a boolean option is one field inside a form row, for example
-    text style flags such as bold or italic. Larger feature rows with a config
-    action should keep using ``FeatureToggleRow``.
+    text style flags such as bold or italic. Do not use it for module-level
+    feature controls; larger feature rows with a config action should keep
+    using ``FeatureToggleRow``.
     """
 
     _VALID_VARIANTS = {"contained", "inline"}

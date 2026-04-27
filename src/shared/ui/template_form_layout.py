@@ -12,6 +12,18 @@ from src.shared.ui.form_row import FormRow
 from src.shared.ui.theme import bind_theme, get_theme
 
 
+def standard_form_column_gap() -> int:
+    return int(get_theme().form_grid_column_gap)
+
+
+def compact_form_column_gap() -> int:
+    return int(get_theme().form_grid_compact_column_gap)
+
+
+def _resolve_column_gap(column_gap: int | None) -> int:
+    return standard_form_column_gap() if column_gap is None else int(column_gap)
+
+
 def template_form_row(
     label: str,
     widget: QWidget,
@@ -73,12 +85,18 @@ def normalize_template_form_rows(widgets: Sequence[QWidget]) -> None:
         control.set_label_width(max(_current_label_width(control), label_width))
 
 
+def _set_template_form_label_alignment(widgets: Sequence[QWidget], alignment) -> None:
+    for control in _iter_template_label_controls(widgets):
+        if isinstance(control, FormRow):
+            control.set_label_alignment(alignment)
+
+
 def template_form_pair_row(
     left_row: QWidget,
     right_row: QWidget,
     *,
     parent=None,
-    column_gap: int = 12,
+    column_gap: int | None = None,
     column_stretches: Sequence[int] = (1, 1),
     normalize_labels: bool = False,
 ) -> "TemplateFormGrid":
@@ -89,7 +107,7 @@ def template_form_pair_row(
     return TemplateFormGrid(
         [[left_row, right_row]],
         parent=parent,
-        column_gap=column_gap,
+        column_gap=compact_form_column_gap() if column_gap is None else column_gap,
         column_stretches=column_stretches,
     )
 
@@ -101,6 +119,7 @@ class TemplateFormStack(QWidget):
         super().__init__(parent)
         self._widgets = tuple(widgets)
         normalize_template_form_rows(self._widgets)
+        self.refresh_template_form_alignment()
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -112,6 +131,12 @@ class TemplateFormStack(QWidget):
 
     def template_form_label_controls(self) -> list[QWidget]:
         return _iter_template_label_controls(self._widgets)
+
+    def refresh_template_form_alignment(self) -> None:
+        for widget in self._widgets:
+            refresh = getattr(widget, "refresh_template_form_alignment", None)
+            if callable(refresh):
+                refresh()
 
 
 class TemplateSplitColumns(QWidget):
@@ -207,12 +232,19 @@ class TemplateFormGrid(QWidget):
         rows: Sequence[Sequence[QWidget]],
         *,
         parent=None,
-        column_gap: int = 28,
+        column_gap: int | None = None,
         column_stretches: Sequence[int] | None = None,
+        align_trailing_labels: bool | None = None,
         show_row_separators: bool = False,
     ):
         super().__init__(parent)
         self._rows = [tuple(row) for row in rows if row]
+        self._column_gap = _resolve_column_gap(column_gap)
+        self._align_trailing_labels = (
+            self._column_gap >= standard_form_column_gap()
+            if align_trailing_labels is None
+            else bool(align_trailing_labels)
+        )
         self._column_stretches = tuple(column_stretches or ())
         self._separators: list[DashedSeparator] = []
 
@@ -221,12 +253,13 @@ class TemplateFormGrid(QWidget):
         self._layout.setSpacing(0)
 
         self._normalize_columns()
+        self._apply_trailing_label_alignment()
         for row_index, row in enumerate(self._rows):
             self._layout.addWidget(
                 AdaptivePairRow(
                     *row,
                     parent=self,
-                    spacing=column_gap,
+                    spacing=self._column_gap,
                     stretches=self._stretches_for_row(row),
                 )
             )
@@ -248,6 +281,19 @@ class TemplateFormGrid(QWidget):
         for row in self._rows:
             if len(row) > 2:
                 normalize_template_form_rows(row)
+
+    def _apply_trailing_label_alignment(self) -> None:
+        if not self._align_trailing_labels:
+            return
+        column_count = max((len(row) for row in self._rows), default=0)
+        for column_index in range(1, column_count):
+            _set_template_form_label_alignment(
+                [row[column_index] for row in self._rows if column_index < len(row)],
+                Qt.AlignRight | Qt.AlignVCenter,
+            )
+
+    def refresh_template_form_alignment(self) -> None:
+        self._apply_trailing_label_alignment()
 
     def _stretches_for_row(self, row: Sequence[QWidget]) -> tuple[int, ...]:
         if not self._column_stretches:
@@ -271,7 +317,9 @@ __all__ = [
     "TemplateFormGrid",
     "TemplateFormStack",
     "TemplateSplitColumns",
+    "compact_form_column_gap",
     "normalize_template_form_rows",
+    "standard_form_column_gap",
     "template_form_pair_row",
     "template_form_row",
 ]

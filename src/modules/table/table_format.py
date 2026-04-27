@@ -1290,13 +1290,25 @@ def _set_cell_bold(tc, enabled: bool) -> None:
             node.set(qn("w:val"), "1" if enabled else "0")
 
 
+def _set_run_toggle(run, tags: tuple[str, str], enabled: bool) -> None:
+    run_pr = find_or_create(run._element, "w:rPr")
+    for tag in tags:
+        node = find_or_create(run_pr, tag)
+        node.set(qn("w:val"), "1" if enabled else "0")
+
+
 def _format_table_cells(table: Table, tbl_cfg) -> None:
     font_cn = tbl_cfg.font_cn
     font_en = tbl_cfg.font_en
     size_pt = tbl_cfg.size_pt
     alignment = tbl_cfg.cell_alignment
     line_spacing = tbl_cfg.line_spacing_mode
+    bold = bool(getattr(tbl_cfg, "bold", False))
+    italic = bool(getattr(tbl_cfg, "italic", False))
     first_row_bold = bool(getattr(tbl_cfg, "first_row_bold", False))
+    border_mode = str(getattr(tbl_cfg, "border_mode", "") or "").strip().lower()
+    variant = color_variant(getattr(tbl_cfg, "color_table_variant", "header_grid"))
+    color_header_bold = border_mode == "color_table" and bool(variant.header_fill)
 
     for row_index, _col_index, cell in iter_table_cells(table):
         for para in cell.paragraphs:
@@ -1326,8 +1338,11 @@ def _format_table_cells(table: Table, tbl_cfg) -> None:
                     set_run_east_asian_font(run, font_cn)
                 if size_pt:
                     run.font.size = Pt(size_pt)
-                if first_row_bold and row_index == 0:
-                    run.font.bold = True
+                run_bold = bold or (row_index == 0 and (first_row_bold or color_header_bold))
+                run.font.bold = run_bold
+                run.font.italic = italic
+                _set_run_toggle(run, ("w:b", "w:bCs"), run_bold)
+                _set_run_toggle(run, ("w:i", "w:iCs"), italic)
 
 
 def _get_cell_text(tc) -> str:

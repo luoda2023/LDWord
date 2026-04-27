@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from src.qt_api import QEvent, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTimer, QWidget, Signal, Qt
 
+from src.shared.ui.input_metrics import build_input_editor_stylesheet, configure_input_line_edit
 from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import bind_theme, get_theme
 from src.ui.icons.catalog import get_icon
@@ -82,20 +83,7 @@ class SearchInput(QWidget):
 
     @staticmethod
     def build_input_stylesheet(theme) -> str:
-        return f"""
-            QLineEdit {{
-                border: none;
-                background: transparent;
-                color: {theme.text_primary};
-                font-size: {theme.font_size_md}px;
-                padding: {theme.input_padding_y}px 0;
-                selection-background-color: {theme.primary};
-                selection-color: {theme.text_on_primary};
-            }}
-            QLineEdit::placeholder {{
-                color: {theme.text_hint};
-            }}
-        """
+        return build_input_editor_stylesheet(theme)
 
     @staticmethod
     def build_clear_button_stylesheet(theme) -> str:
@@ -148,7 +136,7 @@ class SearchInput(QWidget):
         self._separator.setFixedSize(theme.input_separator_width, theme.input_separator_height)
         self._separator.setStyleSheet(self.build_separator_stylesheet(theme, focused=self._is_focused))
 
-        self._input.setStyleSheet(self.build_input_stylesheet(theme))
+        configure_input_line_edit(self._input, theme, stylesheet=self.build_input_stylesheet(theme))
 
         self._clear_btn.setFixedSize(theme.input_clear_button_size, theme.input_clear_button_size)
         self._clear_btn.setIcon(get_icon("x", theme.input_icon_size, theme.text_hint))

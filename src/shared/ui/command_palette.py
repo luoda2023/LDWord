@@ -16,8 +16,9 @@ from src.qt_api import (
     Signal,
 )
 
-from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.divider import Divider
+from src.shared.ui.input_metrics import build_input_editor_stylesheet, configure_input_line_edit
+from src.shared.ui.theme import bind_theme, get_theme
 
 
 class CommandPalette(QWidget):
@@ -99,13 +100,10 @@ class CommandPalette(QWidget):
             }}
             """
         )
-        self._search_edit.setStyleSheet(
-            f"""
-            QLineEdit {{
-                background: transparent; border: none;
-                color: {t.text_primary}; font-size: {t.font_size_lg}px;
-            }}
-            """
+        configure_input_line_edit(
+            self._search_edit,
+            t,
+            stylesheet=build_input_editor_stylesheet(t, font_size=t.font_size_lg),
         )
         self._search_icon.setStyleSheet(
             "background:transparent;border:none;font-size:16px;"

@@ -33,10 +33,23 @@ def test_toc_style_sync_updates_heading_and_entry_styles():
         doc.styles.add_style("TOC Heading", WD_STYLE_TYPE.PARAGRAPH)
 
     config_styles = {
-        "toc_title": StyleConfig(font_cn="Heiti", font_en="Arial", size_pt=16, alignment="center"),
+        "toc_title": StyleConfig(
+            font_cn="Heiti",
+            font_en="Arial",
+            size_pt=16,
+            alignment="center",
+            bold=True,
+            italic=True,
+        ),
         "toc_chapter": StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left"),
         "toc_level1": StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=12, alignment="left"),
-        "toc_level2": StyleConfig(font_cn="FangSong", font_en="Calibri", size_pt=11, alignment="left"),
+        "toc_level2": StyleConfig(
+            font_cn="FangSong",
+            font_en="Calibri",
+            size_pt=11,
+            alignment="left",
+            italic=True,
+        ),
     }
 
     changed = sync_toc_styles(doc, config_styles)
@@ -51,6 +64,9 @@ def test_toc_style_sync_updates_heading_and_entry_styles():
     assert toc_1.font.size.pt == 14
     assert toc_2.font.size.pt == 12
     assert toc_3.font.size.pt == 11
+    assert toc_heading.font.bold is True
+    assert toc_heading.font.italic is True
+    assert toc_3.font.italic is True
 
     toc_heading_outline = toc_heading.element.find(qn("w:pPr")).find(qn("w:outlineLvl"))
     assert toc_heading_outline is not None
@@ -127,9 +143,22 @@ def test_toc_formats_existing_paragraphs_using_doc_tree_range():
     entry = doc.add_paragraph("1.1 Intro\t1")
 
     config = ResolvedConfig()
-    config.styles["toc_title"] = StyleConfig(font_cn="Heiti", font_en="Arial", size_pt=16, alignment="center")
+    config.styles["toc_title"] = StyleConfig(
+        font_cn="Heiti",
+        font_en="Arial",
+        size_pt=16,
+        alignment="center",
+        bold=True,
+        italic=True,
+    )
     config.styles["toc_chapter"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
-    config.styles["toc_level1"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=12, alignment="left")
+    config.styles["toc_level1"] = StyleConfig(
+        font_cn="Songti",
+        font_en="Times New Roman",
+        size_pt=12,
+        alignment="left",
+        italic=True,
+    )
     sync_toc_styles(doc, config.styles)
 
     context = SimpleNamespace(
@@ -141,6 +170,9 @@ def test_toc_formats_existing_paragraphs_using_doc_tree_range():
     assert changed == 2
     assert title.style.name == "TOC Heading"
     assert entry.style.name == "TOC 2"
+    assert title.runs[0].font.bold is True
+    assert title.runs[0].font.italic is True
+    assert entry.runs[0].font.italic is True
     title_outline = title._element.find(qn("w:pPr")).find(qn("w:outlineLvl"))
     assert title_outline is not None
     assert title_outline.get(qn("w:val")) == "9"

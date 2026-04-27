@@ -96,7 +96,7 @@ def test_template_file_management_buttons_use_icon_system_not_emoji():
 def test_heading_numbering_pair_rows_delegate_to_template_form_grid():
     source = (ROOT / "src/ui/panels/heading_numbering_panel.py").read_text(encoding="utf-8")
 
-    assert "template_form_pair_row" in source
+    assert "TemplateFormGrid" in source
     assert "_build_pair_row(" not in source
     assert "def _normalize_form_rows" not in source
 

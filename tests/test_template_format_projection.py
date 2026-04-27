@@ -52,11 +52,15 @@ def test_table_preview_summary_includes_table_behavior_flags():
 
     assert "不首行加粗" in default_group_map["table"].summary
     assert "不跨页重复表头" in default_group_map["table"].summary
+    assert "\u5b57\u5f62\u5e38\u89c4" in default_group_map["table"].summary
 
+    cfg.table.bold = True
+    cfg.table.italic = True
     cfg.table.first_row_bold = True
     cfg.table.repeat_header = True
     enabled_groups = build_template_preview_groups(cfg)
     enabled_group_map = {group.group_id: group for group in enabled_groups}
 
+    assert "\u5b57\u5f62\u52a0\u7c97\u3001\u659c\u4f53" in enabled_group_map["table"].summary
     assert "首行加粗" in enabled_group_map["table"].summary
     assert "跨页重复表头" in enabled_group_map["table"].summary

@@ -186,6 +186,8 @@ def _sync_heading_style_definitions(doc: Document, config: ResolvedConfig) -> in
             font_cn=style_config.font_cn,
             font_en=style_config.font_en,
             size_pt=size_pt,
+            bold=style_config.bold,
+            italic=style_config.italic,
         ):
             count += 1
 

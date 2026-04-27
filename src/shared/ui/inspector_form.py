@@ -9,6 +9,7 @@ from src.qt_api import QSizePolicy, QVBoxLayout, QWidget
 from src.shared.ui.template_form_layout import (
     TemplateFormGrid,
     TemplateSplitColumns,
+    compact_form_column_gap,
     normalize_template_form_rows,
     template_form_row,
 )
@@ -54,13 +55,14 @@ class InspectorForm(QWidget):
     def add_pair(
         self,
         *rows: QWidget,
-        column_gap: int = 12,
+        column_gap: int | None = None,
         column_stretches: Sequence[int] | None = None,
     ) -> TemplateFormGrid:
+        resolved_gap = self._resolve_column_gap(column_gap, column_stretches)
         grid = TemplateFormGrid(
             [rows],
             parent=self,
-            column_gap=column_gap,
+            column_gap=resolved_gap,
             column_stretches=column_stretches,
         )
         self.add_widget(grid)
@@ -70,16 +72,14 @@ class InspectorForm(QWidget):
         self,
         rows: Sequence[Sequence[QWidget | None]],
         *,
-        column_gap: int = 12,
+        column_gap: int | None = None,
         column_stretches: Sequence[int] | None = None,
     ) -> TemplateFormGrid:
+        resolved_gap = self._resolve_column_gap(column_gap, column_stretches)
         grid = TemplateFormGrid(
-            [
-                [widget if widget is not None else self._empty_cell() for widget in row]
-                for row in rows
-            ],
+            [self._normalize_grid_row(row) for row in rows],
             parent=self,
-            column_gap=column_gap,
+            column_gap=resolved_gap,
             column_stretches=column_stretches,
         )
         self.add_widget(grid)
@@ -112,6 +112,10 @@ class InspectorForm(QWidget):
 
     def _normalize_label_scope(self) -> None:
         normalize_template_form_rows(self._label_scope)
+        for item in self._label_scope:
+            refresh = getattr(item, "refresh_template_form_alignment", None)
+            if callable(refresh):
+                refresh()
 
     def _empty_cell(self) -> QWidget:
         cell = QWidget(self)
@@ -119,6 +123,28 @@ class InspectorForm(QWidget):
         cell.setFixedHeight(0)
         cell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         return cell
+
+    def placeholder_cell(self) -> QWidget:
+        """Return an explicit empty grid cell that still reserves its column."""
+
+        return self._empty_cell()
+
+    def _normalize_grid_row(self, row: Sequence[QWidget | None]) -> list[QWidget]:
+        cells = list(row)
+        while cells and cells[-1] is None:
+            cells.pop()
+        return [widget if widget is not None else self._empty_cell() for widget in cells]
+
+    def _resolve_column_gap(
+        self,
+        column_gap: int | None,
+        column_stretches: Sequence[int] | None,
+    ) -> int | None:
+        if column_gap is not None:
+            return column_gap
+        if column_stretches and all(int(stretch) <= 0 for stretch in column_stretches):
+            return compact_form_column_gap()
+        return None
 
     def template_form_label_controls(self) -> list[QWidget]:
         controls: list[QWidget] = []

@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.qt_api import QApplication
+from src.qt_api import QApplication, Qt
 from src.qt_api import QVBoxLayout
 from src.qt_api import QWidget
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
@@ -14,6 +14,7 @@ from src.shared.ui.sizing import (
     normalize_form_control_heights,
     resolved_control_height,
 )
+from src.shared.ui.input_metrics import INPUT_EDITOR_TEXT_MARGIN_LEFT
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.styled_spin_box import StyledSpinBox
@@ -64,6 +65,30 @@ def test_normalize_form_control_heights_unifies_mixed_inputs():
     finally:
         host.close()
         app.processEvents()
+
+
+def test_styled_spin_box_normalizes_editor_text_inset():
+    app = _app()
+    spin = StyledSpinBox()
+
+    try:
+        spin.resize(240, 32)
+        spin.show()
+        app.processEvents()
+        editor = spin.lineEdit()
+        theme = get_theme()
+
+        assert editor is not None
+        assert editor.alignment() & Qt.AlignLeft
+        assert editor.alignment() & Qt.AlignVCenter
+        assert not editor.hasFrame()
+        assert editor.textMargins().left() == INPUT_EDITOR_TEXT_MARGIN_LEFT
+        assert editor.geometry().x() == theme.input_padding_x
+        assert editor.geometry().height() == spin.height()
+        assert editor.geometry().x() + editor.geometry().width() == spin.width() - theme.spin_button_width
+    finally:
+        spin.close()
+        spin.deleteLater()
 
 
 def test_surface_card_module_builds_on_shared_rounded_surface():

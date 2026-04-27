@@ -88,9 +88,14 @@ from src.shared.ui.sizing import (
     normalize_form_control_heights,
     resolved_control_height,
 )
-from src.shared.ui.template_form_layout import template_form_pair_row, template_form_row
+from src.shared.ui.template_form_layout import (
+    TemplateFormGrid,
+    compact_form_column_gap,
+    template_form_row,
+)
 from src.shared.ui.theme import get_theme, bind_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
+from src.shared.ui.typography_controls import build_emphasis_widget
 from src.ui.adapters.heading_numbering_adapter import HeadingNumberingAdapter
 from src.ui.base_panel import BasePanel
 from src.ui.heading_numbering_logic import (
@@ -1056,15 +1061,6 @@ class HeadingNumberingPanel(BasePanel):
             self._core_style_cb.addItem(desc, key)
         self._core_style_cb.currentIndexChanged.connect(self._on_editor_changed)
         core_style_row = self._compact_form_row("编号样式", self._core_style_cb, parent=self)
-        parent_layout.addWidget(
-            template_form_pair_row(
-                enabled_row,
-                core_style_row,
-                parent=self,
-                column_stretches=(0, 1),
-                normalize_labels=True,
-            )
-        )
 
         # Row 2: Prefix / Suffix
         self._prefix_edit = QLineEdit(self)
@@ -1079,15 +1075,6 @@ class HeadingNumberingPanel(BasePanel):
 
         prefix_row = self._compact_form_row("前缀", self._prefix_edit, parent=self)
         suffix_row = self._compact_form_row("后缀", self._suffix_edit, parent=self)
-        parent_layout.addWidget(
-            template_form_pair_row(
-                prefix_row,
-                suffix_row,
-                parent=self,
-                column_stretches=(1, 1),
-                normalize_labels=True,
-            )
-        )
 
         # Row 3: Chain + separator
         self._chain_cb = StyledComboBox(self)
@@ -1102,11 +1089,12 @@ class HeadingNumberingPanel(BasePanel):
         self._chain_sep_lbl_row = self._compact_form_row("级间分隔符", self._chain_sep_edit, parent=self)
         chain_row = self._compact_form_row("带上上级编号", self._chain_cb, parent=self)
         parent_layout.addWidget(
-            template_form_pair_row(
-                chain_row,
-                self._chain_sep_lbl_row,
-                parent=self,
-                column_stretches=(1, 0),
+            self._form_grid(
+                [
+                    [enabled_row, core_style_row],
+                    [prefix_row, suffix_row],
+                    [chain_row, self._chain_sep_lbl_row],
+                ]
             )
         )
 
@@ -1122,14 +1110,6 @@ class HeadingNumberingPanel(BasePanel):
         )
         self._start_at_input.value_changed.connect(self._on_start_at_changed)
         start_at_row = self._compact_form_row("起始编号", self._start_at_input, parent=self)
-        parent_layout.addWidget(
-            template_form_pair_row(
-                toc_row,
-                start_at_row,
-                parent=self,
-                column_stretches=(0, 1),
-            )
-        )
 
         # Row 2: Reference style + title separator
         self._ref_style_cb = StyledComboBox(self)
@@ -1146,14 +1126,12 @@ class HeadingNumberingPanel(BasePanel):
         self._title_sep_edit.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._title_sep_edit.textChanged.connect(self._on_title_sep_edited)
         title_sep_row = self._compact_form_row("标题分隔符", self._title_sep_edit, parent=self)
-        title_sep_row.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         parent_layout.addWidget(
-            template_form_pair_row(
-                ref_style_row,
-                title_sep_row,
-                parent=self,
-                column_stretches=(1, 0),
-                normalize_labels=True,
+            self._form_grid(
+                [
+                    [toc_row, start_at_row],
+                    [ref_style_row, title_sep_row],
+                ]
             )
         )
         self._ref_style_hint_label = QLabel("", self)
@@ -1190,15 +1168,6 @@ class HeadingNumberingPanel(BasePanel):
         self._hd_font_en.font_changed.connect(self._on_heading_format_edited)
         font_cn_row = self._compact_form_row("中文字体", self._hd_font_cn, parent=self)
         font_en_row = self._compact_form_row("英文字体", self._hd_font_en, parent=self)
-        parent_layout.addWidget(
-            template_form_pair_row(
-                font_cn_row,
-                font_en_row,
-                parent=self,
-                column_stretches=(1, 1),
-                normalize_labels=True,
-            )
-        )
 
         # Size + emphasis row
         self._hd_size_combo = SizeCombo(self)
@@ -1210,32 +1179,10 @@ class HeadingNumberingPanel(BasePanel):
         self._hd_italic = ToggleSwitch(self, checked=False)
         self._hd_italic.toggled_signal.connect(self._on_heading_format_edited)
 
-        emphasis_w = QWidget(self)
-        em_layout = QHBoxLayout(emphasis_w)
-        em_layout.setContentsMargins(0, 0, 0, 0)
-        em_layout.setSpacing(8)
-        bold_lbl = QLabel("加粗")
-        self._desc_labels.append(bold_lbl)
-        italic_lbl = QLabel("斜体")
-        self._desc_labels.append(italic_lbl)
-        em_layout.addWidget(bold_lbl)
-        em_layout.addWidget(self._hd_bold)
-        em_layout.addSpacing(8)
-        em_layout.addWidget(italic_lbl)
-        em_layout.addWidget(self._hd_italic)
-        em_layout.addStretch(1)
+        emphasis_w = build_emphasis_widget(self, self._hd_bold, self._hd_italic)
 
         size_row = self._compact_form_row("字号", self._hd_size_combo, parent=self)
-        emphasis_row = self._compact_form_row("强调", emphasis_w, parent=self)
-        parent_layout.addWidget(
-            template_form_pair_row(
-                size_row,
-                emphasis_row,
-                parent=self,
-                column_stretches=(1, 1),
-                normalize_labels=True,
-            )
-        )
+        emphasis_row = self._compact_form_row("字形", emphasis_w, parent=self)
 
         # Alignment
         self._hd_alignment = StyledComboBox(self)
@@ -1243,9 +1190,7 @@ class HeadingNumberingPanel(BasePanel):
         for value, label in ALIGNMENT_OPTIONS:
             self._hd_alignment.addItem(label, value)
         self._hd_alignment.currentIndexChanged.connect(self._on_heading_format_edited)
-        parent_layout.addWidget(
-            self._compact_form_row("对齐方式", self._hd_alignment, parent=self)
-        )
+        alignment_row = self._compact_form_row("对齐方式", self._hd_alignment, parent=self)
 
         # Spacing: line type + line value
         self._hd_line_type = StyledComboBox(self)
@@ -1285,15 +1230,6 @@ class HeadingNumberingPanel(BasePanel):
             parent=self,
             suffix=hd_lv_suffix,
         )
-        parent_layout.addWidget(
-            template_form_pair_row(
-                line_type_row,
-                line_value_row,
-                parent=self,
-                column_stretches=(1, 1),
-                normalize_labels=True,
-            )
-        )
 
         space_before_row = self._compact_form_row(
             "段前",
@@ -1308,12 +1244,14 @@ class HeadingNumberingPanel(BasePanel):
             suffix=hd_sa_suffix,
         )
         parent_layout.addWidget(
-            template_form_pair_row(
-                space_before_row,
-                space_after_row,
-                parent=self,
-                column_stretches=(1, 1),
-                normalize_labels=True,
+            self._form_grid(
+                [
+                    [font_cn_row, font_en_row],
+                    [size_row, emphasis_row],
+                    [alignment_row],
+                    [line_type_row, line_value_row],
+                    [space_before_row, space_after_row],
+                ]
             )
         )
 
@@ -1364,14 +1302,6 @@ class HeadingNumberingPanel(BasePanel):
         self._nn_font_cn.font_changed.connect(self._on_nn_style_edited)
         self._nn_font_en = FontCombo(lang="en", parent=self)
         self._nn_font_en.font_changed.connect(self._on_nn_style_edited)
-        nn_style_layout.addWidget(
-            template_form_pair_row(
-                self._compact_form_row("中文字体", self._nn_font_cn, parent=self),
-                self._compact_form_row("英文字体", self._nn_font_en, parent=self),
-                parent=self,
-                column_stretches=(0, 1),
-            )
-        )
 
         self._nn_size_combo = SizeCombo(self)
         self._nn_size_combo.size_changed.connect(self._on_nn_style_edited)
@@ -1380,30 +1310,26 @@ class HeadingNumberingPanel(BasePanel):
         self._nn_bold.toggled_signal.connect(self._on_nn_style_edited)
         self._nn_italic = ToggleSwitch(self, checked=False)
         self._nn_italic.toggled_signal.connect(self._on_nn_style_edited)
-        nn_emphasis = QWidget(self)
-        nn_emphasis_layout = QHBoxLayout(nn_emphasis)
-        nn_emphasis_layout.setContentsMargins(0, 0, 0, 0)
-        nn_emphasis_layout.setSpacing(8)
-        nn_emphasis_layout.addWidget(QLabel("加粗", self))
-        nn_emphasis_layout.addWidget(self._nn_bold)
-        nn_emphasis_layout.addWidget(QLabel("斜体", self))
-        nn_emphasis_layout.addWidget(self._nn_italic)
-        nn_emphasis_layout.addStretch(1)
-        nn_style_layout.addWidget(
-            template_form_pair_row(
-                self._compact_form_row("字号", self._nn_size_combo, parent=self),
-                self._compact_form_row("字形", nn_emphasis, parent=self),
-                parent=self,
-                column_stretches=(0, 1),
-            )
-        )
+        nn_emphasis = build_emphasis_widget(self, self._nn_bold, self._nn_italic)
 
         self._nn_alignment = StyledComboBox(self)
         for value, label in ALIGNMENT_OPTIONS:
             self._nn_alignment.addItem(label, value)
         self._nn_alignment.currentIndexChanged.connect(self._on_nn_style_edited)
         nn_style_layout.addWidget(
-            self._compact_form_row("对齐方式", self._nn_alignment, parent=self)
+            self._form_grid(
+                [
+                    [
+                        self._compact_form_row("中文字体", self._nn_font_cn, parent=self),
+                        self._compact_form_row("英文字体", self._nn_font_en, parent=self),
+                    ],
+                    [
+                        self._compact_form_row("字号", self._nn_size_combo, parent=self),
+                        self._compact_form_row("字形", nn_emphasis, parent=self),
+                    ],
+                    [self._compact_form_row("对齐方式", self._nn_alignment, parent=self)],
+                ]
+            )
         )
 
         self._nn_section.add_widget(self._nn_style_editor)
@@ -1463,6 +1389,13 @@ class HeadingNumberingPanel(BasePanel):
         if label_width is None:
             row.set_label_width(row.preferred_label_width())
         return row
+
+    def _form_grid(self, rows: list[list[QWidget]]) -> TemplateFormGrid:
+        return TemplateFormGrid(
+            rows,
+            parent=self,
+            column_gap=compact_form_column_gap(),
+        )
 
     # ━━ Sidebar List ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

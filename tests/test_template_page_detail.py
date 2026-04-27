@@ -152,7 +152,7 @@ def test_page_setup_detail_split_column_combos_expand_to_fill_available_width():
         app.processEvents()
 
 
-def test_page_setup_detail_right_column_form_rows_left_align_labels_for_visual_balance():
+def test_page_setup_detail_right_column_form_rows_hug_their_controls():
     app = _app()
     detail = PageSetupDetail()
     detail.set_template(TemplateConfig())
@@ -162,10 +162,10 @@ def test_page_setup_detail_right_column_form_rows_left_align_labels_for_visual_b
         detail.show()
         app.processEvents()
         row_map = {row.label_text: row for row in detail.findChildren(FormRow)}
-        assert row_map["分节方式"]._label.alignment() & Qt.AlignLeft
-        assert row_map["下边距"]._label.alignment() & Qt.AlignLeft
-        assert row_map["右边距"]._label.alignment() & Qt.AlignLeft
-        assert row_map["页脚距离"]._label.alignment() & Qt.AlignLeft
+        assert row_map["分节方式"]._label.alignment() & Qt.AlignRight
+        assert row_map["下边距"]._label.alignment() & Qt.AlignRight
+        assert row_map["右边距"]._label.alignment() & Qt.AlignRight
+        assert row_map["页脚距离"]._label.alignment() & Qt.AlignRight
         assert row_map["分节方式"].widget.geometry().x() - row_map["分节方式"].label_width <= 20
         assert row_map["下边距"].widget.geometry().x() - row_map["下边距"].label_width <= 20
         assert row_map["右边距"].widget.geometry().x() - row_map["右边距"].label_width <= 20

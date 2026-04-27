@@ -14,9 +14,11 @@ def apply_style_text_format(
     font_cn: str | None = None,
     font_en: str | None = None,
     size_pt: float | None = None,
+    bold: bool | None = None,
+    italic: bool | None = None,
 ) -> bool:
     """Apply text-level formatting to a Word style definition."""
-    if not any((font_cn, font_en, size_pt is not None)):
+    if not any((font_cn, font_en, size_pt is not None, bold is not None, italic is not None)):
         return False
 
     changed = False
@@ -46,6 +48,22 @@ def apply_style_text_format(
         changed |= _set_attr(find_or_create(r_pr, "w:sz"), "w:val", half_points)
         changed |= _set_attr(find_or_create(r_pr, "w:szCs"), "w:val", half_points)
 
+    if bold is not None:
+        enabled = bool(bold)
+        if style.font.bold != enabled:
+            changed = True
+        style.font.bold = enabled
+        changed |= _set_toggle(r_pr, "w:b", enabled)
+        changed |= _set_toggle(r_pr, "w:bCs", enabled)
+
+    if italic is not None:
+        enabled = bool(italic)
+        if style.font.italic != enabled:
+            changed = True
+        style.font.italic = enabled
+        changed |= _set_toggle(r_pr, "w:i", enabled)
+        changed |= _set_toggle(r_pr, "w:iCs", enabled)
+
     return changed
 
 
@@ -55,3 +73,9 @@ def _set_attr(element, attr: str, value: str) -> bool:
         return False
     element.set(qn(attr), value)
     return True
+
+
+def _set_toggle(parent, tag: str, enabled: bool) -> bool:
+    element = find_or_create(parent, tag)
+    value = "1" if enabled else "0"
+    return _set_attr(element, "w:val", value)

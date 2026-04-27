@@ -5,14 +5,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.config.template import TemplateConfig
-from src.qt_api import QLineEdit, QWidget, Qt
+from src.qt_api import QHBoxLayout, QLineEdit, QWidget, Qt
 from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
+from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.styled_combo_box import StyledComboBox
-from src.shared.ui.template_form_layout import template_form_row
+from src.shared.ui.template_form_layout import normalize_template_form_rows, template_form_row
+from src.shared.ui.theme import get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
+from src.shared.ui.typography_controls import build_emphasis_widget
 from src.ui.panels.template_elements_page_plan import (
     PageNumberPlanSection,
     PageSelectorEditor,
@@ -63,6 +66,9 @@ class HeaderFooterDetailSection:
             "_font_en_row",
             "_size_combo",
             "_size_row",
+            "_bold_toggle",
+            "_italic_toggle",
+            "_emphasis_row",
             "_page_number_toggle",
             "_page_number_row",
             "_header_border_toggle",
@@ -124,10 +130,20 @@ class HeaderFooterDetailSection:
         self._size_combo.size_changed.connect(self._owner._on_structure_edited)
         self._size_combo.currentTextChanged.connect(self._owner._on_structure_edited)
         self._size_row = self._form_row("字号", self._size_combo, parent=self._inspector_form)
+
+        self._bold_toggle = ToggleSwitch(self._owner, checked=False)
+        self._bold_toggle.toggled_signal.connect(self._owner._on_structure_edited)
+        self._italic_toggle = ToggleSwitch(self._owner, checked=False)
+        self._italic_toggle.toggled_signal.connect(self._owner._on_structure_edited)
+        self._emphasis_row = self._form_row(
+            "字形",
+            build_emphasis_widget(self._owner, self._bold_toggle, self._italic_toggle),
+            parent=self._inspector_form,
+        )
         self._typography_grid = self._inspector_form.add_grid(
             [
                 [self._font_cn_row, self._size_row],
-                [self._font_en_row, None],
+                [self._font_en_row, self._emphasis_row],
             ],
         )
 
@@ -142,12 +158,16 @@ class HeaderFooterDetailSection:
         self._hide_cover_toggle = ToggleSwitch(self._owner, checked=True)
         self._hide_cover_toggle.toggled_signal.connect(self._owner._on_structure_edited)
         self._hide_cover_row = self._form_row("起始前留空", self._hide_cover_toggle, parent=self._inspector_form)
-        self._page_toggle_pair = self._inspector_form.add_pair(
-            self._page_number_row,
-            self._header_border_row,
-            self._hide_cover_row,
-            column_stretches=(0, 0, 0),
-        )
+        toggle_rows = [self._page_number_row, self._header_border_row, self._hide_cover_row]
+        normalize_template_form_rows(toggle_rows)
+        self._page_toggle_group = QWidget(self._inspector_form)
+        toggle_layout = QHBoxLayout(self._page_toggle_group)
+        toggle_layout.setContentsMargins(0, 0, 0, 0)
+        toggle_layout.setSpacing(16)
+        for row in toggle_rows:
+            toggle_layout.addWidget(row, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        toggle_layout.addStretch(1)
+        self._inspector_form.add_widget(self._page_toggle_group)
 
         self._suppress_selector_editor = PageSelectorEditor(
             self.section,
@@ -199,6 +219,8 @@ class HeaderFooterDetailSection:
         self._font_cn_combo.set_font_name(header_footer.font_cn or "")
         self._font_en_combo.set_font_name(header_footer.font_en or "")
         self._size_combo.set_pt(header_footer.size_pt or 12.0)
+        self._bold_toggle.setChecked(bool(getattr(header_footer, "bold", False)))
+        self._italic_toggle.setChecked(bool(getattr(header_footer, "italic", False)))
         self._page_number_toggle.setChecked(header_footer.page_number_enabled)
         self._header_border_toggle.setChecked(header_footer.header_border)
         suppress_selectors = default_suppress_header_footer_selectors(header_footer)
@@ -213,6 +235,8 @@ class HeaderFooterDetailSection:
         header_footer.font_cn = self._font_cn_combo.selected_font() or None
         header_footer.font_en = self._font_en_combo.selected_font() or None
         header_footer.size_pt = self._size_combo.current_pt()
+        header_footer.bold = self._bold_toggle.isChecked()
+        header_footer.italic = self._italic_toggle.isChecked()
         header_footer.page_number_enabled = self._page_number_toggle.isChecked()
         header_footer.header_border = self._header_border_toggle.isChecked()
         suppress_enabled = self._hide_cover_toggle.isChecked()
@@ -237,6 +261,7 @@ class HeaderFooterDetailSection:
         self._font_cn_row.setEnabled(typography_enabled)
         self._font_en_row.setEnabled(typography_enabled)
         self._size_row.setEnabled(typography_enabled)
+        self._emphasis_row.setEnabled(typography_enabled)
         self._header_border_row.setEnabled(header_outputs)
         self._suppress_selector_row.setVisible(self._hide_cover_toggle.isChecked())
         self._suppress_selector_row.setEnabled(self._hide_cover_toggle.isChecked())
@@ -247,6 +272,9 @@ class HeaderFooterDetailSection:
         self._page_plan.refresh_validation_alert(template)
 
     def apply_theme(self) -> None:
+        self._header_text_edit.setStyleSheet(
+            build_text_input_stylesheet(get_theme(), selector="QLineEdit")
+        )
         self._page_plan.apply_theme()
 
 

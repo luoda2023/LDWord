@@ -9,7 +9,6 @@ from src.config.template import PageNumberPhaseConfig, TemplateConfig
 from src.qt_api import (
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QSize,
     QSizePolicy,
@@ -19,7 +18,6 @@ from src.qt_api import (
 )
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
-from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
 from src.shared.ui.theme import bind_theme, get_theme
 from src.ui.panels.template_elements_header_footer import (
@@ -63,6 +61,15 @@ def _size_text(size_pt: float | None) -> str:
     if size_pt in (None, ""):
         return "默认字号"
     return f"{float(size_pt):g} 磅"
+
+
+def _emphasis_text(config) -> str:
+    parts: list[str] = []
+    if bool(getattr(config, "bold", False)):
+        parts.append("加粗")
+    if bool(getattr(config, "italic", False)):
+        parts.append("斜体")
+    return "、".join(parts) if parts else "常规"
 
 
 class ElementsDetail(QWidget):
@@ -268,7 +275,10 @@ class ElementsDetail(QWidget):
         if mode == "fixed":
             text = str(header_footer.header_text or "").strip() or "未填写固定文字"
             return f"{text} / {'横线开启' if header_footer.header_border else '横线关闭'}"
-        return f"{header_footer.font_cn or '-'} / {header_footer.font_en or '-'} / {_size_text(header_footer.size_pt)}"
+        return (
+            f"{header_footer.font_cn or '-'} / {header_footer.font_en or '-'} / "
+            f"{_size_text(header_footer.size_pt)} / {_emphasis_text(header_footer)}"
+        )
 
     def _page_number_summary_detail(self, header_footer, phases: list[PageNumberPhaseConfig]) -> str:
         if not header_footer.page_number_enabled:
@@ -429,10 +439,11 @@ class ElementsDetail(QWidget):
             widget.setStyleSheet(title_ss)
         if hasattr(self, "_page_plan_note"):
             self._page_plan_note.setStyleSheet(note_ss)
-        for widget in self.findChildren(QLineEdit):
-            widget.setStyleSheet(build_text_input_stylesheet(theme, selector="QLineEdit"))
         for widget in self.findChildren(QLabel, "tpl_style_unit"):
             widget.setStyleSheet(unit_ss)
+
+        if self._header_footer_detail is not None:
+            self._header_footer_detail.apply_theme()
 
         apply_button_variant(self._restore_entry_btn, "ghost-primary")
         apply_button_variant(self._save_btn, "primary")

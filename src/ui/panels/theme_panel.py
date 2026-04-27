@@ -23,6 +23,7 @@ from src.shared.ui.theme import (
 from src.shared.ui.custom_themes import CustomThemeStore
 from src.shared.ui.divider import Divider
 from src.shared.ui.flow_layout import FlowLayout
+from src.shared.ui.input_metrics import build_framed_input_stylesheet
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.ui.base_panel import BasePanel
 
@@ -539,6 +540,15 @@ class _ThemeEditorDialog(QDialog):
 
     def _apply_theme(self):
         t = get_theme()
+        input_qss = build_framed_input_stylesheet(
+            t,
+            background=t.bg_card,
+            focus_border_color=t.primary,
+            border_radius=t.radius_sm,
+            padding_x=10,
+            padding_y=0,
+            font_size=13,
+        )
         self.setStyleSheet(f"""
             _ThemeEditorDialog {{
                 background: {t.bg_window};
@@ -555,17 +565,7 @@ class _ThemeEditorDialog(QDialog):
                 font-size: 11px;
                 color: {t.text_hint}; background: transparent;
             }}
-            QLineEdit {{
-                background: {t.bg_card};
-                border: 1px solid {t.border};
-                border-radius: {t.radius_sm}px;
-                padding: 0 10px;
-                font-size: 13px;
-                color: {t.text_primary};
-            }}
-            QLineEdit:focus {{
-                border-color: {t.primary};
-            }}
+            {input_qss}
             QPushButton {{
                 background: {t.bg_card};
                 border: 1px solid {t.border};

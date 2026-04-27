@@ -75,6 +75,7 @@ class AppTheme:
     text_disabled: str = "#CBD5E1"       # 禁用文字
     text_on_primary: str = "#FFFFFF"     # 品牌色上的文字
     text_on_accent: str = "#FFFFFF"      # 强调色上的文字
+    text_on_tooltip: str = ""            # Tooltip text on bg_tooltip
     text_link: str = "#1677FF"           # 链接文字
 
     # ━━ 侧边栏 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -284,6 +285,8 @@ class AppTheme:
 
     form_row_label_width: int = 120
     form_row_height: int = 30
+    form_grid_column_gap: int = 40
+    form_grid_compact_column_gap: int = 12
 
     spacing_input_unit_width: int = 60
 
@@ -352,6 +355,11 @@ class AppTheme:
         # bg_nav_rail 智能 fallback：未显式定义时自动取 bg_card
         if not self.bg_nav_rail:
             self.bg_nav_rail = self.bg_card
+        if not self.text_on_tooltip:
+            try:
+                self.text_on_tooltip = "#1A1A1A" if _hex_luminance(self.bg_tooltip) > 0.55 else "#FFFFFF"
+            except (TypeError, ValueError, IndexError):
+                self.text_on_tooltip = self.text_primary
         if not self.checkbox_border_color:
             self.checkbox_border_color = self.border
         if not self.checkbox_hover_border_color:
@@ -453,6 +461,7 @@ class AppTheme:
         pairs = [
             ('text_on_primary', 'primary',   40, '按钮/图标前景 vs 品牌色'),
             ('text_on_accent',  'accent',    30, '强调色上的文字 vs 强调色'),
+            ('text_on_tooltip', 'bg_tooltip', 35, 'tooltip text vs tooltip background'),
             ('text_primary',    'bg_card',   40, '主文字 vs 卡片背景'),
             ('border_light',    'bg_card',   10, '浅边框 vs 卡片背景'),
             ('border',          'bg_card',   12, '默认边框 vs 卡片背景'),

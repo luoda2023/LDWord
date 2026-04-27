@@ -240,10 +240,11 @@ def test_heading_panel_detail_rows_keep_text_to_control_gap_compact():
         for widget in widgets:
             row = row_map[widget]
             layout_gap = row.layout().spacing()
-            text_width = row.preferred_label_width()
-            visible_gap = row.widget.x() - text_width
+            label_width = row.label_width or row.preferred_label_width()
+            visible_gap = row.widget.x() - label_width
             assert layout_gap == 4
             assert visible_gap <= 20
+        assert row_map[panel._title_sep_edit].x() == row_map[panel._start_at_input].x()
     finally:
         panel.close()
         app.processEvents()
@@ -256,7 +257,7 @@ def test_heading_panel_uses_shared_template_form_row_baseline():
     assert "FormRow(" not in source
     assert "InspectorForm(" in source
     assert "template_form_row(" in source
-    assert "template_form_pair_row(" in source
+    assert "TemplateFormGrid" in source
     assert "_build_pair_row(" not in source
 
 

@@ -268,6 +268,8 @@ def test_load_template_normalizes_legacy_fields():
         "update_header": False,
         "update_page_number": False,
         "update_header_line": False,
+        "bold": True,
+        "italic": True,
         "heading_numbering": {
             "levels": {
                 "heading1": {"format": "chinese_chapter", "separator": " "},
@@ -290,6 +292,8 @@ def test_load_template_normalizes_legacy_fields():
         assert template.header_footer.header_mode == "none"
         assert template.header_footer.page_number_enabled is False
         assert template.header_footer.header_border is False
+        assert template.header_footer.bold is True
+        assert template.header_footer.italic is True
         assert template.styles["normal"].size_display == "小四"
         assert template.styles["normal"].size_pt == 12
         assert template.styles["normal"].line_spacing_type == "exact"
@@ -319,6 +323,8 @@ def test_load_template_supports_nested_page_number_plan_schema():
                 "font_cn": "宋体",
                 "font_en": "Times New Roman",
                 "size_pt": 10.5,
+                "bold": True,
+                "italic": True,
             },
             "header": {
                 "mode": "fixed",
@@ -371,6 +377,8 @@ def test_load_template_supports_nested_page_number_plan_schema():
         assert header_footer.page_number_enabled is False
         assert header_footer.front_matter_page_number_format == "lowerRoman"
         assert header_footer.body_page_number_start == 3
+        assert header_footer.bold is True
+        assert header_footer.italic is True
     finally:
         Path(tmp.name).unlink(missing_ok=True)
 

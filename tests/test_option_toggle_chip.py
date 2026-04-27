@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.qt_api import QApplication, QSizePolicy
+from src.shared.ui.feature_toggle_row import FeatureToggleRow
 from src.shared.ui.option_toggle_chip import OptionToggleChip
 from src.shared.ui.toggle_switch import ToggleSwitch
 
@@ -44,6 +45,13 @@ def test_option_toggle_chip_supports_inline_non_filling_mode():
         chip.close()
 
 
+def test_binary_toggle_primitives_document_their_roles():
+    assert "OptionToggleChip" in (ToggleSwitch.__doc__ or "")
+    assert "FeatureToggleRow" in (ToggleSwitch.__doc__ or "")
+    assert "form row" in (OptionToggleChip.__doc__ or "")
+    assert "feature" in (FeatureToggleRow.__doc__ or "").lower()
+
+
 def test_template_style_panels_reuse_shared_option_toggle_chip():
     panel_paths = [
         ROOT / "src/ui/panels/template_style_detail.py",
@@ -51,8 +59,10 @@ def test_template_style_panels_reuse_shared_option_toggle_chip():
         ROOT / "src/ui/panels/template_elements_toc.py",
     ]
     source = "\n".join(path.read_text(encoding="utf-8") for path in panel_paths)
+    helper_source = (ROOT / "src/shared/ui/typography_controls.py").read_text(encoding="utf-8")
 
-    assert "OptionToggleChip(" in source
+    assert "build_emphasis_widget" in source
+    assert "OptionToggleChip(" in helper_source
     assert "_build_toggle_chip" not in source
     assert "tpl_inline_label" not in source
     assert "tpl_style_toggle_chip" not in source

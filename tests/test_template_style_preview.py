@@ -274,6 +274,8 @@ def test_template_style_preview_maps_table_alignment_and_color_header_style():
     cfg.table.color_table_variant = "header_grid"
     cfg.table.cell_alignment = "center"
     cfg.table.first_row_bold = False
+    cfg.table.bold = True
+    cfg.table.italic = True
 
     preview = TemplateStylePreview()
     try:
@@ -282,7 +284,10 @@ def test_template_style_preview_maps_table_alignment_and_color_header_style():
         assert layout is not None
         table = layout.table_layouts[0]
         assert table.cell_alignment == "center"
+        assert table.font.bold() is True
+        assert table.font.italic() is True
         assert table.header_font.bold() is True
+        assert table.header_font.italic() is True
     finally:
         preview.close()
 

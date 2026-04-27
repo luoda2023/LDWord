@@ -109,6 +109,10 @@ def _start_gui() -> int:
     from src.shared.ui.input_guard import install_global_input_guard
     _input_guard = install_global_input_guard(app)  # noqa: F841  保持引用防 GC
 
+    # 全局主题 tooltip，统一悬停延迟、浮层样式和锚点位置。
+    from src.shared.ui.tooltip import install_global_tooltip
+    _tooltip_guard = install_global_tooltip(app)  # noqa: F841  保持引用防 GC
+
     win = MainWindow()
     win.show()
     return app.exec()

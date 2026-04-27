@@ -9,6 +9,7 @@ from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.placeholder_edit import PlaceholderEdit
 from src.shared.ui.theme import LIGHT
 from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
+from src.ui.panels import theme_panel
 
 
 def test_shared_input_stylesheet_supports_font_family_override():
@@ -29,4 +30,11 @@ def test_heading_numbering_panel_uses_shared_text_input_and_selection_helpers():
 
     assert "build_text_input_stylesheet" in source
     assert "build_checkbox_stylesheet" in source
+    assert "QLineEdit {" not in source
+
+
+def test_theme_editor_dialog_uses_shared_framed_input_stylesheet():
+    source = inspect.getsource(theme_panel._ThemeEditorDialog._apply_theme)
+
+    assert "build_framed_input_stylesheet" in source
     assert "QLineEdit {" not in source

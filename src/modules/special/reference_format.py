@@ -193,6 +193,8 @@ def _format_reference_entry(para: Paragraph, style_config: StyleConfig) -> None:
     font_cn = style_config.font_cn
     font_en = style_config.font_en
     size_pt = style_config.size_pt
+    bold = style_config.bold
+    italic = style_config.italic
 
     for run in para.runs:
         if font_en:
@@ -201,6 +203,8 @@ def _format_reference_entry(para: Paragraph, style_config: StyleConfig) -> None:
             set_run_east_asian_font(run, font_cn)
         if size_pt:
             run.font.size = Pt(size_pt)
+        run.font.bold = bool(bold)
+        run.font.italic = bool(italic)
 
     # Only strip numPr that is list-indentation spillover (numId=0),
     # preserve intentional reference numbering (numId > 0, e.g. [1] [2] ...).

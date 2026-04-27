@@ -36,7 +36,6 @@ from src.shared.ui.button_style import apply_button_variant, build_button_styles
 from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
 from src.shared.ui.inspector_form import InspectorForm
-from src.shared.ui.option_toggle_chip import OptionToggleChip
 from src.shared.ui.paragraph_style_inputs import IndentInput, SpecialIndentInput
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
@@ -45,6 +44,7 @@ from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
 from src.shared.ui.template_form_layout import template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
+from src.shared.ui.typography_controls import build_emphasis_widget
 
 ALIGNMENT_OPTIONS: tuple[tuple[str, str], ...] = (
     ("left", "左对齐"),
@@ -452,16 +452,7 @@ class StyleDetail(QWidget):
         self._spacing_card.add_widget(self._spacing_form)
 
     def _build_emphasis_widget(self) -> QWidget:
-        widget = QWidget(self)
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-
-        self._bold_chip = OptionToggleChip("加粗", self._bold_switch, parent=widget)
-        self._italic_chip = OptionToggleChip("斜体", self._italic_switch, parent=widget)
-        layout.addWidget(self._bold_chip, 1)
-        layout.addWidget(self._italic_chip, 1)
-        return widget
+        return build_emphasis_widget(self, self._bold_switch, self._italic_switch, spacing=10)
 
     # ------------------------------------------------------------------
     # Public API

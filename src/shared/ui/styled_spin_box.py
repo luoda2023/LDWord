@@ -1,43 +1,22 @@
-"""
-StyledSpinBox — themed QDoubleSpinBox matching the StyledComboBox visual design.
-
-Replaces the native OS spin-box chrome with custom-painted borders,
-separator, and up/down chevrons that harmonize with the rest of the
-design system.
-
-Usage::
-
-    from src.shared.ui.styled_spin_box import StyledSpinBox
-
-    spin = StyledSpinBox(parent)
-    spin.setRange(0.0, 20.0)
-    spin.setSingleStep(0.5)
-    spin.setDecimals(1)
-"""
+"""Themed QDoubleSpinBox matching the shared input control metrics."""
 
 from __future__ import annotations
 
-from src.qt_api import (
-    QColor,
-    QDoubleSpinBox,
-    QPainter,
-    QPen,
-    QRectF,
-    Qt,
-)
+from src.qt_api import QDoubleSpinBox, QEvent, QPainter, Qt
 
+from src.shared.ui.input_metrics import (
+    build_input_editor_stylesheet,
+    configure_input_line_edit,
+    draw_input_surface,
+    draw_spin_chevrons,
+    sync_input_line_edit_geometry,
+)
 from src.shared.ui.sizing import apply_size_class, resolved_control_height
 from src.shared.ui.theme import bind_theme, get_theme
 
 
 class StyledSpinBox(QDoubleSpinBox):
-    """QDoubleSpinBox with custom-painted border and up/down chevrons.
-
-    The visual language mirrors ``StyledComboBox``:
-    - Rounded rect border (normal / focus / disabled states)
-    - Internal vertical separator before the button zone
-    - Chevron arrows drawn with anti-aliased QPainter strokes
-    """
+    """QDoubleSpinBox with shared input text geometry and custom chrome."""
 
     _id_counter = 0
 
@@ -48,14 +27,14 @@ class StyledSpinBox(QDoubleSpinBox):
         spin_id = StyledSpinBox._id_counter
         self.setObjectName(f"styled_spin_{spin_id}")
         self.setAttribute(Qt.WA_StyledBackground, True)
+        self._editor_widget = None
+        self._syncing_editor_geometry = False
+
         apply_size_class(self, "md")
+        self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         self._refresh_style()
         bind_theme(self, self._refresh_style)
-
-    # ------------------------------------------------------------------
-    # QSS
-    # ------------------------------------------------------------------
 
     @staticmethod
     def build_spin_stylesheet(object_name: str, theme) -> str:
@@ -122,83 +101,81 @@ class StyledSpinBox(QDoubleSpinBox):
             }}
         """
 
-    # ------------------------------------------------------------------
-    # Custom paint
-    # ------------------------------------------------------------------
-
     def paintEvent(self, event):
         super().paintEvent(event)
 
         theme = get_theme()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-
-        # ── Border ──
-        if not self.isEnabled():
-            border_color = QColor(theme.border)
-            border_width = 1.0
-        elif self.hasFocus():
-            border_color = QColor(theme.border_focus)
-            border_width = 1.5
-        else:
-            border_color = QColor(theme.text_hint)
-            border_width = 1.25
-
-        radius = float(theme.input_radius)
-        half = border_width / 2.0
-        border_rect = QRectF(half, half, self.width() - border_width, self.height() - border_width)
-        painter.setPen(QPen(border_color, border_width))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(border_rect, radius, radius)
-
-        # ── Separator ──
-        separator_color = QColor(theme.border_focus if self.hasFocus() else theme.border)
-        separator_color.setAlpha(170 if self.hasFocus() else 135)
-        painter.setPen(QPen(separator_color, 1.0))
-        sep_x = self.width() - theme.spin_button_width
-        inset = max(4, self.height() // 5)
-        painter.drawLine(sep_x, inset, sep_x, self.height() - inset)
-
-        # ── Up / Down chevrons ──
-        arrow_color = QColor(theme.border_focus if self.hasFocus() else theme.text_secondary)
-        if not self.isEnabled():
-            arrow_color = QColor(theme.text_disabled)
-        painter.setPen(QPen(arrow_color, 1.6))
-
-        zone_cx = self.width() - (theme.spin_button_width // 2)
-        mid_y = self.height() / 2.0
-        half_chevron = 3  # half-width of the chevron
-
-        # Up arrow: centered in top half of button zone
-        up_cy = mid_y / 2.0 + 1
-        painter.drawLine(
-            int(zone_cx - half_chevron), int(up_cy + 2),
-            int(zone_cx), int(up_cy - 1),
+        active = self.hasFocus()
+        draw_input_surface(
+            painter,
+            self.width(),
+            self.height(),
+            theme=theme,
+            enabled=self.isEnabled(),
+            active=active,
+            button_width=theme.spin_button_width,
         )
-        painter.drawLine(
-            int(zone_cx), int(up_cy - 1),
-            int(zone_cx + half_chevron), int(up_cy + 2),
+        draw_spin_chevrons(
+            painter,
+            self.width(),
+            self.height(),
+            theme=theme,
+            enabled=self.isEnabled(),
+            active=active,
         )
-
-        # Down arrow: centered in bottom half of button zone
-        dn_cy = mid_y + mid_y / 2.0 - 1
-        painter.drawLine(
-            int(zone_cx - half_chevron), int(dn_cy - 2),
-            int(zone_cx), int(dn_cy + 1),
-        )
-        painter.drawLine(
-            int(zone_cx), int(dn_cy + 1),
-            int(zone_cx + half_chevron), int(dn_cy - 2),
-        )
-
         painter.end()
 
-    # ------------------------------------------------------------------
-    # Theme sync
-    # ------------------------------------------------------------------
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._sync_editor_geometry()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._editor_widget and event.type() in {QEvent.Move, QEvent.Resize, QEvent.Show}:
+            self._sync_editor_geometry()
+        return super().eventFilter(watched, event)
+
+    def _configure_editor(self) -> None:
+        line_edit = self.lineEdit()
+        if line_edit is None:
+            return
+
+        configure_input_line_edit(line_edit, get_theme(), stylesheet=build_input_editor_stylesheet(get_theme()))
+        if self._editor_widget is not line_edit:
+            self._release_editor_filter()
+            self._editor_widget = line_edit
+            line_edit.installEventFilter(self)
+        self._sync_editor_geometry()
+
+    def _release_editor_filter(self) -> None:
+        if self._editor_widget is None:
+            return
+        try:
+            self._editor_widget.removeEventFilter(self)
+        except RuntimeError:
+            pass
+        self._editor_widget = None
+
+    def _sync_editor_geometry(self) -> None:
+        line_edit = self.lineEdit()
+        if line_edit is None or self._syncing_editor_geometry:
+            return
+
+        self._syncing_editor_geometry = True
+        try:
+            sync_input_line_edit_geometry(
+                self,
+                line_edit,
+                button_width=get_theme().spin_button_width,
+                theme=get_theme(),
+            )
+        finally:
+            self._syncing_editor_geometry = False
 
     def _refresh_style(self) -> None:
         theme = get_theme()
         self.setStyleSheet(self.build_spin_stylesheet(self.objectName(), theme))
+        self._configure_editor()
         self.updateGeometry()
         self.update()

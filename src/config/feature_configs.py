@@ -22,6 +22,8 @@ class HeaderFooterTypographyConfig:
     font_cn: str | None = None
     font_en: str | None = None
     size_pt: float | None = None
+    bold: bool = False
+    italic: bool = False
 
 
 @dataclass
@@ -190,6 +192,22 @@ class HeaderFooterConfig:
     @size_pt.setter
     def size_pt(self, value: float | None) -> None:
         self.typography.size_pt = None if value in (None, "") else float(value)
+
+    @property
+    def bold(self) -> bool:
+        return bool(self.typography.bold)
+
+    @bold.setter
+    def bold(self, value: bool) -> None:
+        self.typography.bold = bool(value)
+
+    @property
+    def italic(self) -> bool:
+        return bool(self.typography.italic)
+
+    @italic.setter
+    def italic(self, value: bool) -> None:
+        self.typography.italic = bool(value)
 
     @property
     def hide_cover_header_footer(self) -> bool:
@@ -415,6 +433,8 @@ class TableConfig:
     font_cn: str | None = "微软雅黑"
     font_en: str | None = "Times New Roman"
     size_pt: float | None = 10.5
+    bold: bool = False
+    italic: bool = False
     table_alignment: str | None = "center"
     cell_alignment: str | None = None
     first_row_bold: bool = False

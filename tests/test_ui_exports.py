@@ -12,6 +12,7 @@ from src.shared.ui import (
     FeatureToggleRow,
     FileDropZone,
     FontCombo,
+    GlobalTooltipController,
     FlowSection,
     InspectorForm,
     LogStreamWidget,
@@ -29,7 +30,10 @@ from src.shared.ui import (
     apply_button_variant,
     build_button_stylesheet,
     build_checkbox_stylesheet,
+    install_global_tooltip,
+    set_global_tooltip,
     template_form_row,
+    tooltip_position_for,
 )
 
 
@@ -48,6 +52,7 @@ def test_shared_ui_exports_include_unified_controls():
     assert OptionToggleChip.__name__ == "OptionToggleChip"
     assert InspectorForm.__name__ == "InspectorForm"
     assert DynamicNavigationRail.__name__ == "DynamicNavigationRail"
+    assert GlobalTooltipController.__name__ == "GlobalTooltipController"
     assert ExecutionFeedbackWidget.__name__ == "ExecutionFeedbackWidget"
     assert FlowSection.__name__ == "FlowSection"
     assert FileDropZone.__name__ == "FileDropZone"
@@ -57,4 +62,7 @@ def test_shared_ui_exports_include_unified_controls():
     assert callable(apply_button_variant)
     assert callable(build_button_stylesheet)
     assert callable(build_checkbox_stylesheet)
+    assert callable(install_global_tooltip)
+    assert callable(set_global_tooltip)
     assert callable(template_form_row)
+    assert callable(tooltip_position_for)

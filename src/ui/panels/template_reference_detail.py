@@ -47,7 +47,6 @@ from src.shared.ui.button_style import apply_button_variant, build_button_styles
 from src.shared.ui.card import Card
 from src.shared.ui.flow_section import FlowSection
 from src.shared.ui.font_combo import FontCombo
-from src.shared.ui.option_toggle_chip import OptionToggleChip
 from src.shared.ui.paragraph_style_inputs import IndentInput, SpecialIndentInput
 from src.shared.ui.segmented_control import SegmentedControl
 from src.shared.ui.size_combo import SizeCombo
@@ -56,6 +55,7 @@ from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.template_form_layout import TemplateFormGrid, template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
+from src.shared.ui.typography_controls import build_emphasis_widget
 
 _VARIANT_KEY = "references_body"
 
@@ -239,15 +239,18 @@ class ReferenceDetail(QWidget):
         self._italic_switch.toggled_signal.connect(self._on_form_edited)
 
         self._text_section.add_widget(
-            self._pair_row(
-                self._form_row("中文字体", self._font_cn, parent=self._text_section),
-                self._form_row("英文字体", self._font_en, parent=self._text_section),
-            )
-        )
-        self._text_section.add_widget(
-            self._pair_row(
-                self._form_row("字号", self._size_combo, parent=self._text_section),
-                self._form_row("字形", self._build_emphasis_widget(), parent=self._text_section),
+            self._form_grid(
+                [
+                    [
+                        self._form_row("中文字体", self._font_cn, parent=self._text_section),
+                        self._form_row("英文字体", self._font_en, parent=self._text_section),
+                    ],
+                    [
+                        self._form_row("字号", self._size_combo, parent=self._text_section),
+                        self._form_row("字形", self._build_emphasis_widget(), parent=self._text_section),
+                    ],
+                ],
+                parent=self._text_section,
             )
         )
 
@@ -267,10 +270,13 @@ class ReferenceDetail(QWidget):
         self._right_indent.value_changed.connect(self._on_form_edited)
 
         self._paragraph_section.add_widget(
-            self._form_row("对齐", self._alignment_combo, parent=self._paragraph_section)
-        )
-        self._paragraph_section.add_widget(
-            self._form_row("特殊缩进", self._special_indent, parent=self._paragraph_section)
+            self._form_grid(
+                [
+                    [self._form_row("对齐", self._alignment_combo, parent=self._paragraph_section)],
+                    [self._form_row("特殊缩进", self._special_indent, parent=self._paragraph_section)],
+                ],
+                parent=self._paragraph_section,
+            )
         )
 
         indent_note = QLabel('缩进支持字 / 磅 / cm，其中“字”会跟随当前字号换算。', self)
@@ -280,9 +286,14 @@ class ReferenceDetail(QWidget):
 
         advanced = FlowSection("高级缩进", expanded=False, parent=self)
         advanced.add_widget(
-            self._pair_row(
-                self._form_row("左缩进", self._left_indent, parent=advanced),
-                self._form_row("右缩进", self._right_indent, parent=advanced),
+            self._form_grid(
+                [
+                    [
+                        self._form_row("左缩进", self._left_indent, parent=advanced),
+                        self._form_row("右缩进", self._right_indent, parent=advanced),
+                    ],
+                ],
+                parent=advanced,
             )
         )
         self._paragraph_section.add_widget(advanced)
@@ -322,30 +333,33 @@ class ReferenceDetail(QWidget):
         after_suffix.setObjectName("tpl_style_unit")
 
         self._spacing_section.add_widget(
-            self._pair_row(
-                self._form_row("行距类型", self._line_type_combo, parent=self._spacing_section),
-                self._form_row(
-                    "行距值", self._line_value,
-                    suffix_widget=self._line_value_suffix,
-                    parent=self._spacing_section,
-                ),
+            self._form_grid(
+                [
+                    [
+                        self._form_row("行距类型", self._line_type_combo, parent=self._spacing_section),
+                        self._form_row(
+                            "行距值", self._line_value,
+                            suffix_widget=self._line_value_suffix,
+                            parent=self._spacing_section,
+                        ),
+                    ],
+                    [
+                        self._form_row(
+                            "段前", self._space_before,
+                            suffix_widget=before_suffix,
+                            parent=self._spacing_section,
+                        ),
+                        self._form_row(
+                            "段后", self._space_after,
+                            suffix_widget=after_suffix,
+                            parent=self._spacing_section,
+                        ),
+                    ],
+                ],
+                parent=self._spacing_section,
             )
         )
         self._spacing_section.add_widget(self._line_spacing_note)
-        self._spacing_section.add_widget(
-            self._pair_row(
-                self._form_row(
-                    "段前", self._space_before,
-                    suffix_widget=before_suffix,
-                    parent=self._spacing_section,
-                ),
-                self._form_row(
-                    "段后", self._space_after,
-                    suffix_widget=after_suffix,
-                    parent=self._spacing_section,
-                ),
-            )
-        )
 
     def _build_inherit_summary(self) -> None:
         self._inherit_label = QLabel("", self)
@@ -376,10 +390,27 @@ class ReferenceDetail(QWidget):
         after_suffix.setObjectName("tpl_style_unit")
 
         self._rules_section.add_widget(
-            self._form_row("悬挂缩进", self._hanging_indent, suffix_widget=indent_suffix, parent=self._rules_section)
-        )
-        self._rules_section.add_widget(
-            self._form_row("条目段后", self._rules_space_after, suffix_widget=after_suffix, parent=self._rules_section)
+            self._form_grid(
+                [
+                    [
+                        self._form_row(
+                            "悬挂缩进",
+                            self._hanging_indent,
+                            suffix_widget=indent_suffix,
+                            parent=self._rules_section,
+                        )
+                    ],
+                    [
+                        self._form_row(
+                            "条目段后",
+                            self._rules_space_after,
+                            suffix_widget=after_suffix,
+                            parent=self._rules_section,
+                        )
+                    ],
+                ],
+                parent=self._rules_section,
+            )
         )
 
         rules_note = QLabel(
@@ -395,19 +426,13 @@ class ReferenceDetail(QWidget):
     # ──────────────────────────────────────────────────────
 
     def _build_emphasis_widget(self) -> QWidget:
-        widget = QWidget(self)
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        layout.addWidget(
-            OptionToggleChip("加粗", self._bold_switch, variant="inline", fill=False, parent=widget)
+        return build_emphasis_widget(
+            self,
+            self._bold_switch,
+            self._italic_switch,
+            variant="inline",
+            fill=False,
         )
-        layout.addWidget(
-            OptionToggleChip("斜体", self._italic_switch, variant="inline", fill=False, parent=widget)
-        )
-        layout.addStretch(1)
-        return widget
 
     def _form_row(
         self,
@@ -419,8 +444,13 @@ class ReferenceDetail(QWidget):
     ) -> QWidget:
         return template_form_row(label, widget, suffix_widget=suffix_widget, parent=parent)
 
-    def _pair_row(self, *widgets: QWidget) -> TemplateFormGrid:
-        return TemplateFormGrid([widgets], parent=self)
+    def _form_grid(
+        self,
+        rows: list[list[QWidget]],
+        *,
+        parent: QWidget | None = None,
+    ) -> TemplateFormGrid:
+        return TemplateFormGrid(rows, parent=parent or self)
 
     def _set_combo_by_data(self, combo: StyledComboBox, target) -> None:
         for index in range(combo.count()):

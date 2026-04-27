@@ -14,6 +14,7 @@ from src.app_meta import APP_DISPLAY_NAME_FULL
 from src.qt_api import QFont, QHBoxLayout, QLabel, QMouseEvent, QPoint, QPushButton, QSize, QSizePolicy, QWidget, Qt
 
 from src.shared.ui.theme import get_theme, bind_theme
+from src.shared.ui.tooltip import set_global_tooltip
 from src.ui.icons.catalog import get_app_logo, get_icon
 
 
@@ -75,7 +76,7 @@ class TitleBar(QWidget):
     def _make_btn(self, object_name: str, tooltip: str) -> QPushButton:
         btn = QPushButton()
         btn.setObjectName(object_name)
-        btn.setToolTip(tooltip)
+        set_global_tooltip(btn, tooltip, placement="bottom", role="chrome")
         btn.setFixedSize(46, self.HEIGHT)
         btn.setCursor(Qt.PointingHandCursor)
         btn.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
@@ -120,7 +121,7 @@ class TitleBar(QWidget):
             self._window.setGeometry(geo)
             self._window.show()
 
-        self._btn_pin.setToolTip("取消置顶" if self._pinned else "置顶")
+        set_global_tooltip(self._btn_pin, "取消置顶" if self._pinned else "置顶", placement="bottom", role="chrome")
         self._update_icons()
 
     # ── 拖拽移动窗口 ──
@@ -185,10 +186,10 @@ class TitleBar(QWidget):
         # Maximize / Restore
         if self._window.isMaximized():
             self._btn_max.setIcon(get_icon("copy", size=s, color=color))
-            self._btn_max.setToolTip("向下还原")
+            set_global_tooltip(self._btn_max, "向下还原", placement="bottom", role="chrome")
         else:
             self._btn_max.setIcon(get_icon("square", size=s, color=color))
-            self._btn_max.setToolTip("最大化")
+            set_global_tooltip(self._btn_max, "最大化", placement="bottom", role="chrome")
 
         # Close
         self._btn_close.setIcon(get_icon("x", size=s, color=color))

@@ -24,7 +24,8 @@ def test_search_input_input_and_clear_stylesheets_are_tokenized():
     clear_qss = SearchInput.build_clear_button_stylesheet(LIGHT)
 
     assert f"font-size: {LIGHT.font_size_md}px;" in input_qss
-    assert f"padding: {LIGHT.input_padding_y}px 0;" in input_qss
+    assert "padding: 0;" in input_qss
+    assert "QLineEdit::placeholder" in input_qss
     assert f"border-radius: {LIGHT.input_radius}px;" in clear_qss
 
 

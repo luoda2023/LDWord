@@ -4,9 +4,18 @@ Shared combo-box foundation with an anchored in-window popup panel.
 
 from __future__ import annotations
 
-from src.qt_api import QComboBox, QListView, QPoint, QRect, QRectF, QColor, QEvent, QPainter, QPen, QSizePolicy, Qt
+from src.qt_api import QComboBox, QListView, QPoint, QRect, QColor, QEvent, QPainter, QPen, Qt
 
 from src.shared.ui.combo_popup_panel import ComboPopupPanel
+from src.shared.ui.input_metrics import (
+    build_input_editor_stylesheet,
+    configure_input_line_edit,
+    draw_combo_chevron,
+    draw_input_surface,
+    input_text_color,
+    input_text_rect,
+    sync_input_line_edit_geometry,
+)
 from src.shared.ui.sizing import apply_size_class, resolved_control_height
 from src.shared.ui.theme import bind_theme, get_theme
 
@@ -95,6 +104,8 @@ class StyledComboBox(QComboBox):
 
     @staticmethod
     def build_combo_stylesheet(object_name: str, theme) -> str:
+        # QSS owns size hints and popup chrome; visible text geometry is
+        # normalized in input_metrics so editable and static combos match.
         height_sm = resolved_control_height(theme, "sm")
         height_md = resolved_control_height(theme, "md")
         height_lg = resolved_control_height(theme, "lg")
@@ -178,18 +189,7 @@ class StyledComboBox(QComboBox):
 
     @staticmethod
     def build_editor_stylesheet(theme) -> str:
-        return f"""
-            QLineEdit {{
-                border: none;
-                background: transparent;
-                color: {theme.text_primary};
-                selection-background-color: {theme.primary};
-                selection-color: {theme.text_on_primary};
-                padding: 0;
-                font-size: {theme.font_size_md}px;
-                font-family: {theme.font_family};
-            }}
-        """
+        return build_input_editor_stylesheet(theme)
 
     def setEditable(self, editable: bool) -> None:
         super().setEditable(editable)
@@ -203,16 +203,11 @@ class StyledComboBox(QComboBox):
         if line_edit is None:
             return
 
-        line_edit.setFrame(False)
-        line_edit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        line_edit.setContentsMargins(0, 0, 0, 0)
-        line_edit.setTextMargins(0, 0, 0, 0)
-        line_edit.setMinimumHeight(0)
-        editor_policy = line_edit.sizePolicy()
-        editor_policy.setHorizontalPolicy(QSizePolicy.Expanding)
-        editor_policy.setVerticalPolicy(QSizePolicy.Ignored)
-        line_edit.setSizePolicy(editor_policy)
-        line_edit.setStyleSheet(self.build_editor_stylesheet(get_theme()))
+        configure_input_line_edit(
+            line_edit,
+            get_theme(),
+            stylesheet=self.build_editor_stylesheet(get_theme()),
+        )
         if self._editor_widget is not line_edit:
             self._release_editor_filter()
             self._editor_widget = line_edit
@@ -235,18 +230,24 @@ class StyledComboBox(QComboBox):
         if self._syncing_editor_geometry:
             return
 
-        theme = get_theme()
-        left = max(0, int(theme.input_padding_x))
-        right = max(0, int(theme.combo_arrow_zone_width))
-        height = max(0, int(self.height()))
         self._syncing_editor_geometry = True
         try:
-            line_edit.setMinimumHeight(0)
-            if height > 0:
-                line_edit.setMaximumHeight(height)
-            line_edit.setGeometry(left, 0, max(0, self.width() - left - right), height)
+            sync_input_line_edit_geometry(
+                self,
+                line_edit,
+                button_width=get_theme().combo_arrow_zone_width,
+                theme=get_theme(),
+            )
         finally:
             self._syncing_editor_geometry = False
+
+    def _input_text_rect(self) -> QRect:
+        return input_text_rect(
+            self.width(),
+            self.height(),
+            button_width=get_theme().combo_arrow_zone_width,
+            theme=get_theme(),
+        )
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -384,56 +385,62 @@ class StyledComboBox(QComboBox):
         self._refresh_style()
 
     def paintEvent(self, event):
-        super().paintEvent(event)
-
         if self._inline:
-            # Inline mode: only draw a small dropdown chevron, no border
-            theme = get_theme()
-            painter = QPainter(self)
-            painter.setRenderHint(QPainter.Antialiasing)
-            arrow_color = QColor(theme.primary if (self.hasFocus() or self._popup_panel.isVisible()) else theme.text_hint)
-            painter.setPen(QPen(arrow_color, 1.5))
-            zone_x = self.width() - 10
-            cy = self.height() // 2
-            half = 3
-            painter.drawLine(zone_x - half, cy - 1, zone_x, cy + half - 1)
-            painter.drawLine(zone_x, cy + half - 1, zone_x + half, cy - 1)
-            painter.end()
+            self._paint_inline_combo()
             return
+
+        theme = get_theme()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        active = self.hasFocus() or self._popup_panel.isVisible()
+        draw_input_surface(
+            painter,
+            self.width(),
+            self.height(),
+            theme=theme,
+            enabled=self.isEnabled(),
+            active=active,
+            button_width=theme.combo_arrow_zone_width,
+        )
+
+        if not self.isEditable():
+            self._paint_current_text(painter, self._input_text_rect(), theme=theme)
+        draw_combo_chevron(
+            painter,
+            self.width(),
+            self.height(),
+            theme=theme,
+            enabled=self.isEnabled(),
+            active=active,
+        )
+        painter.end()
+
+    def _paint_current_text(self, painter: QPainter, rect: QRect, *, theme) -> None:
+        text = self.currentText()
+        if not text:
+            return
+        painter.setFont(self.font())
+        painter.setPen(input_text_color(theme, enabled=self.isEnabled()))
+        elided = painter.fontMetrics().elidedText(text, Qt.ElideRight, rect.width())
+        painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, elided)
+
+    def _paint_inline_combo(self) -> None:
         theme = get_theme()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
+        if not self.isEditable():
+            text_rect = QRect(2, 0, max(0, self.width() - 16), max(0, self.height()))
+            self._paint_current_text(painter, text_rect, theme=theme)
+
+        active = self.hasFocus() or self._popup_panel.isVisible()
+        arrow_color = QColor(theme.primary if active else theme.text_hint)
         if not self.isEnabled():
-            border_color = QColor(theme.border)
-            border_width = 1.0
-        elif self.hasFocus() or self._popup_panel.isVisible():
-            border_color = QColor(theme.border_focus)
-            border_width = 1.5
-        else:
-            border_color = QColor(theme.text_hint)
-            border_width = 1.25
-
-        radius = float(theme.input_radius)
-        half_border = border_width / 2.0
-        border_rect = QRectF(half_border, half_border, self.width() - border_width, self.height() - border_width)
-        painter.setPen(QPen(border_color, border_width))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(border_rect, radius, radius)
-
-        separator_color = QColor(theme.border_focus if (self.hasFocus() or self._popup_panel.isVisible()) else theme.border)
-        separator_color.setAlpha(170 if self.hasFocus() or self._popup_panel.isVisible() else 135)
-        painter.setPen(QPen(separator_color, 1.0))
-        separator_x = self.width() - theme.combo_arrow_zone_width
-        inset = max(4, self.height() // 5)
-        painter.drawLine(separator_x, inset, separator_x, self.height() - inset)
-
-        arrow_color = QColor(theme.border_focus if self.hasFocus() or self._popup_panel.isVisible() else theme.text_secondary)
-        painter.setPen(QPen(arrow_color, 1.8))
-
-        zone_center_x = self.width() - (theme.combo_arrow_zone_width // 2)
-        zone_center_y = self.height() // 2
-        half = max(2, theme.combo_arrow_size // 2)
-        painter.drawLine(zone_center_x - half, zone_center_y - 1, zone_center_x, zone_center_y + half - 1)
-        painter.drawLine(zone_center_x, zone_center_y + half - 1, zone_center_x + half, zone_center_y - 1)
+            arrow_color = QColor(theme.text_disabled)
+        painter.setPen(QPen(arrow_color, 1.5))
+        zone_x = self.width() - 10
+        cy = self.height() // 2
+        half = 3
+        painter.drawLine(zone_x - half, cy - 1, zone_x, cy + half - 1)
+        painter.drawLine(zone_x, cy + half - 1, zone_x + half, cy - 1)
         painter.end()

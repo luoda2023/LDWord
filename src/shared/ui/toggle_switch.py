@@ -1,27 +1,34 @@
-"""
-toggle_switch — 胶囊开关控件
-
-ON/OFF 自定义绘制的胶囊形状开关。
-颜色从全局主题动态读取，主题切换时自动刷新。
-"""
+"""Primitive capsule ON/OFF switch."""
 
 from __future__ import annotations
 
-from src.qt_api import QAbstractButton, QBrush, QColor, QPainter, QPen, QPropertyAnimation, QRectF, QSize, Signal, Property, Qt
+from src.qt_api import (
+    QAbstractButton,
+    QBrush,
+    QColor,
+    QPainter,
+    QPen,
+    QPropertyAnimation,
+    QRectF,
+    QSize,
+    Signal,
+    Property,
+    Qt,
+)
 
-from src.shared.ui.theme import get_theme, bind_theme
+from src.shared.ui.theme import bind_theme, get_theme
 
 
 class ToggleSwitch(QAbstractButton):
-    """胶囊形状的 ON/OFF 开关控件。
+    """Primitive switch control.
 
-    Signals:
-        toggled(bool): 状态变化信号
+    Use this directly only when the switch is the whole control. For a labelled
+    boolean field inside a form row, wrap it in ``OptionToggleChip``. For a
+    feature/module row with a config action, use ``FeatureToggleRow``.
     """
 
     toggled_signal = Signal(bool)
 
-    # ── 尺寸 ──
     TRACK_W = 44
     TRACK_H = 24
     THUMB_D = 18
@@ -32,8 +39,11 @@ class ToggleSwitch(QAbstractButton):
         super().__init__(parent)
         self.setCheckable(True)
         self.setChecked(checked)
-        self._thumb_x = float(self.TRACK_W - self.THUMB_D - self.THUMB_MARGIN if checked
-                              else self.THUMB_MARGIN)
+        self._thumb_x = float(
+            self.TRACK_W - self.THUMB_D - self.THUMB_MARGIN
+            if checked
+            else self.THUMB_MARGIN
+        )
 
         self._anim = QPropertyAnimation(self, b"thumb_position", self)
         self._anim.setDuration(250)
@@ -41,10 +51,8 @@ class ToggleSwitch(QAbstractButton):
         self.clicked.connect(self._on_click)
         self.setFixedSize(self.sizeHint())
 
-        # 主题切换时自动刷新
         bind_theme(self, self.update)
 
-    # ── 动画属性 ──
     @Property(float)
     def thumb_position(self) -> float:
         return self._thumb_x
@@ -54,11 +62,13 @@ class ToggleSwitch(QAbstractButton):
         self._thumb_x = val
         self.update()
 
-    # ── 事件 ──
     def _on_click(self) -> None:
         checked = self.isChecked()
-        end = (self.TRACK_W - self.THUMB_D - self.THUMB_MARGIN
-               if checked else self.THUMB_MARGIN)
+        end = (
+            self.TRACK_W - self.THUMB_D - self.THUMB_MARGIN
+            if checked
+            else self.THUMB_MARGIN
+        )
         self._anim.stop()
         self._anim.setStartValue(self._thumb_x)
         self._anim.setEndValue(end)
@@ -76,8 +86,7 @@ class ToggleSwitch(QAbstractButton):
         if pen_width <= 0:
             return QRectF(0.0, 0.0, float(self.width()), float(self.height()))
 
-        # Keep the OFF-state border fully inside the widget bounds so the
-        # capsule edge does not lose half of its stroke to clipping.
+        # Keep the OFF-state border fully inside the widget bounds.
         inset = pen_width / 2.0
         return QRectF(
             inset,
@@ -89,45 +98,40 @@ class ToggleSwitch(QAbstractButton):
     def _thumb_y(self, track_rect: QRectF) -> float:
         return track_rect.y() + (track_rect.height() - self.THUMB_D) / 2.0
 
-    # ── 绘制 ──
     def paintEvent(self, event) -> None:
-        t = get_theme()  # 每次绘制时动态取色
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
+        theme = get_theme()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
 
-        # 轨道
         if not self.isEnabled():
-            track_color = QColor(t.switch_disabled)
+            track_color = QColor(theme.switch_disabled)
         elif self.isChecked():
-            track_color = QColor(t.success)  # macOS uses green for switches
+            track_color = QColor(theme.success)
         else:
-            track_color = QColor(t.switch_off)
+            track_color = QColor(theme.switch_off)
 
-        p.setBrush(QBrush(track_color))
+        painter.setBrush(QBrush(track_color))
         track_rect = self._track_rect()
-        # OFF 状态增加极其轻微的边框勾勒
         if self._has_off_track_border():
-            p.setPen(QPen(QColor(t.border), self.OFF_TRACK_BORDER_W))
+            painter.setPen(QPen(QColor(theme.border), self.OFF_TRACK_BORDER_W))
         else:
-            p.setPen(Qt.NoPen)
+            painter.setPen(Qt.NoPen)
 
         radius = track_rect.height() / 2.0
-        p.drawRoundedRect(track_rect, radius, radius)
+        painter.drawRoundedRect(track_rect, radius, radius)
 
-        p.setPen(Qt.NoPen)
-        # 滑块和柔软阴影 (Soft Shadow)
+        painter.setPen(Qt.NoPen)
         thumb_y = self._thumb_y(track_rect)
-        
-        p.setBrush(QBrush(QColor(0, 0, 0, 20)))
-        p.drawEllipse(QRectF(self._thumb_x, thumb_y + 1, self.THUMB_D, self.THUMB_D))
-        p.setBrush(QBrush(QColor(0, 0, 0, 10)))
-        p.drawEllipse(QRectF(self._thumb_x, thumb_y + 2, self.THUMB_D, self.THUMB_D))
-        p.setBrush(QBrush(QColor(0, 0, 0, 5)))
-        p.drawEllipse(QRectF(self._thumb_x, thumb_y + 3, self.THUMB_D, self.THUMB_D))
-        
-        p.setBrush(QBrush(QColor(t.switch_thumb)))
-        p.drawEllipse(QRectF(self._thumb_x, thumb_y, self.THUMB_D, self.THUMB_D))
+
+        painter.setBrush(QBrush(QColor(0, 0, 0, 20)))
+        painter.drawEllipse(QRectF(self._thumb_x, thumb_y + 1, self.THUMB_D, self.THUMB_D))
+        painter.setBrush(QBrush(QColor(0, 0, 0, 10)))
+        painter.drawEllipse(QRectF(self._thumb_x, thumb_y + 2, self.THUMB_D, self.THUMB_D))
+        painter.setBrush(QBrush(QColor(0, 0, 0, 5)))
+        painter.drawEllipse(QRectF(self._thumb_x, thumb_y + 3, self.THUMB_D, self.THUMB_D))
+
+        painter.setBrush(QBrush(QColor(theme.switch_thumb)))
+        painter.drawEllipse(QRectF(self._thumb_x, thumb_y, self.THUMB_D, self.THUMB_D))
 
     def sizeHint(self) -> QSize:
         return QSize(self.TRACK_W, self.TRACK_H)
-

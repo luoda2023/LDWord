@@ -58,6 +58,25 @@ def test_header_footer_page_number_disabled_removes_existing_page_field():
     assert section.footer.paragraphs[0].text == ""
 
 
+def test_header_footer_fixed_header_applies_emphasis_typography():
+    doc = Document()
+    config = ResolvedConfig()
+    config.header_footer.header_mode = "fixed"
+    config.header_footer.header_text = "Fixed Header"
+    config.header_footer.font_cn = "SimSun"
+    config.header_footer.font_en = "Times New Roman"
+    config.header_footer.size_pt = 9
+    config.header_footer.bold = True
+    config.header_footer.italic = True
+
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), PipelineContext())
+
+    run = doc.sections[0].header.paragraphs[0].runs[0]
+    assert run.font.size.pt == 9
+    assert run.font.bold is True
+    assert run.font.italic is True
+
+
 def _build_sectioned_doc():
     doc = Document()
     doc.add_paragraph("封面")
