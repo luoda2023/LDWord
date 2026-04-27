@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.config.template import TemplateConfig
-from src.qt_api import QLineEdit, QWidget
+from src.qt_api import QLineEdit, QWidget, Qt
 from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
 from src.shared.ui.inspector_form import InspectorForm
@@ -161,6 +161,7 @@ class HeaderFooterDetailSection:
             parent=self._inspector_form,
         )
         self._inspector_form.add_widget(self._suppress_selector_row)
+        self._suppress_selector_row.set_label_alignment(Qt.AlignLeft | Qt.AlignTop)
         self.section.add_widget(self._inspector_form)
 
     def _form_row(

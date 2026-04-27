@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from src.config.feature_configs import default_continuous_page_number_phases
 from src.config.template import PageNumberPhaseConfig, TemplateConfig
-from src.qt_api import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget, Signal
+from src.qt_api import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget, Qt, Signal
 from src.shared.engine.page_number_planner import (
     collect_static_page_number_diagnostics,
     format_page_number_diagnostic_text,
@@ -493,7 +493,9 @@ class PageNumberPlanSection:
         start_value_spin = self._build_page_number_spin()
         remove_btn = QPushButton("移除规则", section)
 
-        section.add_widget(self._form_row("适用范围", selector_editor, parent=section))
+        selector_row = self._form_row("适用范围", selector_editor, parent=section)
+        selector_row.set_label_alignment(Qt.AlignLeft | Qt.AlignTop)
+        section.add_widget(selector_row)
         section.add_widget(
             self._pair_row(
                 self._form_row("页码", visible_toggle, parent=section),

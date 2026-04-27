@@ -312,6 +312,7 @@ def test_template_elements_header_footer_uses_main_form_baseline():
         )
         expected_label_width = max(row.preferred_label_width() for row in rows)
         assert {row.label_width for row in rows} == {expected_label_width}
+        assert detail._header_footer_detail._suppress_selector_row._label.alignment() & Qt.AlignTop
         font_cn_top = detail._header_footer_detail._font_cn_row.mapTo(
             detail, detail._header_footer_detail._font_cn_row.rect().topLeft()
         ).y()
