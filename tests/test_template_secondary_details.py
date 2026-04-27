@@ -10,6 +10,7 @@ from src.config.template import TemplateConfig
 from src.shared.ui.dashed_separator import DashedSeparator
 from src.shared.ui.flow_layout import FlowLayout
 from src.shared.ui.form_row import FormRow
+from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.table_style_gallery import ColorTableGallery
 from src.shared.ui.template_form_layout import TemplateFormGrid, TemplateSplitColumns, template_form_row
 from src.shared.ui.toggle_switch import ToggleSwitch
@@ -39,9 +40,10 @@ def test_table_and_elements_details_reuse_shared_controls():
     assert "SummaryGrid(" in table_source
     assert "_build_summary_card()" in table_source
     assert "_build_editor_column(self)" in table_source
+    assert "InspectorForm(" in table_source
     assert "TemplateFormGrid" in table_source
     assert "TemplateFormStack" in table_source
-    assert "TemplateSplitColumns" in table_source
+    assert "TemplateSplitColumns" not in table_source
     assert "template_form_row" in table_source
     assert "_pair_row(first_row_bold_row, repeat_header_row, self._table_alignment_row)" in table_source
     assert '("keep", "保留原样")' in table_source
@@ -55,8 +57,10 @@ def test_table_and_elements_details_reuse_shared_controls():
     assert "ToggleSwitch(" in header_footer_source
     assert "ToggleSwitch(" in toc_source
     assert "StyledSpinBox(" in page_plan_source
-    assert "TemplateFormGrid" in header_footer_source
-    assert "TemplateSplitColumns" in header_footer_source
+    assert "InspectorForm(" in header_footer_source
+    assert ".add_pair(" in header_footer_source
+    assert ".add_grid(" in header_footer_source
+    assert ".add_split_columns(" not in header_footer_source
     assert "column_stretches=(0, 0, 0)" in header_footer_source
     assert "template_form_row" in header_footer_source
     assert "SummaryGrid(" in elements_source
@@ -87,17 +91,24 @@ def test_template_table_typography_uses_main_form_baseline():
         detail.show()
         app.processEvents()
 
-        assert detail.findChildren(TemplateSplitColumns)
         assert detail.findChildren(TemplateFormGrid)
+        assert not detail._typography_card.findChildren(TemplateSplitColumns)
 
         row_map = {row.label_text: row for row in detail.findChildren(FormRow)}
         for label in ("中文字体", "英文字体", "字号", "对齐"):
             row = row_map[label]
-            visible_gap = row.widget.x() - row.preferred_label_width()
+            visible_gap = row.widget.x() - row.label_width
             assert row._label.alignment() & Qt.AlignLeft
             assert not (row._label.alignment() & Qt.AlignRight)
             assert row.layout().spacing() == 4
             assert visible_gap <= 20
+        font_cn_top = row_map["中文字体"].mapTo(detail, row_map["中文字体"].rect().topLeft()).y()
+        size_top = row_map["字号"].mapTo(detail, row_map["字号"].rect().topLeft()).y()
+        font_en_top = row_map["英文字体"].mapTo(detail, row_map["英文字体"].rect().topLeft()).y()
+        alignment_top = row_map["对齐"].mapTo(detail, row_map["对齐"].rect().topLeft()).y()
+        assert abs(font_cn_top - size_top) <= 4
+        assert abs(font_en_top - alignment_top) <= 4
+        assert font_en_top > font_cn_top
     finally:
         detail.close()
         app.processEvents()
@@ -240,6 +251,40 @@ def test_template_split_columns_can_opt_into_vertical_divider():
         host.close()
 
 
+def test_inspector_form_normalizes_single_grid_and_split_rows_in_one_scope():
+    app = _app()
+    host = QWidget()
+    form = InspectorForm(parent=host)
+    host_layout = QVBoxLayout(host)
+    host_layout.addWidget(form)
+
+    single_row = form.add_field("A", QWidget(form))
+    grid_left = template_form_row("Longer label", QWidget(form), parent=form)
+    grid_right = template_form_row("B", QWidget(form), parent=form)
+    reserved_left = template_form_row("Reserved left", QWidget(form), parent=form)
+    form.add_grid(
+        [
+            [grid_left, grid_right],
+            [reserved_left, None],
+        ]
+    )
+    split_left = template_form_row("Longest inspector label", QWidget(form), parent=form)
+    split_right = template_form_row("C", QWidget(form), parent=form)
+    form.add_split_columns([split_left], [split_right])
+
+    try:
+        host.resize(960, 260)
+        host.show()
+        app.processEvents()
+
+        rows = (single_row, grid_left, grid_right, reserved_left, split_left, split_right)
+        expected = max(row.preferred_label_width() for row in rows)
+        assert {row.label_width for row in rows} == {expected}
+    finally:
+        host.close()
+        app.processEvents()
+
+
 def test_template_elements_header_footer_uses_main_form_baseline():
     app = _app()
     detail = ElementsDetail()
@@ -250,17 +295,38 @@ def test_template_elements_header_footer_uses_main_form_baseline():
         detail.show()
         app.processEvents()
 
-        assert detail.findChildren(TemplateSplitColumns)
         assert detail.findChildren(TemplateFormGrid)
+        assert not detail._header_footer_detail.section.findChildren(TemplateSplitColumns)
 
         rows = (
+            detail._header_footer_detail._header_mode_row,
+            detail._header_footer_detail._styleref_level_row,
+            detail._header_footer_detail._header_text_row,
             detail._header_footer_detail._font_cn_row,
             detail._header_footer_detail._font_en_row,
             detail._header_footer_detail._size_row,
+            detail._header_footer_detail._page_number_row,
+            detail._header_footer_detail._header_border_row,
+            detail._header_footer_detail._hide_cover_row,
             detail._header_footer_detail._suppress_selector_row,
         )
+        expected_label_width = max(row.preferred_label_width() for row in rows)
+        assert {row.label_width for row in rows} == {expected_label_width}
+        font_cn_top = detail._header_footer_detail._font_cn_row.mapTo(
+            detail, detail._header_footer_detail._font_cn_row.rect().topLeft()
+        ).y()
+        size_top = detail._header_footer_detail._size_row.mapTo(
+            detail, detail._header_footer_detail._size_row.rect().topLeft()
+        ).y()
+        font_en_top = detail._header_footer_detail._font_en_row.mapTo(
+            detail, detail._header_footer_detail._font_en_row.rect().topLeft()
+        ).y()
+        assert abs(font_cn_top - size_top) <= 4
+        assert font_en_top > font_cn_top
         for row in rows:
-            visible_gap = row.widget.x() - row.preferred_label_width()
+            if row.isHidden():
+                continue
+            visible_gap = row.widget.x() - row.label_width
             assert row._label.alignment() & Qt.AlignLeft
             assert not (row._label.alignment() & Qt.AlignRight)
             assert row.layout().spacing() == 4

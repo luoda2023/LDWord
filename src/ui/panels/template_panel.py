@@ -1558,7 +1558,8 @@ class _SummaryRow(QWidget):
             f"border: none; background: transparent; padding: 2px 6px; }}"
             f"QPushButton:hover {{ text-decoration: underline; }}"
         )
-        self._edit_btn.setFixedHeight(22)
+        self._edit_btn.setMinimumHeight(22)
+        self._edit_btn.setMaximumHeight(22)
         try:
             from src.ui.icons.catalog import get_icon
             self._icon_lbl.setPixmap(get_icon(self._icon_name, size=14, color=t.text_hint).pixmap(14, 14))

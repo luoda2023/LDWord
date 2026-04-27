@@ -16,6 +16,7 @@ from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.styled_spin_box import StyledSpinBox
 from src.qt_api import QLabel
+from src.shared.ui.sizing import resolved_control_height
 from src.shared.ui.theme import get_theme
 from src.ui.bridge import PanelBridge
 from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
@@ -47,13 +48,27 @@ def test_shared_form_controls_follow_md_height_contract():
     app.processEvents()
 
     theme = get_theme()
-    assert combo.height() >= theme.control_height_md
-    assert spin.height() >= theme.control_height_md
-    assert spacing.height() >= theme.control_height_md
+    expected_height = resolved_control_height(theme, "md")
+    assert combo.height() == expected_height
+    assert spin.height() == expected_height
+    assert spacing.height() == expected_height
+    assert spacing.spin_box.height() == expected_height
     assert row.height() >= combo.height()
 
     host.close()
     app.processEvents()
+
+
+def test_interaction_panels_delegate_fixed_heights_to_shared_controls():
+    panel_sources = (ROOT / "src/ui/panels").rglob("*.py")
+
+    offenders = [
+        str(path.relative_to(ROOT))
+        for path in panel_sources
+        if "setFixedHeight(" in path.read_text(encoding="utf-8")
+    ]
+
+    assert offenders == []
 
 
 def test_form_row_exposes_label_width_without_private_field_access():
@@ -239,6 +254,7 @@ def test_heading_panel_uses_shared_template_form_row_baseline():
 
     assert "from src.shared.ui.form_row import FormRow" not in source
     assert "FormRow(" not in source
+    assert "InspectorForm(" in source
     assert "template_form_row(" in source
     assert "template_form_pair_row(" in source
     assert "_build_pair_row(" not in source
@@ -254,8 +270,28 @@ def test_heading_panel_combo_and_input_controls_share_same_height():
         panel.show()
         app.processEvents()
 
+        assert panel._preset_cb.height() == panel._levels_input.height()
+        assert panel._levels_input.spin_box.height() == panel._levels_input.height()
         assert panel._ref_style_cb.height() == panel._title_sep_edit.height()
         assert panel._core_style_cb.height() == panel._prefix_edit.height()
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_heading_panel_scheme_rows_share_inspector_form_label_scope():
+    app = _app()
+    panel = HeadingNumberingPanel(PanelBridge())
+
+    try:
+        panel.on_template_changed(TemplateConfig())
+        panel.resize(1280, 900)
+        panel.show()
+        app.processEvents()
+
+        assert panel._preset_row.label_width == panel._levels_row.label_width
+        assert panel._preset_row.widget.x() == panel._levels_row.widget.x()
+        assert panel._levels_row.label_width >= panel._levels_row.preferred_label_width()
     finally:
         panel.close()
         app.processEvents()
@@ -370,7 +406,7 @@ def test_style_detail_pairs_stack_when_editor_width_is_narrow():
 
     try:
         detail.set_template(TemplateConfig())
-        detail.resize(560, 900)
+        detail.resize(360, 900)
         detail.show()
         app.processEvents()
 

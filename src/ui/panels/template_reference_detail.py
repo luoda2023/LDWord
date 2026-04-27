@@ -47,6 +47,7 @@ from src.shared.ui.button_style import apply_button_variant, build_button_styles
 from src.shared.ui.card import Card
 from src.shared.ui.flow_section import FlowSection
 from src.shared.ui.font_combo import FontCombo
+from src.shared.ui.option_toggle_chip import OptionToggleChip
 from src.shared.ui.paragraph_style_inputs import IndentInput, SpecialIndentInput
 from src.shared.ui.segmented_control import SegmentedControl
 from src.shared.ui.size_combo import SizeCombo
@@ -399,15 +400,12 @@ class ReferenceDetail(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        bold_label = QLabel("加粗", widget)
-        bold_label.setObjectName("tpl_inline_label")
-        layout.addWidget(bold_label)
-        layout.addWidget(self._bold_switch)
-
-        italic_label = QLabel("斜体", widget)
-        italic_label.setObjectName("tpl_inline_label")
-        layout.addWidget(italic_label)
-        layout.addWidget(self._italic_switch)
+        layout.addWidget(
+            OptionToggleChip("加粗", self._bold_switch, variant="inline", fill=False, parent=widget)
+        )
+        layout.addWidget(
+            OptionToggleChip("斜体", self._italic_switch, variant="inline", fill=False, parent=widget)
+        )
         layout.addStretch(1)
         return widget
 
@@ -725,11 +723,6 @@ class ReferenceDetail(QWidget):
             widget.setStyleSheet(
                 f"font-size: {theme.font_size_sm}px; color: {theme.text_secondary};"
             )
-        for widget in self.findChildren(QLabel, "tpl_inline_label"):
-            widget.setStyleSheet(
-                f"font-size: {theme.font_size_md}px; color: {theme.text_primary};"
-            )
-
         apply_button_variant(self._restore_entry_btn, "ghost-primary")
         apply_button_variant(self._save_btn, "primary")
 

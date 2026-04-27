@@ -35,15 +35,14 @@ from src.qt_api import (
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
+from src.shared.ui.inspector_form import InspectorForm
+from src.shared.ui.option_toggle_chip import OptionToggleChip
 from src.shared.ui.paragraph_style_inputs import IndentInput, SpecialIndentInput
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
-from src.shared.ui.template_form_layout import (
-    TemplateSplitColumns,
-    template_form_row,
-)
+from src.shared.ui.template_form_layout import template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 
@@ -145,7 +144,6 @@ class StyleDetail(QWidget):
         self._header_icons: list[tuple[str, QLabel]] = []
         self._header_titles: list[QLabel] = []
         self._desc_labels: list[QLabel] = []
-        self._toggle_chip_labels: list[QLabel] = []
         self._unit_labels: list[QLabel] = []
         self._is_syncing = False
         self._save_enabled = False
@@ -303,19 +301,22 @@ class StyleDetail(QWidget):
         self._italic_switch = ToggleSwitch(self, checked=False)
         self._italic_switch.toggled_signal.connect(self._on_form_edited)
 
-        self._text_card.add_widget(
-            TemplateSplitColumns(
-                [
-                    self._build_form_row("中文字体", self._font_cn, parent=self._text_card),
-                    self._build_form_row("英文字体", self._font_en, parent=self._text_card),
-                ],
-                [
-                    self._build_form_row("字号", self._size_combo, parent=self._text_card),
-                    self._build_form_row("字形", self._build_emphasis_widget(), parent=self._text_card),
-                ],
-                parent=self._text_card,
-            )
+        self._text_form = InspectorForm(parent=self._text_card)
+        font_cn_row = self._build_form_row("中文字体", self._font_cn, parent=self._text_form)
+        font_en_row = self._build_form_row("英文字体", self._font_en, parent=self._text_form)
+        size_row = self._build_form_row("字号", self._size_combo, parent=self._text_form)
+        emphasis_row = self._build_form_row(
+            "字形",
+            self._build_emphasis_widget(),
+            parent=self._text_form,
         )
+        self._text_form.add_grid(
+            [
+                [font_cn_row, size_row],
+                [font_en_row, emphasis_row],
+            ]
+        )
+        self._text_card.add_widget(self._text_form)
 
     def _build_alignment_indent_card(self) -> None:
         self._alignment_combo = StyledComboBox(self)
@@ -334,19 +335,34 @@ class StyleDetail(QWidget):
         self._right_indent = IndentInput(self, reference_size_pt=12.0)
         self._right_indent.value_changed.connect(self._on_form_edited)
 
-        self._alignment_indent_card.add_widget(
-            TemplateSplitColumns(
-                [
-                    self._build_form_row("对齐", self._alignment_combo, parent=self._alignment_indent_card),
-                    self._build_form_row("左缩进", self._left_indent, parent=self._alignment_indent_card),
-                ],
-                [
-                    self._build_form_row("特殊缩进", self._special_indent, parent=self._alignment_indent_card),
-                    self._build_form_row("右缩进", self._right_indent, parent=self._alignment_indent_card),
-                ],
-                parent=self._alignment_indent_card,
-            )
+        self._alignment_indent_form = InspectorForm(parent=self._alignment_indent_card)
+        alignment_row = self._build_form_row(
+            "对齐",
+            self._alignment_combo,
+            parent=self._alignment_indent_form,
         )
+        special_indent_row = self._build_form_row(
+            "特殊缩进",
+            self._special_indent,
+            parent=self._alignment_indent_form,
+        )
+        left_indent_row = self._build_form_row(
+            "左缩进",
+            self._left_indent,
+            parent=self._alignment_indent_form,
+        )
+        right_indent_row = self._build_form_row(
+            "右缩进",
+            self._right_indent,
+            parent=self._alignment_indent_form,
+        )
+        self._alignment_indent_form.add_grid(
+            [
+                [alignment_row, special_indent_row],
+                [left_indent_row, right_indent_row],
+            ]
+        )
+        self._alignment_indent_card.add_widget(self._alignment_indent_form)
 
     def _build_spacing_card(self) -> None:
         self._line_type_combo = StyledComboBox(self)
@@ -403,38 +419,37 @@ class StyleDetail(QWidget):
         self._space_after_suffix.setObjectName("tpl_style_unit")
         self._unit_labels.append(self._space_after_suffix)
 
-        self._spacing_card.add_widget(
-            TemplateSplitColumns(
-                [
-                    self._build_form_row(
-                        "行距类型",
-                        self._line_type_combo,
-                        parent=self._spacing_card,
-                    ),
-                    self._build_form_row(
-                        "段前",
-                        self._space_before,
-                        suffix_widget=self._space_before_suffix,
-                        parent=self._spacing_card,
-                    ),
-                ],
-                [
-                    self._build_form_row(
-                        "行距值",
-                        self._line_value,
-                        suffix_widget=self._line_value_suffix,
-                        parent=self._spacing_card,
-                    ),
-                    self._build_form_row(
-                        "段后",
-                        self._space_after,
-                        suffix_widget=self._space_after_suffix,
-                        parent=self._spacing_card,
-                    ),
-                ],
-                parent=self._spacing_card,
-            )
+        self._spacing_form = InspectorForm(parent=self._spacing_card)
+        line_type_row = self._build_form_row(
+            "行距类型",
+            self._line_type_combo,
+            parent=self._spacing_form,
         )
+        line_value_row = self._build_form_row(
+            "行距值",
+            self._line_value,
+            suffix_widget=self._line_value_suffix,
+            parent=self._spacing_form,
+        )
+        space_before_row = self._build_form_row(
+            "段前",
+            self._space_before,
+            suffix_widget=self._space_before_suffix,
+            parent=self._spacing_form,
+        )
+        space_after_row = self._build_form_row(
+            "段后",
+            self._space_after,
+            suffix_widget=self._space_after_suffix,
+            parent=self._spacing_form,
+        )
+        self._spacing_form.add_grid(
+            [
+                [line_type_row, line_value_row],
+                [space_before_row, space_after_row],
+            ]
+        )
+        self._spacing_card.add_widget(self._spacing_form)
 
     def _build_emphasis_widget(self) -> QWidget:
         widget = QWidget(self)
@@ -442,27 +457,11 @@ class StyleDetail(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
 
-        self._bold_chip = self._build_toggle_chip("加粗", self._bold_switch, parent=widget)
-        self._italic_chip = self._build_toggle_chip("斜体", self._italic_switch, parent=widget)
+        self._bold_chip = OptionToggleChip("加粗", self._bold_switch, parent=widget)
+        self._italic_chip = OptionToggleChip("斜体", self._italic_switch, parent=widget)
         layout.addWidget(self._bold_chip, 1)
         layout.addWidget(self._italic_chip, 1)
         return widget
-
-    def _build_toggle_chip(self, text: str, toggle: ToggleSwitch, *, parent: QWidget) -> QWidget:
-        chip = QWidget(parent)
-        chip.setObjectName("tpl_style_toggle_chip")
-        chip.setAttribute(Qt.WA_StyledBackground, True)
-
-        layout = QHBoxLayout(chip)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(10)
-
-        label = QLabel(text, chip)
-        self._toggle_chip_labels.append(label)
-        layout.addWidget(label)
-        layout.addStretch(1)
-        layout.addWidget(toggle)
-        return chip
 
     # ------------------------------------------------------------------
     # Public API
@@ -738,16 +737,7 @@ class StyleDetail(QWidget):
 
     def _apply_theme(self) -> None:
         theme = get_theme()
-        self.setStyleSheet(
-            build_button_stylesheet(theme)
-            + f"""
-            QWidget#tpl_style_toggle_chip {{
-                background: {theme.bg_hover};
-                border: 1px solid {theme.border_light};
-                border-radius: {theme.radius_sm}px;
-            }}
-            """
-        )
+        self.setStyleSheet(build_button_stylesheet(theme))
 
         title_ss = (
             f"font-size: {theme.font_size_lg}px; "
@@ -761,10 +751,6 @@ class StyleDetail(QWidget):
             label.setStyleSheet(title_ss)
         for label in self._desc_labels:
             label.setStyleSheet(desc_ss)
-        for label in self._toggle_chip_labels:
-            label.setStyleSheet(
-                f"font-size: {theme.font_size_md}px; color: {theme.text_primary};"
-            )
         for label in self._unit_labels:
             label.setStyleSheet(unit_ss)
 

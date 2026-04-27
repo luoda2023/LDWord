@@ -438,7 +438,9 @@ class QuickExecutionDetail(QWidget):
         # Left: Execute button
         self._execute_btn = QPushButton("开始执行", self)
         self._execute_btn.setObjectName("wb_v2_execute_btn")
-        self._execute_btn.setFixedHeight(get_theme().control_height_lg)
+        exec_height = get_theme().control_height_lg
+        self._execute_btn.setMinimumHeight(exec_height)
+        self._execute_btn.setMaximumHeight(exec_height)
         self._execute_btn.setCursor(Qt.PointingHandCursor)
         self._execute_btn.setIcon(get_icon("play", 16, get_theme().text_on_primary))
         apply_button_variant(self._execute_btn, "primary")
@@ -448,7 +450,8 @@ class QuickExecutionDetail(QWidget):
         # Right: Compact status panel (fixed height = button height)
         self._exec_status_area = QWidget(exec_row)
         self._exec_status_area.setObjectName("wb_v2_exec_status_area")
-        self._exec_status_area.setFixedHeight(get_theme().control_height_lg)
+        self._exec_status_area.setMinimumHeight(exec_height)
+        self._exec_status_area.setMaximumHeight(exec_height)
         status_layout = QVBoxLayout(self._exec_status_area)
         status_layout.setContentsMargins(0, 0, 0, 0)
         status_layout.setSpacing(0)
@@ -464,7 +467,8 @@ class QuickExecutionDetail(QWidget):
         self._exec_bar.setRange(0, 100)
         self._exec_bar.setValue(0)
         self._exec_bar.setTextVisible(False)
-        self._exec_bar.setFixedHeight(4)
+        self._exec_bar.setMinimumHeight(4)
+        self._exec_bar.setMaximumHeight(4)
         self._exec_bar.setVisible(False)
         status_layout.addWidget(self._exec_bar)
 
@@ -1094,12 +1098,16 @@ class QuickExecutionDetail(QWidget):
 
         # Execute button
         if hasattr(self, "_execute_btn"):
+            self._execute_btn.setMinimumHeight(t.control_height_lg)
+            self._execute_btn.setMaximumHeight(t.control_height_lg)
             apply_button_variant(self._execute_btn, "primary")
             if not self._execution_running:
                 self._execute_btn.setIcon(get_icon("play", 16, t.text_on_primary))
 
         # Exec status area (right of button)
         if hasattr(self, "_exec_status_area"):
+            self._exec_status_area.setMinimumHeight(t.control_height_lg)
+            self._exec_status_area.setMaximumHeight(t.control_height_lg)
             self._exec_status_area.setStyleSheet(
                 f"""QWidget#wb_v2_exec_status_area {{
                     background: {t.bg_hover};

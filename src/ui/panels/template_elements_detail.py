@@ -423,7 +423,6 @@ class ElementsDetail(QWidget):
             f"font-weight: {theme.font_weight_emphasis}; color: {theme.primary}; background: transparent;"
         )
         note_ss = f"font-size: {theme.font_size_sm}px; color: {theme.text_hint};"
-        inline_ss = f"font-size: {theme.font_size_md}px; color: {theme.text_primary};"
         unit_ss = f"font-size: {theme.font_size_sm}px; color: {theme.text_secondary};"
 
         for widget in self.findChildren(QLabel, "tpl_card_title"):
@@ -432,8 +431,6 @@ class ElementsDetail(QWidget):
             self._page_plan_note.setStyleSheet(note_ss)
         for widget in self.findChildren(QLineEdit):
             widget.setStyleSheet(build_text_input_stylesheet(theme, selector="QLineEdit"))
-        for widget in self.findChildren(QLabel, "tpl_inline_label"):
-            widget.setStyleSheet(inline_ss)
         for widget in self.findChildren(QLabel, "tpl_style_unit"):
             widget.setStyleSheet(unit_ss)
 

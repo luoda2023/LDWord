@@ -27,6 +27,7 @@ from src.qt_api import (
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
+from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
@@ -35,7 +36,6 @@ from src.shared.ui.table_style_gallery import ColorTableGallery
 from src.shared.ui.template_form_layout import (
     TemplateFormGrid,
     TemplateFormStack,
-    TemplateSplitColumns,
     template_form_row,
 )
 from src.shared.ui.theme import bind_theme, get_theme
@@ -301,31 +301,33 @@ class TableCaptionDetail(QWidget):
         self._border_layout_card.add_widget(TemplateFormStack(rows, parent=self._border_layout_card))
 
     def _build_typography_form(self) -> None:
+        self._typography_form = InspectorForm(parent=self._typography_card)
+
         self._font_cn_combo = FontCombo(lang="cn", parent=self)
         self._font_cn_combo.font_changed.connect(self._on_form_edited)
-        font_cn_row = self._form_row("中文字体", self._font_cn_combo, parent=self._typography_card)
+        font_cn_row = self._form_row("中文字体", self._font_cn_combo, parent=self._typography_form)
 
         self._font_en_combo = FontCombo(lang="en", parent=self)
         self._font_en_combo.font_changed.connect(self._on_form_edited)
-        font_en_row = self._form_row("英文字体", self._font_en_combo, parent=self._typography_card)
+        font_en_row = self._form_row("英文字体", self._font_en_combo, parent=self._typography_form)
 
         self._size_combo = SizeCombo(self)
         self._size_combo.size_changed.connect(self._on_form_edited)
         self._size_combo.currentTextChanged.connect(self._on_form_edited)
-        size_row = self._form_row("字号", self._size_combo, parent=self._typography_card)
+        size_row = self._form_row("字号", self._size_combo, parent=self._typography_form)
 
         self._alignment_combo = StyledComboBox(self)
         for value, label in ALIGNMENT_OPTIONS:
             self._alignment_combo.addItem(label, value)
         self._alignment_combo.currentIndexChanged.connect(self._on_form_edited)
-        alignment_row = self._form_row("对齐", self._alignment_combo, parent=self._typography_card)
-        self._typography_card.add_widget(
-            TemplateSplitColumns(
-                [font_cn_row, font_en_row],
-                [size_row, alignment_row],
-                parent=self._typography_card,
-            )
+        alignment_row = self._form_row("对齐", self._alignment_combo, parent=self._typography_form)
+        self._typography_form.add_grid(
+            [
+                [font_cn_row, size_row],
+                [font_en_row, alignment_row],
+            ]
         )
+        self._typography_card.add_widget(self._typography_form)
 
     def _build_behavior_form(self) -> None:
         self._first_row_bold_toggle = ToggleSwitch(self, checked=False)

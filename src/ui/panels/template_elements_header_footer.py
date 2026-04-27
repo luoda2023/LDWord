@@ -8,13 +8,10 @@ from src.config.template import TemplateConfig
 from src.qt_api import QLineEdit, QWidget
 from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
+from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.styled_combo_box import StyledComboBox
-from src.shared.ui.template_form_layout import (
-    TemplateFormGrid,
-    TemplateSplitColumns,
-    template_form_row,
-)
+from src.shared.ui.template_form_layout import template_form_row
 from src.shared.ui.toggle_switch import ToggleSwitch
 from src.ui.panels.template_elements_page_plan import (
     PageNumberPlanSection,
@@ -92,66 +89,64 @@ class HeaderFooterDetailSection:
         self._owner._page_phase_rows = self._page_phase_rows
 
     def _build_form(self) -> None:
+        self._inspector_form = InspectorForm(parent=self.section)
+
         self._header_mode_combo = StyledComboBox(self._owner)
         for value, label in HEADER_MODE_OPTIONS:
             self._header_mode_combo.addItem(label, value)
         self._header_mode_combo.currentIndexChanged.connect(self._owner._on_structure_edited)
-        self._header_mode_row = self._form_row("页眉内容", self._header_mode_combo, parent=self.section)
+        self._header_mode_row = self._form_row("页眉内容", self._header_mode_combo, parent=self._inspector_form)
 
         self._header_text_edit = QLineEdit(self._owner)
         self._header_text_edit.textChanged.connect(self._owner._on_structure_edited)
-        self._header_text_row = self._form_row("固定文字", self._header_text_edit, parent=self.section)
+        self._header_text_row = self._form_row("固定文字", self._header_text_edit, parent=self._inspector_form)
 
         self._styleref_level_combo = StyledComboBox(self._owner)
         for level in range(1, 7):
             self._styleref_level_combo.addItem(f"{level} 级", level)
         self._styleref_level_combo.currentIndexChanged.connect(self._owner._on_structure_edited)
-        self._styleref_level_row = self._form_row("标题级别", self._styleref_level_combo, parent=self.section)
-        self._header_mode_pair = self._pair_row(
+        self._styleref_level_row = self._form_row("标题级别", self._styleref_level_combo, parent=self._inspector_form)
+        self._header_mode_pair = self._inspector_form.add_pair(
             self._header_mode_row,
             self._styleref_level_row,
             self._header_text_row,
         )
-        self.section.add_widget(self._header_mode_pair)
 
         self._font_cn_combo = FontCombo(lang="cn", parent=self._owner)
         self._font_cn_combo.font_changed.connect(self._owner._on_structure_edited)
-        self._font_cn_row = self._form_row("中文字体", self._font_cn_combo, parent=self.section)
+        self._font_cn_row = self._form_row("中文字体", self._font_cn_combo, parent=self._inspector_form)
 
         self._font_en_combo = FontCombo(lang="en", parent=self._owner)
         self._font_en_combo.font_changed.connect(self._owner._on_structure_edited)
-        self._font_en_row = self._form_row("英文字体", self._font_en_combo, parent=self.section)
+        self._font_en_row = self._form_row("英文字体", self._font_en_combo, parent=self._inspector_form)
 
         self._size_combo = SizeCombo(self._owner)
         self._size_combo.size_changed.connect(self._owner._on_structure_edited)
         self._size_combo.currentTextChanged.connect(self._owner._on_structure_edited)
-        self._size_row = self._form_row("字号", self._size_combo, parent=self.section)
-        self.section.add_widget(
-            TemplateSplitColumns(
-                [self._font_cn_row, self._font_en_row],
-                [self._size_row],
-                parent=self.section,
-            )
+        self._size_row = self._form_row("字号", self._size_combo, parent=self._inspector_form)
+        self._typography_grid = self._inspector_form.add_grid(
+            [
+                [self._font_cn_row, self._size_row],
+                [self._font_en_row, None],
+            ],
         )
 
         self._page_number_toggle = ToggleSwitch(self._owner, checked=True)
         self._page_number_toggle.toggled_signal.connect(self._owner._on_structure_edited)
-        self._page_number_row = self._form_row("页码", self._page_number_toggle, parent=self.section)
+        self._page_number_row = self._form_row("页码", self._page_number_toggle, parent=self._inspector_form)
 
         self._header_border_toggle = ToggleSwitch(self._owner, checked=True)
         self._header_border_toggle.toggled_signal.connect(self._owner._on_structure_edited)
-        self._header_border_row = self._form_row("页眉线", self._header_border_toggle, parent=self.section)
+        self._header_border_row = self._form_row("页眉线", self._header_border_toggle, parent=self._inspector_form)
 
         self._hide_cover_toggle = ToggleSwitch(self._owner, checked=True)
         self._hide_cover_toggle.toggled_signal.connect(self._owner._on_structure_edited)
-        self._hide_cover_row = self._form_row("起始前留空", self._hide_cover_toggle, parent=self.section)
-        self.section.add_widget(
-            self._pair_row(
-                self._page_number_row,
-                self._header_border_row,
-                self._hide_cover_row,
-                column_stretches=(0, 0, 0),
-            )
+        self._hide_cover_row = self._form_row("起始前留空", self._hide_cover_toggle, parent=self._inspector_form)
+        self._page_toggle_pair = self._inspector_form.add_pair(
+            self._page_number_row,
+            self._header_border_row,
+            self._hide_cover_row,
+            column_stretches=(0, 0, 0),
         )
 
         self._suppress_selector_editor = PageSelectorEditor(
@@ -160,8 +155,13 @@ class HeaderFooterDetailSection:
             hint_text="默认覆盖正文页码开始前的封面、声明、授权书和说明页。",
         )
         self._suppress_selector_editor.changed.connect(self._owner._on_structure_edited)
-        self._suppress_selector_row = self._form_row("留空范围", self._suppress_selector_editor, parent=self.section)
-        self.section.add_widget(self._suppress_selector_row)
+        self._suppress_selector_row = self._form_row(
+            "留空范围",
+            self._suppress_selector_editor,
+            parent=self._inspector_form,
+        )
+        self._inspector_form.add_widget(self._suppress_selector_row)
+        self.section.add_widget(self._inspector_form)
 
     def _form_row(
         self,
@@ -172,18 +172,6 @@ class HeaderFooterDetailSection:
         parent,
     ) -> QWidget:
         return template_form_row(label, widget, suffix_widget=suffix_widget, parent=parent)
-
-    def _pair_row(
-        self,
-        *widgets: QWidget,
-        column_stretches: tuple[int, ...] | None = None,
-    ) -> TemplateFormGrid:
-        return TemplateFormGrid(
-            [widgets],
-            parent=self._owner,
-            column_gap=12,
-            column_stretches=column_stretches,
-        )
 
     def _set_combo_by_data(self, combo: StyledComboBox, target) -> None:
         for index in range(combo.count()):

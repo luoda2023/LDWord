@@ -94,7 +94,9 @@ def test_page_setup_detail_reuses_shared_spacing_input_control():
 
     assert "SummaryGrid(" in source
     assert "SpacingInput(" in source
-    assert "TemplateSplitColumns(" in source
+    assert "InspectorForm(" in source
+    assert ".add_grid(" in source
+    assert "TemplateSplitColumns(" not in source
     assert "def _build_split_form_columns" not in source
     assert "InlineAlert(" in source
     assert 'QPushButton("恢复"' in source
@@ -164,10 +166,10 @@ def test_page_setup_detail_right_column_form_rows_left_align_labels_for_visual_b
         assert row_map["下边距"]._label.alignment() & Qt.AlignLeft
         assert row_map["右边距"]._label.alignment() & Qt.AlignLeft
         assert row_map["页脚距离"]._label.alignment() & Qt.AlignLeft
-        assert row_map["分节方式"].widget.geometry().x() < 70
-        assert row_map["下边距"].widget.geometry().x() < 70
-        assert row_map["右边距"].widget.geometry().x() < 70
-        assert row_map["页脚距离"].widget.geometry().x() < 70
+        assert row_map["分节方式"].widget.geometry().x() - row_map["分节方式"].label_width <= 20
+        assert row_map["下边距"].widget.geometry().x() - row_map["下边距"].label_width <= 20
+        assert row_map["右边距"].widget.geometry().x() - row_map["右边距"].label_width <= 20
+        assert row_map["页脚距离"].widget.geometry().x() - row_map["页脚距离"].label_width <= 20
     finally:
         detail.close()
         app.processEvents()

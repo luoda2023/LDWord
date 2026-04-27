@@ -17,11 +17,12 @@ from src.config.style_semantics import (
     spacing_editor_config,
 )
 from src.config.template import StyleConfig, TemplateConfig
-from src.qt_api import QHBoxLayout, QLabel, QLineEdit, QWidget
+from src.qt_api import QLabel, QLineEdit, QWidget
 from src.shared.engine.toc_style_ops import resolve_toc_style_config
 from src.shared.ui.card import Card
 from src.shared.ui.flow_section import FlowSection
 from src.shared.ui.font_combo import FontCombo
+from src.shared.ui.option_toggle_chip import OptionToggleChip
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
@@ -222,7 +223,7 @@ class TocDetailSection:
         indent_suffix = QLabel("字", self._owner)
         indent_suffix.setObjectName("tpl_style_unit")
 
-        bold_widget = self._build_toggle_chip("加粗", bold_toggle)
+        bold_widget = OptionToggleChip("加粗", bold_toggle, variant="inline", parent=self._owner)
 
         section.add_widget(
             TemplateFormGrid(
@@ -267,19 +268,6 @@ class TocDetailSection:
             "left_indent": left_indent,
         }
         return section
-
-    def _build_toggle_chip(self, label_text: str, toggle: ToggleSwitch) -> QWidget:
-        chip = QWidget(self._owner)
-        layout = QHBoxLayout(chip)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        label = QLabel(label_text, chip)
-        label.setObjectName("tpl_inline_label")
-        layout.addWidget(label)
-        layout.addWidget(toggle)
-        layout.addStretch(1)
-        return chip
 
     def _form_row(
         self,

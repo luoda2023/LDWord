@@ -12,6 +12,7 @@ from src.qt_api import QApplication, Qt
 from src.shared.ui.card import Card
 from src.shared.ui.dashed_separator import DashedSeparator
 from src.shared.ui.form_row import FormRow
+from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.summary_grid import SummaryGrid
 from src.shared.ui.template_form_layout import TemplateFormGrid, TemplateSplitColumns
 from src.shared.ui.toast import Toast
@@ -121,7 +122,9 @@ def test_style_detail_reuses_shared_controls():
     assert "SpecialIndentInput(" in source
     assert "IndentInput(" in source
     assert "ToggleSwitch(" in source
-    assert "TemplateSplitColumns(" in source
+    assert "InspectorForm(" in source
+    assert ".add_grid(" in source
+    assert "TemplateSplitColumns(" not in source
     assert "TemplateFormGrid(" not in source
     assert "template_form_row(" in source
     assert "_build_split_form_columns" not in source
@@ -153,8 +156,9 @@ def test_style_detail_organizes_body_controls_into_cards():
         assert isinstance(detail._text_card, Card)
         assert isinstance(detail._alignment_indent_card, Card)
         assert isinstance(detail._spacing_card, Card)
-        assert detail.findChildren(TemplateSplitColumns)
-        assert not detail.findChildren(TemplateFormGrid)
+        assert detail.findChildren(InspectorForm)
+        assert detail.findChildren(TemplateFormGrid)
+        assert not detail.findChildren(TemplateSplitColumns)
         assert not hasattr(detail, "_paragraph_card")
         assert not detail.findChildren(DashedSeparator)
         assert not hasattr(detail, "_advanced_indent_toggle")
@@ -271,8 +275,7 @@ def test_style_detail_text_to_control_gap_stays_compact():
         for label in ("中文字体", "英文字体", "字号", "字形", "对齐", "特殊缩进", "左缩进", "右缩进", "行距类型", "行距值", "段前", "段后"):
             row = row_map[label]
             layout_gap = row.layout().spacing()
-            text_width = row.preferred_label_width()
-            visible_gap = row.widget.x() - text_width
+            visible_gap = row.widget.x() - row.label_width
             assert layout_gap == 4
             assert visible_gap <= 20
     finally:

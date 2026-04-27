@@ -74,6 +74,7 @@ from src.shared.ui import (
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
+from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.style_preview_utils import (
@@ -82,7 +83,11 @@ from src.shared.ui.style_preview_utils import (
     resolve_preview_size_pt,
 )
 from src.shared.ui.styled_combo_box import StyledComboBox
-from src.shared.ui.sizing import apply_size_class
+from src.shared.ui.sizing import (
+    apply_size_class,
+    normalize_form_control_heights,
+    resolved_control_height,
+)
 from src.shared.ui.template_form_layout import template_form_pair_row, template_form_row
 from src.shared.ui.theme import get_theme, bind_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
@@ -335,7 +340,7 @@ class _WhitespacePresetWidget(QWidget):
         self,
         *,
         text: str = "",
-        control_height: int = 32,
+        control_height: int | None = None,
         compact_mode_width: int = 72,
         parent=None,
     ):
@@ -346,11 +351,12 @@ class _WhitespacePresetWidget(QWidget):
         self._value_to_key = dict(SEPARATOR_VALUE_TO_KEY)
         self._custom_raw_text = ""
         self._current_mode_key = "custom"
-        self._control_height = max(24, int(control_height or 34))
+        self._control_height = max(24, int(control_height or resolved_control_height(get_theme(), "md")))
         self._compact_mode_width = max(60, int(compact_mode_width or 72))
         self._custom_layout_spacing = 6
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setFixedHeight(self._control_height)
+        self.setMinimumHeight(self._control_height)
+        self.setMaximumHeight(self._control_height)
 
         self._mode_combo = StyledComboBox(self)
         self._mode_combo.setEditable(True)
@@ -577,6 +583,7 @@ class HeadingNumberingPanel(BasePanel):
     def _build_scheme_section(self) -> None:
         self._scheme_section = Card(parent=self)
         self._add_card_header(self._scheme_section, "settings", "编号方案")
+        self._scheme_form = InspectorForm(parent=self._scheme_section)
 
         # Preset combo
         self._preset_cb = StyledComboBox(self)
@@ -585,9 +592,7 @@ class HeadingNumberingPanel(BasePanel):
             self._preset_cb.addItem(label, key)
         self._preset_cb.setPlaceholderText("当前配置（自定义）")
         self._preset_cb.setCurrentIndex(-1)
-        self._scheme_section.add_widget(
-            self._form_row("编号库", self._preset_cb, parent=self._scheme_section)
-        )
+        self._preset_row = self._scheme_form.add_field("编号库", self._preset_cb)
 
         # Max levels
         self._levels_input = SpacingInput(
@@ -602,9 +607,12 @@ class HeadingNumberingPanel(BasePanel):
         )
         levels_suffix = QLabel("级", self)
         self._unit_labels.append(levels_suffix)
-        self._scheme_section.add_widget(
-            self._form_row("最大级数", self._levels_input, parent=self._scheme_section, suffix=levels_suffix)
+        self._levels_row = self._scheme_form.add_field(
+            "最大级数",
+            self._levels_input,
+            suffix_widget=levels_suffix,
         )
+        self._scheme_section.add_widget(self._scheme_form)
         # Backward-compatible alias used by older tests/callers.
         self._levels_slider = self._levels_input.spin_box
 
@@ -635,7 +643,9 @@ class HeadingNumberingPanel(BasePanel):
 
         list_header = QLabel("选择级别")
         list_header.setObjectName("hn_list_header")
-        list_header.setFixedHeight(t.control_height_md)
+        header_height = resolved_control_height(t, "md")
+        list_header.setMinimumHeight(header_height)
+        list_header.setMaximumHeight(header_height)
         list_header.setAlignment(Qt.AlignCenter)
         left_layout.addWidget(list_header)
 
@@ -2059,8 +2069,8 @@ class HeadingNumberingPanel(BasePanel):
         except Exception:
             pass
 
-        self._sync_combo_heights(t)
-        QTimer.singleShot(0, lambda: self._sync_combo_heights(get_theme()))
+        self._sync_input_heights(t)
+        QTimer.singleShot(0, lambda: self._sync_input_heights(get_theme()))
         self._refresh_inspector_toggles()
         self._refresh_action_state()
 
@@ -2183,33 +2193,13 @@ class HeadingNumberingPanel(BasePanel):
             {build_checkbox_stylesheet(t, selector="#HeadingNumberingPanel QCheckBox")}
         """ + build_button_stylesheet(t)
 
-    def _sync_combo_heights(self, theme) -> None:
-        reference_height = theme.control_height_md + 2
-        if reference_height <= 0:
-            return
-        override_marker = "/* heading-panel-height-override */"
-        for combo in self.findChildren(StyledComboBox):
-            base_style = combo.styleSheet()
-            if override_marker in base_style:
-                base_style = base_style.split(override_marker, 1)[0].rstrip()
-            combo.setStyleSheet(
-                (
-                    f"{base_style}\n{override_marker}\n"
-                    f"#{combo.objectName()} {{\n"
-                    f"    min-height: {reference_height}px;\n"
-                    f"    max-height: {reference_height}px;\n"
-                    f"    padding-top: 0px;\n"
-                    f"    padding-bottom: 0px;\n"
-                    f"}}\n"
-                    f"#{combo.objectName()}[sizeClass=\"md\"] {{\n"
-                    f"    min-height: {reference_height}px;\n"
-                    f"    max-height: {reference_height}px;\n"
-                    f"    padding-top: 0px;\n"
-                    f"    padding-bottom: 0px;\n"
-                    f"}}\n"
-                ).strip()
-            )
-            combo.updateGeometry()
+    def _sync_input_heights(self, theme) -> None:
+        reference_height = resolved_control_height(theme, "md")
+        normalize_form_control_heights(
+            self,
+            reference_height,
+            marker="/* heading-panel-form-control-height */",
+        )
 
 
 # ── Utility ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

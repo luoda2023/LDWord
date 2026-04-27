@@ -19,11 +19,12 @@ from src.qt_api import (
 )
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
+from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.inline_alert import InlineAlert
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
-from src.shared.ui.template_form_layout import TemplateSplitColumns, template_form_row
+from src.shared.ui.template_form_layout import template_form_row
 from src.shared.ui.themed_radio_button import ThemedRadioButton
 from src.shared.ui.theme import bind_theme, get_theme
 
@@ -276,58 +277,60 @@ class PageSetupDetail(QWidget):
         for value, label in _SECTION_BREAK_OPTIONS:
             self._section_break_combo.addItem(label, value)
         self._section_break_combo.currentIndexChanged.connect(self._on_form_edited)
-        self._paper_card.add_widget(
-            TemplateSplitColumns(
+        self._paper_form = InspectorForm(parent=self._paper_card)
+        self._paper_form.add_grid(
+            [
                 [
-                    self._build_form_row("纸张", self._paper_combo, parent=self._paper_card),
+                    self._build_form_row("纸张", self._paper_combo, parent=self._paper_form),
+                    self._build_form_row("分节方式", self._section_break_combo, parent=self._paper_form),
                 ],
-                [
-                    self._build_form_row("分节方式", self._section_break_combo, parent=self._paper_card),
-                ],
-                parent=self._paper_card,
-                gutter_padding=14,
-            )
+            ],
         )
-        self._paper_card.add_widget(
-            self._build_form_row(
-                "方向",
-                self._build_direction_selector(parent=self._paper_card),
-                parent=self._paper_card,
-            )
+        self._paper_form.add_field(
+            "方向",
+            self._build_direction_selector(parent=self._paper_form),
         )
+        self._paper_card.add_widget(self._paper_form)
 
     def _build_margin_controls(self) -> None:
-        self._margin_card.add_widget(
-            TemplateSplitColumns(
+        self._margin_form = InspectorForm(parent=self._margin_card)
+        self._margin_form.add_grid(
+            [
                 [
-                    self._build_spacing_form_row("上边距", "top_cm", parent=self._margin_card),
-                    self._build_spacing_form_row("左边距", "left_cm", parent=self._margin_card),
+                    self._build_spacing_form_row("上边距", "top_cm", parent=self._margin_form),
+                    self._build_spacing_form_row("下边距", "bottom_cm", parent=self._margin_form),
                 ],
                 [
-                    self._build_spacing_form_row("下边距", "bottom_cm", parent=self._margin_card),
-                    self._build_spacing_form_row("右边距", "right_cm", parent=self._margin_card),
+                    self._build_spacing_form_row("左边距", "left_cm", parent=self._margin_form),
+                    self._build_spacing_form_row("右边距", "right_cm", parent=self._margin_form),
                 ],
-                parent=self._margin_card,
-                gutter_padding=14,
-            )
+                [
+                    self._build_spacing_form_row("装订线", "gutter_cm", parent=self._margin_form),
+                    None,
+                ],
+            ]
         )
-        self._margin_card.add_widget(
-            self._build_spacing_form_row("装订线", "gutter_cm", parent=self._margin_card)
-        )
+        self._margin_card.add_widget(self._margin_form)
 
     def _build_header_footer_controls(self) -> None:
-        self._header_footer_card.add_widget(
-            TemplateSplitColumns(
+        self._header_footer_form = InspectorForm(parent=self._header_footer_card)
+        self._header_footer_form.add_grid(
+            [
                 [
-                    self._build_spacing_form_row("页眉距离", "header_distance_cm", parent=self._header_footer_card),
+                    self._build_spacing_form_row(
+                        "页眉距离",
+                        "header_distance_cm",
+                        parent=self._header_footer_form,
+                    ),
+                    self._build_spacing_form_row(
+                        "页脚距离",
+                        "footer_distance_cm",
+                        parent=self._header_footer_form,
+                    ),
                 ],
-                [
-                    self._build_spacing_form_row("页脚距离", "footer_distance_cm", parent=self._header_footer_card),
-                ],
-                parent=self._header_footer_card,
-                gutter_padding=14,
-            )
+            ],
         )
+        self._header_footer_card.add_widget(self._header_footer_form)
 
     def _add_card_header(
         self,

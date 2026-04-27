@@ -21,6 +21,7 @@ from src.shared.ui.theme import (
     get_theme, set_theme, bind_theme,
 )
 from src.shared.ui.custom_themes import CustomThemeStore
+from src.shared.ui.divider import Divider
 from src.shared.ui.flow_layout import FlowLayout
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.ui.base_panel import BasePanel
@@ -625,8 +626,7 @@ class ThemePanel(BasePanel):
         outer.addSpacing(20)
 
         # ── 分隔线 + 自定义区标题 ──
-        self._custom_divider = QFrame()
-        self._custom_divider.setFixedHeight(1)
+        self._custom_divider = Divider(parent=self)
         outer.addWidget(self._custom_divider)
         outer.addSpacing(14)
 
@@ -779,9 +779,6 @@ class ThemePanel(BasePanel):
         self._subtitle.setStyleSheet(
             f"font-size: {t.font_size_md}px; color: {t.text_secondary}; "
             f"background: transparent;"
-        )
-        self._custom_divider.setStyleSheet(
-            f"background: {t.divider};"
         )
         self._custom_title.setStyleSheet(
             f"font-size: 14px; font-weight: bold; color: {t.text_secondary}; "
