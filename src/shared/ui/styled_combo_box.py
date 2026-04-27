@@ -4,7 +4,7 @@ Shared combo-box foundation with an anchored in-window popup panel.
 
 from __future__ import annotations
 
-from src.qt_api import QComboBox, QListView, QPoint, QRect, QRectF, QColor, QPainter, QPen, Qt
+from src.qt_api import QComboBox, QListView, QPoint, QRect, QRectF, QColor, QEvent, QPainter, QPen, QSizePolicy, Qt
 
 from src.shared.ui.combo_popup_panel import ComboPopupPanel
 from src.shared.ui.sizing import apply_size_class, resolved_control_height
@@ -45,6 +45,8 @@ class StyledComboBox(QComboBox):
 
         self.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self._inline = False
+        self._editor_widget = None
+        self._syncing_editor_geometry = False
         apply_size_class(self, "md")
 
         bind_theme(self, self._refresh_style)
@@ -185,8 +187,76 @@ class StyledComboBox(QComboBox):
                 selection-color: {theme.text_on_primary};
                 padding: 0;
                 font-size: {theme.font_size_md}px;
+                font-family: {theme.font_family};
             }}
         """
+
+    def setEditable(self, editable: bool) -> None:
+        super().setEditable(editable)
+        if editable:
+            self._configure_editor()
+        else:
+            self._release_editor_filter()
+
+    def _configure_editor(self) -> None:
+        line_edit = self.lineEdit()
+        if line_edit is None:
+            return
+
+        line_edit.setFrame(False)
+        line_edit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        line_edit.setContentsMargins(0, 0, 0, 0)
+        line_edit.setTextMargins(0, 0, 0, 0)
+        line_edit.setMinimumHeight(0)
+        editor_policy = line_edit.sizePolicy()
+        editor_policy.setHorizontalPolicy(QSizePolicy.Expanding)
+        editor_policy.setVerticalPolicy(QSizePolicy.Ignored)
+        line_edit.setSizePolicy(editor_policy)
+        line_edit.setStyleSheet(self.build_editor_stylesheet(get_theme()))
+        if self._editor_widget is not line_edit:
+            self._release_editor_filter()
+            self._editor_widget = line_edit
+            line_edit.installEventFilter(self)
+        self._sync_editor_geometry()
+
+    def _release_editor_filter(self) -> None:
+        if self._editor_widget is None:
+            return
+        try:
+            self._editor_widget.removeEventFilter(self)
+        except RuntimeError:
+            pass
+        self._editor_widget = None
+
+    def _sync_editor_geometry(self) -> None:
+        line_edit = self.lineEdit()
+        if line_edit is None:
+            return
+        if self._syncing_editor_geometry:
+            return
+
+        theme = get_theme()
+        left = max(0, int(theme.input_padding_x))
+        right = max(0, int(theme.combo_arrow_zone_width))
+        height = max(0, int(self.height()))
+        self._syncing_editor_geometry = True
+        try:
+            line_edit.setMinimumHeight(0)
+            if height > 0:
+                line_edit.setMaximumHeight(height)
+            line_edit.setGeometry(left, 0, max(0, self.width() - left - right), height)
+        finally:
+            self._syncing_editor_geometry = False
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.isEditable():
+            self._sync_editor_geometry()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._editor_widget and event.type() in {QEvent.Move, QEvent.Resize, QEvent.Show}:
+            self._sync_editor_geometry()
+        return super().eventFilter(watched, event)
 
     def showPopup(self):
         if self._popup_panel.isVisible():
@@ -295,8 +365,8 @@ class StyledComboBox(QComboBox):
         viewport.setAutoFillBackground(False)
         viewport.setStyleSheet("background: transparent; border: none;")
 
-        if self.isEditable() and self.lineEdit() is not None:
-            self.lineEdit().setStyleSheet(self.build_editor_stylesheet(theme))
+        if self.isEditable():
+            self._configure_editor()
 
         if self._popup_panel.isVisible():
             self._popup_panel.reposition()
