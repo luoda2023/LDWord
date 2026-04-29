@@ -135,3 +135,64 @@ def test_template_panel_reuses_heading_numbering_panel_for_heading_detail():
         assert panel._heading_detail._adapter.has_template is True
     finally:
         panel.close()
+
+
+def test_template_panel_reformat_toggle_updates_scene_module_switches():
+    app = _app()
+    bridge = PanelBridge()
+    scene = SceneWorkspace(scene_id="custom", template_id="default")
+    bridge.set_current_scene(scene, config_id="custom", source="library", emit_signal=False)
+    panel = TemplatePanel(bridge)
+    toggled: list[tuple[str, bool]] = []
+    bridge.module_toggled.connect(lambda module_name, enabled: toggled.append((module_name, enabled)))
+
+    try:
+        panel._ensure_detail_loaded("tpl_page")
+        card = panel._reformat_toggle_cards["tpl_page"]
+
+        card._toggle.click()
+        app.processEvents()
+
+        assert scene.module_switches["page_setup"] is False
+        assert scene.module_switches["section_format"] is False
+        assert bridge.is_scene_dirty() is True
+        assert ("page_setup", False) in toggled
+        assert ("section_format", False) in toggled
+        assert card._status_label.text() == "当前场景：已跳过"
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_template_panel_heading_reformat_toggle_keeps_heading_recognition_available():
+    app = _app()
+    bridge = PanelBridge()
+    scene = SceneWorkspace(scene_id="custom", template_id="default")
+    bridge.set_current_scene(scene, config_id="custom", source="library", emit_signal=False)
+    panel = TemplatePanel(bridge)
+
+    try:
+        panel._ensure_detail_loaded("tpl_heading")
+        panel._reformat_toggle_cards["tpl_heading"]._toggle.click()
+        app.processEvents()
+
+        assert scene.module_switches["heading_numbering"] is False
+        assert scene.module_switches["heading_recognition"] is True
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_template_panel_reformat_toggle_disables_without_scene_context():
+    app = _app()
+    panel = TemplatePanel(PanelBridge())
+
+    try:
+        panel._ensure_detail_loaded("tpl_caption")
+        card = panel._reformat_toggle_cards["tpl_caption"]
+
+        assert card._toggle.isEnabled() is False
+        assert card._status_label.text() == "未绑定当前场景"
+    finally:
+        panel.close()
+        app.processEvents()

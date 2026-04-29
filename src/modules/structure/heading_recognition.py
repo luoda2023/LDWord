@@ -57,6 +57,23 @@ BROKEN_TOC_BOOKMARK_HINTS = (
 )
 CHAPTER_REF_RE = re.compile(r"\u7b2c[\u4e00-\u9fff\d]+\u7ae0")
 SECTION_REF_RE = re.compile(r"\u7b2c[\u4e00-\u9fff\d]+\u8282")
+TABULAR_NUMERIC_TOKEN_RE = re.compile(r"^[+\-]?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?%?$")
+TABULAR_CITATION_TOKEN_RE = re.compile(r"^\[\d{1,4}\]$")
+INLINE_ABSTRACT_CN_RE = re.compile(r"^\s*\u6458\u8981\s*[\uff1a:]\s*\S")
+INLINE_ABSTRACT_EN_RE = re.compile(r"^\s*abstract\s*[\uff1a:]\s*\S", re.IGNORECASE)
+SHORT_TABULAR_LITERAL_TOKENS = {
+    "none",
+    "o2",
+    "n2",
+    "air",
+    "this work",
+    "ref",
+    "ref.",
+    "xe lamp",
+    "simulated sunlight",
+    "seawater",
+    "ethanol",
+}
 
 SPECIAL_SECTION_TITLES: dict[str, str] = {
     "\u5b66\u4f4d\u8bba\u6587": "cover",
@@ -258,16 +275,9 @@ class HeadingRecognitionModule(BaseModule):
         # Sanitize spurious outlineLvl before heading scan.
         _sanitize_outline_levels(doc)
 
-        headings: list[HeadingInfo] = []
-        for index, para in enumerate(doc.paragraphs):
-            text = (para.text or "").strip()
-            if not text:
-                continue
-            level = _detect_heading(para, text)
-            if level is not None:
-                headings.append(HeadingInfo(index, level, text[:80]))
-
-        sections, detection_log = _build_sections(doc, headings)
+        candidate_headings = _scan_heading_infos(doc)
+        sections, detection_log = _build_sections(doc, candidate_headings)
+        headings = _filter_body_headings(candidate_headings, sections)
         heading_map = {heading.para_index: heading.level for heading in headings}
         section_ranges = {section.section_type: (section.start_index, section.end_index) for section in sections}
 
@@ -294,6 +304,35 @@ class HeadingRecognitionModule(BaseModule):
             )
 
 
+def _scan_heading_infos(doc: Document) -> list[HeadingInfo]:
+    headings: list[HeadingInfo] = []
+    for index, para in enumerate(doc.paragraphs):
+        text = (para.text or "").strip()
+        if not text:
+            continue
+        level = _detect_heading(para, text)
+        if level is not None:
+            headings.append(HeadingInfo(index, level, text[:80]))
+    return headings
+
+
+def _section_type_for_paragraph(sections: list[DocSection], para_index: int) -> str:
+    for section in sections:
+        if section.start_index <= para_index < section.end_index:
+            return canonicalize_section_type(section.section_type)
+    return "body"
+
+
+def _filter_body_headings(headings: list[HeadingInfo], sections: list[DocSection]) -> list[HeadingInfo]:
+    if not sections:
+        return list(headings)
+    return [
+        heading
+        for heading in headings
+        if _section_type_for_paragraph(sections, heading.para_index) == "body"
+    ]
+
+
 def _norm_no_space(text: str) -> str:
     return re.sub(r"\s+", "", text or "").strip()
 
@@ -303,6 +342,16 @@ def _is_toc_style_para(para: Paragraph) -> bool:
     style_name = ((style.name if style else "") or "").strip()
     style_id = ((getattr(style, "style_id", "") if style else "") or "").strip()
     return bool(TOC_LEVEL_STYLE_RE.match(style_name) or TOC_LEVEL_STYLE_RE.match(style_id))
+
+
+def _para_has_pageref_field(para: Paragraph) -> bool:
+    from src.shared.engine.field_builder import iter_field_instructions
+
+    for _kind, _elem, instr in iter_field_instructions(para._element):
+        normalized = " ".join((instr or "").upper().split())
+        if normalized.startswith("PAGEREF"):
+            return True
+    return False
 
 
 def _looks_like_tabular_numeric_line(text: str) -> bool:
@@ -324,15 +373,43 @@ def _looks_like_tabular_structured_line(text: str) -> bool:
     if "\t" not in raw:
         return False
     tokens = [token.strip() for token in raw.split("\t") if token.strip()]
-    if len(tokens) < 3:
+    if len(tokens) < 2:
         return False
+    if any(len(token) > 80 for token in tokens):
+        return False
+    if any(NARRATIVE_PUNCT.search(token) for token in tokens):
+        return False
+
     structured = 0
+    numericish = 0
+    shortish = 0
     for token in tokens:
+        if len(token) <= 24:
+            shortish += 1
+        lowered = token.lower()
+        if TABULAR_NUMERIC_TOKEN_RE.fullmatch(token) or re.fullmatch(r"\d+:\d+", token):
+            structured += 1
+            numericish += 1
+            continue
+        if TABULAR_CITATION_TOKEN_RE.fullmatch(token):
+            structured += 1
+            continue
+        if lowered in SHORT_TABULAR_LITERAL_TOKENS:
+            structured += 1
+            continue
         has_digit = bool(re.search(r"\d", token))
-        has_unitish = bool(re.search(r"[A-Za-z%<>=/\-]", token))
+        has_unitish = bool(re.search(r"[A-Za-z\u00b5\u03bc\u03a9\u03c9\u03bb\u039b\u00b0\u2103/%<>=\-−]", token))
         if has_digit and has_unitish and len(token) <= 32:
             structured += 1
-    return structured >= 2
+            numericish += 1
+
+    if numericish <= 0:
+        return False
+    if structured >= max(2, len(tokens) - 1):
+        return True
+    if len(tokens) >= 3 and shortish >= len(tokens) - 1 and structured >= 2:
+        return True
+    return False
 
 
 def _looks_like_broken_toc_entry_line(text: str) -> bool:
@@ -340,7 +417,9 @@ def _looks_like_broken_toc_entry_line(text: str) -> bool:
     if not raw or "\t" not in raw:
         return False
     lower = raw.lower()
-    return any(hint in lower for hint in BROKEN_TOC_BOOKMARK_HINTS)
+    return any(hint in lower for hint in BROKEN_TOC_BOOKMARK_HINTS) or (
+        "\u4e66\u7b7e" in lower and "\u672a\u5b9a\u4e49" in lower
+    )
 
 
 def _looks_like_chapter_outline_sentence(text: str) -> bool:
@@ -352,7 +431,7 @@ def _looks_like_chapter_outline_sentence(text: str) -> bool:
         return True
     if total_hits == 0 or len(raw) < 24 or not NARRATIVE_PUNCT.search(raw):
         return False
-    sep_count = raw.count("，") + raw.count(",") + raw.count("；") + raw.count(";") + raw.count("。")
+    sep_count = raw.count("，") + raw.count(",") + raw.count("；") + raw.count(";") + raw.count("。") + raw.count("、")
     return sep_count >= 2
 
 
@@ -399,6 +478,8 @@ def _detect_heading(para: Paragraph, text: str) -> int | None:
         return None
     if looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
         return None
+    if _para_has_pageref_field(para):
+        return None
     if looks_like_reference_entry_line(raw) or looks_like_date_placeholder_line(raw):
         return None
     if _looks_like_broken_toc_entry_line(raw):
@@ -427,15 +508,23 @@ def _detect_heading(para: Paragraph, text: str) -> int | None:
 
 def _score_section_anchor(para: Paragraph, section_type: str, anchors: tuple[str, ...], total: int, para_index: int) -> float:
     text = (para.text or "").strip()
-    if not text or len(text) > 80:
+    if not text:
+        return 0.0
+    ratio = para_index / max(total, 1)
+    if section_type == "abstract_cn" and ratio < 0.35 and len(text) > 20 and INLINE_ABSTRACT_CN_RE.match(text):
+        return 9.0
+    if section_type == "abstract_en" and ratio < 0.45 and len(text) > 20 and INLINE_ABSTRACT_EN_RE.match(text):
+        return 9.0
+    if len(text) > 80:
         return 0.0
     if section_type != "toc" and (looks_like_toc_entry_line(text) or looks_like_numbered_toc_entry_with_page_suffix(text)):
+        return 0.0
+    if section_type != "toc" and _para_has_pageref_field(para):
         return 0.0
     if section_type != "references" and looks_like_reference_entry_line(text):
         return 0.0
 
     text_no_space = _norm_no_space(text).lower()
-    ratio = para_index / max(total, 1)
     best = 0.0
     matched = ""
     for anchor in anchors:
@@ -445,6 +534,12 @@ def _score_section_anchor(para: Paragraph, section_type: str, anchors: tuple[str
             local = 10.0
         elif text_no_space.startswith(anchor_no_space):
             local = 6.0
+            if section_type == "appendix" and re.match(
+                r"^(?:\u9644\u5f55[A-Za-z\uff21-\uff3a\uff41-\uff5a0-9\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]|appendix[A-Za-z0-9])",
+                text_no_space,
+                re.IGNORECASE,
+            ):
+                local = 10.0
         elif anchor_no_space and anchor_no_space in text_no_space:
             local = 2.0
         if local > best:
@@ -458,7 +553,7 @@ def _score_section_anchor(para: Paragraph, section_type: str, anchors: tuple[str
         score += 5.0
     elif _has_heading_visual_traits(para):
         score += 3.0
-    if len(text) <= len(matched) + 4:
+    if len(text) <= len(matched) + 4 or (section_type == "appendix" and best >= 10.0 and len(text) <= 24):
         score += 3.0
     if score >= 6.0:
         if section_type == "cover" and ratio < 0.15:
@@ -467,7 +562,7 @@ def _score_section_anchor(para: Paragraph, section_type: str, anchors: tuple[str
             score += 2.0
         elif section_type == "toc" and ratio < 0.60:
             score += 2.0
-        elif section_type in POST_BODY_TYPES and ratio > 0.50:
+        elif section_type in (POST_BODY_TYPES - {"appendix"}) and ratio > 0.50:
             score += 2.0
     return score
 
@@ -508,7 +603,13 @@ def _pick_best_section_candidates(candidates: list[_SectionCandidate], total: in
         if candidate.score == current.score:
             if candidate.section_type in PRE_BODY_TYPES and candidate.para_index < current.para_index:
                 best[candidate.section_type] = candidate
-            elif candidate.section_type in POST_BODY_TYPES and candidate.para_index > current.para_index:
+            elif candidate.section_type == "appendix" and candidate.para_index < current.para_index:
+                best[candidate.section_type] = candidate
+            elif (
+                candidate.section_type in POST_BODY_TYPES
+                and candidate.section_type != "appendix"
+                and candidate.para_index > current.para_index
+            ):
                 best[candidate.section_type] = candidate
     return {
         section_type: DocSection(
@@ -652,7 +753,11 @@ def _detect_references_by_content(doc: Document, total: int) -> DocSection | Non
 def _detect_cover_by_content(doc: Document, total: int) -> DocSection | None:
     for index in range(min(total, 12)):
         raw = (doc.paragraphs[index].text or "").strip()
-        if raw and any(keyword in raw for keyword in SECTION_ANCHORS["cover"]):
+        if not raw or len(raw) > 40 or NARRATIVE_PUNCT.search(raw):
+            continue
+        if INLINE_ABSTRACT_CN_RE.match(raw) or INLINE_ABSTRACT_EN_RE.match(raw):
+            continue
+        if any(keyword in raw for keyword in SECTION_ANCHORS["cover"]):
             return DocSection("cover", 0, 1, confidence=8.0, title_confident=False)
     return None
 

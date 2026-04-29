@@ -728,6 +728,26 @@ def test_page_selector_editor_uses_flow_chips_instead_of_fixed_grid():
         app.processEvents()
 
 
+def test_page_selector_editor_does_not_stretch_chips_into_blank_space():
+    app = _app()
+    root = QWidget()
+    layout = QVBoxLayout(root)
+    editor = PageSelectorEditor(options=SUPPRESS_HEADER_FOOTER_SELECTOR_OPTIONS)
+    layout.addWidget(editor)
+
+    try:
+        root.resize(1080, 260)
+        root.show()
+        app.processEvents()
+
+        expected_chips_height = editor._chips_layout.heightForWidth(editor._chips.width())
+        assert editor._chips.height() <= expected_chips_height + 1
+        assert editor._custom_edit.y() - editor._chips.geometry().bottom() <= editor.layout().spacing() + 2
+    finally:
+        root.close()
+        app.processEvents()
+
+
 def test_elements_detail_materializes_default_page_number_phase():
     app = _app()
     detail = ElementsDetail()

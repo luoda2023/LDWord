@@ -8,7 +8,18 @@ from typing import TYPE_CHECKING
 
 from src.config.feature_configs import default_continuous_page_number_phases
 from src.config.template import PageNumberPhaseConfig, TemplateConfig
-from src.qt_api import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget, Qt, Signal
+from src.qt_api import (
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSize,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+    Qt,
+    Signal,
+)
 from src.shared.engine.page_number_planner import (
     collect_static_page_number_diagnostics,
     expand_page_number_selectors,
@@ -249,6 +260,7 @@ def _parse_selector_text(text: str) -> list[str]:
 
 class PageSelectorEditor(QWidget):
     changed = Signal()
+    _DEFAULT_LAYOUT_WIDTH = 760
 
     def __init__(
         self,
@@ -261,12 +273,14 @@ class PageSelectorEditor(QWidget):
         self._is_syncing = False
         self._options = tuple(options)
         self._selector_buttons: dict[str, QPushButton] = {}
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
         self._chips = QWidget(self)
+        self._chips.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._chips_layout = FlowLayout(self._chips, h_spacing=8, v_spacing=8)
 
         for selector, label in self._options:
@@ -290,6 +304,53 @@ class PageSelectorEditor(QWidget):
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
+        self._sync_chips_height()
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        width = max(1, int(width))
+        margins = self.layout().contentsMargins()
+        spacing = self.layout().spacing()
+        chips_height = max(0, self._chips_layout.heightForWidth(width))
+        edit_height = max(self._custom_edit.sizeHint().height(), self._custom_edit.minimumSizeHint().height())
+        hint_height = self._hint.heightForWidth(width) if self._hint.hasHeightForWidth() else self._hint.sizeHint().height()
+        hint_height = max(self._hint.minimumSizeHint().height(), hint_height)
+        return (
+            margins.top()
+            + margins.bottom()
+            + chips_height
+            + edit_height
+            + hint_height
+            + spacing * 2
+        )
+
+    def sizeHint(self) -> QSize:
+        width = max(self.width(), self._DEFAULT_LAYOUT_WIDTH, self._chips_layout.minimumSize().width())
+        return QSize(width, self.heightForWidth(width))
+
+    def minimumSizeHint(self) -> QSize:
+        width = max(1, self._chips_layout.minimumSize().width())
+        return QSize(width, self.heightForWidth(self._DEFAULT_LAYOUT_WIDTH))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._sync_chips_height()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._sync_chips_height()
+
+    def _sync_chips_height(self) -> None:
+        width = max(1, self._chips.width() or self.width() or self._DEFAULT_LAYOUT_WIDTH)
+        height = max(0, self._chips_layout.heightForWidth(width))
+        if self._chips.minimumHeight() != height:
+            self._chips.setMinimumHeight(height)
+        if self._chips.maximumHeight() != height:
+            self._chips.setMaximumHeight(height)
+        self._chips.updateGeometry()
+        self.updateGeometry()
 
     def set_selectors(self, selectors: list[str]) -> None:
         self._is_syncing = True
@@ -359,6 +420,7 @@ class PageSelectorEditor(QWidget):
         )
         for button in self._selector_buttons.values():
             button.setStyleSheet(button_stylesheet)
+        self._sync_chips_height()
 
 
 class PageNumberPlanSection:

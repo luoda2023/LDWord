@@ -45,6 +45,26 @@ def test_heading_recognition_ignores_reference_entries_even_with_heading_visual_
     assert _detect_heading(para, para.text.strip()) is None
 
 
+def test_heading_recognition_ignores_pageref_toc_entries_even_with_heading_style():
+    from src.shared.engine.field_builder import build_pageref_field
+
+    doc = Document()
+    para = doc.add_paragraph("Abstract")
+    para.style = doc.styles["Heading 1"]
+    para._element.append(build_pageref_field("_Toc123"))
+
+    assert _detect_heading(para, para.text.strip()) is None
+
+
+def test_heading_recognition_ignores_structured_table_rows_with_heading_visual_traits():
+    doc = Document()
+    para = doc.add_paragraph("41.9 mW cm-2\t1562\tthis work")
+    para.runs[0].bold = True
+    para.runs[0].font.size = Pt(16)
+
+    assert _detect_heading(para, para.text.strip()) is None
+
+
 def test_heading_recognition_detects_references_section_from_reference_entry_cluster():
     doc = Document()
     doc.add_heading("第一章 绪论", level=1)
@@ -96,6 +116,23 @@ def test_heading_recognition_detects_cover_section_from_content():
 
     assert doc_tree.get_section("cover") is not None
     assert doc_tree.get_section("cover").start_index == 0
+
+
+def test_heading_recognition_exposes_only_body_headings_for_downstream_numbering():
+    doc = Document()
+    doc.add_heading("硕士学位论文", level=1)
+    doc.add_heading("摘要", level=1)
+    doc.add_paragraph("摘要正文。")
+    doc.add_heading("第一章 绪论", level=1)
+    doc.add_paragraph("正文内容。")
+
+    context = _apply_heading_recognition(doc)
+
+    assert context.doc_tree.get_section_for_paragraph(0) == "cover"
+    assert context.doc_tree.get_section_for_paragraph(1) == "abstract_cn"
+    assert context.doc_tree.get_section_for_paragraph(3) == "body"
+    assert context.heading_map == {3: 1}
+    assert [heading.para_index for heading in context.doc_tree.headings] == [3]
 
 
 def test_heading_recognition_detects_pre_numbering_statement_pages():
@@ -159,3 +196,36 @@ def test_heading_recognition_detects_abstract_and_acknowledgment_sections_withou
     assert doc_tree.get_section_for_paragraph(2) == "body"
     assert doc_tree.get_section_for_paragraph(4) == "acknowledgment"
     assert doc_tree.get_section_for_paragraph(5) == "acknowledgment"
+
+
+def test_heading_recognition_detects_inline_abstract_anchor():
+    doc = Document()
+    doc.add_paragraph("摘要：本文研究毕业论文格式自动修订中的结构识别问题。")
+    doc.add_heading("第一章 绪论", level=1)
+    doc.add_paragraph("正文内容。")
+
+    context = _apply_heading_recognition(doc)
+    doc_tree = context.doc_tree
+
+    assert doc_tree.get_section("abstract_cn") is not None
+    assert doc_tree.get_section("abstract_cn").start_index == 0
+    assert doc_tree.get_section_for_paragraph(0) == "abstract_cn"
+    assert context.heading_map == {1: 1}
+
+
+def test_heading_recognition_keeps_appendix_section_at_first_appendix_title():
+    doc = Document()
+    doc.add_heading("第一章 绪论", level=1)
+    doc.add_paragraph("正文内容。")
+    doc.add_paragraph("附录A 数据表")
+    doc.add_paragraph("附录A 正文。")
+    doc.add_paragraph("附录B 访谈提纲")
+    doc.add_paragraph("附录B 正文。")
+
+    context = _apply_heading_recognition(doc)
+    appendix = context.doc_tree.get_section("appendix")
+
+    assert appendix is not None
+    assert appendix.start_index == 2
+    assert context.doc_tree.get_section_for_paragraph(2) == "appendix"
+    assert context.doc_tree.get_section_for_paragraph(4) == "appendix"

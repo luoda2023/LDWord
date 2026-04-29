@@ -69,6 +69,7 @@ from src.shared.ui.style_preview_utils import (
 )
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.toggle_switch import ToggleSwitch
 from src.ui.adapters.heading_numbering_adapter import HeadingNumberingAdapter
 from src.ui.base_panel import BasePanel
 from src.ui.panels.template_format import build_template_preview_groups
@@ -135,6 +136,28 @@ DETAIL_CARDS = (
     "tpl_reference",
     "tpl_caption",
 )
+
+DETAIL_REFORMAT_MODULES: dict[str, tuple[str, ...]] = {
+    "tpl_page": ("page_setup", "section_format"),
+    "tpl_style": ("paragraph_style",),
+    "tpl_heading": ("heading_numbering",),
+    "tpl_table": ("table_format",),
+    "tpl_header_footer": ("header_footer",),
+    "tpl_toc": ("toc",),
+    "tpl_reference": ("reference_format",),
+    "tpl_caption": ("caption",),
+}
+
+DETAIL_REFORMAT_TARGETS: dict[str, str] = {
+    "tpl_page": "页面设置",
+    "tpl_style": "正文排版",
+    "tpl_heading": "标题编号",
+    "tpl_table": "表格格式",
+    "tpl_header_footer": "页眉与页脚",
+    "tpl_toc": "目录",
+    "tpl_reference": "参考文献",
+    "tpl_caption": "题注",
+}
 
 
 @dataclass(frozen=True)
@@ -1599,6 +1622,108 @@ class _SummaryRow(QWidget):
             self._icon_lbl.setText(self._label_text[:1])
 
 
+def _set_toggle_checked(toggle: ToggleSwitch, checked: bool) -> None:
+    checked = bool(checked)
+    toggle.setChecked(checked)
+    toggle._thumb_x = float(
+        toggle.TRACK_W - toggle.THUMB_D - toggle.THUMB_MARGIN
+        if checked
+        else toggle.THUMB_MARGIN
+    )
+    toggle.update()
+
+
+class _ReformatToggleCard(Card):
+    """Scene-level module switch surfaced inside a template detail page."""
+
+    toggled = Signal(str, bool)
+
+    def __init__(
+        self,
+        card_id: str,
+        *,
+        target_label: str,
+        module_names: tuple[str, ...],
+        parent=None,
+    ):
+        super().__init__(parent=parent)
+        self._card_id = card_id
+        self._target_label = target_label
+        self._module_names = module_names
+        self._syncing = False
+
+        row = QWidget(self)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self._icon_label = QLabel(row)
+        self._icon_label.setFixedSize(18, 18)
+        layout.addWidget(self._icon_label, 0, Qt.AlignVCenter)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(2)
+
+        self._title_label = QLabel(f"重新排版{target_label}", row)
+        self._status_label = QLabel("", row)
+        self._status_label.setWordWrap(True)
+        text_col.addWidget(self._title_label)
+        text_col.addWidget(self._status_label)
+
+        layout.addLayout(text_col, 1)
+
+        self._toggle = ToggleSwitch(row, checked=True)
+        self._toggle.toggled_signal.connect(self._on_toggled)
+        layout.addWidget(self._toggle, 0, Qt.AlignVCenter)
+
+        self.add_widget(row)
+
+        self._apply_theme()
+        bind_theme(self, self._apply_theme)
+
+    def sync_state(self, *, enabled: bool, available: bool, partial: bool = False) -> None:
+        self._syncing = True
+        try:
+            _set_toggle_checked(self._toggle, enabled)
+            self._toggle.setEnabled(available)
+            if not available:
+                status = "未绑定当前场景"
+            elif partial:
+                status = "当前场景：部分开启"
+            elif enabled:
+                status = "当前场景：已开启"
+            else:
+                status = "当前场景：已跳过"
+            self._status_label.setText(status)
+        finally:
+            self._syncing = False
+
+    def _on_toggled(self, checked: bool) -> None:
+        if self._syncing:
+            return
+        self.toggled.emit(self._card_id, bool(checked))
+
+    def _apply_theme(self) -> None:
+        super()._apply_theme()
+        if not hasattr(self, "_title_label") or not hasattr(self, "_status_label"):
+            return
+        theme = get_theme()
+        self._title_label.setStyleSheet(
+            f"font-size: {theme.font_size_md}px; "
+            f"font-weight: {theme.font_weight_emphasis}; "
+            f"color: {theme.text_primary};"
+        )
+        self._status_label.setStyleSheet(
+            f"font-size: {theme.font_size_sm}px; color: {theme.text_secondary};"
+        )
+        try:
+            from src.ui.icons.catalog import get_icon
+            self._icon_label.setPixmap(get_icon("refresh-ccw", 18, theme.primary).pixmap(18, 18))
+        except Exception:
+            self._icon_label.setText("↻")
+
+
 
 class ImportExportDetail(QWidget):
     """Layer 2 detail: import / save-as / reset."""
@@ -1845,6 +1970,7 @@ class TemplatePanel(BasePanel):
         }
         self._loaded_detail_ids: set[str] = {"tpl_overview", "tpl_io"}
         self._retired_detail_placeholders: list[QWidget] = []
+        self._reformat_toggle_cards: dict[str, _ReformatToggleCard] = {}
 
         self._detail_map: dict[str, QWidget] = {
             "tpl_overview": self._overview_detail,
@@ -1953,6 +2079,7 @@ class TemplatePanel(BasePanel):
         self._details.detail_map[card_id] = detail
         detail.hide()
         detail.setParent(self._detail_container)
+        self._attach_reformat_toggle(card_id, detail)
         old.hide()
         old.setParent(None)
         self._retired_detail_placeholders.append(old)
@@ -1966,6 +2093,86 @@ class TemplatePanel(BasePanel):
         self._wire_parameter_detail_signals(card_id, detail)
         self._sync_detail_state(detail)
         return detail
+
+    def _attach_reformat_toggle(self, card_id: str, detail: QWidget) -> None:
+        module_names = DETAIL_REFORMAT_MODULES.get(card_id)
+        if not module_names or card_id in self._reformat_toggle_cards:
+            return
+
+        layout = detail.layout()
+        if layout is None or not hasattr(layout, "insertWidget"):
+            return
+
+        card = _ReformatToggleCard(
+            card_id,
+            target_label=DETAIL_REFORMAT_TARGETS.get(card_id, CARD_DEFINITIONS[card_id][0]),
+            module_names=module_names,
+            parent=detail,
+        )
+        card.toggled.connect(self._on_reformat_toggle_changed)
+        layout.insertWidget(0, card)
+        self._reformat_toggle_cards[card_id] = card
+        self._sync_reformat_toggle(card_id)
+
+    def _sync_reformat_toggles(self) -> None:
+        for card_id in tuple(self._reformat_toggle_cards):
+            self._sync_reformat_toggle(card_id)
+
+    def _sync_reformat_toggle(self, card_id: str) -> None:
+        card = self._reformat_toggle_cards.get(card_id)
+        if card is None:
+            return
+
+        scene = self.bridge.current_scene()
+        module_names = DETAIL_REFORMAT_MODULES.get(card_id, ())
+        if scene is None or not module_names:
+            card.sync_state(enabled=False, available=False)
+            nav_card = self._nav_cards.get(card_id)
+            if nav_card is not None:
+                nav_card.set_badge("", "neutral")
+            return
+
+        switches = getattr(scene, "module_switches", {}) or {}
+        states = [bool(switches.get(module_name, False)) for module_name in module_names]
+        enabled = any(states)
+        partial = any(states) and not all(states)
+        card.sync_state(enabled=enabled, available=True, partial=partial)
+
+        nav_card = self._nav_cards.get(card_id)
+        if nav_card is not None:
+            if partial:
+                nav_card.set_badge("部分", "warning")
+            elif not enabled:
+                nav_card.set_badge("跳过", "neutral")
+            else:
+                nav_card.set_badge("", "neutral")
+
+    def _on_reformat_toggle_changed(self, card_id: str, enabled: bool) -> None:
+        scene = self.bridge.current_scene()
+        module_names = DETAIL_REFORMAT_MODULES.get(card_id, ())
+        if scene is None or not module_names:
+            self._sync_reformat_toggle(card_id)
+            return
+
+        changed_modules: list[str] = []
+        for module_name in module_names:
+            if scene.module_switches.get(module_name) == bool(enabled):
+                continue
+            scene.module_switches[module_name] = bool(enabled)
+            changed_modules.append(module_name)
+
+        if changed_modules:
+            self.bridge.set_current_scene(
+                scene,
+                config_id=self.bridge.current_scene_id(),
+                path=self.bridge.current_scene_path(),
+                source=self.bridge.current_scene_source(),
+            )
+            for module_name in changed_modules:
+                self.bridge.module_toggled.emit(module_name, bool(enabled))
+            self.bridge.mark_scene_dirty()
+
+        self._sync_reformat_toggles()
 
     def _wire_parameter_detail_signals(self, card_id: str, detail: QWidget) -> None:
         if hasattr(detail, "template_edited"):
@@ -2283,6 +2490,7 @@ class TemplatePanel(BasePanel):
 
     def on_scene_changed(self, _scene) -> None:
         self._refresh_template_selector_options()
+        self._sync_reformat_toggles()
 
     def on_template_changed(self, template: TemplateConfig) -> None:
         if self._bridge_template_echo_depth:

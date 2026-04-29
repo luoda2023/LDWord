@@ -12,6 +12,7 @@ from src.qt_api import (
     QLabel,
     QSizePolicy,
     QVBoxLayout,
+    QWidget,
     Qt,
     Signal,
 )
@@ -83,6 +84,7 @@ class NavigationCard(Card):
         # --- Badge ---
         self._badge = badge or Badge("")
         self._badge.setObjectName("nav_card_badge")
+        self._title_action: QWidget | None = None
 
         # --- Assemble layout ---
         row = QHBoxLayout()
@@ -95,13 +97,13 @@ class NavigationCard(Card):
         text_col.setContentsMargins(0, 0, 0, 0)
         text_col.setSpacing(2)
 
-        title_row = QHBoxLayout()
-        title_row.setContentsMargins(0, 0, 0, 0)
-        title_row.setSpacing(10)
-        title_row.addWidget(self._title, 1)
-        title_row.addWidget(self._badge, 0, Qt.AlignRight | Qt.AlignVCenter)
+        self._title_row = QHBoxLayout()
+        self._title_row.setContentsMargins(0, 0, 0, 0)
+        self._title_row.setSpacing(10)
+        self._title_row.addWidget(self._title, 1)
+        self._title_row.addWidget(self._badge, 0, Qt.AlignRight | Qt.AlignVCenter)
 
-        text_col.addLayout(title_row)
+        text_col.addLayout(self._title_row)
         text_col.addWidget(self._subtitle)
 
         row.addLayout(text_col, 1)
@@ -237,6 +239,16 @@ class NavigationCard(Card):
     def set_badge(self, text: str, variant: str = "neutral") -> None:
         self._badge.set_text(text)
         self._badge.set_variant(variant)
+
+    def set_title_action(self, widget: QWidget | None) -> None:
+        if self._title_action is widget:
+            return
+        if self._title_action is not None:
+            self._title_row.removeWidget(self._title_action)
+            self._title_action.setParent(None)
+        self._title_action = widget
+        if widget is not None:
+            self._title_row.addWidget(widget, 0, Qt.AlignRight | Qt.AlignVCenter)
 
     # ------------------------------------------------------------------
     # Events
