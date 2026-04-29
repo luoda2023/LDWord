@@ -25,7 +25,6 @@ from src.ui.panels.template_elements_header_footer import (
     default_page_number_phases,
     default_suppress_header_footer_selectors,
     ensure_default_page_number_phases,
-    page_number_phase_brief,
 )
 from src.ui.panels.template_elements_toc import (
     TOC_INSERT_OPTIONS,
@@ -220,9 +219,9 @@ class ElementsDetail(QWidget):
                     ),
                     SummaryGridItem(
                         key="page_number",
-                        label="页脚页码",
-                        value="页码开启" if header_footer.page_number_enabled else "页码关闭",
-                        detail=self._page_number_summary_detail(header_footer, phases),
+                        label="页脚内容",
+                        value=self._footer_summary_value(header_footer),
+                        detail=self._footer_summary_detail(header_footer, phases),
                         column_span=3,
                     ),
                 ]
@@ -280,24 +279,82 @@ class ElementsDetail(QWidget):
             f"{_size_text(header_footer.size_pt)} / {_emphasis_text(header_footer)}"
         )
 
+    def _footer_summary_value(self, header_footer) -> str:
+        mode = str(getattr(header_footer.footer, "content_mode", "page_number") or "page_number")
+        return {
+            "page_number": "仅页码",
+            "fixed": "固定文字",
+            "page_number_with_text": "页码 + 文字",
+            "none": "不显示页脚",
+        }.get(mode, mode)
+
+    def _footer_summary_detail(self, header_footer, phases: list[PageNumberPhaseConfig]) -> str:
+        mode = str(getattr(header_footer.footer, "content_mode", "page_number") or "page_number")
+        footer_text = str(getattr(header_footer, "footer_text", "") or "").strip()
+        alignment = {
+            "left": "左对齐",
+            "center": "居中",
+            "right": "右对齐",
+        }.get(str(getattr(header_footer, "footer_alignment", "center") or "center"), "居中")
+        parts: list[str] = []
+        if mode in {"page_number", "page_number_with_text"}:
+            parts.append(self._page_number_summary_detail(header_footer, phases))
+        elif mode == "fixed":
+            parts.append(footer_text or "未填写固定文字")
+        else:
+            return "不输出页脚"
+        if mode == "page_number_with_text":
+            parts.append(f"文字：{footer_text or '未填写'}")
+        parts.append(alignment)
+        return "；".join(part for part in parts if part)
+
     def _page_number_summary_detail(self, header_footer, phases: list[PageNumberPhaseConfig]) -> str:
         if not header_footer.page_number_enabled:
-            return "不输出页脚页码"
+            return "不输出页码"
         valid_phases = [
             phase
             for phase in phases
             if any(str(selector or "").strip() for selector in (getattr(phase, "selectors", []) or []))
         ]
         visible_phases = valid_phases[:2]
-        detail = "；".join(page_number_phase_brief(phase) for phase in visible_phases)
+        detail = "；".join(self._page_number_phase_result_brief(phase) for phase in visible_phases)
         extra_count = max(0, len(valid_phases) - len(visible_phases))
         if detail and extra_count:
             detail = f"{detail}；另 {extra_count} 段"
         suppress_selectors = default_suppress_header_footer_selectors(header_footer)
-        prefix = "起始前留空" if suppress_selectors else ""
+        prefix = "分区排除" if suppress_selectors else ""
         if detail:
             return f"{prefix}；{detail}" if prefix else detail
         return f"{prefix}；全文连续阿拉伯数字页码" if prefix else "全文连续阿拉伯数字页码"
+
+    def _page_number_phase_result_brief(self, phase: PageNumberPhaseConfig) -> str:
+        scope = self._page_number_phase_scope_text(list(getattr(phase, "selectors", []) or []))
+        if not bool(getattr(phase, "visible", True)):
+            return f"{scope}不显示页码"
+        fmt = {
+            "decimal": "阿拉伯数字",
+            "upperRoman": "大写罗马",
+            "lowerRoman": "小写罗马",
+        }.get(str(getattr(phase, "number_format", "decimal") or "decimal"), "阿拉伯数字")
+        if str(getattr(phase, "start_mode", "restart") or "restart") == "continue":
+            return f"{scope}{fmt}续号"
+        start_value = max(1, int(getattr(phase, "start_value", 1) or 1))
+        return f"{scope}{fmt}从 {start_value} 起"
+
+    def _page_number_phase_scope_text(self, selectors: list[str]) -> str:
+        labels = {
+            "all_numbered_content": "全文",
+            "front_matter": "前置部分",
+            "body": "正文",
+            "back_matter": "后置部分",
+            "toc": "目录",
+            "references": "参考文献",
+            "appendix": "附录",
+        }
+        parts = [labels.get(str(selector), str(selector)) for selector in selectors if str(selector or "").strip()]
+        if not parts:
+            return "未选择分区"
+        return "、".join(parts)
 
     def _toc_summary_value(self, toc) -> str:
         if not toc.enabled:

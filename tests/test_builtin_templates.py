@@ -29,18 +29,18 @@ def test_thesis_template_uses_real_config_payload_instead_of_name_only_shell():
     assert template.styles["body"].font_cn
     assert "heading1" in template.heading_numbering.level_bindings
     assert "toc_title" in template.styles
-    assert "toc_chapter" in template.styles
     assert "toc_level1" in template.styles
     assert "toc_level2" in template.styles
+    assert "toc_level3" in template.styles
 
     assert template.styles["toc_title"].size_pt == 16
     assert template.styles["toc_title"].bold is True
     assert template.styles["toc_title"].alignment == "center"
-    assert template.styles["toc_chapter"].size_pt == 14
-    assert template.styles["toc_level1"].size_pt == 12
-    assert template.styles["toc_level1"].left_indent_chars == 1
-    assert template.styles["toc_level2"].size_pt == 10.5
-    assert template.styles["toc_level2"].left_indent_chars == 2
+    assert template.styles["toc_level1"].size_pt == 14
+    assert template.styles["toc_level2"].size_pt == 12
+    assert template.styles["toc_level2"].left_indent_chars == 1
+    assert template.styles["toc_level3"].size_pt == 10.5
+    assert template.styles["toc_level3"].left_indent_chars == 2
     assert [phase.phase_id for phase in template.header_footer.page_number_plan.phases] == [
         "front",
         "body",

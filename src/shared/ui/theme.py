@@ -32,7 +32,7 @@ from typing import Any
 import warnings
 
 try:
-    from src.qt_api import QObject, Signal
+    from src.qt_api import QApplication, QEvent, QObject, QTimer, Signal
     _HAS_QT = True
 except ImportError:
     _HAS_QT = False
@@ -1075,6 +1075,8 @@ class _ThemeManager:
 
     def __init__(self):
         self._theme: AppTheme = LIGHT
+        self._notified_theme: AppTheme = LIGHT
+        self._pending_notification = False
         if _HAS_QT:
             self._notifier = _ThemeNotifier()
 
@@ -1083,7 +1085,39 @@ class _ThemeManager:
         return self._theme
 
     def set(self, theme: AppTheme) -> None:
+        if theme == self._theme:
+            return
         self._theme = theme
+        self._queue_notification()
+
+    def _queue_notification(self) -> None:
+        if not (_HAS_QT and hasattr(self, "_notifier")):
+            return
+
+        if self._pending_notification:
+            return
+
+        if QApplication.instance() is None:
+            self.flush()
+            return
+
+        self._pending_notification = True
+        QTimer.singleShot(0, self.flush)
+
+    def flush(self) -> None:
+        self._pending_notification = False
+        if self._theme == self._notified_theme:
+            return
+
+        if __debug__:
+            contrast_warnings = self._theme.validate_contrast()
+            if contrast_warnings:
+                import sys
+                print("[Theme Contrast Warning]", file=sys.stderr)
+                for warning in contrast_warnings:
+                    print(f"  ! {warning}", file=sys.stderr)
+
+        self._notified_theme = self._theme
         if _HAS_QT and hasattr(self, "_notifier"):
             self._notifier.theme_changed.emit()
 
@@ -1107,6 +1141,49 @@ if _HAS_QT:
         theme_changed = Signal()
 
 
+if _HAS_QT:
+    class _ThemeBinding(QObject):
+        """Theme subscription that defers hidden widget refresh work."""
+
+        def __init__(self, owner, callback) -> None:
+            self._owner = owner
+            self._callback = callback
+            self._dirty = False
+            super().__init__(owner)
+            on_theme_changed(self._on_theme_changed)
+            owner.installEventFilter(self)
+            self._cleanup_callback = lambda *_args: self._cleanup()
+            owner.destroyed.connect(self._cleanup_callback)
+
+        def eventFilter(self, watched, event) -> bool:
+            owner = getattr(self, "_owner", None)
+            if owner is not None and watched is owner and event.type() in (QEvent.Show, QEvent.ShowToParent):
+                self.apply_if_dirty()
+            return False
+
+        def _on_theme_changed(self) -> None:
+            if getattr(self, "_owner", None) is None:
+                self._cleanup()
+                return
+            if self._is_visible():
+                self._dirty = False
+                self._callback()
+                return
+            self._dirty = True
+
+        def apply_if_dirty(self) -> None:
+            if self._dirty and self._is_visible():
+                self._dirty = False
+                self._callback()
+
+        def _is_visible(self) -> bool:
+            return bool(getattr(self._owner, "isVisible", lambda: True)())
+
+        def _cleanup(self, *_args) -> None:
+            off_theme_changed(self._on_theme_changed)
+            self._owner = None
+
+
 _manager = _ThemeManager()
 
 
@@ -1115,19 +1192,6 @@ _manager = _ThemeManager()
 def get_theme() -> AppTheme:
     """获取当前配色（控件内使用）。"""
     return _manager.current
-
-
-def set_theme(theme: AppTheme) -> None:
-    """切换配色方案（运行时生效）。"""
-    # 开发模式下自动检查对比度（不阻塞运行）
-    if __debug__:
-        warnings = theme.validate_contrast()
-        if warnings:
-            import sys
-            print("[Theme Contrast Warning]", file=sys.stderr)
-            for w in warnings:
-                print(f"  ⚠ {w}", file=sys.stderr)
-    _manager.set(theme)
 
 
 def on_theme_changed(callback) -> None:
@@ -1140,15 +1204,36 @@ def off_theme_changed(callback) -> None:
     _manager.disconnect(callback)
 
 
+def set_theme(theme: AppTheme) -> None:
+    """Switch the active theme and coalesce repaint notifications."""
+    _manager.set(theme)
+
+
+def flush_theme_changes() -> None:
+    """Apply any coalesced theme notification immediately."""
+    _manager.flush()
+
+
 def bind_theme(owner, callback) -> None:
     """Register a theme callback and auto-disconnect it when the owner dies."""
-    on_theme_changed(callback)
+    if _HAS_QT and hasattr(owner, "installEventFilter") and hasattr(owner, "destroyed"):
+        binding = _ThemeBinding(owner, callback)
+        bindings = getattr(owner, "_theme_bindings", None)
+        if bindings is None:
+            bindings = []
+            setattr(owner, "_theme_bindings", bindings)
+        bindings.append(binding)
+        return
 
     if _HAS_QT and hasattr(owner, "destroyed"):
+        on_theme_changed(callback)
+
         def _cleanup(*_args) -> None:
             off_theme_changed(callback)
 
         owner.destroyed.connect(_cleanup)
+    else:
+        on_theme_changed(callback)
 
 
 def load_theme_from_dict(data: dict) -> AppTheme:

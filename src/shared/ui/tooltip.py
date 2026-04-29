@@ -182,6 +182,7 @@ class TooltipPopup(QWidget):
         self.hide()
 
     def show_text(self, text: str, anchor: QWidget, placement: str) -> None:
+        self._apply_theme()
         self._label.setText(str(text).replace("\r", " ").replace("\n", " "))
         self.adjustSize()
         self.move(tooltip_position_for(anchor, self.size(), placement=placement))

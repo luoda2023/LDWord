@@ -188,11 +188,17 @@ def _page_number_phase_scope_label(selectors: list[str]) -> str:
 
 def _suppress_header_footer_summary(header) -> str:
     selector_map = {
-        "pre_numbering": "封面及声明页留空",
-        "cover": "封面留空",
-        "statement": "声明页留空",
-        "authorization": "授权书留空",
-        "front_note": "说明页留空",
+        "pre_numbering": "封面及声明页",
+        "cover": "封面",
+        "statement": "声明页",
+        "authorization": "授权书",
+        "front_note": "说明页",
+        "front_matter": "前置部分",
+        "toc": "目录",
+        "body": "正文部分",
+        "back_matter": "后置部分",
+        "references": "参考文献",
+        "appendix": "附录",
     }
     selectors = [
         str(selector or "").strip()
@@ -201,39 +207,52 @@ def _suppress_header_footer_summary(header) -> str:
     ]
     if not selectors and getattr(header, "hide_cover_header_footer", False):
         selectors = ["pre_numbering"]
-    labels = [selector_map.get(selector, f"{selector}留空") for selector in selectors]
-    return "+".join(labels)
+    labels = [selector_map.get(selector, selector) for selector in selectors]
+    return f"分区排除：{'+'.join(labels)}" if labels else ""
 
 
-def _page_number_phase_summary(header) -> str:
-    page_format_map = {
-        "decimal": "阿拉伯",
-        "upperRoman": "大写罗马",
-        "lowerRoman": "小写罗马",
-    }
+def _footer_content_summary(header) -> str:
+    mode = str(getattr(header.footer, "content_mode", "page_number") or "page_number")
+    footer_text = str(getattr(header, "footer_text", "") or "").strip()
+    alignment = {
+        "left": "左对齐",
+        "center": "居中",
+        "right": "右对齐",
+    }.get(str(getattr(header, "footer_alignment", "center") or "center"), "居中")
+    if mode == "none":
+        return "无页脚"
+    if mode == "fixed":
+        return f"页脚固定文字：{footer_text or '未填写'} / {alignment}"
+    if mode == "page_number_with_text":
+        return f"页码+页脚文字：{footer_text or '未填写'} / {alignment}"
+    return f"仅页码 / {alignment}"
+
+
+def _phase_result_summary(header) -> str:
+    if not bool(getattr(header, "page_number_enabled", True)):
+        return "页码：不显示"
     phases = list(getattr(header.page_number_plan, "phases", []) or [])
     if not phases:
-        return "未设置页码规则"
-
-    parts = []
+        return "页码：全文阿拉伯，从 1 起"
+    results: list[str] = []
     for phase in phases[:2]:
         scope = _page_number_phase_scope_label(list(getattr(phase, "selectors", []) or []))
         if not bool(getattr(phase, "visible", True)):
-            parts.append(f"{scope}隐藏")
+            results.append(f"{scope}不显示页码")
             continue
-        fmt = page_format_map.get(
-            str(getattr(phase, "number_format", "") or ""),
-            str(getattr(phase, "number_format", "") or "decimal"),
-        )
-        if str(getattr(phase, "start_mode", "") or "continue") == "restart":
-            start_value = max(1, int(getattr(phase, "start_value", 1) or 1))
-            parts.append(f"{scope}{fmt}({start_value})")
+        fmt = {
+            "decimal": "阿拉伯",
+            "upperRoman": "大写罗马",
+            "lowerRoman": "小写罗马",
+        }.get(str(getattr(phase, "number_format", "decimal") or "decimal"), "阿拉伯")
+        if str(getattr(phase, "start_mode", "restart") or "restart") == "continue":
+            results.append(f"{scope}{fmt}续号")
         else:
-            parts.append(f"{scope}{fmt}(续号)")
-
+            start_value = max(1, int(getattr(phase, "start_value", 1) or 1))
+            results.append(f"{scope}{fmt}从 {start_value}")
     if len(phases) > 2:
-        parts.append(f"+{len(phases) - 2}条规则")
-    return " / ".join(parts)
+        results.append(f"另 {len(phases) - 2} 项")
+    return "页码：" + " / ".join(results)
 
 
 def _header_footer_group_summary(cfg: TemplateConfig) -> str:
@@ -245,9 +264,8 @@ def _header_footer_group_summary(cfg: TemplateConfig) -> str:
     }
     parts = [header_map.get(header.header_mode, header.header_mode or "跟随章节标题")]
     parts.append("页眉线" if header.header_border else "无页眉线")
-    parts.append("页码开启" if header.page_number_enabled else "页码关闭")
-    if header.page_number_enabled:
-        parts.append(_page_number_phase_summary(header))
+    parts.append(_footer_content_summary(header))
+    parts.append(_phase_result_summary(header))
     suppress_summary = _suppress_header_footer_summary(header)
     if suppress_summary:
         parts.append(suppress_summary)

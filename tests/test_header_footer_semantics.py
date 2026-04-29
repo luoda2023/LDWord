@@ -58,6 +58,36 @@ def test_header_footer_page_number_disabled_removes_existing_page_field():
     assert section.footer.paragraphs[0].text == ""
 
 
+def test_header_footer_fixed_footer_text_and_alignment_without_page_number():
+    doc = Document()
+    config = ResolvedConfig()
+    config.header_footer.footer.content_mode = "fixed"
+    config.header_footer.footer_text = "Confidential"
+    config.header_footer.footer_alignment = "right"
+
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), PipelineContext())
+
+    para = doc.sections[0].footer.paragraphs[0]
+    assert para.text == "Confidential"
+    assert _paragraph_has_field(para, "PAGE") is False
+    assert para._element.find(qn("w:pPr")).find(qn("w:jc")).get(qn("w:val")) == "right"
+
+
+def test_header_footer_page_number_can_append_footer_text():
+    doc = Document()
+    config = ResolvedConfig()
+    config.header_footer.footer.content_mode = "page_number_with_text"
+    config.header_footer.footer_text = "Confidential"
+    config.header_footer.footer_alignment = "left"
+
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), PipelineContext())
+
+    para = doc.sections[0].footer.paragraphs[0]
+    assert _paragraph_has_field(para, "PAGE") is True
+    assert "Confidential" in para.text
+    assert para._element.find(qn("w:pPr")).find(qn("w:jc")).get(qn("w:val")) == "left"
+
+
 def test_header_footer_fixed_header_applies_emphasis_typography():
     doc = Document()
     config = ResolvedConfig()

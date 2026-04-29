@@ -28,6 +28,7 @@ from src.shared.engine.toc_style_ops import (
     apply_toc_paragraph_style,
     resolve_toc_style_config,
     sync_toc_styles,
+    toc_style_key_for_heading_level,
 )
 
 if TYPE_CHECKING:
@@ -41,8 +42,8 @@ TOC_TITLE_TEXT = "\u76ee\u5f55"
 TOC_FIELD_PLACEHOLDER = "\u8bf7\u66f4\u65b0\u57df\u4ee5\u663e\u793a\u76ee\u5f55"
 TOC_TITLE_RE = re.compile(r"^(\u76ee\u5f55|\u76ee\s*\u5f55|contents|tableofcontents)$", re.IGNORECASE)
 TOC_LEVEL_STYLE_RE = re.compile(r"^(toc|\u76ee\u5f55)\s*(\d+)$", re.IGNORECASE)
-RE_TOC_CHAPTER_CN = re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+(?:\u7ae0|\u7bc7)")
-RE_TOC_SECTION_CN = re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+\u8282")
+RE_TOC_LEVEL1_CN = re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+(?:\u7ae0|\u7bc7)")
+RE_TOC_LEVEL2_CN = re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+\u8282")
 RE_LEVEL2 = re.compile(r"^\d+\.\d+\.\d+(?:[\.、．])?\s*\S")
 RE_LEVEL1 = re.compile(r"^\d+\.\d+(?:[\.、．])?\s*\S")
 BACK_MATTER_TITLES = {
@@ -254,9 +255,9 @@ def _infer_toc_level_from_paragraph(para) -> str:
             return "heading3"
 
     raw = (para.text or "").strip()
-    if RE_TOC_SECTION_CN.match(raw):
+    if RE_TOC_LEVEL2_CN.match(raw):
         return "heading2"
-    if RE_TOC_CHAPTER_CN.match(raw):
+    if RE_TOC_LEVEL1_CN.match(raw):
         return "heading1"
     if RE_LEVEL2.match(raw):
         return "heading3"
@@ -364,11 +365,7 @@ def _format_existing_toc_paragraphs(doc: Document, config: ResolvedConfig, conte
 
         if _is_toc_level_style_para(para) or looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
             level = _infer_toc_level_from_paragraph(para)
-            level_key = {
-                "heading1": "toc_chapter",
-                "heading2": "toc_level1",
-                "heading3": "toc_level2",
-            }.get(level, "toc_level2")
+            level_key = toc_style_key_for_heading_level(level)
             style_config = resolve_toc_style_config(config.styles, level_key)
             if style_config is None:
                 continue
@@ -576,11 +573,7 @@ def _format_inserted_plain_toc(doc: Document, config: ResolvedConfig, inserted_e
         if para is None:
             continue
         level = str(entry.get("level", "heading3"))
-        level_key = {
-            "heading1": "toc_chapter",
-            "heading2": "toc_level1",
-            "heading3": "toc_level2",
-        }.get(level, "toc_level2")
+        level_key = toc_style_key_for_heading_level(level)
         style_config = resolve_toc_style_config(config.styles, level_key)
         if style_config is None:
             continue

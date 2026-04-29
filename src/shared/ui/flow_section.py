@@ -4,7 +4,7 @@ Shared flow section container.
 
 from __future__ import annotations
 
-from src.qt_api import QToolButton, QVBoxLayout, QWidget, Signal, Qt
+from src.qt_api import QSizePolicy, QToolButton, QVBoxLayout, QWidget, Signal, Qt
 
 from src.shared.ui.card import Card
 from src.shared.ui.theme import bind_theme, get_theme
@@ -69,8 +69,25 @@ class FlowSection(Card):
         self._toggle_button.setChecked(self._expanded)
         self._toggle_button.setArrowType(Qt.DownArrow if self._expanded else Qt.RightArrow)
         self._content.setVisible(self._expanded)
+        self._content.setMaximumHeight(16777215 if self._expanded else 0)
+        self._content.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Minimum if self._expanded else QSizePolicy.Ignored,
+        )
+        self._content.updateGeometry()
+        self._refresh_layout_chain()
         if emit_signal:
             self.expanded_changed.emit(self._expanded)
+
+    def _refresh_layout_chain(self) -> None:
+        widget: QWidget | None = self
+        while widget is not None:
+            layout = widget.layout()
+            if layout is not None:
+                layout.invalidate()
+                layout.activate()
+            widget.updateGeometry()
+            widget = widget.parentWidget()
 
     def is_expanded(self) -> bool:
         return self._expanded

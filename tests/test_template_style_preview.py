@@ -82,6 +82,23 @@ def test_template_style_preview_header_footer_state_reflects_config():
     assert state.header_text == "固定页眉"
     assert state.header_border is True
     assert state.footer_text == "- III -"
+    assert state.footer_alignment == "center"
+
+    cfg.header_footer.footer.content_mode = "page_number_with_text"
+    cfg.header_footer.footer_text = "Confidential"
+    cfg.header_footer.footer_alignment = "right"
+
+    state = _resolve_preview_header_footer(cfg)
+
+    assert state.footer_text == "- III - Confidential"
+    assert state.footer_alignment == "right"
+
+    cfg.header_footer.footer.content_mode = "fixed"
+    cfg.header_footer.footer_text = "仅内部流转"
+
+    state = _resolve_preview_header_footer(cfg)
+
+    assert state.footer_text == "仅内部流转"
 
 
 def test_template_style_preview_builds_paragraphs_from_real_heading_levels():

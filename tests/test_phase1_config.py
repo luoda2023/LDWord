@@ -335,6 +335,8 @@ def test_load_template_supports_nested_page_number_plan_schema():
             },
             "footer": {
                 "content_mode": "none",
+                "fixed_text": "内部流转",
+                "alignment": "right",
                 "hide_on_cover": False,
             },
             "page_number_plan": {
@@ -373,12 +375,40 @@ def test_load_template_supports_nested_page_number_plan_schema():
         assert header_footer.header.mode == "fixed"
         assert header_footer.header.fixed_text == "固定页眉"
         assert header_footer.footer.content_mode == "none"
+        assert header_footer.footer.fixed_text == "内部流转"
+        assert header_footer.footer.alignment == "right"
         assert len(header_footer.page_number_plan.phases) == 2
         assert header_footer.page_number_enabled is False
         assert header_footer.front_matter_page_number_format == "lowerRoman"
         assert header_footer.body_page_number_start == 3
         assert header_footer.bold is True
         assert header_footer.italic is True
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
+
+
+def test_load_template_normalizes_flat_footer_text_and_alignment():
+    from src.config.loader import load_template
+
+    payload = {
+        "name": "flat_footer_fields",
+        "footer_text": "Confidential",
+        "footer_alignment": "right",
+        "page_number_enabled": True,
+    }
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w", encoding="utf-8")
+    try:
+        json.dump(payload, tmp, ensure_ascii=False, indent=2)
+        tmp.close()
+
+        template = load_template(tmp.name)
+        header_footer = template.header_footer
+
+        assert header_footer.footer.content_mode == "page_number_with_text"
+        assert header_footer.footer_text == "Confidential"
+        assert header_footer.footer_alignment == "right"
+        assert header_footer.page_number_enabled is True
     finally:
         Path(tmp.name).unlink(missing_ok=True)
 

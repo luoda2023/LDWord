@@ -60,13 +60,21 @@ class WorkbenchDetailController:
         if detail is None or detail is self._current_detail:
             return self._current_detail
 
-        if self._current_detail is not None:
-            self._detail_layout.removeWidget(self._current_detail)
-            self._current_detail.hide()
-
         detail.setParent(self._detail_container)
-        self._detail_layout.addWidget(detail)
-        detail.show()
+        previous_detail = self._current_detail
+        if previous_detail is not None:
+            self._detail_scroll.setUpdatesEnabled(False)
+        try:
+            # Add the replacement before removing the old pane to avoid a
+            # transient empty scroll layout, which can trigger recursive relayouts.
+            self._detail_layout.addWidget(detail)
+            detail.show()
+            if previous_detail is not None:
+                self._detail_layout.removeWidget(previous_detail)
+                previous_detail.hide()
+        finally:
+            if previous_detail is not None:
+                self._detail_scroll.setUpdatesEnabled(True)
         self._current_detail = detail
         self._detail_scroll.verticalScrollBar().setValue(0)
         return detail

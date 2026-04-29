@@ -37,7 +37,9 @@ class HeaderConfig:
 
 @dataclass
 class FooterConfig:
-    content_mode: str = "page_number"   # "page_number" | "none"
+    content_mode: str = "page_number"   # "page_number" | "fixed" | "page_number_with_text" | "none"
+    fixed_text: str = ""
+    alignment: str = "center"           # "left" | "center" | "right"
     hide_on_cover: bool = True
 
 
@@ -155,11 +157,31 @@ class HeaderFooterConfig:
 
     @property
     def page_number_enabled(self) -> bool:
-        return str(self.footer.content_mode or "page_number") == "page_number"
+        return str(self.footer.content_mode or "page_number") in {"page_number", "page_number_with_text"}
 
     @page_number_enabled.setter
     def page_number_enabled(self, value: bool) -> None:
-        self.footer.content_mode = "page_number" if bool(value) else "none"
+        if bool(value):
+            self.footer.content_mode = "page_number_with_text" if self.footer.fixed_text else "page_number"
+        else:
+            self.footer.content_mode = "fixed" if self.footer.fixed_text else "none"
+
+    @property
+    def footer_text(self) -> str:
+        return str(self.footer.fixed_text or "")
+
+    @footer_text.setter
+    def footer_text(self, value: str) -> None:
+        self.footer.fixed_text = str(value or "")
+
+    @property
+    def footer_alignment(self) -> str:
+        return str(self.footer.alignment or "center")
+
+    @footer_alignment.setter
+    def footer_alignment(self, value: str) -> None:
+        normalized = str(value or "center").strip().lower()
+        self.footer.alignment = normalized if normalized in {"left", "center", "right"} else "center"
 
     @property
     def styleref_level(self) -> int:

@@ -195,7 +195,7 @@ def test_header_footer_validate_warns_for_cover_hide_even_when_page_numbers_are_
 
     assert issues
     assert issues[0].level == "warning"
-    assert "页眉页脚留空区" in issues[0].message
+    assert "页眉页脚分区排除" in issues[0].message
     assert issues[0].location == "context.doc_tree"
 
 
@@ -206,7 +206,7 @@ def test_section_format_validate_rejects_overlapping_page_number_phases_in_stric
     issues = SectionFormatModule().validate(_build_doc(), config, _build_context())
 
     assert any(issue.level == "error" for issue in issues)
-    assert any("同时命中了多个页码规则" in issue.message for issue in issues)
+    assert any("同时命中了多个页码结果" in issue.message for issue in issues)
     assert any("建议：" in issue.message for issue in issues)
 
 
@@ -216,8 +216,8 @@ def test_header_footer_validate_downgrades_phase_overlap_to_warning_in_warn_mode
     config.header_footer.page_number_plan.phases[1].selectors = ["body", "back_matter"]
     issues = HeaderFooterModule().validate(_build_doc(), config, _build_context())
 
-    assert any(issue.level == "warning" for issue in issues)
-    assert all(issue.level != "error" for issue in issues)
+    assert any(issue.level == "error" for issue in issues)
+    assert any("同时命中了多个页码结果" in issue.message for issue in issues)
 
 
 def test_empty_page_number_plan_defaults_to_continuous_decimal():
@@ -259,5 +259,25 @@ def test_collect_static_page_number_diagnostics_flags_empty_selectors():
     diagnostics = collect_static_page_number_diagnostics(config.header_footer)
 
     assert len(diagnostics) == 1
-    assert "尚未选择适用范围" in diagnostics[0].message
-    assert "删除这条空规则" in diagnostics[0].suggestion
+    assert "尚未选择编号分区" in diagnostics[0].message
+    assert "删除这个空项" in diagnostics[0].suggestion
+
+
+def test_collect_static_page_number_diagnostics_flags_duplicate_phase_ids():
+    config = _build_config()
+    config.header_footer.page_number_plan.phases[1].phase_id = "front"
+
+    diagnostics = collect_static_page_number_diagnostics(config.header_footer)
+
+    assert any(item.level == "error" for item in diagnostics)
+    assert any("重复出现" in item.message for item in diagnostics)
+
+
+def test_collect_static_page_number_diagnostics_warns_when_hidden_range_masks_rule():
+    config = _build_config()
+    config.header_footer.suppress_header_footer_selectors = ["toc"]
+
+    diagnostics = collect_static_page_number_diagnostics(config.header_footer)
+
+    assert any(item.level == "warning" for item in diagnostics)
+    assert any("已被设置为分区排除" in item.message for item in diagnostics)

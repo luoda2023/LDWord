@@ -100,7 +100,7 @@ _SECTION_TYPE_LABELS: dict[str, str] = {
     "body": "正文部分",
     "back_matter": "后置部分",
     "cover": "封面",
-    "pre_numbering": "页码前留空区",
+    "pre_numbering": "页码前排除分区",
     "statement": "声明页",
     "authorization": "授权书",
     "front_note": "说明页",
@@ -177,6 +177,7 @@ def _resolve_phase_rules(
     diagnostics: list[PageNumberDiagnostic] = []
     rules: list[PageNumberPhaseRule] = []
     claimed_by_section_type: dict[str, list[str]] = {}
+    claimed_phase_ids: dict[str, int] = {}
 
     for index, phase in enumerate(phases):
         selectors = tuple(
@@ -185,6 +186,7 @@ def _resolve_phase_rules(
             if str(selector or "").strip()
         )
         phase_id = str(getattr(phase, "phase_id", "") or "").strip() or f"phase_{index + 1}"
+        claimed_phase_ids[phase_id] = claimed_phase_ids.get(phase_id, 0) + 1
         matched = expand_page_number_selectors(selectors)
         rule = PageNumberPhaseRule(
             phase_id=phase_id,
@@ -205,10 +207,22 @@ def _resolve_phase_rules(
                 _build_phase_overlap_diagnostic(
                     section_type=section_type,
                     phase_ids=phase_ids,
-                    level="warning",
+                    level="error",
                     location="header_footer.page_number_plan",
                 )
             )
+
+    for phase_id, count in claimed_phase_ids.items():
+        if count <= 1:
+            continue
+        diagnostics.append(
+            PageNumberDiagnostic(
+                level="error",
+                message=f"页码结果名称“{phase_id}”重复出现。",
+                suggestion="为每个页码结果使用唯一名称，便于诊断和维护。",
+                location="header_footer.page_number_plan",
+            )
+        )
 
     return rules, diagnostics
 
@@ -259,11 +273,11 @@ def collect_page_number_diagnostics(
 
     diagnostics: list[PageNumberDiagnostic] = []
     if plan.missing_doc_tree and on_missing_doc_tree == "warn_and_fallback":
-        message = "当前页码和留空区规则依赖文档结构识别，但本次没有识别到文档结构。"
-        suggestion = "先运行标题/结构识别，或把模板里的“识别不到结构时”改成“直接使用默认规则”。"
+        message = "当前页码和分区排除规则依赖文档结构识别，但本次没有识别到文档结构。"
+        suggestion = "先运行标题/结构识别，或把模板里的“无结构识别时”改成“直接使用默认规则”。"
         if not page_number_enabled and suppress_header_footer:
-            message = "页眉页脚留空区依赖文档结构识别，但本次没有识别到文档结构。"
-            suggestion = "先运行标题/结构识别，或关闭“起始前留空”。"
+            message = "页眉页脚分区排除依赖文档结构识别，但本次没有识别到文档结构。"
+            suggestion = "先运行标题/结构识别，或关闭“分区排除”。"
         diagnostics.append(
             PageNumberDiagnostic(
                 level="warning",
@@ -280,7 +294,7 @@ def collect_page_number_diagnostics(
     for item in plan.diagnostics:
         diagnostics.append(
             PageNumberDiagnostic(
-                level=diagnostic_level,
+                level="error" if item.level == "error" else diagnostic_level,
                 message=item.message,
                 suggestion=item.suggestion,
                 location=item.location or "header_footer.page_number_plan",
@@ -315,8 +329,8 @@ def collect_static_page_number_diagnostics(header_footer) -> list[PageNumberDiag
             diagnostics.append(
                 PageNumberDiagnostic(
                     level=level,
-                    message=f"第 {index} 条页码规则尚未选择适用范围。",
-                    suggestion="为这条规则选择作用的内容范围，或者直接删除这条空规则。",
+                    message=f"第 {index} 条页码结果尚未选择编号分区。",
+                    suggestion="为这一项选择要编号的分区，或者直接删除这个空项。",
                     location=location,
                 )
             )
@@ -325,22 +339,36 @@ def collect_static_page_number_diagnostics(header_footer) -> list[PageNumberDiag
             diagnostics.append(
                 PageNumberDiagnostic(
                     level=level,
-                    message=f"规则“{phase_id}”的适用范围没有命中任何已知分区。",
+                    message=f"规则“{phase_id}”的编号分区没有命中任何已知分区。",
                     suggestion="检查分区名称；如果这是自定义分区，请确认结构识别里确实会产出同名分区。",
                     location=location,
                 )
             )
 
-    _rules, overlap_messages = _resolve_phase_rules(header_footer)
+    rules, overlap_messages = _resolve_phase_rules(header_footer)
     diagnostics.extend(
         PageNumberDiagnostic(
-            level=level,
+            level="error" if item.level == "error" else level,
             message=item.message,
             suggestion=item.suggestion,
             location=item.location or location,
         )
         for item in overlap_messages
     )
+    suppressed = resolve_suppressed_header_footer_section_types(header_footer)
+    for rule in rules:
+        hidden_matches = sorted(rule.matched_section_types & suppressed)
+        if not hidden_matches:
+            continue
+        hidden_text = "、".join(_section_type_label(section_type) for section_type in hidden_matches)
+        diagnostics.append(
+            PageNumberDiagnostic(
+                level="warning",
+                message=f"规则“{rule.phase_id}”命中的分区已被设置为分区排除：{hidden_text}。",
+                suggestion="这些分区不会输出页码；如需显示页码，请从排除分区中移除对应分区。",
+                location=location,
+            )
+        )
     return diagnostics
 
 
@@ -446,8 +474,8 @@ def _build_phase_overlap_diagnostic(
     phase_text = "、".join(str(phase_id or "").strip() for phase_id in phase_ids if str(phase_id or "").strip())
     return PageNumberDiagnostic(
         level=level,
-        message=f"分区“{section_label}”同时命中了多个页码规则：{phase_text}。",
-        suggestion="让同一分区只属于一条规则；如果只是想续号，请保留一条规则并把起号方式改为“延续前段”。",
+        message=f"分区“{section_label}”同时命中了多个页码结果：{phase_text}。",
+        suggestion="让同一分区只属于一个页码结果；如果只是想续号，请保留一项并把起号方式改为“延续前段”。",
         location=location,
     )
 
@@ -461,8 +489,8 @@ def _build_uncovered_section_diagnostic(
     section_label = _section_type_label(section_type)
     return PageNumberDiagnostic(
         level=level,
-        message=f"可编号分区“{section_label}”没有被任何页码规则覆盖。",
-        suggestion="新增一条覆盖该分区的规则，或把它并入现有规则。",
+        message=f"可编号分区“{section_label}”没有对应页码结果。",
+        suggestion="新增一项覆盖该分区的页码结果，或把它并入现有项。",
         location=location,
     )
 

@@ -19,6 +19,14 @@ LEVEL_TO_WORD_STYLE = {
     "heading3": "TOC 3",
 }
 
+LEVEL_TO_STYLE_KEY = {
+    "heading1": "toc_level1",
+    "heading2": "toc_level2",
+    "heading3": "toc_level3",
+}
+
+DEFAULT_TOC_ENTRY_STYLE_KEY = "toc_level3"
+
 TOC_HEADING_STYLE_CANDIDATES = ["TOC Heading", "目录标题"]
 
 ALIGNMENT_MAP = {
@@ -46,6 +54,10 @@ def resolve_toc_style_config(styles_cfg: dict, role: str):
         if style is not None:
             return style
     return None
+
+
+def toc_style_key_for_heading_level(level: str) -> str:
+    return LEVEL_TO_STYLE_KEY.get(str(level or ""), DEFAULT_TOC_ENTRY_STYLE_KEY)
 
 
 def _ensure_style(doc, style_name: str):
@@ -184,13 +196,8 @@ def sync_toc_styles(doc, styles_cfg: dict) -> int:
         _normalize_toc_heading_style(doc, toc_title_style, toc_title_cfg)
         changed += 1
 
-    level_to_key = {
-        "heading1": "toc_chapter",
-        "heading2": "toc_level1",
-        "heading3": "toc_level2",
-    }
     for level, word_style_name in LEVEL_TO_WORD_STYLE.items():
-        style_config = resolve_toc_style_config(styles_cfg, level_to_key[level])
+        style_config = resolve_toc_style_config(styles_cfg, toc_style_key_for_heading_level(level))
         if style_config is None:
             continue
         style = _ensure_style(doc, word_style_name)

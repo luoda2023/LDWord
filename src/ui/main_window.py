@@ -158,8 +158,13 @@ class MainWindow(QMainWindow):
         self.panel_stack = QStackedWidget(self._container)
         self.panel_stack.setObjectName("main_panel_stack")
         self.panel_stack.setFrameShape(QFrame.NoFrame)
-        for spec in PANEL_SPECS:
-            panel = create_panel(spec.id, self.bridge) or _PlaceholderPanel(spec.title)
+        self._loaded_panel_indexes: set[int] = set()
+        for index, spec in enumerate(PANEL_SPECS):
+            if index == 0:
+                panel = create_panel(spec.id, self.bridge) or _PlaceholderPanel(spec.title)
+                self._loaded_panel_indexes.add(index)
+            else:
+                panel = _PlaceholderPanel(spec.title)
             self.panel_stack.addWidget(panel)
 
         container_layout = QVBoxLayout(self._container)
@@ -177,7 +182,7 @@ class MainWindow(QMainWindow):
         body_layout.addWidget(self.panel_stack, 1)
         container_layout.addWidget(body, 1)
 
-        self.sidebar.panel_selected.connect(self.panel_stack.setCurrentIndex)
+        self.sidebar.panel_selected.connect(self._show_panel)
         self.bridge.navigate_to_panel.connect(self._navigate)
 
         self._apply_theme()
@@ -246,8 +251,30 @@ class MainWindow(QMainWindow):
             self.title_bar._update_icons()
 
     def _navigate(self, index: int) -> None:
-        self.panel_stack.setCurrentIndex(index)
+        self._show_panel(index)
         self.sidebar.select(index)
+
+    def _show_panel(self, index: int) -> None:
+        if not 0 <= index < self.panel_stack.count():
+            return
+        self._ensure_panel_loaded(index)
+        self.panel_stack.setCurrentIndex(index)
+
+    def _ensure_panel_loaded(self, index: int) -> QWidget:
+        if index in self._loaded_panel_indexes:
+            return self.panel_stack.widget(index)
+
+        spec = PANEL_SPECS[index]
+        panel = create_panel(spec.id, self.bridge)
+        self._loaded_panel_indexes.add(index)
+        if panel is None:
+            return self.panel_stack.widget(index)
+
+        old = self.panel_stack.widget(index)
+        self.panel_stack.removeWidget(old)
+        old.deleteLater()
+        self.panel_stack.insertWidget(index, panel)
+        return panel
 
     def _apply_theme(self) -> None:
         t = get_theme()
@@ -337,3 +364,5 @@ class MainWindow(QMainWindow):
         self.panel_stack.removeWidget(old)
         old.deleteLater()
         self.panel_stack.insertWidget(index, panel)
+        if hasattr(self, "_loaded_panel_indexes"):
+            self._loaded_panel_indexes.add(index)

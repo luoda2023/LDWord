@@ -35,6 +35,12 @@ _PAGE_NUMBER_W_FORMATS = {
     "lowerRoman": "lowerRoman",
 }
 
+_FOOTER_ALIGNMENT_VALUES = {
+    "left": "left",
+    "center": "center",
+    "right": "right",
+}
+
 
 class HeaderFooterModule(BaseModule):
     meta = ModuleMeta(
@@ -76,6 +82,7 @@ class HeaderFooterModule(BaseModule):
         header_mode = str(hf_cfg.header_mode or "styleref")
         header_border = bool(hf_cfg.header_border)
         page_number_enabled = bool(hf_cfg.page_number_enabled)
+        footer_text = str(getattr(hf_cfg, "footer_text", "") or "")
         section_plan = build_page_number_execution_plan(doc, context, hf_cfg)
 
         for section, plan in zip(doc.sections, section_plan.sections):
@@ -103,8 +110,11 @@ class HeaderFooterModule(BaseModule):
                 _clear_footer(section)
                 count += 1
             elif page_number_enabled and plan.page_number_visible:
-                _set_page_number(section, num_format=plan.number_format)
+                _set_page_number(section, hf_cfg, num_format=plan.number_format)
                 _set_page_number_format(section, plan.number_format, start=plan.start_value)
+                count += 1
+            elif footer_text:
+                _set_fixed_footer(section, hf_cfg)
                 count += 1
             elif _clear_page_number_fields(section):
                 count += 1
@@ -207,13 +217,38 @@ def _set_page_number(section, hf_cfg=None, *, num_format: str = "decimal") -> No
     para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
     p_pr = find_or_create(para._element, "w:pPr")
     jc = find_or_create(p_pr, "w:jc")
-    jc.set(qn("w:val"), "center")
+    jc.set(qn("w:val"), _footer_alignment(hf_cfg))
 
     field_instruction = _PAGE_NUMBER_FIELD_INSTRUCTIONS.get(
         str(num_format or "decimal"),
         _PAGE_NUMBER_FIELD_INSTRUCTIONS["decimal"],
     )
     _add_field_to_paragraph(para, field_instruction)
+    footer_text = str(getattr(hf_cfg, "footer_text", "") or "") if hf_cfg is not None else ""
+    if footer_text:
+        para.add_run(" ")
+        para.add_run(footer_text)
+
+
+def _set_fixed_footer(section, hf_cfg) -> None:
+    footer = section.footer
+    footer.is_linked_to_previous = False
+
+    for para in footer.paragraphs:
+        _clear_paragraph_runs(para)
+
+    para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+    p_pr = find_or_create(para._element, "w:pPr")
+    jc = find_or_create(p_pr, "w:jc")
+    jc.set(qn("w:val"), _footer_alignment(hf_cfg))
+    text = str(getattr(hf_cfg, "footer_text", "") or "")
+    if text:
+        para.add_run(text)
+
+
+def _footer_alignment(hf_cfg) -> str:
+    raw = str(getattr(hf_cfg, "footer_alignment", "center") or "center").strip().lower()
+    return _FOOTER_ALIGNMENT_VALUES.get(raw, "center")
 
 
 def _set_page_number_format(section, fmt: str = "decimal", *, start: int | None = None) -> None:

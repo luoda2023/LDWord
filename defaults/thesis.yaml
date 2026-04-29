@@ -108,7 +108,7 @@ styles:
     space_before_pt: 24
     space_after_pt: 18
 
-  toc_chapter:
+  toc_level1:
     font_cn: "宋体"
     font_en: "Times New Roman"
     size_pt: 14
@@ -123,7 +123,7 @@ styles:
     space_before_pt: 6
     space_after_pt: 0
 
-  toc_level1:
+  toc_level2:
     font_cn: "宋体"
     font_en: "Times New Roman"
     size_pt: 12
@@ -138,7 +138,7 @@ styles:
     space_before_pt: 6
     space_after_pt: 0
 
-  toc_level2:
+  toc_level3:
     font_cn: "宋体"
     font_en: "Times New Roman"
     size_pt: 10.5

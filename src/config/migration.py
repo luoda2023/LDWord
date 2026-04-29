@@ -157,7 +157,14 @@ def _add_header_footer_compat_aliases(flat: dict[str, Any]) -> None:
         footer_mode = str(
             flat.get("header_footer.footer.content_mode", "page_number") or "page_number"
         )
-        flat.setdefault("header_footer.page_number_enabled", footer_mode == "page_number")
+        flat.setdefault(
+            "header_footer.page_number_enabled",
+            footer_mode in {"page_number", "page_number_with_text"},
+        )
+    if "header_footer.footer.fixed_text" in flat:
+        flat.setdefault("header_footer.footer_text", flat["header_footer.footer.fixed_text"])
+    if "header_footer.footer.alignment" in flat:
+        flat.setdefault("header_footer.footer_alignment", flat["header_footer.footer.alignment"])
 
     if (
         "header_footer.header.hide_on_cover" in flat
@@ -205,7 +212,6 @@ def _add_header_footer_compat_aliases(flat: dict[str, Any]) -> None:
             "header_footer.restart_body_page_number",
             body_phase["start_mode"] != "continue",
         )
-
 
 def _resolve_page_number_phase_alias(
     phases: Any,
@@ -302,6 +308,8 @@ _HEADER_FOOTER_TOP_LEVEL_KEYS = (
     "update_page_number",
     "update_header_line",
     "page_number_enabled",
+    "footer_text",
+    "footer_alignment",
     "header_border",
     "hide_cover_header_footer",
     "front_matter_page_number_format",
@@ -348,6 +356,7 @@ def normalize_template_payload(payload: Mapping[str, Any] | None) -> dict[str, A
             for name, style in styles_raw.items()
             if isinstance(style, Mapping)
         }
+        _normalize_toc_style_keys(styles)
         _ensure_runtime_style_aliases(styles)
         normalized["styles"] = styles
 
@@ -419,6 +428,12 @@ def _normalize_style_payload(style: Mapping[str, Any]) -> dict[str, Any]:
     normalized.pop("left_indent_cm", None)
 
     return normalized
+
+
+def _normalize_toc_style_keys(styles: dict[str, dict[str, Any]]) -> None:
+    if "toc" in styles:
+        for key in ("toc_level1", "toc_level2", "toc_level3"):
+            styles.setdefault(key, copy.deepcopy(styles["toc"]))
 
 
 def _normalize_style_line_spacing(style: dict[str, Any]) -> None:
@@ -549,7 +564,7 @@ def _ensure_runtime_style_aliases(styles: dict[str, dict[str, Any]]) -> None:
     alias_groups = {
         "heading": ("heading", "heading1", "heading2", "heading3"),
         "caption": ("caption", "figure_caption", "table_caption"),
-        "toc": ("toc", "toc_level1", "toc_chapter", "toc_title"),
+        "toc": ("toc", "toc_level1", "toc_level2", "toc_level3", "toc_title"),
         "references_body": ("references_body",),
         "abstract_body": ("abstract_body", "abstract_body_en"),
         "appendix_body": ("appendix_body",),
@@ -635,7 +650,22 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
         page_number_enabled = normalized.get("page_number_enabled")
         if page_number_enabled is None and update_page_number is not None:
             page_number_enabled = bool(update_page_number)
-        footer["content_mode"] = "page_number" if page_number_enabled is not False else "none"
+        footer_text = str(normalized.get("footer_text", "") or footer.get("fixed_text", "") or "")
+        if page_number_enabled is False:
+            footer["content_mode"] = "fixed" if footer_text else "none"
+        elif footer_text:
+            footer["content_mode"] = "page_number_with_text"
+        else:
+            footer["content_mode"] = "page_number"
+    else:
+        footer["content_mode"] = str(footer.get("content_mode", "page_number") or "page_number")
+    if "fixed_text" not in footer:
+        footer["fixed_text"] = str(normalized.get("footer_text", "") or "")
+    if "alignment" not in footer:
+        footer["alignment"] = str(normalized.get("footer_alignment", "center") or "center")
+    footer["alignment"] = str(footer.get("alignment", "center") or "center").strip().lower()
+    if footer["alignment"] not in {"left", "center", "right"}:
+        footer["alignment"] = "center"
     if "hide_on_cover" not in footer:
         footer["hide_on_cover"] = True if hide_cover is None else bool(hide_cover)
 
@@ -951,4 +981,3 @@ def _lift_scene_direct_feature_overrides(
             feature_payloads[root] = copy.deepcopy(dict(root_payload))
 
     return feature_payloads, remaining
-

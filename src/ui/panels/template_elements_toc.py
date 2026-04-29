@@ -54,9 +54,9 @@ TOC_ALIGNMENT_OPTIONS: tuple[tuple[str, str], ...] = (
 TOC_STYLE_META: tuple[tuple[str, str, bool], ...] = (
     ("toc", "目录共享样式", True),
     ("toc_title", "目录标题样式", False),
-    ("toc_chapter", "章级目录样式", False),
     ("toc_level1", "一级目录样式", False),
     ("toc_level2", "二级目录样式", False),
+    ("toc_level3", "三级目录样式", False),
 )
 
 TOC_STYLE_KEYS = tuple(role for role, _, _ in TOC_STYLE_META)

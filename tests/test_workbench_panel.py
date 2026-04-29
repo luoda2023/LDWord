@@ -29,6 +29,23 @@ def test_main_window_registers_real_workbench_panel():
         window.close()
 
 
+def test_main_window_lazily_loads_non_initial_panels():
+    _app()
+    window = MainWindow()
+    try:
+        theme_index = next(i for i, spec in enumerate(PANEL_SPECS) if spec.id == "theme")
+
+        assert window.panel_stack.widget(theme_index).__class__.__name__ == "_PlaceholderPanel"
+        assert theme_index not in window._loaded_panel_indexes
+
+        window._show_panel(theme_index)
+
+        assert window.panel_stack.widget(theme_index).__class__.__name__ == "ThemePanel"
+        assert theme_index in window._loaded_panel_indexes
+    finally:
+        window.close()
+
+
 def test_workbench_panel_exposes_navigation_components():
     _app()
     panel = WorkbenchPanel(PanelBridge())

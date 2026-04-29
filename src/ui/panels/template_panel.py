@@ -37,6 +37,7 @@ from src.config.style_semantics import (
 from src.config.table_style_presets import color_palette, color_variant
 from src.config.template import StyleConfig, TemplateConfig
 from src.qt_api import (
+    QApplication,
     QBrush,
     QColor,
     QFileDialog,
@@ -147,6 +148,7 @@ class _PreviewHeaderFooterState:
     header_text: str
     header_border: bool
     footer_text: str
+    footer_alignment: str
 
 
 _PREVIEW_TABLE_STYLE_KEY = "table_preview"
@@ -242,6 +244,28 @@ def _page_number_preview_text(header_footer) -> str:
     return f"- {sample} -"
 
 
+def _footer_preview_text(header_footer) -> str:
+    mode = str(getattr(getattr(header_footer, "footer", None), "content_mode", "page_number") or "page_number")
+    footer_text = str(getattr(header_footer, "footer_text", "") or "").strip()
+    page_number_text = _page_number_preview_text(header_footer)
+    if mode == "none":
+        return ""
+    if mode == "fixed":
+        return footer_text
+    if mode == "page_number_with_text":
+        return " ".join(part for part in (page_number_text, footer_text) if part)
+    return page_number_text
+
+
+def _preview_footer_alignment_flags(alignment: str | None):
+    value = str(alignment or "center").strip().lower()
+    if value == "left":
+        return Qt.AlignLeft | Qt.AlignTop
+    if value == "right":
+        return Qt.AlignRight | Qt.AlignTop
+    return Qt.AlignHCenter | Qt.AlignTop
+
+
 def _resolve_preview_header_footer(cfg: TemplateConfig) -> _PreviewHeaderFooterState:
     header_footer = cfg.header_footer
     mode = str(getattr(header_footer, "header_mode", "styleref") or "styleref")
@@ -257,7 +281,8 @@ def _resolve_preview_header_footer(cfg: TemplateConfig) -> _PreviewHeaderFooterS
     return _PreviewHeaderFooterState(
         header_text=header_text,
         header_border=bool(getattr(header_footer, "header_border", True)) and mode != "none",
-        footer_text=_page_number_preview_text(header_footer),
+        footer_text=_footer_preview_text(header_footer),
+        footer_alignment=str(getattr(header_footer, "footer_alignment", "center") or "center"),
     )
 
 
@@ -513,7 +538,6 @@ class TemplateStylePreview(QWidget):
 
     def _apply_theme(self) -> None:
         self._apply_shadow_theme()
-        self._rebuild_cache()
         self.update()
 
     def _apply_shadow_theme(self) -> None:
@@ -888,7 +912,11 @@ class TemplateStylePreview(QWidget):
             )
             painter.setPen(header_text_color)
             painter.setFont(header_font)
-            painter.drawText(footer_text_rect, Qt.AlignHCenter | Qt.AlignTop, preview_state.footer_text)
+            painter.drawText(
+                footer_text_rect,
+                _preview_footer_alignment_flags(preview_state.footer_alignment),
+                preview_state.footer_text,
+            )
 
         # ── Distance annotations — reuse the same dimension-line style ──
         label_font = QFont(self.font())
@@ -1795,27 +1823,36 @@ class TemplatePanel(BasePanel):
         # ── Build detail panes ──
         self._overview_detail = TemplateOverviewDetail()
         self._io_detail = ImportExportDetail()
-        self._page_detail = PageSetupDetail()
-        self._style_detail = StyleDetail()
-        self._heading_detail = HeadingNumberingPanel(self.bridge)
-        self._table_detail = TableCaptionDetail()
-        self._header_footer_detail = ElementsDetail(scope="header_footer")
-        self._toc_detail = ElementsDetail(scope="toc")
-        self._reference_detail = ReferenceDetail()
-        self._caption_detail = CaptionDetail()
+        self._detail_factories = {
+            "tpl_page": PageSetupDetail,
+            "tpl_style": StyleDetail,
+            "tpl_heading": lambda: HeadingNumberingPanel(self.bridge),
+            "tpl_table": TableCaptionDetail,
+            "tpl_header_footer": lambda: ElementsDetail(scope="header_footer"),
+            "tpl_toc": lambda: ElementsDetail(scope="toc"),
+            "tpl_reference": ReferenceDetail,
+            "tpl_caption": CaptionDetail,
+        }
+        self._detail_attr_names = {
+            "_page_detail": "tpl_page",
+            "_style_detail": "tpl_style",
+            "_heading_detail": "tpl_heading",
+            "_table_detail": "tpl_table",
+            "_header_footer_detail": "tpl_header_footer",
+            "_toc_detail": "tpl_toc",
+            "_reference_detail": "tpl_reference",
+            "_caption_detail": "tpl_caption",
+        }
+        self._loaded_detail_ids: set[str] = {"tpl_overview", "tpl_io"}
+        self._retired_detail_placeholders: list[QWidget] = []
 
         self._detail_map: dict[str, QWidget] = {
             "tpl_overview": self._overview_detail,
             "tpl_io": self._io_detail,
-            "tpl_page": self._page_detail,
-            "tpl_style": self._style_detail,
-            "tpl_heading": self._heading_detail,
-            "tpl_table": self._table_detail,
-            "tpl_header_footer": self._header_footer_detail,
-            "tpl_toc": self._toc_detail,
-            "tpl_reference": self._reference_detail,
-            "tpl_caption": self._caption_detail,
         }
+        for card_id in DETAIL_CARDS:
+            title, icon = CARD_DEFINITIONS[card_id]
+            self._detail_map[card_id] = _PlaceholderDetail(title, icon)
         self._details = WorkbenchDetailController(
             self._detail_container,
             self._detail_layout,
@@ -1871,22 +1908,6 @@ class TemplatePanel(BasePanel):
         self._io_detail.import_requested.connect(self._on_import)
         self._io_detail.save_as_requested.connect(self._save_current_template_as)
         self._io_detail.reset_requested.connect(self._on_reset)
-        self._page_detail.template_edited.connect(self._on_template_edited)
-        self._page_detail.save_requested.connect(self._on_page_save_requested)
-        self._style_detail.template_edited.connect(self._on_template_edited)
-        self._style_detail.save_requested.connect(self._on_style_save_requested)
-        self._heading_detail.template_edited.connect(self._on_template_edited)
-        self._heading_detail.save_requested.connect(self._save_current_template)
-        self._table_detail.template_edited.connect(self._on_template_edited)
-        self._table_detail.save_requested.connect(self._save_current_template)
-        self._header_footer_detail.template_edited.connect(self._on_template_edited)
-        self._header_footer_detail.save_requested.connect(self._save_current_template)
-        self._toc_detail.template_edited.connect(self._on_template_edited)
-        self._toc_detail.save_requested.connect(self._save_current_template)
-        self._reference_detail.template_edited.connect(self._on_template_edited)
-        self._reference_detail.save_requested.connect(self._save_current_template)
-        self._caption_detail.template_edited.connect(self._on_template_edited)
-        self._caption_detail.save_requested.connect(self._save_current_template)
 
         # Bridge
         self.bridge.scene_changed.connect(self.on_scene_changed)
@@ -1897,12 +1918,81 @@ class TemplatePanel(BasePanel):
     # Detail switching
     # ──────────────────────────────────────────────────────
 
+    def __getattr__(self, name: str):
+        detail_attrs = self.__dict__.get("_detail_attr_names", {})
+        card_id = detail_attrs.get(name)
+        if card_id:
+            return self._ensure_detail_loaded(card_id)
+        raise AttributeError(f"{type(self).__name__} object has no attribute {name!r}")
+
     def _show_detail(self, card_id: str) -> None:
+        is_first_detail_load = card_id not in self._loaded_detail_ids and card_id in self._detail_factories
+        self._ensure_detail_loaded(card_id)
+        if is_first_detail_load and self._details.current_detail is not None and self.isVisible():
+            self._details.hide_all()
+            app = QApplication.instance()
+            if app is not None:
+                app.processEvents()
         self._details.show_detail(card_id)
         self._current_detail = self._details.current_detail
         detail = self._detail_map.get(card_id)
         if detail is not None and hasattr(detail, "capture_entry_snapshot"):
             detail.capture_entry_snapshot()
+
+    def _ensure_detail_loaded(self, card_id: str) -> QWidget:
+        if card_id in self._loaded_detail_ids:
+            return self._detail_map[card_id]
+
+        factory = self._detail_factories.get(card_id)
+        if factory is None:
+            return self._detail_map[card_id]
+
+        detail = factory()
+        old = self._detail_map[card_id]
+        self._detail_map[card_id] = detail
+        self._details.detail_map[card_id] = detail
+        detail.hide()
+        detail.setParent(self._detail_container)
+        old.hide()
+        old.setParent(None)
+        self._retired_detail_placeholders.append(old)
+
+        for attr_name, attr_card_id in self._detail_attr_names.items():
+            if attr_card_id == card_id:
+                setattr(self, attr_name, detail)
+                break
+
+        self._loaded_detail_ids.add(card_id)
+        self._wire_parameter_detail_signals(card_id, detail)
+        self._sync_detail_state(detail)
+        return detail
+
+    def _wire_parameter_detail_signals(self, card_id: str, detail: QWidget) -> None:
+        if hasattr(detail, "template_edited"):
+            detail.template_edited.connect(self._on_template_edited)
+        if not hasattr(detail, "save_requested"):
+            return
+        if card_id == "tpl_page":
+            detail.save_requested.connect(self._on_page_save_requested)
+        elif card_id == "tpl_style":
+            detail.save_requested.connect(self._on_style_save_requested)
+        else:
+            detail.save_requested.connect(self._save_current_template)
+
+    def _sync_detail_state(self, detail: QWidget) -> None:
+        was_dirty = self.bridge.is_template_dirty()
+        if hasattr(detail, "set_template"):
+            detail.set_template(self._current_template)
+        elif hasattr(detail, "on_template_changed"):
+            detail.on_template_changed(self._current_template)
+        if was_dirty and not self.bridge.is_template_dirty():
+            self.bridge.mark_template_dirty()
+        if hasattr(detail, "set_save_enabled"):
+            detail.set_save_enabled(self.bridge.is_template_dirty())
+        if hasattr(detail, "apply_theme"):
+            detail.apply_theme()
+        elif hasattr(detail, "_apply_theme"):
+            detail._apply_theme()
 
     def _template_source_text(self) -> str:
         source = str(self._current_template_source or "").strip()
@@ -1976,14 +2066,9 @@ class TemplatePanel(BasePanel):
 
     def _parameter_details(self) -> list[QWidget]:
         return [
-            self._page_detail,
-            self._style_detail,
-            self._heading_detail,
-            self._table_detail,
-            self._header_footer_detail,
-            self._toc_detail,
-            self._reference_detail,
-            self._caption_detail,
+            self._detail_map[card_id]
+            for card_id in DETAIL_CARDS
+            if card_id in self._loaded_detail_ids
         ]
 
     def _set_detail_templates(self, template: TemplateConfig) -> None:

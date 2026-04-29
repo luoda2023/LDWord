@@ -41,9 +41,9 @@ def test_toc_style_sync_updates_heading_and_entry_styles():
             bold=True,
             italic=True,
         ),
-        "toc_chapter": StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left"),
-        "toc_level1": StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=12, alignment="left"),
-        "toc_level2": StyleConfig(
+        "toc_level1": StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left"),
+        "toc_level2": StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=12, alignment="left"),
+        "toc_level3": StyleConfig(
             font_cn="FangSong",
             font_en="Calibri",
             size_pt=11,
@@ -151,8 +151,8 @@ def test_toc_formats_existing_paragraphs_using_doc_tree_range():
         bold=True,
         italic=True,
     )
-    config.styles["toc_chapter"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
-    config.styles["toc_level1"] = StyleConfig(
+    config.styles["toc_level1"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
+    config.styles["toc_level2"] = StyleConfig(
         font_cn="Songti",
         font_en="Times New Roman",
         size_pt=12,
@@ -200,7 +200,7 @@ def test_toc_resolve_existing_range_rejects_suspicious_doc_tree_section():
 
     config = ResolvedConfig()
     config.styles["toc_title"] = StyleConfig(font_cn="Heiti", font_en="Arial", size_pt=16, alignment="center")
-    config.styles["toc_chapter"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
+    config.styles["toc_level1"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
     sync_toc_styles(doc, config.styles)
 
     context = SimpleNamespace(
@@ -233,9 +233,9 @@ def test_toc_plain_mode_inserts_plain_entries_from_front_body_and_back_matter():
     config = ResolvedConfig()
     config.toc.mode = "plain"
     config.styles["toc_title"] = StyleConfig(font_cn="Heiti", font_en="Arial", size_pt=16, alignment="center")
-    config.styles["toc_chapter"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
-    config.styles["toc_level1"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=12, alignment="left")
-    config.styles["toc_level2"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=10.5, alignment="left")
+    config.styles["toc_level1"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
+    config.styles["toc_level2"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=12, alignment="left")
+    config.styles["toc_level3"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=10.5, alignment="left")
 
     TocModule().apply(doc, config, ChangeTracker(), context)
 
@@ -266,7 +266,7 @@ def test_toc_plain_mode_rebuilds_existing_plain_toc_block():
     config = ResolvedConfig()
     config.toc.mode = "plain"
     config.styles["toc_title"] = StyleConfig(font_cn="Heiti", font_en="Arial", size_pt=16, alignment="center")
-    config.styles["toc_chapter"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
+    config.styles["toc_level1"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
 
     TocModule().apply(doc, config, ChangeTracker(), context)
 
