@@ -146,7 +146,7 @@ class TableCaptionDetail(QWidget):
 
         self._summary_card.add_widget(header)
 
-        self._summary_grid = SummaryGrid(columns=6, parent=self._summary_card)
+        self._summary_grid = SummaryGrid(columns=6, tile_style="module", parent=self._summary_card)
         self._summary_card.add_widget(self._summary_grid)
 
     def _build_editor_column(self, parent: QWidget) -> None:
@@ -470,7 +470,15 @@ class TableCaptionDetail(QWidget):
     def _refresh_summary(self) -> None:
         template = self._current_template
         if template is None:
-            self._summary_grid.set_items([SummaryGridItem(key="empty", label="当前状态", value="未选择模板。", column_span=6)])
+            self._summary_grid.set_items([
+                SummaryGridItem(
+                    key="empty",
+                    label="当前状态",
+                    value="未选择模板。",
+                    column_span=6,
+                    icon_name="info",
+                )
+            ])
             return
         table = template.table
         border_label = table_style_label(table.border_mode)
@@ -497,6 +505,7 @@ class TableCaptionDetail(QWidget):
                         else f"行距 {spacing_label}{color_detail}"
                     ),
                     column_span=3,
+                    icon_name="table-2",
                 ),
                 SummaryGridItem(
                     key="width",
@@ -504,6 +513,7 @@ class TableCaptionDetail(QWidget):
                     value=width_value,
                     detail=width_detail,
                     column_span=3,
+                    icon_name="ruler",
                 ),
                 SummaryGridItem(
                     key="type",
@@ -511,12 +521,14 @@ class TableCaptionDetail(QWidget):
                     value=f"{table.font_cn or '-'} / {table.font_en or '-'}",
                     detail=f"字号 {size_text}  字形 {self._emphasis_summary_text(table)}  单元格 {alignment_label}",
                     column_span=3,
+                    icon_name="type-outline",
                 ),
                 SummaryGridItem(
                     key="behavior",
                     label="输出行为",
                     value=self._behavior_summary_text(table),
                     column_span=3,
+                    icon_name="settings",
                 ),
             ]
         )

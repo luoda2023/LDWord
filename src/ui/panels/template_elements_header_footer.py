@@ -65,11 +65,32 @@ class HeaderFooterDetailSection:
     def __init__(self, owner: "ElementsDetail"):
         self._owner = owner
 
-        self.section = Card(parent=owner._editor_column)
-        owner._header_section = self.section
-        owner._add_card_header(self.section, "panel-top", "页眉与页脚")
-        owner._editor_layout.addWidget(self.section)
-        self._build_form()
+        self._scheme_card = Card(parent=owner._editor_column)
+        owner._add_card_header(self._scheme_card, "list", "应用方案")
+        owner._editor_layout.addWidget(self._scheme_card)
+        self._build_scheme_form()
+
+        self._header_card = Card(parent=owner._editor_column)
+        owner._add_card_header(self._header_card, "panel-top", "页眉")
+        owner._editor_layout.addWidget(self._header_card)
+        self._build_header_form()
+
+        self._footer_card = Card(parent=owner._editor_column)
+        owner._add_card_header(self._footer_card, "panel-bottom", "页脚")
+        owner._editor_layout.addWidget(self._footer_card)
+        self._build_footer_form()
+
+        self._typography_card = Card(parent=owner._editor_column)
+        owner._add_card_header(
+            self._typography_card,
+            "type",
+            "页眉页脚文字样式",
+            description="同时应用于实际显示的页眉文字、页脚文字和页码。",
+        )
+        owner._editor_layout.addWidget(self._typography_card)
+        self._build_typography_form()
+
+        self._build_advanced_section()
 
         self._page_plan = PageNumberPlanSection(owner)
         self._page_plan.export_compat_attributes(self)
@@ -80,7 +101,6 @@ class HeaderFooterDetailSection:
             "_scheme_combo",
             "_scheme_row",
             "_scheme_note",
-            "_quick_preview_label",
             "_structure_section",
             "_header_mode_combo",
             "_header_mode_row",
@@ -126,41 +146,39 @@ class HeaderFooterDetailSection:
             setattr(self._owner, name, getattr(self, name))
         self._owner._page_phase_rows = self._page_phase_rows
 
-    def _build_form(self) -> None:
-        self._inspector_form = InspectorForm(parent=self.section)
+    def _build_scheme_form(self) -> None:
+        form = InspectorForm(parent=self._scheme_card)
 
         self._scheme_combo = StyledComboBox(self._owner)
         for value, label in HEADER_FOOTER_SCHEME_OPTIONS:
             self._scheme_combo.addItem(label, value)
         self._scheme_combo.currentIndexChanged.connect(self._on_scheme_changed)
-        self._scheme_row = self._form_row("应用方案", self._scheme_combo, parent=self._inspector_form)
-        self._inspector_form.add_widget(self._scheme_row)
-        self._scheme_note = self._group_note("选择方案后仍可手动微调。")
-        self._inspector_form.add_widget(self._scheme_note)
+        self._scheme_row = self._form_row("应用方案", self._scheme_combo, parent=form)
+        form.add_widget(self._scheme_row)
+        self._scheme_note = self._group_note("选择方案后仍可手动微调。", form)
+        form.add_widget(self._scheme_note)
 
-        self._quick_preview_label = QLabel(self._inspector_form)
-        self._quick_preview_label.setObjectName("tpl_header_footer_quick_preview")
-        self._quick_preview_label.setWordWrap(True)
-        self._inspector_form.add_widget(self._quick_preview_label)
+        self._scheme_card.add_widget(form)
 
-        self._inspector_form.add_widget(self._group_title("页眉"))
+    def _build_header_form(self) -> None:
+        form = InspectorForm(parent=self._header_card)
 
         self._header_mode_combo = StyledComboBox(self._owner)
         for value, label in HEADER_MODE_OPTIONS:
             self._header_mode_combo.addItem(label, value)
         self._header_mode_combo.currentIndexChanged.connect(self._owner._on_structure_edited)
-        self._header_mode_row = self._form_row("页眉内容", self._header_mode_combo, parent=self._inspector_form)
+        self._header_mode_row = self._form_row("页眉内容", self._header_mode_combo, parent=form)
 
         self._header_text_edit = QLineEdit(self._owner)
         self._header_text_edit.textChanged.connect(self._owner._on_structure_edited)
-        self._header_text_row = self._form_row("页眉文字", self._header_text_edit, parent=self._inspector_form)
+        self._header_text_row = self._form_row("页眉文字", self._header_text_edit, parent=form)
 
         self._styleref_level_combo = StyledComboBox(self._owner)
         for level in range(1, 7):
             self._styleref_level_combo.addItem(f"{level} 级", level)
         self._styleref_level_combo.currentIndexChanged.connect(self._owner._on_structure_edited)
-        self._styleref_level_row = self._form_row("标题级别", self._styleref_level_combo, parent=self._inspector_form)
-        self._header_mode_pair = self._inspector_form.add_pair(
+        self._styleref_level_row = self._form_row("标题级别", self._styleref_level_combo, parent=form)
+        self._header_mode_pair = form.add_pair(
             self._header_mode_row,
             self._styleref_level_row,
             self._header_text_row,
@@ -168,50 +186,51 @@ class HeaderFooterDetailSection:
 
         self._header_border_toggle = ToggleSwitch(self._owner, checked=True)
         self._header_border_toggle.toggled_signal.connect(self._owner._on_structure_edited)
-        self._header_border_row = self._form_row("页眉横线", self._header_border_toggle, parent=self._inspector_form)
-        self._inspector_form.add_widget(self._header_border_row)
+        self._header_border_row = self._form_row("页眉横线", self._header_border_toggle, parent=form)
+        form.add_widget(self._header_border_row)
+        self._header_card.add_widget(form)
 
-        self._inspector_form.add_widget(self._group_title("页脚"))
+    def _build_footer_form(self) -> None:
+        form = InspectorForm(parent=self._footer_card)
 
         self._footer_content_combo = StyledComboBox(self._owner)
         for value, label in FOOTER_CONTENT_OPTIONS:
             self._footer_content_combo.addItem(label, value)
         self._footer_content_combo.currentIndexChanged.connect(self._owner._on_structure_edited)
-        self._footer_content_row = self._form_row("页脚内容", self._footer_content_combo, parent=self._inspector_form)
+        self._footer_content_row = self._form_row("页脚内容", self._footer_content_combo, parent=form)
 
         self._footer_text_edit = QLineEdit(self._owner)
         self._footer_text_edit.textChanged.connect(self._owner._on_structure_edited)
-        self._footer_text_row = self._form_row("页脚文字", self._footer_text_edit, parent=self._inspector_form)
+        self._footer_text_row = self._form_row("页脚文字", self._footer_text_edit, parent=form)
 
         self._footer_alignment_combo = StyledComboBox(self._owner)
         for value, label in FOOTER_ALIGNMENT_OPTIONS:
             self._footer_alignment_combo.addItem(label, value)
         self._footer_alignment_combo.currentIndexChanged.connect(self._owner._on_structure_edited)
-        self._footer_alignment_row = self._form_row("页脚对齐", self._footer_alignment_combo, parent=self._inspector_form)
+        self._footer_alignment_row = self._form_row("页脚对齐", self._footer_alignment_combo, parent=form)
 
-        self._footer_grid = self._inspector_form.add_pair(
+        self._footer_grid = form.add_pair(
             self._footer_content_row,
             self._footer_alignment_row,
         )
-        self._inspector_form.add_widget(self._footer_text_row)
+        form.add_widget(self._footer_text_row)
+        self._footer_card.add_widget(form)
 
-        self._inspector_form.add_widget(self._group_title("页眉页脚文字样式"))
-        self._inspector_form.add_widget(
-            self._group_note("同时应用于实际显示的页眉文字、页脚文字和页码。")
-        )
+    def _build_typography_form(self) -> None:
+        form = InspectorForm(parent=self._typography_card)
 
         self._font_cn_combo = FontCombo(lang="cn", parent=self._owner)
         self._font_cn_combo.font_changed.connect(self._owner._on_structure_edited)
-        self._font_cn_row = self._form_row("中文字体", self._font_cn_combo, parent=self._inspector_form)
+        self._font_cn_row = self._form_row("中文字体", self._font_cn_combo, parent=form)
 
         self._font_en_combo = FontCombo(lang="en", parent=self._owner)
         self._font_en_combo.font_changed.connect(self._owner._on_structure_edited)
-        self._font_en_row = self._form_row("英文字体", self._font_en_combo, parent=self._inspector_form)
+        self._font_en_row = self._form_row("英文字体", self._font_en_combo, parent=form)
 
         self._size_combo = SizeCombo(self._owner)
         self._size_combo.size_changed.connect(self._owner._on_structure_edited)
         self._size_combo.currentTextChanged.connect(self._owner._on_structure_edited)
-        self._size_row = self._form_row("字号", self._size_combo, parent=self._inspector_form)
+        self._size_row = self._form_row("字号", self._size_combo, parent=form)
 
         self._bold_toggle = ToggleSwitch(self._owner, checked=False)
         self._bold_toggle.toggled_signal.connect(self._owner._on_structure_edited)
@@ -220,18 +239,23 @@ class HeaderFooterDetailSection:
         self._emphasis_row = self._form_row(
             "字形",
             build_emphasis_widget(self._owner, self._bold_toggle, self._italic_toggle),
-            parent=self._inspector_form,
+            parent=form,
         )
-        self._typography_grid = self._inspector_form.add_grid(
+        self._typography_grid = form.add_grid(
             [
                 [self._font_cn_row, self._size_row],
                 [self._font_en_row, self._emphasis_row],
             ],
         )
+        self._typography_card.add_widget(form)
 
-        self._structure_section = FlowSection("高级：分区排除", expanded=False, parent=self._inspector_form)
+    def _build_advanced_section(self) -> None:
+        self._structure_section = FlowSection("高级：分区排除", expanded=False, parent=self._owner._editor_column)
         self._structure_section.add_widget(
-            self._group_note("启用后，所选分区的页眉、页脚和页码都不显示；分区来自文档结构识别。")
+            self._group_note(
+                "启用后，所选分区的页眉、页脚和页码都不显示；分区来自文档结构识别。",
+                self._structure_section,
+            )
         )
 
         self._hide_cover_toggle = ToggleSwitch(self._owner, checked=True)
@@ -261,8 +285,7 @@ class HeaderFooterDetailSection:
         )
         self._structure_section.add_widget(self._suppress_selector_row)
         self._suppress_selector_row.set_label_alignment(Qt.AlignLeft | Qt.AlignTop)
-        self._inspector_form.add_widget(self._structure_section)
-        self.section.add_widget(self._inspector_form)
+        self._owner._editor_layout.addWidget(self._structure_section)
 
     def _form_row(
         self,
@@ -274,17 +297,8 @@ class HeaderFooterDetailSection:
     ) -> QWidget:
         return template_form_row(label, widget, suffix_widget=suffix_widget, parent=parent)
 
-    def _group_title(self, text: str) -> QLabel:
-        label = QLabel(text, self._inspector_form)
-        label.setObjectName("tpl_form_group_title")
-        theme = get_theme()
-        label.setStyleSheet(
-            f"font-size: {theme.font_size_sm}px; font-weight: {theme.font_weight_medium}; color: {theme.text_primary}; margin-top: 8px;"
-        )
-        return label
-
-    def _group_note(self, text: str) -> QLabel:
-        label = QLabel(text, self._inspector_form)
+    def _group_note(self, text: str, parent: QWidget) -> QLabel:
+        label = QLabel(text, parent)
         label.setObjectName("tpl_form_group_note")
         label.setWordWrap(True)
         theme = get_theme()
@@ -448,29 +462,8 @@ class HeaderFooterDetailSection:
         self._suppress_selector_row.setEnabled(self._hide_cover_toggle.isChecked())
 
         self._page_plan.set_enabled_visible(page_number_enabled)
-        self._refresh_section_preview()
         if self._owner._current_template is not None and not self._owner._is_syncing:
             self._sync_scheme_combo(self._owner._current_template.header_footer)
-
-    def _refresh_section_preview(self) -> None:
-        header_text = self._preview_header_text()
-        footer_text = self._preview_footer_summary_text()
-        page_text = self._preview_page_summary_text()
-        hidden_text = self._preview_hidden_summary_text()
-        parts = [f"页眉：{header_text}", f"页脚：{footer_text}"]
-        if page_text:
-            parts.append(f"页码：{page_text}")
-        if hidden_text:
-            parts.append(f"不显示：{hidden_text}")
-        self._quick_preview_label.setText("；".join(parts))
-
-    def _preview_header_text(self) -> str:
-        mode = str(self._header_mode_combo.currentData() or "styleref")
-        if mode == "none":
-            return "不显示"
-        if mode == "fixed":
-            return self._header_text_edit.text().strip() or "固定文字未填写"
-        return f"跟随 {int(self._styleref_level_combo.currentData() or 1)} 级标题"
 
     def _preview_excluded_sections(self) -> set[str]:
         if not self._hide_cover_toggle.isChecked():
@@ -489,24 +482,6 @@ class HeaderFooterDetailSection:
             elif selector in {"back_matter", "references", "appendix", "acknowledgment", "resume", "errata"}:
                 expanded.add("back_matter")
         return expanded
-
-    def _preview_hidden_summary_text(self) -> str:
-        if not self._hide_cover_toggle.isChecked():
-            return ""
-        selectors = self._suppress_selector_editor.selectors() or ["pre_numbering"]
-        labels = dict(SUPPRESS_HEADER_FOOTER_SELECTOR_OPTIONS)
-        return "、".join(labels.get(str(selector), str(selector)) for selector in selectors)
-
-    def _preview_footer_summary_text(self) -> str:
-        footer_mode = str(self._footer_content_combo.currentData() or "page_number")
-        if footer_mode == "none":
-            return "不显示"
-        if footer_mode == "fixed":
-            return self._footer_text_edit.text().strip() or "固定文字未填写"
-        if footer_mode == "page_number_with_text":
-            text = self._footer_text_edit.text().strip() or "固定文字未填写"
-            return f"页码 + {text}"
-        return "页码"
 
     def _preview_page_summary_text(self) -> str:
         footer_mode = str(self._footer_content_combo.currentData() or "page_number")
@@ -545,9 +520,9 @@ class HeaderFooterDetailSection:
         self._page_plan.refresh_validation_alert(template)
 
     def apply_theme(self) -> None:
-        self._header_text_edit.setStyleSheet(
-            build_text_input_stylesheet(get_theme(), selector="QLineEdit")
-        )
+        ss = build_text_input_stylesheet(get_theme(), selector="QLineEdit")
+        self._header_text_edit.setStyleSheet(ss)
+        self._footer_text_edit.setStyleSheet(ss)
         self._page_plan.apply_theme()
 
 

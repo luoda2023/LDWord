@@ -32,6 +32,11 @@ def test_heading_numbering_panel_uses_spacing_input_for_max_levels_control():
         assert panel._levels_slider.maximum() == 8
         assert panel._levels_slider.value() == 4
         assert panel._levels_input.value() == 4
+        summary_items = panel._summary_grid.items()
+        assert panel._summary_grid._tile_style == "module"
+        assert summary_items[0].icon_name == "settings"
+        assert summary_items[1].icon_name == "sliders-horizontal"
+        assert {item.icon_name for item in summary_items[2:]} == {"list-ordered"}
     finally:
         panel.close()
         app.processEvents()

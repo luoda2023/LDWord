@@ -42,6 +42,7 @@ from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
 from src.shared.ui.template_form_layout import template_form_row
+from src.shared.ui.template_summary_header import TemplateSummaryHeader
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 from src.shared.ui.typography_controls import build_emphasis_widget
@@ -143,6 +144,7 @@ class StyleDetail(QWidget):
         self._snapshot: _StyleSnapshot | None = None
         self._header_icons: list[tuple[str, QLabel]] = []
         self._header_titles: list[QLabel] = []
+        self._section_header_titles: list[QLabel] = []
         self._desc_labels: list[QLabel] = []
         self._unit_labels: list[QLabel] = []
         self._is_syncing = False
@@ -150,7 +152,7 @@ class StyleDetail(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(15)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self._build_summary_card()
@@ -169,37 +171,24 @@ class StyleDetail(QWidget):
 
     def _build_summary_card(self) -> None:
         self._summary_card = Card(parent=self)
-        header = QWidget(self._summary_card)
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 6)
-        layout.setSpacing(6)
-
-        icon_label = QLabel(header)
-        icon_label.setFixedSize(18, 18)
-        self._header_icons.append(("type-outline", icon_label))
-        layout.addWidget(icon_label)
-
-        title_label = QLabel("正文排版", header)
-        title_label.setObjectName("tpl_card_title")
-        self._header_titles.append(title_label)
-        layout.addWidget(title_label)
-        layout.addStretch(1)
+        header = TemplateSummaryHeader("正文排版", "type-outline", parent=self._summary_card)
+        self._header_titles.append(header.title_label)
 
         self._restore_entry_btn = QPushButton("恢复", header)
         self._restore_entry_btn.setCursor(Qt.PointingHandCursor)
         self._restore_entry_btn.setIconSize(QSize(16, 16))
         self._restore_entry_btn.clicked.connect(self._on_restore_entry)
-        layout.addWidget(self._restore_entry_btn)
+        header.add_action(self._restore_entry_btn)
 
         self._save_btn = QPushButton("保存", header)
         self._save_btn.setCursor(Qt.PointingHandCursor)
         self._save_btn.setIconSize(QSize(16, 16))
         self._save_btn.clicked.connect(self.save_requested.emit)
-        layout.addWidget(self._save_btn)
+        header.add_action(self._save_btn)
 
         self._summary_card.add_widget(header)
 
-        self._summary_grid = SummaryGrid(columns=6, parent=self._summary_card)
+        self._summary_grid = SummaryGrid(columns=6, tile_style="module", parent=self._summary_card)
         self._summary_card.add_widget(self._summary_grid)
 
     def _build_editor_column(self, parent: QWidget) -> None:
@@ -207,7 +196,7 @@ class StyleDetail(QWidget):
         self._editor_column.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         layout = QVBoxLayout(self._editor_column)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(15)
 
         self._text_card = Card(parent=self._editor_column)
         self._add_card_header(
@@ -256,7 +245,7 @@ class StyleDetail(QWidget):
 
         title_label = QLabel(title, header)
         title_label.setObjectName("tpl_card_title")
-        self._header_titles.append(title_label)
+        self._section_header_titles.append(title_label)
         layout.addWidget(title_label)
         layout.addStretch(1)
         card.add_widget(header)
@@ -671,6 +660,7 @@ class StyleDetail(QWidget):
                     detail=f"字号 {_size_text(style)}  字形 {_emphasis_text(style)}",
                     detail_emphasis=True,
                     column_span=2,
+                    icon_name="type-outline",
                 ),
                 SummaryGridItem(
                     key="paragraph",
@@ -682,6 +672,7 @@ class StyleDetail(QWidget):
                     ),
                     detail_emphasis=True,
                     column_span=2,
+                    icon_name="sliders-horizontal",
                 ),
                 SummaryGridItem(
                     key="spacing",
@@ -693,6 +684,7 @@ class StyleDetail(QWidget):
                     ),
                     detail_emphasis=True,
                     column_span=2,
+                    icon_name="sliders-horizontal",
                 ),
             ]
         )
@@ -730,21 +722,43 @@ class StyleDetail(QWidget):
         theme = get_theme()
         self.setStyleSheet(build_button_stylesheet(theme))
 
-        title_ss = (
+        section_title_ss = (
             f"font-size: {theme.font_size_lg}px; "
             f"font-weight: {theme.font_weight_emphasis}; "
-            f"color: {theme.primary}; background: transparent;"
+            f"color: {theme.text_primary}; background: transparent;"
         )
         desc_ss = f"font-size: {theme.font_size_sm}px; color: {theme.text_secondary};"
         unit_ss = f"font-size: {theme.font_size_sm}px; color: {theme.text_secondary};"
 
         for label in self._header_titles:
-            label.setStyleSheet(title_ss)
+            label.setStyleSheet(
+                f"font-size: {TemplateSummaryHeader.TITLE_FONT_SIZE}px; "
+                f"font-weight: {theme.font_weight_emphasis}; "
+                f"color: {theme.primary}; background: transparent;"
+            )
+        for label in self._section_header_titles:
+            label.setStyleSheet(section_title_ss)
         for label in self._desc_labels:
             label.setStyleSheet(desc_ss)
         for label in self._unit_labels:
             label.setStyleSheet(unit_ss)
 
+        self._restore_entry_btn.setStyleSheet(build_button_stylesheet(
+            theme,
+            selector="QPushButton",
+            min_height=28,
+            padding_x=10,
+            padding_y=3,
+            font_size=theme.font_size_sm,
+        ))
+        self._save_btn.setStyleSheet(build_button_stylesheet(
+            theme,
+            selector="QPushButton",
+            min_height=28,
+            padding_x=12,
+            padding_y=3,
+            font_size=theme.font_size_sm,
+        ))
         apply_button_variant(self._restore_entry_btn, "ghost-primary")
         apply_button_variant(self._save_btn, "primary")
 

@@ -15,6 +15,7 @@ from src.shared.ui.form_row import FormRow
 from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.summary_grid import SummaryGrid
 from src.shared.ui.template_form_layout import TemplateFormGrid, TemplateSplitColumns
+from src.shared.ui.template_summary_header import TemplateSummaryHeader
 from src.shared.ui.toast import Toast
 from src.ui.bridge import PanelBridge
 from src.ui.panels.template_panel import TemplatePanel
@@ -68,6 +69,7 @@ def test_style_detail_syncs_widget_values_from_template():
         assert detail._line_value.value() == 1.5
 
         assert isinstance(detail._summary_grid, SummaryGrid)
+        assert detail._summary_grid._tile_style == "module"
         assert len(detail._summary_grid.items()) == 3
         summary_items = {item.key: item for item in detail._summary_grid.items()}
         assert detail._summary_grid.value_for("text") == "黑体 / Arial"
@@ -81,6 +83,9 @@ def test_style_detail_syncs_widget_values_from_template():
         assert summary_items["text"].detail_emphasis is True
         assert summary_items["paragraph"].detail_emphasis is True
         assert summary_items["spacing"].detail_emphasis is True
+        assert summary_items["text"].icon_name == "type-outline"
+        assert summary_items["paragraph"].icon_name == "sliders-horizontal"
+        assert summary_items["spacing"].icon_name == "sliders-horizontal"
     finally:
         detail.close()
 
@@ -156,6 +161,8 @@ def test_style_detail_organizes_body_controls_into_cards():
         assert isinstance(detail._text_card, Card)
         assert isinstance(detail._alignment_indent_card, Card)
         assert isinstance(detail._spacing_card, Card)
+        assert detail.findChild(TemplateSummaryHeader) is not None
+        assert detail.findChild(TemplateSummaryHeader).title_label.font().pixelSize() == 20
         assert detail.findChildren(InspectorForm)
         assert detail.findChildren(TemplateFormGrid)
         assert not detail.findChildren(TemplateSplitColumns)

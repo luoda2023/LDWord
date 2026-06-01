@@ -28,6 +28,8 @@ from src.qt_api import (
 )
 from src.shared.ui.theme import bind_theme, get_theme
 
+_CHECKMARK_COLOR = "#FFFFFF"  # 纯白，不跟随主题，不自动切换
+
 
 class ColorDotButton(QAbstractButton):
     def __init__(self, palette: ColorTablePalette, parent=None):
@@ -48,9 +50,11 @@ class ColorDotButton(QAbstractButton):
         painter.setBrush(QColor(f"#{self.palette.accent}"))
         painter.drawEllipse(rect)
         if self.isChecked():
-            painter.setPen(QPen(QColor("#FFFFFF" if self.palette.header_text == "FFFFFF" else "#1F2933"), 2))
-            painter.drawLine(10, 14, 13, 17)
-            painter.drawLine(13, 17, 19, 10)
+            painter.setPen(QPen(QColor(_CHECKMARK_COLOR), 2))
+            cx = self.width() // 2
+            cy = self.height() // 2
+            painter.drawLine(cx - 3, cy, cx - 1, cy + 2)
+            painter.drawLine(cx - 1, cy + 2, cx + 3, cy - 2)
 
 
 class TableStylePreviewButton(QAbstractButton):

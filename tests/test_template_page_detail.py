@@ -42,8 +42,14 @@ def test_page_setup_detail_syncs_widget_values_from_template():
         assert detail._page_inputs["header_distance_cm"].value() == 1.6
         assert detail._section_break_combo.currentData() == "nextPage"
         assert isinstance(detail._summary_grid, SummaryGrid)
+        assert detail._summary_grid._tile_style == "module"
         assert len(detail._summary_grid.items()) == 5
         summary_items = {item.key: item for item in detail._summary_grid.items()}
+        assert summary_items["paper"].icon_name == "layout"
+        assert summary_items["orientation"].icon_name == "ruler"
+        assert summary_items["section"].icon_name == "layers"
+        assert summary_items["margin_gutter"].icon_name == "scan"
+        assert summary_items["header_footer"].icon_name == "panel-top"
         assert detail._summary_grid.value_for("paper") == "A3"
         assert detail._summary_grid.value_for("orientation") == "横向"
         assert detail._summary_grid.value_for("section") == "下一页分节"

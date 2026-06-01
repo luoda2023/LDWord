@@ -1,10 +1,72 @@
 from __future__ import annotations
 
 from src.qt_api import (
-    QHBoxLayout, QLabel, QPainter, QPen, QColor, QWidget, QVBoxLayout, Signal, Qt
+    QBrush,
+    QColor,
+    QConicalGradient,
+    QHBoxLayout,
+    QLabel,
+    QPainter,
+    QPen,
+    QTimer,
+    QVBoxLayout,
+    QWidget,
+    Signal,
+    Qt,
 )
 from src.shared.ui.theme import bind_theme, get_theme
 from src.ui.icons.catalog import get_icon
+
+_PULSE_INTERVAL_MS = 40
+_PULSE_STEP = 6  # degrees per tick
+
+
+class _RunningDot(QWidget):
+    """Small pulsing arc indicator for the 'running' stepper state."""
+
+    def __init__(self, color: str, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(24, 24)
+        self._color = QColor(color)
+        self._angle = 0.0
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(_PULSE_INTERVAL_MS)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def _tick(self) -> None:
+        self._angle = (self._angle + _PULSE_STEP) % 360
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        cx = self.width() / 2.0
+        cy = self.height() / 2.0
+        r = min(cx, cy) - 3.0
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Track
+        track = QColor(self._color)
+        track.setAlpha(40)
+        painter.setPen(QPen(track, 2.0, Qt.SolidLine, Qt.RoundCap))
+        painter.drawEllipse(int(cx - r), int(cy - r), int(r * 2), int(r * 2))
+
+        # Spinning arc
+        grad = QConicalGradient(cx, cy, self._angle)
+        grad.setColorAt(0.0, QColor(self._color.red(), self._color.green(),
+                                    self._color.blue(), 0))
+        grad.setColorAt(0.5, QColor(self._color.red(), self._color.green(),
+                                    self._color.blue(), 200))
+        grad.setColorAt(1.0, QColor(self._color.red(), self._color.green(),
+                                    self._color.blue(), 255))
+        painter.setPen(QPen(QBrush(grad), 2.0, Qt.SolidLine, Qt.RoundCap))
+        painter.drawArc(int(cx - r), int(cy - r), int(r * 2), int(r * 2),
+                        int(self._angle * 16), int(270 * 16))
+
+    def stop(self) -> None:
+        self._timer.stop()
 
 
 class StepperItem(QWidget):
@@ -12,6 +74,7 @@ class StepperItem(QWidget):
         super().__init__(parent)
         self._status = "queued"
         self._progress = 0
+        self._running_dot: _RunningDot | None = None
         self.setFixedHeight(get_theme().control_height_md)
 
         layout = QHBoxLayout(self)
@@ -22,13 +85,9 @@ class StepperItem(QWidget):
         self._icon_label.setFixedSize(24, 24)
         self._icon_label.setAlignment(Qt.AlignCenter)
 
-        # Title
         self._title_label = QLabel(title, self)
-
-        # Details
         self._detail_label = QLabel("", self)
 
-        # Using stretch to push details to right
         layout.addWidget(self._icon_label)
         layout.addWidget(self._title_label)
         layout.addStretch(1)
@@ -44,36 +103,57 @@ class StepperItem(QWidget):
 
     def _apply_theme(self):
         t = get_theme()
-        self._title_font_size = t.font_size_sm
         self._title_label.setStyleSheet(f"font-size: {t.font_size_md}px;")
         self._detail_label.setStyleSheet(f"font-size: {t.font_size_sm}px;")
         self._refresh_ui()
 
+    def _clear_running_dot(self) -> None:
+        if self._running_dot is not None:
+            self._running_dot.stop()
+            layout = self.layout()
+            if layout is not None:
+                layout.removeWidget(self._running_dot)
+            self._running_dot.deleteLater()
+            self._running_dot = None
+
+    def _show_running_dot(self) -> None:
+        self._clear_running_dot()
+        t = get_theme()
+        dot = _RunningDot(t.primary, self)
+        self.layout().replaceWidget(self._icon_label, dot)
+        self._icon_label.hide()
+        dot.show()
+        self._running_dot = dot
+
+    def _show_icon(self, name: str, size: int, color: str) -> None:
+        self._clear_running_dot()
+        self._icon_label.setPixmap(get_icon(name, size=size, color=color).pixmap(24, 24))
+        self._icon_label.show()
+
     def _refresh_ui(self):
         t = get_theme()
         if self._status == "queued":
-            self._icon_label.setPixmap(get_icon("info", size=16, color=t.text_hint).pixmap(24, 24))
+            self._show_icon("info", 16, t.text_hint)
             self._title_label.setStyleSheet(f"font-size: {t.font_size_md}px; color: {t.text_secondary};")
             self._detail_label.setText("排队中")
             self._detail_label.setStyleSheet(f"font-size: {t.font_size_sm}px; color: {t.text_hint};")
         elif self._status == "running":
-            # Just an indicator, the spinner is hard natively, we'll use a filled circle from primary
-            self._icon_label.setPixmap(get_icon("play", size=18, color=t.primary).pixmap(24, 24))
+            self._show_running_dot()
             self._title_label.setStyleSheet(f"font-size: {t.font_size_md}px; font-weight: bold; color: {t.text_primary};")
             self._detail_label.setText(f"执行中 {self._progress}%")
             self._detail_label.setStyleSheet(f"font-size: {t.font_size_sm}px; font-weight: bold; color: {t.primary};")
         elif self._status == "completed":
-            self._icon_label.setPixmap(get_icon("circle-check", size=20, color=t.success).pixmap(24, 24))
+            self._show_icon("circle-check", 20, t.success)
             self._title_label.setStyleSheet(f"font-size: {t.font_size_md}px; color: {t.text_primary};")
             self._detail_label.setText("已完成")
             self._detail_label.setStyleSheet(f"font-size: {t.font_size_sm}px; color: {t.success};")
-        elif self._status == "failed" or self._status == "error":
-            self._icon_label.setPixmap(get_icon("circle-x", size=20, color=t.error).pixmap(24, 24))
+        elif self._status in ("failed", "error"):
+            self._show_icon("circle-x", 20, t.error)
             self._title_label.setStyleSheet(f"font-size: {t.font_size_md}px; color: {t.error};")
             self._detail_label.setText("失败")
             self._detail_label.setStyleSheet(f"font-size: {t.font_size_sm}px; color: {t.error};")
         else:
-            self._icon_label.setPixmap(get_icon("alert-triangle", size=20, color=t.warning).pixmap(24, 24))
+            self._show_icon("alert-triangle", 20, t.warning)
             self._title_label.setStyleSheet(f"font-size: {t.font_size_md}px; color: {t.warning};")
             self._detail_label.setText(self._status)
             self._detail_label.setStyleSheet(f"font-size: {t.font_size_sm}px; color: {t.warning};")
@@ -114,7 +194,7 @@ class StepperWidget(QWidget):
         if not self._current_module_id:
             self._current_module_id = module_id
 
-        self.update() # Trigger paint for lines
+        self.update()
 
     def update_status(self, module_id: str, status: str, progress: int = 0) -> None:
         if module_id not in self._items:
@@ -127,7 +207,6 @@ class StepperWidget(QWidget):
     def current_module_text(self) -> str:
         if not self._current_module_id or self._current_module_id not in self._items:
             return ""
-        # Access protected member directly for simplicity
         return self._items[self._current_module_id]._title_label.text()
 
     def clear(self) -> None:
@@ -149,8 +228,6 @@ class StepperWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         t = get_theme()
 
-        # Center of the 24x24 icon which has 8px left margin in the QHBoxLayout
-        # margin = 8, width = 24 => center is at 8 + 12 = 20
         x = 20
 
         for i in range(len(self._item_keys) - 1):
@@ -162,7 +239,6 @@ class StepperWidget(QWidget):
             y_start = item_curr.get_node_center_y() + 12
             y_end = item_next.get_node_center_y() - 12
 
-            # Determine line color
             status_curr = item_curr.status()
             if status_curr == "completed":
                 color = QColor(t.success)

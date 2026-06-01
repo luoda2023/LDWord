@@ -272,6 +272,22 @@ class AppTheme:
     style_preview_min_height: int = 60
     style_preview_padding: int = 12
 
+    module_summary_tile_min_height: int = 104
+    module_summary_tile_padding_x: int = 18
+    module_summary_tile_padding_y: int = 13
+    module_summary_icon_container_size: int = 52
+    module_summary_icon_size: int = 28
+    module_summary_icon_bg_alpha: int = 13
+    module_summary_icon_text_gap: int = 18
+    module_summary_grid_gap: int = 15
+    module_summary_content_spacing: int = 4
+    module_summary_title_font_size: int = 14
+    module_summary_title_line_height: int = 30
+    module_summary_body_line_height: int = 20
+    module_summary_border_alpha: int = 150
+    module_summary_shadow_alpha: int = 8
+    module_summary_shadow_offset_y: int = 2
+
     card_padding_x: int = 16
     card_padding_y: int = 16
     card_padding_top: int = 12
@@ -1077,6 +1093,7 @@ class _ThemeManager:
         self._theme: AppTheme = LIGHT
         self._notified_theme: AppTheme = LIGHT
         self._pending_notification = False
+        self._version: int = 1
         if _HAS_QT:
             self._notifier = _ThemeNotifier()
 
@@ -1088,6 +1105,7 @@ class _ThemeManager:
         if theme == self._theme:
             return
         self._theme = theme
+        self._version += 1
         self._queue_notification()
 
     def _queue_notification(self) -> None:
@@ -1149,6 +1167,7 @@ if _HAS_QT:
             self._owner = owner
             self._callback = callback
             self._dirty = False
+            self._applied_version: int = _manager._version
             super().__init__(owner)
             on_theme_changed(self._on_theme_changed)
             owner.installEventFilter(self)
@@ -1167,14 +1186,20 @@ if _HAS_QT:
                 return
             if self._is_visible():
                 self._dirty = False
-                self._callback()
+                self._do_apply()
                 return
             self._dirty = True
 
         def apply_if_dirty(self) -> None:
             if self._dirty and self._is_visible():
                 self._dirty = False
-                self._callback()
+                self._do_apply()
+
+        def _do_apply(self) -> None:
+            if self._applied_version == _manager._version:
+                return
+            self._applied_version = _manager._version
+            self._callback()
 
         def _is_visible(self) -> bool:
             return bool(getattr(self._owner, "isVisible", lambda: True)())

@@ -211,7 +211,7 @@ class PageSetupDetail(QWidget):
 
         self._summary_card.add_widget(header)
 
-        self._summary_grid = SummaryGrid(columns=6, parent=self._summary_card)
+        self._summary_grid = SummaryGrid(columns=6, tile_style="module", parent=self._summary_card)
         self._summary_card.add_widget(self._summary_grid)
 
     def _build_editor_column(self, parent: QWidget) -> None:
@@ -516,6 +516,7 @@ class PageSetupDetail(QWidget):
                     value="未选择模板。",
                     detail="选择模板后，这里会汇总纸张、边距、页眉页脚和装订线信息。",
                     column_span=6,
+                    icon_name="info",
                 ),
             ])
             return
@@ -527,18 +528,21 @@ class PageSetupDetail(QWidget):
                 label="纸张规格",
                 value=str(page.paper_size or "A4").upper(),
                 column_span=2,
+                icon_name="layout",
             ),
             SummaryGridItem(
                 key="orientation",
                 label="页面方向",
                 value=_orientation_label(page.orientation),
                 column_span=2,
+                icon_name="ruler",
             ),
             SummaryGridItem(
                 key="section",
                 label="分节方式",
                 value=_section_break_label(template.section.section_break_type),
                 column_span=2,
+                icon_name="layers",
             ),
             SummaryGridItem(
                 key="margin_gutter",
@@ -554,6 +558,7 @@ class PageSetupDetail(QWidget):
                 ),
                 detail_emphasis=True,
                 column_span=3,
+                icon_name="scan",
             ),
             SummaryGridItem(
                 key="header_footer",
@@ -562,6 +567,7 @@ class PageSetupDetail(QWidget):
                 detail=f"页脚距离 {_cm_text(page.footer_distance_cm)}",
                 detail_emphasis=True,
                 column_span=3,
+                icon_name="panel-top",
             ),
         ])
 

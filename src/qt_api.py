@@ -8,6 +8,7 @@ MIT-source + third-party-notices release posture as V0.2 LTS.
 from __future__ import annotations
 
 from PySide6.QtCore import (
+    QAbstractAnimation,
     QByteArray,
     QEasingCurve,
     QEvent,
@@ -26,6 +27,7 @@ from PySide6.QtGui import (
     QAction,
     QBrush,
     QColor,
+    QConicalGradient,
     QCursor,
     QFont,
     QFontMetricsF,
@@ -92,6 +94,7 @@ from PySide6.QtWidgets import (
 )
 
 __all__ = [
+    "QAbstractAnimation",
     "QAbstractButton",
     "QAbstractItemView",
     "QAbstractSlider",
@@ -104,6 +107,7 @@ __all__ = [
     "QCheckBox",
     "QColor",
     "QColorDialog",
+    "QConicalGradient",
     "QComboBox",
     "QCursor",
     "QDialog",

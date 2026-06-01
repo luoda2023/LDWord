@@ -27,24 +27,21 @@ class _NavButton(QPushButton):
     def __init__(self, nav_id: str, tooltip: str, parent=None):
         super().__init__(parent)
         self.nav_id = nav_id
+        self._active = False
         set_global_tooltip(self, tooltip, placement="right", role="nav", delay_ms=80)
         self.setCheckable(True)
         self.setFixedSize(40, 40)
         self.setCursor(Qt.PointingHandCursor)
 
-    def apply_theme(self, active: bool = False) -> None:
+    def apply_theme(self) -> None:
+        active = self._active
         t = get_theme()
-        # 选中态用 accent 色图标，否则用 sidebar 文字色
         icon_color = t.icon_accent if active else t.text_sidebar
         lucide_name = SIDEBAR_ICONS.get(self.nav_id, "settings")
         self.setIcon(get_icon(lucide_name, self.ICON_SIZE, icon_color))
         self.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
 
-        if active:
-            bg = t.bg_sidebar_active
-        else:
-            bg = "transparent"
-
+        bg = t.bg_sidebar_active if active else "transparent"
         self.setStyleSheet(f"""
             QPushButton {{
                 background: {bg};
@@ -55,6 +52,12 @@ class _NavButton(QPushButton):
                 background: {t.bg_sidebar_active};
             }}
         """)
+
+    def set_active(self, active: bool) -> None:
+        if self._active == active:
+            return
+        self._active = active
+        self.apply_theme()
 
 
 class Sidebar(QWidget):
@@ -71,6 +74,7 @@ class Sidebar(QWidget):
     def __init__(self, bridge: PanelBridge, parent=None):
         super().__init__(parent)
         self.bridge = bridge
+        self._active_index: int = 0
         self.setFixedWidth(self.WIDTH)
         self.setObjectName("sidebar")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -83,7 +87,6 @@ class Sidebar(QWidget):
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
 
-        # 主导航 — 从 panel_registry 读取
         for i, spec in enumerate(MAIN_SPECS):
             btn = _NavButton(spec.id, spec.title)
             self._group.addButton(btn, i)
@@ -92,7 +95,6 @@ class Sidebar(QWidget):
 
         layout.addStretch()
 
-        # 底部 — 从 panel_registry 读取
         for i, spec in enumerate(BOTTOM_SPECS):
             idx = len(MAIN_SPECS) + i
             btn = _NavButton(spec.id, spec.title)
@@ -100,19 +102,25 @@ class Sidebar(QWidget):
             self._buttons.append(btn)
             layout.addWidget(btn, 0, Qt.AlignHCenter)
 
-        # 信号
         self._group.idClicked.connect(self._on_clicked)
 
-        # 默认选中第一个
         if self._buttons:
             self._buttons[0].setChecked(True)
+            self._buttons[0].set_active(True)
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
 
     def _on_clicked(self, idx: int) -> None:
+        old = self._active_index
+        self._active_index = idx
+        # 只更新变化的两按钮，不全量重建
+        if old != idx:
+            if 0 <= old < len(self._buttons):
+                self._buttons[old].set_active(False)
+            if 0 <= idx < len(self._buttons):
+                self._buttons[idx].set_active(True)
         self.panel_selected.emit(idx)
-        self._apply_theme()
 
     def _apply_theme(self) -> None:
         t = get_theme()
@@ -123,7 +131,7 @@ class Sidebar(QWidget):
             }}
         """)
         for btn in self._buttons:
-            btn.apply_theme(active=btn.isChecked())
+            btn.apply_theme()
 
     def select(self, index: int) -> None:
         """外部切换选中项。"""

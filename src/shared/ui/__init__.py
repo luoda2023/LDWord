@@ -56,6 +56,7 @@ _EXPORT_MAP: dict[str, tuple[str, str]] = {
     "TemplateFormGrid": (".template_form_layout", "TemplateFormGrid"),
     "TemplateFormStack": (".template_form_layout", "TemplateFormStack"),
     "TemplateSplitColumns": (".template_form_layout", "TemplateSplitColumns"),
+    "TemplateSummaryHeader": (".template_summary_header", "TemplateSummaryHeader"),
     "template_form_pair_row": (".template_form_layout", "template_form_pair_row"),
     "TextArea": (".text_area", "TextArea"),
     "ThemedRadioButton": (".themed_radio_button", "ThemedRadioButton"),

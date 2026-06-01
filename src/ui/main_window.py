@@ -27,6 +27,7 @@ from src.qt_api import (
     QLabel,
     QMainWindow,
     QStackedWidget,
+    QTimer,
     QVBoxLayout,
     QWidget,
     Qt,
@@ -192,6 +193,10 @@ class MainWindow(QMainWindow):
         if sys.platform == "win32":
             self._install_native_frame()
 
+        # 窗口首次显示后，在事件循环空闲时逐个预加载剩余面板
+        self._preload_queue = [i for i in range(len(PANEL_SPECS)) if i not in self._loaded_panel_indexes]
+        QTimer.singleShot(0, self._preload_next)
+
     def _install_native_frame(self) -> None:
         """恢复 WS_THICKFRAME 等原生窗口样式以获得 DWM 动画。"""
         hwnd = int(self.winId())
@@ -274,7 +279,38 @@ class MainWindow(QMainWindow):
         self.panel_stack.removeWidget(old)
         old.deleteLater()
         self.panel_stack.insertWidget(index, panel)
+
+        # 从预加载队列中移除（如果还在的话）
+        if hasattr(self, "_preload_queue") and index in self._preload_queue:
+            self._preload_queue.remove(index)
+
         return panel
+
+    def _preload_next(self) -> None:
+        """在事件循环空闲时逐个创建面板，避免切换时卡顿。"""
+        if not hasattr(self, "_preload_queue"):
+            return
+        while self._preload_queue:
+            index = self._preload_queue.pop(0)
+            if index in self._loaded_panel_indexes:
+                continue
+            self._ensure_panel_loaded(index)
+            # 强制面板完成首次布局和渲染，避免用户切换时才触发
+            self._warmup_panel(index)
+            QTimer.singleShot(0, self._preload_next)
+            return
+
+    def _warmup_panel(self, index: int) -> None:
+        """让面板做一次完整的 show→layout→hide，刷掉首次渲染开销。"""
+        panel = self.panel_stack.widget(index)
+        if panel is None:
+            return
+        saved_index = self.panel_stack.currentIndex()
+        self.panel_stack.setCurrentIndex(index)
+        panel.show()
+        QApplication.processEvents()
+        if saved_index != index:
+            self.panel_stack.setCurrentIndex(saved_index)
 
     def _apply_theme(self) -> None:
         t = get_theme()

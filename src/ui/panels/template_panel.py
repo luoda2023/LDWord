@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic
 
 from src.config.builtin_templates import create_builtin_template
 from src.config.heading_style_semantics import resolve_heading_style, resolve_non_numbered_heading_style
@@ -38,6 +39,7 @@ from src.config.table_style_presets import color_palette, color_variant
 from src.config.template import StyleConfig, TemplateConfig
 from src.qt_api import (
     QApplication,
+    QAbstractAnimation,
     QBrush,
     QColor,
     QFileDialog,
@@ -53,6 +55,7 @@ from src.qt_api import (
     QPushButton,
     QSize,
     QSizePolicy,
+    QTimer,
     QVBoxLayout,
     QWidget,
     Qt,
@@ -157,6 +160,21 @@ DETAIL_REFORMAT_TARGETS: dict[str, str] = {
     "tpl_toc": "目录",
     "tpl_reference": "参考文献",
     "tpl_caption": "题注",
+}
+
+FIRST_LOAD_LOADING_CARDS = frozenset({"tpl_page", "tpl_style", "tpl_heading", "tpl_table", "tpl_header_footer", "tpl_toc", "tpl_reference", "tpl_caption"})
+FIRST_LOAD_LOADING_DELAY_MS = 150
+DETAIL_LOADING_MIN_VISIBLE_MS = 200
+DETAIL_REFRESH_MIN_VISIBLE_MS = 140
+DETAIL_LOADING_SKELETONS: dict[str, tuple[tuple[str, int], ...]] = {
+    "tpl_page": (("summary_3", 118), ("card_header_a", 24), ("editor_a", 186), ("card_header_b", 24), ("editor_b", 154)),
+    "tpl_style": (("summary_3", 118), ("card_header_a", 24), ("editor_a", 148), ("card_header_b", 24), ("editor_b", 148), ("card_header_c", 24), ("editor_c", 148)),
+    "tpl_heading": (("summary_3", 118), ("card_header_a", 24), ("editor_a", 168), ("card_header_b", 24), ("editor_b", 168), ("card_header_c", 24), ("editor_c", 168)),
+    "tpl_table": (("summary_3", 118), ("card_header_a", 24), ("editor_a", 164), ("card_header_b", 24), ("editor_b", 148), ("card_header_c", 24), ("editor_c", 132)),
+    "tpl_header_footer": (("summary_2", 118), ("card_header_a", 24), ("editor_a", 142), ("card_header_b", 24), ("editor_b", 210), ("card_header_c", 24), ("editor_c", 168)),
+    "tpl_toc": (("summary_2", 118), ("card_header_a", 24), ("editor_a", 148), ("card_header_b", 24), ("editor_b", 188)),
+    "tpl_reference": (("summary_2", 112), ("card_header_a", 24), ("editor_a", 156), ("card_header_b", 24), ("editor_b", 156), ("card_header_c", 24), ("editor_c", 144)),
+    "tpl_caption": (("summary_2", 112), ("card_header_a", 24), ("editor_a", 168), ("card_header_b", 24), ("editor_b", 168)),
 }
 
 
@@ -1624,17 +1642,19 @@ class _SummaryRow(QWidget):
 
 def _set_toggle_checked(toggle: ToggleSwitch, checked: bool) -> None:
     checked = bool(checked)
+    if toggle.isChecked() == checked and toggle._anim.state() != QAbstractAnimation.Running:
+        return
+    toggle._anim.stop()
     toggle.setChecked(checked)
-    toggle._thumb_x = float(
+    toggle.thumb_position = float(
         toggle.TRACK_W - toggle.THUMB_D - toggle.THUMB_MARGIN
         if checked
         else toggle.THUMB_MARGIN
     )
-    toggle.update()
 
 
-class _ReformatToggleCard(Card):
-    """Scene-level module switch surfaced inside a template detail page."""
+class _ReformatToggleCard(QWidget):
+    """Scene-level module switch surfaced inline in a detail header."""
 
     toggled = Signal(str, bool)
 
@@ -1652,32 +1672,14 @@ class _ReformatToggleCard(Card):
         self._module_names = module_names
         self._syncing = False
 
-        row = QWidget(self)
-        layout = QHBoxLayout(row)
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(4)
 
-        self._icon_label = QLabel(row)
-        self._icon_label.setFixedSize(18, 18)
-        layout.addWidget(self._icon_label, 0, Qt.AlignVCenter)
-
-        text_col = QVBoxLayout()
-        text_col.setContentsMargins(0, 0, 0, 0)
-        text_col.setSpacing(2)
-
-        self._title_label = QLabel(f"重新排版{target_label}", row)
-        self._status_label = QLabel("", row)
-        self._status_label.setWordWrap(True)
-        text_col.addWidget(self._title_label)
-        text_col.addWidget(self._status_label)
-
-        layout.addLayout(text_col, 1)
-
-        self._toggle = ToggleSwitch(row, checked=True)
+        self._toggle = ToggleSwitch(self, checked=True)
+        self._toggle.set_checked_track_color(get_theme().primary)
         self._toggle.toggled_signal.connect(self._on_toggled)
         layout.addWidget(self._toggle, 0, Qt.AlignVCenter)
-
-        self.add_widget(row)
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
@@ -1690,12 +1692,12 @@ class _ReformatToggleCard(Card):
             if not available:
                 status = "未绑定当前场景"
             elif partial:
-                status = "当前场景：部分开启"
+                status = f"重新排版{self._target_label}：当前场景部分开启"
             elif enabled:
-                status = "当前场景：已开启"
+                status = f"重新排版{self._target_label}：当前场景已开启"
             else:
-                status = "当前场景：已跳过"
-            self._status_label.setText(status)
+                status = f"重新排版{self._target_label}：当前场景已跳过"
+            self.setToolTip(status)
         finally:
             self._syncing = False
 
@@ -1705,23 +1707,9 @@ class _ReformatToggleCard(Card):
         self.toggled.emit(self._card_id, bool(checked))
 
     def _apply_theme(self) -> None:
-        super()._apply_theme()
-        if not hasattr(self, "_title_label") or not hasattr(self, "_status_label"):
-            return
-        theme = get_theme()
-        self._title_label.setStyleSheet(
-            f"font-size: {theme.font_size_md}px; "
-            f"font-weight: {theme.font_weight_emphasis}; "
-            f"color: {theme.text_primary};"
-        )
-        self._status_label.setStyleSheet(
-            f"font-size: {theme.font_size_sm}px; color: {theme.text_secondary};"
-        )
-        try:
-            from src.ui.icons.catalog import get_icon
-            self._icon_label.setPixmap(get_icon("refresh-ccw", 18, theme.primary).pixmap(18, 18))
-        except Exception:
-            self._icon_label.setText("↻")
+        self.setContentsMargins(0, 0, 0, 0)
+        self._toggle.set_checked_track_color(get_theme().primary)
+        self.setToolTip(self.toolTip())
 
 
 
@@ -1880,6 +1868,167 @@ class _PlaceholderDetail(QWidget):
             pass
 
 
+class _LoadingDetail(QWidget):
+    """In-place first-load skeleton overlay for heavier detail panes."""
+
+    def __init__(self, title: str, icon_name: str, *, blocks: tuple[tuple[str, int], ...], parent=None):
+        super().__init__(parent)
+        self._title = title
+        self._icon_name = icon_name
+        self._block_specs = tuple(blocks)
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        self.hide()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setSpacing(8)
+
+        self._shell = QWidget(self)
+        shell_layout = QVBoxLayout(self._shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(8)
+
+        header = QWidget(self._shell)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(6)
+        self._hdr_icon = QLabel(header)
+        self._hdr_icon.setFixedSize(18, 18)
+        header_layout.addWidget(self._hdr_icon)
+        title_label = QLabel(title, header)
+        title_label.setObjectName("tpl_card_title")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch(1)
+        shell_layout.addWidget(header)
+
+        self._desc = QLabel(f"正在加载“{title}”…", self._shell)
+        self._desc.setObjectName("tpl_loading_desc")
+        self._desc.setWordWrap(True)
+        shell_layout.addWidget(self._desc)
+
+        self._blocks: dict[str, QFrame] = {}
+        for name, height in self._block_specs:
+            block = QFrame(self._shell)
+            block.setObjectName(f"tpl_loading_block_{name}")
+            block.setMinimumHeight(height)
+            block.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            if name.startswith("summary_"):
+                inner = QHBoxLayout(block)
+                inner.setContentsMargins(16, 14, 16, 14)
+                inner.setSpacing(12)
+                chip_count = 3 if name.endswith("_3") else 2
+                for index in range(chip_count):
+                    chip = QFrame(block)
+                    chip.setObjectName(f"tpl_loading_chip_{name}_{index}")
+                    chip.setMinimumHeight(52)
+                    chip.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                    inner.addWidget(chip, 1)
+            elif name.startswith("editor_"):
+                inner = QVBoxLayout(block)
+                inner.setContentsMargins(18, 16, 18, 16)
+                inner.setSpacing(10)
+                for row_index in range(2):
+                    row = QFrame(block)
+                    row.setObjectName(f"tpl_loading_row_{name}_{row_index}")
+                    row.setMinimumHeight(28)
+                    row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                    inner.addWidget(row)
+            shell_layout.addWidget(block)
+            self._blocks[name] = block
+
+        layout.addWidget(self._shell)
+        layout.addStretch(1)
+
+    def show_overlay(self) -> None:
+        if self.parentWidget() is not None:
+            self.setGeometry(self.parentWidget().rect())
+        self.raise_()
+        self.show()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        tint = QColor(get_theme().bg_window)
+        tint.setAlpha(210)
+        painter.fillRect(self.rect(), tint)
+        super().paintEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.updateGeometry()
+
+    def apply_theme(self) -> None:
+        t = get_theme()
+        for w in self.findChildren(QLabel, "tpl_card_title"):
+            w.setStyleSheet(
+                f"font-size: {t.font_size_lg}px; font-weight: {t.font_weight_emphasis}; color: {t.primary}; background: transparent;"
+            )
+        self._desc.setStyleSheet(f"font-size: {t.font_size_sm}px; color: {t.text_secondary};")
+        shell_style = (
+            f"background: transparent; border: none;"
+        )
+        self._shell.setStyleSheet(shell_style)
+        block_style = (
+            f"background: {t.bg_card}; border: 1px solid {t.border_light}; border-radius: {t.radius_md}px;"
+        )
+        header_block_style = (
+            f"background: {t.bg_hover}; border: 1px solid {t.border_light}; border-radius: {t.radius_sm}px;"
+        )
+        for name, block in self._blocks.items():
+            if name.startswith("card_header_"):
+                block.setStyleSheet(header_block_style)
+            else:
+                block.setStyleSheet(block_style)
+        chip_style = (
+            f"background: {t.bg_hover}; border: 1px solid {t.border_light}; border-radius: {t.radius_sm}px;"
+        )
+        row_style = (
+            f"background: {t.bg_hover}; border: 1px solid {t.border_light}; border-radius: {t.radius_sm}px;"
+        )
+        for chip in self.findChildren(QFrame):
+            object_name = chip.objectName()
+            if object_name.startswith("tpl_loading_chip_"):
+                chip.setStyleSheet(chip_style)
+            elif object_name.startswith("tpl_loading_row_"):
+                chip.setStyleSheet(row_style)
+        try:
+            from src.ui.icons.catalog import get_icon
+            self._hdr_icon.setPixmap(get_icon(self._icon_name, 18, t.primary).pixmap(18, 18))
+        except Exception:
+            pass
+        if self.parentWidget() is not None:
+            self.setGeometry(self.parentWidget().rect())
+        self.update()
+
+
+class _RefreshOverlay(QWidget):
+    """Lightweight refresh transition overlay for the visible detail pane."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        self.hide()
+
+    def show_overlay(self) -> None:
+        if self.parentWidget() is not None:
+            self.setGeometry(self.parentWidget().rect())
+        self.raise_()
+        self.show()
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        tint = QColor(get_theme().bg_window)
+        tint.setAlpha(150)
+        painter.fillRect(self.rect(), tint)
+
+    def apply_theme(self) -> None:
+        if self.parentWidget() is not None:
+            self.setGeometry(self.parentWidget().rect())
+        self.update()
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  Main Panel (Master-Detail)
 # ═══════════════════════════════════════════════════════════════════════
@@ -1971,6 +2120,13 @@ class TemplatePanel(BasePanel):
         self._loaded_detail_ids: set[str] = {"tpl_overview", "tpl_io"}
         self._retired_detail_placeholders: list[QWidget] = []
         self._reformat_toggle_cards: dict[str, _ReformatToggleCard] = {}
+        self._loading_detail: _LoadingDetail | None = None
+        self._refresh_overlay: _RefreshOverlay | None = None
+        self._loading_timer: QTimer | None = None
+        self._loading_min_visible_timer: QTimer | None = None
+        self._loading_visible_since: float | None = None
+        self._pending_detail_card_id: str | None = None
+        self._pending_real_detail_switch_card_id: str | None = None
 
         self._detail_map: dict[str, QWidget] = {
             "tpl_overview": self._overview_detail,
@@ -2013,6 +2169,7 @@ class TemplatePanel(BasePanel):
         self._overview_detail.set_source_text(self._template_source_text())
         self._overview_detail.refresh(self._current_template)
         self._refresh_subtitles()
+        self._sync_reformat_toggles()
         self._set_detail_save_enabled(self.bridge.is_template_dirty())
         if self.bridge.current_template() is None:
             self._publish_current_template(emit_signal=False)
@@ -2053,17 +2210,103 @@ class TemplatePanel(BasePanel):
 
     def _show_detail(self, card_id: str) -> None:
         is_first_detail_load = card_id not in self._loaded_detail_ids and card_id in self._detail_factories
+        use_loading = is_first_detail_load and card_id in FIRST_LOAD_LOADING_CARDS
+        if use_loading:
+            self._pending_real_detail_switch_card_id = card_id
+            self._schedule_loading_detail(card_id)
+            QTimer.singleShot(0, lambda cid=card_id: self._complete_first_load_detail(cid))
+            return
+        self._show_loaded_detail(card_id)
+
+    def _complete_first_load_detail(self, card_id: str) -> None:
+        if self._pending_real_detail_switch_card_id != card_id:
+            return
         self._ensure_detail_loaded(card_id)
-        if is_first_detail_load and self._details.current_detail is not None and self.isVisible():
-            self._details.hide_all()
-            app = QApplication.instance()
-            if app is not None:
-                app.processEvents()
+        self._finish_detail_transition(card_id)
+
+    def _show_loaded_detail(self, card_id: str) -> None:
+        self._ensure_detail_loaded(card_id)
+        self._finish_detail_transition(card_id)
+
+    def _finish_detail_transition(self, card_id: str) -> None:
+        self._pending_real_detail_switch_card_id = None
+        loading_visible_since = self._loading_visible_since
+        if loading_visible_since is not None:
+            elapsed_ms = int((monotonic() - loading_visible_since) * 1000)
+            remaining_ms = max(0, DETAIL_LOADING_MIN_VISIBLE_MS - elapsed_ms)
+            if remaining_ms > 0:
+                if self._loading_min_visible_timer is None:
+                    self._loading_min_visible_timer = QTimer(self)
+                    self._loading_min_visible_timer.setSingleShot(True)
+                    self._loading_min_visible_timer.timeout.connect(self._on_loading_min_visible_timeout)
+                self._pending_detail_card_id = card_id
+                self._loading_min_visible_timer.start(remaining_ms)
+                return
+        self._hide_loading_detail()
         self._details.show_detail(card_id)
         self._current_detail = self._details.current_detail
         detail = self._detail_map.get(card_id)
-        if detail is not None and hasattr(detail, "capture_entry_snapshot"):
+        if (
+            detail is not None
+            and hasattr(detail, "capture_entry_snapshot")
+            and not self.bridge.is_template_dirty()
+        ):
             detail.capture_entry_snapshot()
+
+    def _schedule_loading_detail(self, card_id: str) -> None:
+        self._pending_detail_card_id = card_id
+        if self._loading_timer is None:
+            self._loading_timer = QTimer(self)
+            self._loading_timer.setSingleShot(True)
+            self._loading_timer.timeout.connect(self._on_loading_timer_timeout)
+        self._loading_timer.start(FIRST_LOAD_LOADING_DELAY_MS)
+
+    def _on_loading_timer_timeout(self) -> None:
+        card_id = self._pending_detail_card_id
+        if not card_id or self._pending_real_detail_switch_card_id != card_id:
+            return
+        self._show_loading_detail(card_id)
+
+    def _on_loading_min_visible_timeout(self) -> None:
+        card_id = self._pending_detail_card_id
+        if not card_id:
+            return
+        self._hide_loading_detail()
+        self._details.show_detail(card_id)
+        self._current_detail = self._details.current_detail
+        detail = self._detail_map.get(card_id)
+        if (
+            detail is not None
+            and hasattr(detail, "capture_entry_snapshot")
+            and not self.bridge.is_template_dirty()
+        ):
+            detail.capture_entry_snapshot()
+
+    def _show_loading_detail(self, card_id: str) -> None:
+        title, icon = CARD_DEFINITIONS.get(card_id, (card_id, ""))
+        if self._loading_timer is not None:
+            self._loading_timer.stop()
+        self._pending_detail_card_id = card_id
+        self._loading_visible_since = monotonic()
+        block_specs = DETAIL_LOADING_SKELETONS.get(card_id, (("summary", 118), ("editor_a", 168), ("editor_b", 148)))
+        self._loading_detail = _LoadingDetail(title, icon, blocks=block_specs, parent=self._detail_container)
+        self._loading_detail.apply_theme()
+        self._loading_detail.show_overlay()
+
+    def _hide_loading_detail(self) -> None:
+        if self._loading_timer is not None:
+            self._loading_timer.stop()
+        if self._loading_min_visible_timer is not None:
+            self._loading_min_visible_timer.stop()
+        self._pending_detail_card_id = None
+        self._loading_visible_since = None
+        loading = self._loading_detail
+        self._loading_detail = None
+        if loading is None:
+            return
+        loading.hide()
+        loading.setParent(None)
+        self._retired_detail_placeholders.append(loading)
 
     def _ensure_detail_loaded(self, card_id: str) -> QWidget:
         if card_id in self._loaded_detail_ids:
@@ -2094,29 +2337,89 @@ class TemplatePanel(BasePanel):
         self._sync_detail_state(detail)
         return detail
 
+    def _show_refresh_overlay(self) -> None:
+        current = self._details.current_detail
+        if current is None:
+            return
+        if self._refresh_overlay is not None:
+            self._refresh_overlay.hide()
+            self._refresh_overlay.setParent(None)
+        self._refresh_overlay = _RefreshOverlay(parent=self._detail_container)
+        self._refresh_overlay.apply_theme()
+        self._refresh_overlay.show_overlay()
+
+    def _hide_refresh_overlay(self) -> None:
+        overlay = self._refresh_overlay
+        self._refresh_overlay = None
+        if overlay is None:
+            return
+        overlay.hide()
+        overlay.setParent(None)
+        self._retired_detail_placeholders.append(overlay)
+
     def _attach_reformat_toggle(self, card_id: str, detail: QWidget) -> None:
         module_names = DETAIL_REFORMAT_MODULES.get(card_id)
         if not module_names or card_id in self._reformat_toggle_cards:
             return
 
-        layout = detail.layout()
-        if layout is None or not hasattr(layout, "insertWidget"):
+        summary_card = getattr(detail, "_summary_card", None)
+        if summary_card is None and hasattr(detail, "_header_card"):
+            summary_card = getattr(detail, "_header_card", None)
+        if summary_card is None:
+            return
+
+        content_layout = getattr(summary_card, "_content_layout", None)
+        header_widget = None
+        if content_layout is not None and content_layout.count() > 0:
+            first_item = content_layout.itemAt(0)
+            header_widget = first_item.widget() if first_item is not None else None
+        header_layout = header_widget.layout() if header_widget is not None else None
+        if header_layout is None or not hasattr(header_layout, "insertWidget"):
             return
 
         card = _ReformatToggleCard(
             card_id,
             target_label=DETAIL_REFORMAT_TARGETS.get(card_id, CARD_DEFINITIONS[card_id][0]),
             module_names=module_names,
-            parent=detail,
+            parent=header_widget,
         )
         card.toggled.connect(self._on_reformat_toggle_changed)
-        layout.insertWidget(0, card)
+        add_control = getattr(header_widget, "add_control", None)
+        if callable(add_control):
+            add_control(card)
+        else:
+            header_layout.insertWidget(2, card, 0, Qt.AlignLeft | Qt.AlignVCenter)
         self._reformat_toggle_cards[card_id] = card
         self._sync_reformat_toggle(card_id)
 
     def _sync_reformat_toggles(self) -> None:
+        for card_id in DETAIL_CARDS:
+            self._sync_reformat_nav_badge(card_id)
         for card_id in tuple(self._reformat_toggle_cards):
             self._sync_reformat_toggle(card_id)
+
+    def _sync_reformat_nav_badge(self, card_id: str) -> None:
+        nav_card = self._nav_cards.get(card_id)
+        if nav_card is None:
+            return
+
+        scene = self.bridge.current_scene()
+        module_names = DETAIL_REFORMAT_MODULES.get(card_id, ())
+        if scene is None or not module_names:
+            nav_card.set_badge("", "neutral")
+            return
+
+        switches = getattr(scene, "module_switches", {}) or {}
+        states = [bool(switches.get(module_name, False)) for module_name in module_names]
+        enabled = any(states)
+        partial = any(states) and not all(states)
+
+        if partial:
+            nav_card.set_badge("部分", "warning")
+        elif not enabled:
+            nav_card.set_badge("跳过", "neutral")
+        else:
+            nav_card.set_badge("执行", "success")
 
     def _sync_reformat_toggle(self, card_id: str) -> None:
         card = self._reformat_toggle_cards.get(card_id)
@@ -2127,9 +2430,7 @@ class TemplatePanel(BasePanel):
         module_names = DETAIL_REFORMAT_MODULES.get(card_id, ())
         if scene is None or not module_names:
             card.sync_state(enabled=False, available=False)
-            nav_card = self._nav_cards.get(card_id)
-            if nav_card is not None:
-                nav_card.set_badge("", "neutral")
+            self._sync_reformat_nav_badge(card_id)
             return
 
         switches = getattr(scene, "module_switches", {}) or {}
@@ -2137,15 +2438,7 @@ class TemplatePanel(BasePanel):
         enabled = any(states)
         partial = any(states) and not all(states)
         card.sync_state(enabled=enabled, available=True, partial=partial)
-
-        nav_card = self._nav_cards.get(card_id)
-        if nav_card is not None:
-            if partial:
-                nav_card.set_badge("部分", "warning")
-            elif not enabled:
-                nav_card.set_badge("跳过", "neutral")
-            else:
-                nav_card.set_badge("", "neutral")
+        self._sync_reformat_nav_badge(card_id)
 
     def _on_reformat_toggle_changed(self, card_id: str, enabled: bool) -> None:
         scene = self.bridge.current_scene()
@@ -2543,11 +2836,22 @@ class TemplatePanel(BasePanel):
         t = get_theme()
         self._shell.apply_theme(t)
 
+        if self._loading_detail is not None:
+            self._loading_detail.apply_theme()
+        if self._refresh_overlay is not None:
+            self._refresh_overlay.apply_theme()
+
         # Propagate to details
         self._overview_detail.apply_theme()
         self._io_detail.apply_theme()
+        current_detail = self._details.current_detail
+        show_refresh = current_detail is not None and current_detail not in {self._overview_detail, self._io_detail}
+        if show_refresh:
+            self._show_refresh_overlay()
         for detail in self._parameter_details():
             if hasattr(detail, "apply_theme"):
                 detail.apply_theme()
             elif hasattr(detail, "_apply_theme"):
                 detail._apply_theme()
+        if show_refresh:
+            QTimer.singleShot(DETAIL_REFRESH_MIN_VISIBLE_MS, self._hide_refresh_overlay)

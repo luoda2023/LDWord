@@ -59,8 +59,8 @@ PAGE_NUMBER_VALIDATION_OPTIONS: tuple[tuple[str, str], ...] = (
 )
 
 PAGE_NUMBER_DOC_TREE_POLICY_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("warn_and_fallback", "提醒并使用默认页码结果"),
-    ("fallback", "直接使用默认页码结果"),
+    ("warn_and_fallback", "提醒并使用默认规则"),
+    ("fallback", "直接使用默认规则"),
 )
 
 PAGE_NUMBER_SELECTOR_OPTIONS: tuple[tuple[str, str], ...] = (
@@ -217,7 +217,7 @@ def _suppress_selector_brief(selectors: list[str]) -> str:
         for selector in selectors
         if str(selector or "").strip()
     ]
-    return "、".join(labels) if labels else "未设置不显示分区"
+    return "、".join(labels) if labels else "未设置不显示的部分"
 
 
 def _section_type_label(section_type: str) -> str:
@@ -426,15 +426,32 @@ class PageSelectorEditor(QWidget):
 class PageNumberPlanSection:
     """Owns the page-number plan card and dynamic rule rows."""
 
-    def __init__(self, owner: "ElementsDetail"):
+    def __init__(
+        self,
+        owner: "ElementsDetail",
+        *,
+        container: Card | None = None,
+        embedded: bool = False,
+        group_title_builder=None,
+    ):
         self._owner = owner
         self._page_phase_rows: list[PageNumberPhaseControls] = []
+        self._embedded = bool(embedded)
+        self._group_title_builder = group_title_builder
 
-        self.section = Card(parent=owner._editor_column)
+        host = container or Card(parent=owner._editor_column)
+        self.section = host
         self._page_plan_section = self.section
         owner._page_plan_section = self.section
-        owner._add_card_header(self.section, "list-ordered", "页码结果")
-        owner._editor_layout.addWidget(self.section)
+        if container is None:
+            owner._add_card_header(self.section, "list-ordered", "页码规则")
+            owner._editor_layout.addWidget(self.section)
+        elif callable(self._group_title_builder):
+            self.section.add_widget(self._group_title_builder("页码规则", parent=self.section))
+            self._embedded_note = QLabel("按需设置显示范围、格式与起号方式。", self.section)
+            self._embedded_note.setObjectName("tpl_phase_plan_note")
+            self._embedded_note.setWordWrap(True)
+            self.section.add_widget(self._embedded_note)
         self._build_form()
 
     @property
@@ -472,44 +489,44 @@ class PageNumberPlanSection:
         self._page_missing_doc_tree_combo.currentIndexChanged.connect(self._owner._on_structure_edited)
 
         self._page_plan_note = QLabel(
-            "常用方案会直接生成页码结果；只有附录、致谢等需要独立页码时，才需要展开高级编辑器。",
+            "常用规则可直接应用；需要更细控制时再展开高级编辑器。",
             self._owner,
         )
         self._page_plan_note.setObjectName("tpl_phase_plan_note")
         self._page_plan_note.setWordWrap(True)
         self.section.add_widget(self._page_plan_note)
 
-        preset_row = QWidget(self._owner)
-        preset_layout = QHBoxLayout(preset_row)
+        self._preset_row = QWidget(self._owner)
+        preset_layout = QHBoxLayout(self._preset_row)
         preset_layout.setContentsMargins(0, 0, 0, 0)
         preset_layout.setSpacing(8)
 
-        self._preset_continuous_btn = QPushButton("可编号内容从 1 连续", preset_row)
+        self._preset_continuous_btn = QPushButton("可编号内容从 1 连续", self._preset_row)
         self._preset_continuous_btn.clicked.connect(
             lambda: self._apply_page_number_preset("continuous")
         )
         preset_layout.addWidget(self._preset_continuous_btn)
 
-        self._preset_split_restart_btn = QPushButton("前置罗马，正文从 1", preset_row)
+        self._preset_split_restart_btn = QPushButton("前置罗马，正文从 1", self._preset_row)
         self._preset_split_restart_btn.clicked.connect(
             lambda: self._apply_page_number_preset("split_restart")
         )
         preset_layout.addWidget(self._preset_split_restart_btn)
 
-        self._preset_split_continue_btn = QPushButton("前置罗马，正文续号", preset_row)
+        self._preset_split_continue_btn = QPushButton("前置罗马，正文续号", self._preset_row)
         self._preset_split_continue_btn.clicked.connect(
             lambda: self._apply_page_number_preset("split_continue")
         )
         preset_layout.addWidget(self._preset_split_continue_btn)
 
         preset_layout.addStretch(1)
-        self.section.add_widget(preset_row)
+        self.section.add_widget(self._preset_row)
 
-        self._page_advanced_section = FlowSection("高级：页码结果编辑器", expanded=False, parent=self.section)
+        self._page_advanced_section = FlowSection("高级规则编辑器", expanded=False, parent=self.section)
         self._page_advanced_section.add_widget(
             self._pair_row(
-                self._form_row("冲突处理", self._page_validation_mode_combo, parent=self._page_advanced_section),
-                self._form_row("无结构识别时", self._page_missing_doc_tree_combo, parent=self._page_advanced_section),
+                self._form_row("规则冲突时", self._page_validation_mode_combo, parent=self._page_advanced_section),
+                self._form_row("无法识别文档结构时", self._page_missing_doc_tree_combo, parent=self._page_advanced_section),
             )
         )
 
@@ -518,7 +535,7 @@ class PageNumberPlanSection:
         self._page_advanced_section.add_widget(self._page_plan_alert)
 
         advanced_note = QLabel(
-            "分区来自文档结构识别。每条结果描述：哪些分区显示页码、使用什么格式、从哪里起号。",
+            "每条规则定义显示范围、格式，以及是否从 1 重新起号。",
             self._page_advanced_section,
         )
         advanced_note.setObjectName("tpl_phase_plan_note")
@@ -531,7 +548,7 @@ class PageNumberPlanSection:
         advanced_actions_layout.setSpacing(8)
         advanced_actions_layout.addStretch(1)
 
-        self._add_phase_btn = QPushButton("新增页码结果", advanced_actions)
+        self._add_phase_btn = QPushButton("新增页码规则", advanced_actions)
         self._add_phase_btn.clicked.connect(self._on_add_phase)
         advanced_actions_layout.addWidget(self._add_phase_btn)
         self._page_advanced_section.add_widget(advanced_actions)
@@ -582,14 +599,14 @@ class PageNumberPlanSection:
         )
 
     def _append_page_phase_row(self, phase: PageNumberPhaseConfig) -> None:
-        section = FlowSection("未选择分区", expanded=False, parent=self._page_phase_rows_host)
+        section = FlowSection("未选择部分", expanded=False, parent=self._page_phase_rows_host)
 
         phase_id_edit = QLineEdit(section)
         phase_id_edit.setPlaceholderText("例如：前置 / 正文 / 附录")
         phase_id_edit.hide()
 
         selector_editor = PageSelectorEditor(section)
-        selector_preview = QLabel("结果：尚未选择编号分区", section)
+        selector_preview = QLabel("结果：尚未选择部分", section)
         selector_preview.setObjectName("tpl_phase_selector_preview")
         selector_preview.setWordWrap(True)
         visible_toggle = ToggleSwitch(section, checked=True)
@@ -608,7 +625,7 @@ class PageNumberPlanSection:
         move_down_btn = QPushButton("下移", section)
         remove_btn = QPushButton("移除", section)
 
-        selector_row = self._form_row("编号分区", selector_editor, parent=section)
+        selector_row = self._form_row("哪些部分使用这条规则", selector_editor, parent=section)
         selector_row.set_label_alignment(Qt.AlignLeft | Qt.AlignTop)
         section.add_widget(selector_row)
         section.add_widget(selector_preview)
@@ -718,10 +735,10 @@ class PageNumberPlanSection:
 
     def _selector_preview_text(self, selectors: list[str]) -> str:
         if not selectors:
-            return "分区：尚未选择编号分区"
+            return "范围：尚未选择部分"
         label_map = dict(PAGE_NUMBER_SELECTOR_OPTIONS) | dict(SUPPRESS_HEADER_FOOTER_SELECTOR_OPTIONS)
         labels = [label_map.get(str(selector), str(selector)) for selector in selectors]
-        return "分区：" + "、".join(labels)
+        return "范围：" + "、".join(labels)
 
     def _phase_preview_text(
         self,
@@ -739,7 +756,7 @@ class PageNumberPlanSection:
             lines.append("实际命中：待选择分区")
 
         if not row.visible_toggle.isChecked():
-            lines.append("结果：这些分区不显示页码")
+            lines.append("结果：这些部分不显示页码")
         else:
             start_mode = str(row.start_mode_combo.currentData() or "restart")
             format_label = _page_number_format_label(str(row.format_combo.currentData() or "decimal"))
@@ -751,11 +768,11 @@ class PageNumberPlanSection:
 
         hidden_sections = matched_sections & set(suppressed)
         if hidden_sections:
-            lines.append(f"提醒：{_section_type_labels(hidden_sections)} 已在不显示分区内，不会输出页码")
+            lines.append(f"提醒：{_section_type_labels(hidden_sections)} 已在不显示的部分内，不会输出页码")
 
         overlap_sections = self._overlapped_sections_for_row(row, matched_sections)
         if overlap_sections:
-            lines.append(f"冲突：{_section_type_labels(overlap_sections)} 同时命中其他页码结果")
+            lines.append(f"冲突：{_section_type_labels(overlap_sections)} 同时命中其他页码规则")
         return "\n".join(lines)
 
     def _overlapped_sections_for_row(
@@ -775,7 +792,7 @@ class PageNumberPlanSection:
     def _phase_section_title(self, index: int, row: PageNumberPhaseControls) -> str:
         scope_text = _selector_title_brief(row.selector_editor.selectors())
         if scope_text == "未选择范围":
-            return "未选择编号分区"
+            return "未选择部分"
         if not row.visible_toggle.isChecked():
             return f"{scope_text}：不显示页码"
 
@@ -945,8 +962,13 @@ class PageNumberPlanSection:
         header_footer.page_number_plan.phases = self.phase_rows_to_configs()
 
     def set_enabled_visible(self, enabled: bool) -> None:
-        self.section.setVisible(enabled)
-        self.section.setEnabled(enabled)
+        self.section.setVisible(True)
+        self.section.setEnabled(True)
+        self._page_plan_note.setVisible(enabled)
+        self._preset_row.setVisible(enabled)
+        if not enabled:
+            self._page_advanced_section.set_expanded(False)
+        self._page_advanced_section.setVisible(enabled)
 
     def refresh_validation_alert(self, template: TemplateConfig | None) -> None:
         if template is None:
@@ -966,7 +988,7 @@ class PageNumberPlanSection:
         self._page_advanced_section.set_expanded(True)
 
     def _page_plan_alert_message(self, diagnostics) -> str:
-        missing_scope_text = "尚未选择编号分区"
+        missing_scope_text = "尚未选择部分"
         missing_scope_count = sum(
             1 for item in diagnostics if missing_scope_text in str(getattr(item, "message", ""))
         )
@@ -974,7 +996,7 @@ class PageNumberPlanSection:
             return "\n\n".join(format_page_number_diagnostic_text(item) for item in diagnostics)
 
         messages = [
-            f"有 {missing_scope_count} 条页码结果未选择编号分区。展开对应项选择分区，或删除空项。"
+            f"有 {missing_scope_count} 条页码规则未选择部分。展开对应项选择范围，或删除空项。"
         ]
         messages.extend(
             format_page_number_diagnostic_text(item)

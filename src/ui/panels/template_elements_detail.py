@@ -84,6 +84,7 @@ class ElementsDetail(QWidget):
         self._snapshot: _ElementsSnapshot | None = None
         self._header_icons: list[tuple[str, QLabel]] = []
         self._header_titles: list[QLabel] = []
+        self._desc_labels: list[QLabel] = []
         self._is_syncing = False
         self._save_enabled = False
         self._toc_style_controls: dict[str, dict[str, object]] = {}
@@ -143,7 +144,7 @@ class ElementsDetail(QWidget):
 
         self._summary_card.add_widget(header)
 
-        self._summary_grid = SummaryGrid(columns=6, parent=self._summary_card)
+        self._summary_grid = SummaryGrid(columns=6, tile_style="module", parent=self._summary_card)
         self._summary_card.add_widget(self._summary_grid)
 
     def _build_form(self) -> None:
@@ -159,7 +160,7 @@ class ElementsDetail(QWidget):
         self._toc_detail = TocDetailSection(self) if self._scope in {"all", "toc"} else None
         self._editor_layout.addStretch(1)
 
-    def _add_card_header(self, card: Card, icon_name: str, title: str) -> None:
+    def _add_card_header(self, card: Card, icon_name: str, title: str, description: str | None = None) -> None:
         header = QWidget(card)
         layout = QHBoxLayout(header)
         layout.setContentsMargins(0, 0, 0, 6)
@@ -176,6 +177,12 @@ class ElementsDetail(QWidget):
         layout.addWidget(title_label)
         layout.addStretch(1)
         card.add_widget(header)
+
+        if description:
+            desc_label = QLabel(description, card)
+            desc_label.setWordWrap(True)
+            self._desc_labels.append(desc_label)
+            card.add_widget(desc_label)
 
     def _refresh_page_plan_validation_alert(self) -> None:
         if self._header_footer_detail is not None:
@@ -197,6 +204,7 @@ class ElementsDetail(QWidget):
                         label="当前状态",
                         value="未选择模板。",
                         column_span=6,
+                        icon_name="info",
                     )
                 ]
             )
@@ -216,6 +224,7 @@ class ElementsDetail(QWidget):
                         value=self._header_summary_value(header_footer),
                         detail=self._header_summary_detail(header_footer),
                         column_span=3,
+                        icon_name="panel-top",
                     ),
                     SummaryGridItem(
                         key="page_number",
@@ -223,6 +232,7 @@ class ElementsDetail(QWidget):
                         value=self._footer_summary_value(header_footer),
                         detail=self._footer_summary_detail(header_footer, phases),
                         column_span=3,
+                        icon_name="list-ordered",
                     ),
                 ]
             )
@@ -238,6 +248,7 @@ class ElementsDetail(QWidget):
                         value=self._toc_summary_value(toc),
                         detail=self._toc_summary_detail(toc),
                         column_span=3,
+                        icon_name="scroll-text",
                     ),
                     SummaryGridItem(
                         key="toc_style",
@@ -253,6 +264,7 @@ class ElementsDetail(QWidget):
                             else "样式暂不输出"
                         ),
                         column_span=3,
+                        icon_name="type-outline",
                     ),
                 ]
             )
@@ -491,9 +503,12 @@ class ElementsDetail(QWidget):
         )
         note_ss = f"font-size: {theme.font_size_sm}px; color: {theme.text_hint};"
         unit_ss = f"font-size: {theme.font_size_sm}px; color: {theme.text_secondary};"
+        desc_ss = f"font-size: {theme.font_size_sm}px; color: {theme.text_hint};"
 
         for widget in self.findChildren(QLabel, "tpl_card_title"):
             widget.setStyleSheet(title_ss)
+        for label in self._desc_labels:
+            label.setStyleSheet(desc_ss)
         if hasattr(self, "_page_plan_note"):
             self._page_plan_note.setStyleSheet(note_ss)
         for widget in self.findChildren(QLabel, "tpl_style_unit"):

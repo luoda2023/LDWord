@@ -130,6 +130,43 @@ def test_template_table_typography_uses_main_form_baseline():
         app.processEvents()
 
 
+def test_table_and_elements_summary_grids_use_module_thumbnail_style():
+    app = _app()
+    table_detail = TableCaptionDetail()
+    elements_detail = ElementsDetail()
+    toc_detail = ElementsDetail(scope="toc")
+
+    try:
+        template = TemplateConfig()
+        table_detail.set_template(template)
+        elements_detail.set_template(template)
+        toc_detail.set_template(template)
+        app.processEvents()
+
+        table_items = {item.key: item for item in table_detail._summary_grid.items()}
+        element_items = {item.key: item for item in elements_detail._summary_grid.items()}
+        toc_items = {item.key: item for item in toc_detail._summary_grid.items()}
+
+        assert table_detail._summary_grid._tile_style == "module"
+        assert elements_detail._summary_grid._tile_style == "module"
+        assert toc_detail._summary_grid._tile_style == "module"
+        assert table_items["border"].icon_name == "table-2"
+        assert table_items["width"].icon_name == "ruler"
+        assert table_items["type"].icon_name == "type-outline"
+        assert table_items["behavior"].icon_name == "settings"
+        assert element_items["header"].icon_name == "panel-top"
+        assert element_items["page_number"].icon_name == "list-ordered"
+        assert element_items["toc"].icon_name == "scroll-text"
+        assert element_items["toc_style"].icon_name == "type-outline"
+        assert toc_items["toc"].icon_name == "scroll-text"
+        assert toc_items["toc_style"].icon_name == "type-outline"
+    finally:
+        table_detail.close()
+        elements_detail.close()
+        toc_detail.close()
+        app.processEvents()
+
+
 def test_template_table_border_layout_uses_one_label_baseline():
     app = _app()
     detail = TableCaptionDetail()

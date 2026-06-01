@@ -580,7 +580,7 @@ class HeadingNumberingPanel(BasePanel):
 
         self._summary_card.add_widget(header)
 
-        self._summary_grid = SummaryGrid(columns=6, parent=self._summary_card)
+        self._summary_grid = SummaryGrid(columns=6, tile_style="module", parent=self._summary_card)
         self._summary_card.add_widget(self._summary_grid)
 
     # ━━ 2. Scheme Section ━━━━━━━━━━━━━━━━━━━━━━━
@@ -1884,7 +1884,13 @@ class HeadingNumberingPanel(BasePanel):
     def _refresh_summary(self) -> None:
         if not self._adapter.has_template:
             self._summary_grid.set_items([
-                SummaryGridItem(key="empty", label="当前状态", value="未选择模板。", column_span=6),
+                SummaryGridItem(
+                    key="empty",
+                    label="当前状态",
+                    value="未选择模板。",
+                    column_span=6,
+                    icon_name="info",
+                ),
             ])
             return
         items_data = self._adapter.summary_items()
@@ -1894,6 +1900,13 @@ class HeadingNumberingPanel(BasePanel):
                 label=d["label"],
                 value=d["value"],
                 column_span=d.get("span", 1),
+                icon_name=(
+                    "settings"
+                    if i == 0
+                    else "sliders-horizontal"
+                    if i == 1
+                    else "list-ordered"
+                ),
             )
             for i, d in enumerate(items_data)
         ]

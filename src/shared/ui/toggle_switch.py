@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from src.qt_api import (
+    QAbstractAnimation,
     QAbstractButton,
     QBrush,
     QColor,
@@ -37,6 +38,7 @@ class ToggleSwitch(QAbstractButton):
 
     def __init__(self, parent=None, *, checked: bool = False):
         super().__init__(parent)
+        self._checked_track_color: str | None = None
         self.setCheckable(True)
         self.setChecked(checked)
         self._thumb_x = float(
@@ -60,6 +62,10 @@ class ToggleSwitch(QAbstractButton):
     @thumb_position.setter
     def thumb_position(self, val: float) -> None:
         self._thumb_x = val
+        self.update()
+
+    def set_checked_track_color(self, color: str | None) -> None:
+        self._checked_track_color = str(color).strip() if color else None
         self.update()
 
     def _on_click(self) -> None:
@@ -106,7 +112,7 @@ class ToggleSwitch(QAbstractButton):
         if not self.isEnabled():
             track_color = QColor(theme.switch_disabled)
         elif self.isChecked():
-            track_color = QColor(theme.success)
+            track_color = QColor(self._checked_track_color or theme.success)
         else:
             track_color = QColor(theme.switch_off)
 
