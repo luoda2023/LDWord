@@ -322,6 +322,24 @@ class _ReleaseGateEarlyReports:
     external_handoff_contract_report: object
 
 
+@dataclass(slots=True)
+class _ReleaseGateGovernanceReports:
+    boundary_guarded_completion_report: object
+    residual_warning_governance_report: object
+    boundary_readiness_reconciliation_report: object
+    terminal_release_exception_report: object
+    boundary_subject_release_dossier_report: object
+    non_subject_release_trace_attribution_report: object
+    release_trace_partition_guard_report: object
+    release_projection_surface_parity_report: object
+    boundary_subject_release_continuity_report: object
+    release_closure_ledger_report: object
+    boundary_maturity_release_envelope_report: object
+    retained_gap_exit_criteria_report: object
+    release_residual_ratio_ledger_report: object
+    release_acceptance_certificate_report: object
+
+
 def _build_release_governance_export_script_evidence(
     reports: tuple[tuple[str, object], ...],
 ) -> list[dict[str, object]]:
@@ -655,6 +673,166 @@ def _build_release_gate_early_reports(
     )
 
 
+def _build_release_gate_governance_reports(
+    *,
+    checks: dict[str, object],
+    external_handoff_contract_report: object,
+) -> _ReleaseGateGovernanceReports:
+    boundary_guarded_completion_report = (
+        build_scene_boundary_guarded_completion_audit_report(project_root=ROOT)
+    )
+    checks["scene_boundary_guarded_completion_audit"] = _issue_check(
+        audit_scene_boundary_guarded_completion_report(
+            boundary_guarded_completion_report
+        )
+    )
+    residual_warning_governance_report = (
+        build_scene_residual_warning_governance_audit_report(project_root=ROOT)
+    )
+    checks["scene_residual_warning_governance_audit"] = _issue_check(
+        audit_scene_residual_warning_governance_report(
+            residual_warning_governance_report
+        )
+    )
+    boundary_readiness_reconciliation_report = (
+        build_scene_boundary_readiness_reconciliation_audit_report(project_root=ROOT)
+    )
+    checks["scene_boundary_readiness_reconciliation_audit"] = _issue_check(
+        audit_scene_boundary_readiness_reconciliation_report(
+            boundary_readiness_reconciliation_report
+        )
+    )
+    terminal_release_exception_report = (
+        build_scene_terminal_release_exception_audit_report(project_root=ROOT)
+    )
+    checks["scene_terminal_release_exception_audit"] = _issue_check(
+        audit_scene_terminal_release_exception_report(
+            terminal_release_exception_report
+        )
+    )
+    boundary_subject_release_dossier_report = (
+        build_scene_boundary_subject_release_dossier_audit_report(project_root=ROOT)
+    )
+    checks["scene_boundary_subject_release_dossier_audit"] = _issue_check(
+        audit_scene_boundary_subject_release_dossier_report(
+            boundary_subject_release_dossier_report
+        )
+    )
+    non_subject_release_trace_attribution_report = (
+        build_scene_non_subject_release_trace_attribution_audit_report(
+            project_root=ROOT
+        )
+    )
+    checks["scene_non_subject_release_trace_attribution_audit"] = _issue_check(
+        audit_scene_non_subject_release_trace_attribution_report(
+            non_subject_release_trace_attribution_report
+        )
+    )
+    release_trace_partition_guard_report = (
+        build_scene_release_trace_partition_guard_audit_report(project_root=ROOT)
+    )
+    checks["scene_release_trace_partition_guard_audit"] = _issue_check(
+        audit_scene_release_trace_partition_guard_report(
+            release_trace_partition_guard_report
+        )
+    )
+    release_projection_surface_parity_report = (
+        build_scene_release_projection_surface_parity_audit_report(
+            project_root=ROOT
+        )
+    )
+    checks["scene_release_projection_surface_parity_audit"] = _issue_check(
+        audit_scene_release_projection_surface_parity_report(
+            release_projection_surface_parity_report
+        )
+    )
+    boundary_subject_release_continuity_report = (
+        build_scene_boundary_subject_release_continuity_audit_report(
+            project_root=ROOT
+        )
+    )
+    checks["scene_boundary_subject_release_continuity_audit"] = _issue_check(
+        audit_scene_boundary_subject_release_continuity_report(
+            boundary_subject_release_continuity_report
+        )
+    )
+    release_closure_ledger_report = build_scene_release_closure_ledger_audit_report(
+        project_root=ROOT
+    )
+    checks["scene_release_closure_ledger_audit"] = _issue_check(
+        audit_scene_release_closure_ledger_report(release_closure_ledger_report)
+    )
+    boundary_maturity_release_envelope_report = (
+        build_scene_boundary_maturity_release_envelope_audit_report(
+            project_root=ROOT
+        )
+    )
+    checks["scene_boundary_maturity_release_envelope_audit"] = _issue_check(
+        audit_scene_boundary_maturity_release_envelope_report(
+            boundary_maturity_release_envelope_report
+        )
+    )
+    retained_gap_exit_criteria_report = (
+        build_scene_retained_gap_exit_criteria_audit_report(
+            project_root=ROOT,
+            boundary_maturity_release_envelope_report=(
+                boundary_maturity_release_envelope_report
+            ),
+            external_handoff_contract_report=external_handoff_contract_report,
+            boundary_guarded_completion_report=boundary_guarded_completion_report,
+        )
+    )
+    checks["scene_retained_gap_exit_criteria_audit"] = _issue_check(
+        audit_scene_retained_gap_exit_criteria_report(
+            retained_gap_exit_criteria_report
+        )
+    )
+    release_residual_ratio_ledger_report = (
+        build_scene_release_residual_ratio_ledger_audit_report(project_root=ROOT)
+    )
+    checks["scene_release_residual_ratio_ledger_audit"] = _issue_check(
+        audit_scene_release_residual_ratio_ledger_report(
+            release_residual_ratio_ledger_report
+        )
+    )
+    release_acceptance_certificate_report = (
+        build_scene_release_acceptance_certificate_audit_report(project_root=ROOT)
+    )
+    checks["scene_release_acceptance_certificate_audit"] = _issue_check(
+        audit_scene_release_acceptance_certificate_report(
+            release_acceptance_certificate_report
+        )
+    )
+    return _ReleaseGateGovernanceReports(
+        boundary_guarded_completion_report=boundary_guarded_completion_report,
+        residual_warning_governance_report=residual_warning_governance_report,
+        boundary_readiness_reconciliation_report=(
+            boundary_readiness_reconciliation_report
+        ),
+        terminal_release_exception_report=terminal_release_exception_report,
+        boundary_subject_release_dossier_report=(
+            boundary_subject_release_dossier_report
+        ),
+        non_subject_release_trace_attribution_report=(
+            non_subject_release_trace_attribution_report
+        ),
+        release_trace_partition_guard_report=release_trace_partition_guard_report,
+        release_projection_surface_parity_report=(
+            release_projection_surface_parity_report
+        ),
+        boundary_subject_release_continuity_report=(
+            boundary_subject_release_continuity_report
+        ),
+        release_closure_ledger_report=release_closure_ledger_report,
+        boundary_maturity_release_envelope_report=(
+            boundary_maturity_release_envelope_report
+        ),
+        retained_gap_exit_criteria_report=retained_gap_exit_criteria_report,
+        release_residual_ratio_ledger_report=release_residual_ratio_ledger_report,
+        release_acceptance_certificate_report=release_acceptance_certificate_report,
+    )
+
+
 def _build_release_gate_material_delivery_reports(
     *, checks: dict[str, object]
 ) -> _ReleaseGateMaterialDeliveryReports:
@@ -805,130 +983,49 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
     boundary_capability_report = early_reports.boundary_capability_report
     plugin_boundary_report = early_reports.plugin_boundary_report
     external_handoff_contract_report = early_reports.external_handoff_contract_report
-    boundary_guarded_completion_report = (
-        build_scene_boundary_guarded_completion_audit_report(project_root=ROOT)
+    governance_reports = _build_release_gate_governance_reports(
+        checks=checks,
+        external_handoff_contract_report=external_handoff_contract_report,
     )
-    checks["scene_boundary_guarded_completion_audit"] = _issue_check(
-        audit_scene_boundary_guarded_completion_report(
-            boundary_guarded_completion_report
-        )
+    boundary_guarded_completion_report = (
+        governance_reports.boundary_guarded_completion_report
     )
     residual_warning_governance_report = (
-        build_scene_residual_warning_governance_audit_report(project_root=ROOT)
-    )
-    checks["scene_residual_warning_governance_audit"] = _issue_check(
-        audit_scene_residual_warning_governance_report(
-            residual_warning_governance_report
-        )
+        governance_reports.residual_warning_governance_report
     )
     boundary_readiness_reconciliation_report = (
-        build_scene_boundary_readiness_reconciliation_audit_report(project_root=ROOT)
-    )
-    checks["scene_boundary_readiness_reconciliation_audit"] = _issue_check(
-        audit_scene_boundary_readiness_reconciliation_report(
-            boundary_readiness_reconciliation_report
-        )
+        governance_reports.boundary_readiness_reconciliation_report
     )
     terminal_release_exception_report = (
-        build_scene_terminal_release_exception_audit_report(project_root=ROOT)
-    )
-    checks["scene_terminal_release_exception_audit"] = _issue_check(
-        audit_scene_terminal_release_exception_report(
-            terminal_release_exception_report
-        )
+        governance_reports.terminal_release_exception_report
     )
     boundary_subject_release_dossier_report = (
-        build_scene_boundary_subject_release_dossier_audit_report(project_root=ROOT)
-    )
-    checks["scene_boundary_subject_release_dossier_audit"] = _issue_check(
-        audit_scene_boundary_subject_release_dossier_report(
-            boundary_subject_release_dossier_report
-        )
+        governance_reports.boundary_subject_release_dossier_report
     )
     non_subject_release_trace_attribution_report = (
-        build_scene_non_subject_release_trace_attribution_audit_report(
-            project_root=ROOT
-        )
-    )
-    checks["scene_non_subject_release_trace_attribution_audit"] = _issue_check(
-        audit_scene_non_subject_release_trace_attribution_report(
-            non_subject_release_trace_attribution_report
-        )
+        governance_reports.non_subject_release_trace_attribution_report
     )
     release_trace_partition_guard_report = (
-        build_scene_release_trace_partition_guard_audit_report(project_root=ROOT)
-    )
-    checks["scene_release_trace_partition_guard_audit"] = _issue_check(
-        audit_scene_release_trace_partition_guard_report(
-            release_trace_partition_guard_report
-        )
+        governance_reports.release_trace_partition_guard_report
     )
     release_projection_surface_parity_report = (
-        build_scene_release_projection_surface_parity_audit_report(
-            project_root=ROOT
-        )
-    )
-    checks["scene_release_projection_surface_parity_audit"] = _issue_check(
-        audit_scene_release_projection_surface_parity_report(
-            release_projection_surface_parity_report
-        )
+        governance_reports.release_projection_surface_parity_report
     )
     boundary_subject_release_continuity_report = (
-        build_scene_boundary_subject_release_continuity_audit_report(
-            project_root=ROOT
-        )
+        governance_reports.boundary_subject_release_continuity_report
     )
-    checks["scene_boundary_subject_release_continuity_audit"] = _issue_check(
-        audit_scene_boundary_subject_release_continuity_report(
-            boundary_subject_release_continuity_report
-        )
-    )
-    release_closure_ledger_report = build_scene_release_closure_ledger_audit_report(
-        project_root=ROOT
-    )
-    checks["scene_release_closure_ledger_audit"] = _issue_check(
-        audit_scene_release_closure_ledger_report(release_closure_ledger_report)
-    )
+    release_closure_ledger_report = governance_reports.release_closure_ledger_report
     boundary_maturity_release_envelope_report = (
-        build_scene_boundary_maturity_release_envelope_audit_report(
-            project_root=ROOT
-        )
-    )
-    checks["scene_boundary_maturity_release_envelope_audit"] = _issue_check(
-        audit_scene_boundary_maturity_release_envelope_report(
-            boundary_maturity_release_envelope_report
-        )
+        governance_reports.boundary_maturity_release_envelope_report
     )
     retained_gap_exit_criteria_report = (
-        build_scene_retained_gap_exit_criteria_audit_report(
-            project_root=ROOT,
-            boundary_maturity_release_envelope_report=(
-                boundary_maturity_release_envelope_report
-            ),
-            external_handoff_contract_report=external_handoff_contract_report,
-            boundary_guarded_completion_report=boundary_guarded_completion_report,
-        )
-    )
-    checks["scene_retained_gap_exit_criteria_audit"] = _issue_check(
-        audit_scene_retained_gap_exit_criteria_report(
-            retained_gap_exit_criteria_report
-        )
+        governance_reports.retained_gap_exit_criteria_report
     )
     release_residual_ratio_ledger_report = (
-        build_scene_release_residual_ratio_ledger_audit_report(project_root=ROOT)
-    )
-    checks["scene_release_residual_ratio_ledger_audit"] = _issue_check(
-        audit_scene_release_residual_ratio_ledger_report(
-            release_residual_ratio_ledger_report
-        )
+        governance_reports.release_residual_ratio_ledger_report
     )
     release_acceptance_certificate_report = (
-        build_scene_release_acceptance_certificate_audit_report(project_root=ROOT)
-    )
-    checks["scene_release_acceptance_certificate_audit"] = _issue_check(
-        audit_scene_release_acceptance_certificate_report(
-            release_acceptance_certificate_report
-        )
+        governance_reports.release_acceptance_certificate_report
     )
     material_delivery_reports = _build_release_gate_material_delivery_reports(
         checks=checks

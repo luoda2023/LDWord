@@ -5107,3 +5107,51 @@ python scripts\verify_scene_matrix_release_gate.py
 
 - 下一刀可处理 release governance report context: boundary guarded completion、residual warning governance、readiness reconciliation、terminal exceptions、subject dossiers、trace partition、closure ledger、maturity envelope、retained gap、residual ratio、acceptance certificate。
 - 这组 report 依赖略复杂，尤其 retained gap 和 residual explanation 会引用前序 report，建议继续用 dataclass context + 局部变量过渡，逐步拆而不是直接改 payload counts。
+
+### 10.82 后续优化第七刀: release governance report context 抽取
+
+执行日期: 2026-07-08
+
+本轮承接第 10.81 节，处理主聚合函数中 release governance 相关 report build/audit 流水线。这一段比 early reports 更复杂，因为 `retained_gap_exit_criteria_report` 依赖 `external_handoff_contract_report`、`boundary_guarded_completion_report` 和 `boundary_maturity_release_envelope_report`，后续 dashboard residual、export evidence、counts 和 payload 也会继续读取这些 report 对象。因此本轮仍采用 dataclass context + 主 builder 局部变量过渡的方式。
+
+已完成改动:
+
+- 新增 `_ReleaseGateGovernanceReports` dataclass
+  - 承载 `boundary_guarded_completion_report`、`residual_warning_governance_report`、`boundary_readiness_reconciliation_report`、`terminal_release_exception_report`、`boundary_subject_release_dossier_report`、`non_subject_release_trace_attribution_report`、`release_trace_partition_guard_report`、`release_projection_surface_parity_report`、`boundary_subject_release_continuity_report`、`release_closure_ledger_report`、`boundary_maturity_release_envelope_report`、`retained_gap_exit_criteria_report`、`release_residual_ratio_ledger_report`、`release_acceptance_certificate_report`。
+- 新增 `_build_release_gate_governance_reports(...)`
+  - 集中执行 release governance report build/audit/check 写入。
+  - 显式接收 `external_handoff_contract_report`，保留 retained gap exit criteria 的真实依赖关系。
+- 收窄 `build_scene_matrix_release_gate_payload()`
+  - 将 boundary guarded completion 到 acceptance certificate 的内联流水线替换为一次 helper 调用。
+  - 保留原有局部变量名，继续给 material/delivery、dashboard residual、export evidence、counts 与 payload 使用。
+
+规模变化:
+
+| 指标 | 调整后 | 说明 |
+| --- | ---: | --- |
+| `scripts/scene_matrix_release_gate_payload.py` 总行数 | `2759` | 新增 dataclass/helper 后总行数上升，但主聚合函数继续明显收窄 |
+| `build_scene_matrix_release_gate_payload()` | `1738` 行 | 从 `1819` 行降到 `1738` 行 |
+| `_build_release_gate_governance_reports()` | `158` 行 | release governance report build/audit/check 写入的独立 context 边界 |
+
+验证命令:
+
+```powershell
+python -m compileall -q scripts\scene_matrix_release_gate_payload.py scripts\verify_scene_matrix_release_gate.py
+python -m pytest -q tests\test_release_shell.py
+python -m pytest -q tests\test_scene_matrix_dashboard.py tests\test_scene_matrix_drilldown.py tests\test_scene_retained_gap_exit_criteria_audit.py
+python scripts\verify_scene_matrix_release_gate.py
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| release shell pytest | `12 passed in 0.07s` |
+| scene matrix focused pytest | `16 passed in 119.91s` |
+| real scene matrix release gate | `Scene matrix release gate: passed`；release governance context 覆盖的 checks 全部 `passed (0 issues)`；`boundary_guarded=6/6`、`readiness_reconciled=15/15`、`release_exceptions=5/5 (traces=36)`、`trace_partition=36/36`、`release_ledger=13/13`、`boundary_envelopes=6/6`、`retained_gap_exit_criteria=6/6 release-allowed`、`residual_ratios=3/3`、`acceptance_certificate=14/14` |
+
+后续仍可继续优化:
+
+- 当前这一步已完成并验证。下一步若继续推进，可考虑拆 counts payload builder，但它跨越几乎所有 report，风险面比本轮更大。
+- 更稳妥的下一步是先拆 release gate payload 的 report payload/export section，把 `report_payloads` 与 `counts` 分开验证，再逐步处理大 counts 字典。
