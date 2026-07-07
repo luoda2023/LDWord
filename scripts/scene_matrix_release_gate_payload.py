@@ -284,6 +284,18 @@ class _ReleaseGovernanceExportEvidenceGate:
     counts: dict[str, int]
 
 
+@dataclass(slots=True)
+class _ReleaseGateMaterialDeliveryReports:
+    material_schema_report: object
+    material_repair_flow_report: object
+    fixed_layout_profile_report: object
+    report_artifact_drilldown_report: object
+    delivery_preset_report: object
+    delivery_execution_report: object
+    formula_output_watermark_report: object
+    maturity_upgrade_report: object
+
+
 def _build_release_governance_export_script_evidence(
     reports: tuple[tuple[str, object], ...],
 ) -> list[dict[str, object]]:
@@ -487,6 +499,79 @@ def _build_release_gate_foundation(output_dir: Path) -> _ReleaseGateFoundation:
         request_cell_browser=request_cell_browser,
         completeness_report=completeness_report,
         task_lexicon_report=task_lexicon_report,
+    )
+
+
+def _build_release_gate_material_delivery_reports(
+    *, checks: dict[str, object]
+) -> _ReleaseGateMaterialDeliveryReports:
+    material_schema_report = build_scene_material_schema_audit_report(project_root=ROOT)
+    material_schema_issues, _material_schema_warnings = (
+        audit_scene_material_schema_report(material_schema_report)
+    )
+    checks["scene_material_schema_audit"] = _issue_check(material_schema_issues)
+    material_repair_flow_report = build_scene_material_repair_flow_audit_report(
+        project_root=ROOT
+    )
+    checks["scene_material_repair_flow_audit"] = _issue_check(
+        audit_scene_material_repair_flow_report(material_repair_flow_report)
+    )
+    fixed_layout_profile_report = build_scene_fixed_layout_profile_audit_report(
+        project_root=ROOT
+    )
+    checks["scene_fixed_layout_profile_audit"] = _issue_check(
+        audit_scene_fixed_layout_profile_report(fixed_layout_profile_report)
+    )
+    report_artifact_drilldown_report = (
+        build_scene_report_artifact_drilldown_audit_report(project_root=ROOT)
+    )
+    checks["scene_report_artifact_drilldown_audit"] = _issue_check(
+        audit_scene_report_artifact_drilldown_report(
+            report_artifact_drilldown_report
+        )
+    )
+    delivery_preset_report = build_scene_delivery_preset_audit_report(
+        project_root=ROOT
+    )
+    delivery_preset_issues, _delivery_preset_warnings = (
+        audit_scene_delivery_preset_report(delivery_preset_report)
+    )
+    checks["scene_delivery_preset_audit"] = _issue_check(delivery_preset_issues)
+    delivery_execution_report = build_scene_delivery_preset_execution_audit_report(
+        project_root=ROOT
+    )
+    checks["scene_delivery_preset_execution_audit"] = _issue_check(
+        audit_scene_delivery_preset_execution_report(delivery_execution_report)
+    )
+    formula_output_watermark_report = (
+        build_scene_formula_output_watermark_audit_report(project_root=ROOT)
+    )
+    formula_output_watermark_issues, _formula_output_watermark_warnings = (
+        audit_scene_formula_output_watermark_report(
+            formula_output_watermark_report
+        )
+    )
+    checks["scene_formula_output_watermark_audit"] = _issue_check(
+        formula_output_watermark_issues
+    )
+    maturity_upgrade_report = build_scene_product_maturity_upgrade_audit_report(
+        project_root=ROOT
+    )
+    maturity_upgrade_issues, _maturity_upgrade_warnings = (
+        audit_scene_product_maturity_upgrade_report(maturity_upgrade_report)
+    )
+    checks["scene_product_maturity_upgrade_audit"] = _issue_check(
+        maturity_upgrade_issues
+    )
+    return _ReleaseGateMaterialDeliveryReports(
+        material_schema_report=material_schema_report,
+        material_repair_flow_report=material_repair_flow_report,
+        fixed_layout_profile_report=fixed_layout_profile_report,
+        report_artifact_drilldown_report=report_artifact_drilldown_report,
+        delivery_preset_report=delivery_preset_report,
+        delivery_execution_report=delivery_execution_report,
+        formula_output_watermark_report=formula_output_watermark_report,
+        maturity_upgrade_report=maturity_upgrade_report,
     )
 
 
@@ -736,64 +821,25 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
             release_acceptance_certificate_report
         )
     )
-    material_schema_report = build_scene_material_schema_audit_report(project_root=ROOT)
-    material_schema_issues, _material_schema_warnings = (
-        audit_scene_material_schema_report(material_schema_report)
+    material_delivery_reports = _build_release_gate_material_delivery_reports(
+        checks=checks
     )
-    checks["scene_material_schema_audit"] = _issue_check(material_schema_issues)
-    material_repair_flow_report = build_scene_material_repair_flow_audit_report(
-        project_root=ROOT
+    material_schema_report = material_delivery_reports.material_schema_report
+    material_repair_flow_report = (
+        material_delivery_reports.material_repair_flow_report
     )
-    checks["scene_material_repair_flow_audit"] = _issue_check(
-        audit_scene_material_repair_flow_report(material_repair_flow_report)
-    )
-    fixed_layout_profile_report = build_scene_fixed_layout_profile_audit_report(
-        project_root=ROOT
-    )
-    checks["scene_fixed_layout_profile_audit"] = _issue_check(
-        audit_scene_fixed_layout_profile_report(fixed_layout_profile_report)
+    fixed_layout_profile_report = (
+        material_delivery_reports.fixed_layout_profile_report
     )
     report_artifact_drilldown_report = (
-        build_scene_report_artifact_drilldown_audit_report(project_root=ROOT)
+        material_delivery_reports.report_artifact_drilldown_report
     )
-    checks["scene_report_artifact_drilldown_audit"] = _issue_check(
-        audit_scene_report_artifact_drilldown_report(
-            report_artifact_drilldown_report
-        )
-    )
-    delivery_preset_report = build_scene_delivery_preset_audit_report(
-        project_root=ROOT
-    )
-    delivery_preset_issues, _delivery_preset_warnings = (
-        audit_scene_delivery_preset_report(delivery_preset_report)
-    )
-    checks["scene_delivery_preset_audit"] = _issue_check(delivery_preset_issues)
-    delivery_execution_report = build_scene_delivery_preset_execution_audit_report(
-        project_root=ROOT
-    )
-    checks["scene_delivery_preset_execution_audit"] = _issue_check(
-        audit_scene_delivery_preset_execution_report(delivery_execution_report)
-    )
+    delivery_preset_report = material_delivery_reports.delivery_preset_report
+    delivery_execution_report = material_delivery_reports.delivery_execution_report
     formula_output_watermark_report = (
-        build_scene_formula_output_watermark_audit_report(project_root=ROOT)
+        material_delivery_reports.formula_output_watermark_report
     )
-    formula_output_watermark_issues, _formula_output_watermark_warnings = (
-        audit_scene_formula_output_watermark_report(
-            formula_output_watermark_report
-        )
-    )
-    checks["scene_formula_output_watermark_audit"] = _issue_check(
-        formula_output_watermark_issues
-    )
-    maturity_upgrade_report = build_scene_product_maturity_upgrade_audit_report(
-        project_root=ROOT
-    )
-    maturity_upgrade_issues, _maturity_upgrade_warnings = (
-        audit_scene_product_maturity_upgrade_report(maturity_upgrade_report)
-    )
-    checks["scene_product_maturity_upgrade_audit"] = _issue_check(
-        maturity_upgrade_issues
-    )
+    maturity_upgrade_report = material_delivery_reports.maturity_upgrade_report
     matrix_dashboard = build_scene_matrix_dashboard()
     checks["scene_matrix_dashboard"] = _issue_check(
         audit_scene_matrix_dashboard(matrix_dashboard)

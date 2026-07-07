@@ -4963,3 +4963,50 @@ python scripts\verify_scene_matrix_release_gate.py
 - 下一刀可以开始抽取 report build/audit 阶段的上下文对象，例如把 ambiguity/import/input/family/control/count/user-journey/business-capability 这一段先收束为一个 early report context。
 - 对仍被最终 payload 大量引用的 report，不建议一次性全部改成 `context.xxx`，可以继续使用 dataclass 返回 + 主 builder 局部变量过渡的方式逐步降低风险。
 - 当 report context 边界稳定后，再考虑把 counts 字典拆成独立 payload counts builder。
+
+### 10.79 后续优化第四刀: material/delivery report gate 抽取
+
+执行日期: 2026-07-08
+
+本轮继续收窄 `scripts/scene_matrix_release_gate_payload.py` 的主聚合函数，优先处理 material、fixed-layout、report artifact drilldown、delivery preset、formula output watermark、maturity upgrade 这一组报告。它们的 build/audit 阶段相对独立，但后续 counts 和 payload 仍大量读取这些 report 对象，因此采用 dataclass 返回 + 主 builder 局部变量过渡的方式，避免一次性改动最终 payload 结构。
+
+已完成改动:
+
+- 新增 `_ReleaseGateMaterialDeliveryReports` dataclass
+  - 承载 `material_schema_report`、`material_repair_flow_report`、`fixed_layout_profile_report`、`report_artifact_drilldown_report`、`delivery_preset_report`、`delivery_execution_report`、`formula_output_watermark_report`、`maturity_upgrade_report`。
+- 新增 `_build_release_gate_material_delivery_reports(checks=...)`
+  - 集中执行 material schema、material repair flow、fixed layout profile、report artifact drilldown、delivery preset、delivery execution、formula output watermark、product maturity upgrade 的 build/audit/check 写入。
+- 收窄 `build_scene_matrix_release_gate_payload()`
+  - 将上述内联 build/audit 段替换为一次 helper 调用。
+  - 保留原有局部变量名给后续 counts/payload 使用，减少本次改动的行为影响面。
+
+规模变化:
+
+| 指标 | 调整后 | 说明 |
+| --- | ---: | --- |
+| `scripts/scene_matrix_release_gate_payload.py` 总行数 | `2561` | 新增 dataclass/helper 后总行数上升，但主聚合函数继续收窄 |
+| `build_scene_matrix_release_gate_payload()` | `1912` 行 | 从 `1951` 行降到 `1912` 行 |
+| `_build_release_gate_material_delivery_reports()` | `71` 行 | material/delivery/fixed-layout 相关检查的独立 report gate |
+
+验证命令:
+
+```powershell
+python -m compileall -q scripts\scene_matrix_release_gate_payload.py scripts\verify_scene_matrix_release_gate.py
+python -m pytest -q tests\test_release_shell.py
+python -m pytest -q tests\test_scene_matrix_dashboard.py tests\test_scene_matrix_drilldown.py tests\test_scene_retained_gap_exit_criteria_audit.py
+python scripts\verify_scene_matrix_release_gate.py
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| release shell pytest | `12 passed in 0.09s` |
+| scene matrix focused pytest | `16 passed in 120.24s` |
+| real scene matrix release gate | `Scene matrix release gate: passed`；material/delivery/fixed-layout 相关 checks 全部 `passed (0 issues)`；`material_schema_families=15/15`、`material_repair_flows=11/11`、`fixed_layout_profile=12/12`、`report_artifact_drilldown=10/10`、`delivery_execution=10/10`、`formula_output_watermark=3/3` |
+
+后续仍可继续优化:
+
+- 下一步可抽取 matrix dashboard + release residual explanation gate，因为它们当前紧跟 material/delivery 阶段，且只向后暴露 `matrix_dashboard` 和 `release_residual_explanation_report`。
+- 更大的一步是拆 early report context，但涉及变量更多，建议在下一轮继续保持小步提交和 release gate 逐次验证。
