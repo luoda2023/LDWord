@@ -548,4 +548,3 @@ class PreviewPanel(QWidget):
 - DataTable
 
 这些控件不是新设计的必需品，但可以提升整体体验，建议在核心功能完成后逐步补充。
-

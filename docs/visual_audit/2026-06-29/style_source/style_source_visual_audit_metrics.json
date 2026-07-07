@@ -1,0 +1,93 @@
+{
+  "note": "Qt offscreen screenshots verify layout and widget boundaries. Chinese font fidelity still requires a real Windows desktop check.",
+  "panel_size": {
+    "width": 1220,
+    "height": 840
+  },
+  "entries": {
+    "template_overview": {
+      "object_name": "tpl_style_source_compact_row",
+      "view_mode": "template_baseline",
+      "size": {
+        "width": 928,
+        "height": 50
+      },
+      "label": "样式来源",
+      "status": "模板基线",
+      "template_line": "模板：默认格式，作为样式基线",
+      "section_line": "场景分区：默认跟随此模板",
+      "summary": "模板：默认格式，作为样式基线；场景分区：默认跟随此模板",
+      "primary_action": "编辑正文",
+      "primary_visible": true,
+      "secondary_action": "调分区",
+      "secondary_visible": false,
+      "actions_visible": true,
+      "actions_size": {
+        "width": 82,
+        "height": 42
+      },
+      "panel_size": {
+        "width": 1220,
+        "height": 840
+      },
+      "full_screenshot": "docs/visual_audit/2026-06-29/style_source/template_overview_style_source_full.png",
+      "row_screenshot": "docs/visual_audit/2026-06-29/style_source/template_overview_style_source_row.png"
+    },
+    "scene_overview": {
+      "object_name": "scn_style_source_compact_row",
+      "view_mode": "scene_editable",
+      "size": {
+        "width": 882,
+        "height": 50
+      },
+      "label": "样式来源",
+      "status": "分区已调整",
+      "template_line": "模板：默认格式，8 类参数可核对",
+      "section_line": "分区：1 个分区独立设置：参考文献（特殊缩进、行距）",
+      "summary": "模板：默认格式，8 类参数可核对；分区：1 个分区独立设置：参考文献（特殊缩进、行距）",
+      "primary_action": "看模板",
+      "primary_visible": true,
+      "secondary_action": "调分区",
+      "secondary_visible": true,
+      "actions_visible": true,
+      "actions_size": {
+        "width": 146,
+        "height": 42
+      },
+      "panel_size": {
+        "width": 1220,
+        "height": 912
+      },
+      "full_screenshot": "docs/visual_audit/2026-06-29/style_source/scene_overview_style_source_full.png",
+      "row_screenshot": "docs/visual_audit/2026-06-29/style_source/scene_overview_style_source_row.png"
+    },
+    "workbench_quick_execute": {
+      "object_name": "wb_style_source_compact_row",
+      "view_mode": "execution_review",
+      "size": {
+        "width": 882,
+        "height": 50
+      },
+      "label": "样式来源",
+      "status": "分区已调整",
+      "template_line": "模板：默认流程",
+      "section_line": "分区：1 个分区独立设置：参考文献（特殊缩进、行距）",
+      "summary": "模板：默认流程；分区：1 个分区独立设置：参考文献（特殊缩进、行距）",
+      "primary_action": "看模板",
+      "primary_visible": true,
+      "secondary_action": "调分区",
+      "secondary_visible": true,
+      "actions_visible": true,
+      "actions_size": {
+        "width": 146,
+        "height": 42
+      },
+      "panel_size": {
+        "width": 1220,
+        "height": 840
+      },
+      "full_screenshot": "docs/visual_audit/2026-06-29/style_source/workbench_quick_execute_style_source_full.png",
+      "row_screenshot": "docs/visual_audit/2026-06-29/style_source/workbench_quick_execute_style_source_row.png"
+    }
+  }
+}

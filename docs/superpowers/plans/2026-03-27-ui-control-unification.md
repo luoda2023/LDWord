@@ -436,4 +436,3 @@ Expected: no regressions introduced by the UI refactor.
 - **Spec coverage:** theme token expansion, shared button helper, shared `SearchInput`, shared `StyledComboBox`, combo-family migration, raw combo migration, demo display-only conversion, and export cleanup are all covered by Tasks 1-6.
 - **Placeholder scan:** no `TODO`/`TBD` placeholders remain; each task lists concrete files, tests, and commands.
 - **Type consistency:** all combo migration tasks target the same shared base name `StyledComboBox`; button variants consistently use the `variant` property and `apply_button_variant`.
-

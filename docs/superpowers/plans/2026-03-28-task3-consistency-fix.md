@@ -47,11 +47,11 @@ def test_workbench_panel_preserves_cached_template_when_bridge_updates_scene():
     bridge = PanelBridge()
     panel = WorkbenchPanel(bridge)
     try:
-        template = TemplateConfig(name="混合模板")
+        template = TemplateConfig(name="娣峰悎妯℃澘")
         scene = SceneWorkspace(
-            name="初始场景",
-            description="初始描述",
-            category_label="初始分类",
+            name="鍒濆鍦烘櫙",
+            description="鍒濆鎻忚堪",
+            category_label="鍒濆鍒嗙被",
             strict_mode=False,
         )
         for module_name in list(scene.module_switches.keys()):
@@ -61,9 +61,9 @@ def test_workbench_panel_preserves_cached_template_when_bridge_updates_scene():
         panel.set_strategy_summary(template, scene)
 
         updated_scene = SceneWorkspace(
-            name="后续场景",
-            description="后续描述",
-            category_label="后续分类",
+            name="鍚庣画鍦烘櫙",
+            description="鍚庣画鎻忚堪",
+            category_label="鍚庣画鍒嗙被",
             strict_mode=True,
         )
         for module_name in list(updated_scene.module_switches.keys()):
@@ -72,8 +72,8 @@ def test_workbench_panel_preserves_cached_template_when_bridge_updates_scene():
 
         bridge.scene_changed.emit(updated_scene)
 
-        assert panel._strategy_card._scene_value.text() == "后续描述"
-        assert panel._strategy_card._template_value.text() == "混合模板"
+        assert panel._strategy_card._scene_value.text() == "鍚庣画鎻忚堪"
+        assert panel._strategy_card._template_value.text() == "娣峰悎妯℃澘"
         assert "1" in panel._strategy_card._modules_value.text()
     finally:
         panel.close()
