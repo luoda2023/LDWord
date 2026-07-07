@@ -57,7 +57,7 @@ def _start_gui() -> int:
     """启动 GUI 模式。"""
     import traceback
 
-    from src.qt_api import QApplication, QFont, Qt
+    from src.qt_api import QApplication, QFont, QTimer, Qt
 
     # Hi-DPI 适配（必须在 QApplication 之前设置）
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
@@ -69,6 +69,7 @@ def _start_gui() -> int:
         pass  # Qt < 5.14
 
     from src.ui.main_window import MainWindow
+    from src.ui.startup_splash import StartupSplash
 
 
     app = QApplication(sys.argv)
@@ -113,8 +114,27 @@ def _start_gui() -> int:
     from src.shared.ui.tooltip import install_global_tooltip
     _tooltip_guard = install_global_tooltip(app)  # noqa: F841  保持引用防 GC
 
+    splash = StartupSplash()
+    splash.show()
+    splash.set_status("正在准备工作台")
+    app.processEvents()
+
     win = MainWindow()
-    win.show()
+
+    def _show_main_window() -> None:
+        splash.set_status("正在打开首页")
+        win.setWindowOpacity(0.0)
+        win.show()
+        app.processEvents()
+
+        def _reveal_main_window() -> None:
+            win.setWindowOpacity(1.0)
+            splash.finish_and_close()
+
+        QTimer.singleShot(80, _reveal_main_window)
+
+    win.startup_status_changed.connect(splash.set_status)
+    win.startup_ready.connect(_show_main_window)
     return app.exec()
 
 

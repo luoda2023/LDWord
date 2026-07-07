@@ -31,11 +31,12 @@ from src.qt_api import (
     QVBoxLayout,
     QWidget,
     Qt,
+    Signal,
 )
 
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.shared.ui.theme import bind_theme, get_theme
-from src.ui.bridge import PanelBridge
+from src.ui.bridge import NavigationIntent, PanelBridge, navigation_intent_value
 from src.ui.panel_registry import PANEL_SPECS, create_panel
 from src.ui.sidebar import Sidebar
 from src.ui.title_bar import TitleBar
@@ -89,12 +90,17 @@ class _PlaceholderPanel(QWidget):
 
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
+        self._title = title
         layout = QVBoxLayout(self)
-        self._label = QLabel(f"{title}\n\n面板开发中...")
+        self._label = QLabel(f"{title}\n\n暂未开放")
         self._label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._label)
         self._apply_theme()
         bind_theme(self, self._apply_theme)
+
+    def set_loading(self, title: str | None = None) -> None:
+        label = str(title or self._title or "").strip() or "页面"
+        self._label.setText(f"{label}\n\n正在加载...")
 
     def _apply_theme(self) -> None:
         t = get_theme()
@@ -108,6 +114,9 @@ class _PlaceholderPanel(QWidget):
 
 class MainWindow(QMainWindow):
     """Alavette Form V1.0 主窗口。"""
+
+    startup_status_changed = Signal(str)
+    startup_ready = Signal()
 
     WINDOW_TITLE = APP_DISPLAY_NAME_FULL
     MIN_WIDTH = 800
@@ -185,6 +194,7 @@ class MainWindow(QMainWindow):
 
         self.sidebar.panel_selected.connect(self._show_panel)
         self.bridge.navigate_to_panel.connect(self._navigate)
+        self.bridge.navigate_to_intent.connect(self._navigate_intent)
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
@@ -194,8 +204,31 @@ class MainWindow(QMainWindow):
             self._install_native_frame()
 
         # 窗口首次显示后，在事件循环空闲时逐个预加载剩余面板
-        self._preload_queue = [i for i in range(len(PANEL_SPECS)) if i not in self._loaded_panel_indexes]
-        QTimer.singleShot(0, self._preload_next)
+        preload_priority = {
+            "template": 0,
+            "theme": 1,
+            "scene": 2,
+            "assets": 3,
+            "pipeline": 4,
+            "preferences": 5,
+        }
+        background_preload_panel_ids = {"template", "theme", "scene"}
+        self._preload_queue = sorted(
+            [
+                i
+                for i in range(len(PANEL_SPECS))
+                if i not in self._loaded_panel_indexes
+                and PANEL_SPECS[i].id in background_preload_panel_ids
+            ],
+            key=lambda i: preload_priority.get(PANEL_SPECS[i].id, i),
+        )
+        self._startup_ready_emitted = False
+        self._startup_detail_preload_done = False
+        self._idle_preload_started = False
+        self._idle_preload_delay_ms = 240
+        self._async_panel_load_ids = {"assets"}
+        self._async_panel_loads_in_progress: set[int] = set()
+        QTimer.singleShot(0, self._emit_startup_ready)
 
     def _install_native_frame(self) -> None:
         """恢复 WS_THICKFRAME 等原生窗口样式以获得 DWM 动画。"""
@@ -259,11 +292,68 @@ class MainWindow(QMainWindow):
         self._show_panel(index)
         self.sidebar.select(index)
 
-    def _show_panel(self, index: int) -> None:
-        if not 0 <= index < self.panel_stack.count():
+    def _navigate_intent(self, intent) -> None:
+        panel_index = self._panel_index_from_intent(intent)
+        if panel_index < 0:
             return
-        self._ensure_panel_loaded(index)
+        panel = self._show_panel(panel_index, allow_async=False)
+        self.sidebar.select(panel_index)
+        if panel is not None and hasattr(panel, "handle_navigation_intent"):
+            panel.handle_navigation_intent(intent)
+
+    def _panel_index_from_intent(self, intent) -> int:
+        panel_index = int(self._intent_value(intent, "panel_index", -1) or -1)
+        if panel_index >= 0:
+            return panel_index
+        panel_id = str(self._intent_value(intent, "panel_id", "") or "").strip()
+        if not panel_id:
+            return -1
+        for index, spec in enumerate(PANEL_SPECS):
+            if spec.id == panel_id:
+                return index
+        return -1
+
+    @staticmethod
+    def _intent_value(intent, key: str, default=None):
+        return navigation_intent_value(intent, key, default)
+
+    def _show_panel(self, index: int, *, allow_async: bool = True) -> QWidget | None:
+        if not 0 <= index < self.panel_stack.count():
+            return None
+        if (
+            allow_async
+            and index not in self._loaded_panel_indexes
+            and PANEL_SPECS[index].id in self._async_panel_load_ids
+        ):
+            placeholder = self.panel_stack.widget(index)
+            if hasattr(placeholder, "set_loading"):
+                placeholder.set_loading(PANEL_SPECS[index].title)
+            self.panel_stack.setCurrentIndex(index)
+            if index not in self._async_panel_loads_in_progress:
+                self._async_panel_loads_in_progress.add(index)
+                QTimer.singleShot(
+                    60,
+                    lambda panel_index=index: self._finish_async_panel_load(panel_index),
+                )
+            return placeholder
+        panel = self._ensure_panel_loaded(index)
         self.panel_stack.setCurrentIndex(index)
+        return panel
+
+    def _finish_async_panel_load(self, index: int) -> None:
+        try:
+            if not 0 <= index < self.panel_stack.count():
+                return
+            spec = PANEL_SPECS[index]
+            self.startup_status_changed.emit(f"加载{spec.title}")
+            QApplication.processEvents()
+            should_show_loaded_panel = self.panel_stack.currentIndex() == index
+            panel = self._ensure_panel_loaded(index)
+            if should_show_loaded_panel:
+                self.panel_stack.setCurrentIndex(index)
+                panel.updateGeometry()
+        finally:
+            self._async_panel_loads_in_progress.discard(index)
 
     def _ensure_panel_loaded(self, index: int) -> QWidget:
         if index in self._loaded_panel_indexes:
@@ -290,15 +380,72 @@ class MainWindow(QMainWindow):
         """在事件循环空闲时逐个创建面板，避免切换时卡顿。"""
         if not hasattr(self, "_preload_queue"):
             return
+        if self._preload_next_startup_detail():
+            self._schedule_idle_preload(self._idle_preload_delay_ms)
+            return
         while self._preload_queue:
             index = self._preload_queue.pop(0)
             if index in self._loaded_panel_indexes:
                 continue
+            spec = PANEL_SPECS[index]
+            self.startup_status_changed.emit(f"后台加载{spec.title}")
+            QApplication.processEvents()
             self._ensure_panel_loaded(index)
-            # 强制面板完成首次布局和渲染，避免用户切换时才触发
-            self._warmup_panel(index)
-            QTimer.singleShot(0, self._preload_next)
+            self._schedule_idle_preload(self._idle_preload_delay_ms)
             return
+
+    def _preload_next_startup_detail(self) -> bool:
+        if getattr(self, "_startup_detail_preload_done", False):
+            return False
+        found_preloader = False
+        for index in sorted(self._loaded_panel_indexes):
+            panel = self.panel_stack.widget(index)
+            preload = getattr(panel, "preload_one_detail_for_startup", None)
+            if not callable(preload):
+                continue
+            found_preloader = True
+            if preload(self.startup_status_changed.emit):
+                self._startup_detail_preload_done = False
+                return True
+        if found_preloader:
+            self._startup_detail_preload_done = True
+        return False
+
+    def _schedule_idle_preload(self, delay_ms: int | None = None) -> None:
+        self._idle_preload_started = True
+        delay = self._idle_preload_delay_ms if delay_ms is None else int(delay_ms)
+        QTimer.singleShot(max(0, delay), self._preload_next)
+
+    def _emit_startup_ready(self) -> None:
+        if getattr(self, "_startup_ready_emitted", False):
+            return
+        self._startup_ready_emitted = True
+        self.startup_status_changed.emit("启动完成")
+        self.panel_stack.setCurrentIndex(0)
+        self._prepare_initial_panel_for_show()
+        self.startup_ready.emit()
+        self._schedule_idle_preload(900)
+
+    def _prepare_initial_panel_for_show(self) -> None:
+        panel = self.panel_stack.widget(0)
+        if panel is None:
+            return
+        self.startup_status_changed.emit("正在整理首页")
+        panel.show()
+        for widget in (self.centralWidget(), self._container, self.panel_stack, panel):
+            if widget is None:
+                continue
+            widget.updateGeometry()
+            layout = widget.layout()
+            if layout is not None:
+                layout.activate()
+        QApplication.processEvents()
+        for widget in (self.centralWidget(), self._container, self.panel_stack, panel):
+            if widget is None:
+                continue
+            layout = widget.layout()
+            if layout is not None:
+                layout.activate()
 
     def _warmup_panel(self, index: int) -> None:
         """让面板做一次完整的 show→layout→hide，刷掉首次渲染开销。"""

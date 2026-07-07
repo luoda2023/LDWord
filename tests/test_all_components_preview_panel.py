@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import test_all_components as tac
+from scripts.manual import test_all_components as tac
 from src.qt_api import QApplication
 from src.shared.ui.calendar_month import CalendarMonth
 from src.shared.ui.date_picker import DatePicker
@@ -39,7 +39,7 @@ def test_all_components_defines_navigation_preview_panel():
 
 
 def test_all_components_main_uses_preview_panel_window():
-    source = (ROOT / "test_all_components.py").read_text(encoding="utf-8")
+    source = (ROOT / "scripts" / "manual" / "test_all_components.py").read_text(encoding="utf-8")
 
     assert "AllComponentsPreviewPanel" in source
     assert "window = AllComponentsPreviewPanel()" in source

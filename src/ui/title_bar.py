@@ -148,6 +148,15 @@ class TitleBar(QWidget):
         logo = get_app_logo(24)
         self._icon_label.setPixmap(logo.pixmap(24, 24))
         self._update_icons()
+
+        title_font = QFont(self._title_label.font())
+        title_font.setFamily("Segoe UI")
+        title_font.setPixelSize(t.font_size_md)
+        title_font.setWeight(QFont.Weight(t.font_weight_bold))
+        title_font.setBold(t.font_weight_bold >= 700)
+        title_font.setKerning(True)
+        self._title_label.setFont(title_font)
+
         self.setStyleSheet(f"""
             #titlebar {{
                 background: {t.bg_sidebar};
@@ -156,8 +165,6 @@ class TitleBar(QWidget):
             }}
             #titlebar_title {{
                 color: {t.text_primary};
-                font-size: {t.font_size_md}px;
-                font-weight: {t.font_weight_bold};
             }}
             QPushButton {{
                 background: transparent;
