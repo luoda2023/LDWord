@@ -302,6 +302,26 @@ class _ReleaseGateDashboardResidualReports:
     release_residual_explanation_report: object
 
 
+@dataclass(slots=True)
+class _ReleaseGateEarlyReports:
+    ambiguous_boundary_report: object
+    ambiguity_clarification_report: object
+    import_handoff_report: object
+    input_source_report: object
+    family_subscene_report: object
+    family_fixture_depth_report: object
+    scene_control_report: object
+    scene_control_runtime_report: object
+    count_profile_report: object
+    word_risk_report: object
+    object_preflight_action_report: object
+    user_journey_fixture_report: object
+    business_capability_matrix_report: object
+    boundary_capability_report: object
+    plugin_boundary_report: object
+    external_handoff_contract_report: object
+
+
 def _build_release_governance_export_script_evidence(
     reports: tuple[tuple[str, object], ...],
 ) -> list[dict[str, object]]:
@@ -508,6 +528,133 @@ def _build_release_gate_foundation(output_dir: Path) -> _ReleaseGateFoundation:
     )
 
 
+def _build_release_gate_early_reports(
+    *, checks: dict[str, object]
+) -> _ReleaseGateEarlyReports:
+    ambiguous_boundary_report = build_scene_ambiguous_boundary_audit_report(
+        project_root=ROOT
+    )
+    checks["scene_ambiguous_boundary_audit"] = _issue_check(
+        audit_scene_ambiguous_boundary_report(ambiguous_boundary_report)
+    )
+    ambiguity_clarification_report = (
+        build_scene_ambiguity_clarification_ui_audit_report(project_root=ROOT)
+    )
+    ambiguity_clarification_issues, _ambiguity_clarification_warnings = (
+        audit_scene_ambiguity_clarification_ui_report(
+            ambiguity_clarification_report
+        )
+    )
+    checks["scene_ambiguity_clarification_ui_audit"] = _issue_check(
+        ambiguity_clarification_issues
+    )
+    import_handoff_report = build_scene_import_handoff_audit_report(
+        project_root=ROOT
+    )
+    checks["scene_import_handoff_audit"] = _issue_check(
+        audit_scene_import_handoff_report(import_handoff_report)
+    )
+    input_source_report = build_scene_input_source_audit_report(project_root=ROOT)
+    input_source_issues, _input_source_warnings = audit_scene_input_source_report(
+        input_source_report
+    )
+    checks["scene_input_source_audit"] = _issue_check(input_source_issues)
+    family_subscene_report = build_scene_family_subscene_audit_report()
+    checks["scene_family_subscene_audit"] = _issue_check(
+        audit_scene_family_subscene_report(family_subscene_report)
+    )
+    family_fixture_depth_report = build_scene_family_fixture_depth_audit_report(
+        project_root=ROOT
+    )
+    checks["scene_family_fixture_depth_audit"] = _issue_check(
+        audit_scene_family_fixture_depth_report(family_fixture_depth_report)
+    )
+    scene_control_report = build_scene_control_consistency_audit_report()
+    checks["scene_control_consistency_audit"] = _issue_check(
+        audit_scene_control_consistency_report(scene_control_report)
+    )
+    scene_control_runtime_report = (
+        build_scene_control_runtime_consistency_audit_report(project_root=ROOT)
+    )
+    checks["scene_control_runtime_consistency_audit"] = _issue_check(
+        audit_scene_control_runtime_consistency_report(scene_control_runtime_report)
+    )
+    count_profile_report = build_scene_count_profile_audit_report(project_root=ROOT)
+    count_profile_issues, _count_profile_warnings = (
+        audit_scene_count_profile_report(count_profile_report)
+    )
+    checks["scene_count_profile_audit"] = _issue_check(count_profile_issues)
+    word_risk_report = build_scene_word_risk_closure_audit_report()
+    checks["scene_word_risk_closure_audit"] = _issue_check(
+        audit_scene_word_risk_closure_report(word_risk_report)
+    )
+    object_preflight_action_report = (
+        build_scene_object_preflight_action_audit_report(project_root=ROOT)
+    )
+    object_preflight_action_issues, _object_preflight_action_warnings = (
+        audit_scene_object_preflight_action_report(object_preflight_action_report)
+    )
+    checks["scene_object_preflight_action_audit"] = _issue_check(
+        object_preflight_action_issues
+    )
+    user_journey_fixture_report = build_scene_user_journey_fixture_audit_report(
+        project_root=ROOT
+    )
+    user_journey_fixture_issues, _user_journey_fixture_warnings = (
+        audit_scene_user_journey_fixture_report(user_journey_fixture_report)
+    )
+    checks["scene_user_journey_fixture_audit"] = _issue_check(
+        user_journey_fixture_issues
+    )
+    business_capability_matrix_report = (
+        build_scene_business_capability_matrix_audit_report(project_root=ROOT)
+    )
+    business_capability_matrix_issues, _business_capability_matrix_warnings = (
+        audit_scene_business_capability_matrix_report(
+            business_capability_matrix_report
+        )
+    )
+    checks["scene_business_capability_matrix_audit"] = _issue_check(
+        business_capability_matrix_issues
+    )
+    boundary_capability_report = build_scene_boundary_capability_audit_report(
+        project_root=ROOT
+    )
+    checks["scene_boundary_capability_matrix"] = _issue_check(
+        audit_scene_boundary_capability_report(boundary_capability_report)
+    )
+    plugin_boundary_report = build_scene_plugin_boundary_confirmation_audit_report()
+    checks["scene_plugin_boundary_confirmation_audit"] = _issue_check(
+        audit_scene_plugin_boundary_confirmation_report(plugin_boundary_report)
+    )
+    external_handoff_contract_report = (
+        build_scene_external_handoff_contract_audit_report(project_root=ROOT)
+    )
+    checks["scene_external_handoff_contract_audit"] = _issue_check(
+        audit_scene_external_handoff_contract_report(
+            external_handoff_contract_report
+        )
+    )
+    return _ReleaseGateEarlyReports(
+        ambiguous_boundary_report=ambiguous_boundary_report,
+        ambiguity_clarification_report=ambiguity_clarification_report,
+        import_handoff_report=import_handoff_report,
+        input_source_report=input_source_report,
+        family_subscene_report=family_subscene_report,
+        family_fixture_depth_report=family_fixture_depth_report,
+        scene_control_report=scene_control_report,
+        scene_control_runtime_report=scene_control_runtime_report,
+        count_profile_report=count_profile_report,
+        word_risk_report=word_risk_report,
+        object_preflight_action_report=object_preflight_action_report,
+        user_journey_fixture_report=user_journey_fixture_report,
+        business_capability_matrix_report=business_capability_matrix_report,
+        boundary_capability_report=boundary_capability_report,
+        plugin_boundary_report=plugin_boundary_report,
+        external_handoff_contract_report=external_handoff_contract_report,
+    )
+
+
 def _build_release_gate_material_delivery_reports(
     *, checks: dict[str, object]
 ) -> _ReleaseGateMaterialDeliveryReports:
@@ -639,110 +786,25 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
     request_cell_browser = foundation.request_cell_browser
     completeness_report = foundation.completeness_report
     task_lexicon_report = foundation.task_lexicon_report
-    ambiguous_boundary_report = build_scene_ambiguous_boundary_audit_report(
-        project_root=ROOT
-    )
-    checks["scene_ambiguous_boundary_audit"] = _issue_check(
-        audit_scene_ambiguous_boundary_report(ambiguous_boundary_report)
-    )
-    ambiguity_clarification_report = (
-        build_scene_ambiguity_clarification_ui_audit_report(project_root=ROOT)
-    )
-    ambiguity_clarification_issues, _ambiguity_clarification_warnings = (
-        audit_scene_ambiguity_clarification_ui_report(
-            ambiguity_clarification_report
-        )
-    )
-    checks["scene_ambiguity_clarification_ui_audit"] = _issue_check(
-        ambiguity_clarification_issues
-    )
-    import_handoff_report = build_scene_import_handoff_audit_report(
-        project_root=ROOT
-    )
-    checks["scene_import_handoff_audit"] = _issue_check(
-        audit_scene_import_handoff_report(import_handoff_report)
-    )
-    input_source_report = build_scene_input_source_audit_report(project_root=ROOT)
-    input_source_issues, _input_source_warnings = audit_scene_input_source_report(
-        input_source_report
-    )
-    checks["scene_input_source_audit"] = _issue_check(input_source_issues)
-    family_subscene_report = build_scene_family_subscene_audit_report()
-    checks["scene_family_subscene_audit"] = _issue_check(
-        audit_scene_family_subscene_report(family_subscene_report)
-    )
-    family_fixture_depth_report = build_scene_family_fixture_depth_audit_report(
-        project_root=ROOT
-    )
-    checks["scene_family_fixture_depth_audit"] = _issue_check(
-        audit_scene_family_fixture_depth_report(family_fixture_depth_report)
-    )
-    scene_control_report = build_scene_control_consistency_audit_report()
-    checks["scene_control_consistency_audit"] = _issue_check(
-        audit_scene_control_consistency_report(scene_control_report)
-    )
-    scene_control_runtime_report = (
-        build_scene_control_runtime_consistency_audit_report(project_root=ROOT)
-    )
-    checks["scene_control_runtime_consistency_audit"] = _issue_check(
-        audit_scene_control_runtime_consistency_report(scene_control_runtime_report)
-    )
-    count_profile_report = build_scene_count_profile_audit_report(project_root=ROOT)
-    count_profile_issues, _count_profile_warnings = (
-        audit_scene_count_profile_report(count_profile_report)
-    )
-    checks["scene_count_profile_audit"] = _issue_check(count_profile_issues)
-    word_risk_report = build_scene_word_risk_closure_audit_report()
-    checks["scene_word_risk_closure_audit"] = _issue_check(
-        audit_scene_word_risk_closure_report(word_risk_report)
-    )
-    object_preflight_action_report = (
-        build_scene_object_preflight_action_audit_report(project_root=ROOT)
-    )
-    object_preflight_action_issues, _object_preflight_action_warnings = (
-        audit_scene_object_preflight_action_report(object_preflight_action_report)
-    )
-    checks["scene_object_preflight_action_audit"] = _issue_check(
-        object_preflight_action_issues
-    )
-    user_journey_fixture_report = build_scene_user_journey_fixture_audit_report(
-        project_root=ROOT
-    )
-    user_journey_fixture_issues, _user_journey_fixture_warnings = (
-        audit_scene_user_journey_fixture_report(user_journey_fixture_report)
-    )
-    checks["scene_user_journey_fixture_audit"] = _issue_check(
-        user_journey_fixture_issues
-    )
+    early_reports = _build_release_gate_early_reports(checks=checks)
+    ambiguous_boundary_report = early_reports.ambiguous_boundary_report
+    ambiguity_clarification_report = early_reports.ambiguity_clarification_report
+    import_handoff_report = early_reports.import_handoff_report
+    input_source_report = early_reports.input_source_report
+    family_subscene_report = early_reports.family_subscene_report
+    family_fixture_depth_report = early_reports.family_fixture_depth_report
+    scene_control_report = early_reports.scene_control_report
+    scene_control_runtime_report = early_reports.scene_control_runtime_report
+    count_profile_report = early_reports.count_profile_report
+    word_risk_report = early_reports.word_risk_report
+    object_preflight_action_report = early_reports.object_preflight_action_report
+    user_journey_fixture_report = early_reports.user_journey_fixture_report
     business_capability_matrix_report = (
-        build_scene_business_capability_matrix_audit_report(project_root=ROOT)
+        early_reports.business_capability_matrix_report
     )
-    business_capability_matrix_issues, _business_capability_matrix_warnings = (
-        audit_scene_business_capability_matrix_report(
-            business_capability_matrix_report
-        )
-    )
-    checks["scene_business_capability_matrix_audit"] = _issue_check(
-        business_capability_matrix_issues
-    )
-    boundary_capability_report = build_scene_boundary_capability_audit_report(
-        project_root=ROOT
-    )
-    checks["scene_boundary_capability_matrix"] = _issue_check(
-        audit_scene_boundary_capability_report(boundary_capability_report)
-    )
-    plugin_boundary_report = build_scene_plugin_boundary_confirmation_audit_report()
-    checks["scene_plugin_boundary_confirmation_audit"] = _issue_check(
-        audit_scene_plugin_boundary_confirmation_report(plugin_boundary_report)
-    )
-    external_handoff_contract_report = (
-        build_scene_external_handoff_contract_audit_report(project_root=ROOT)
-    )
-    checks["scene_external_handoff_contract_audit"] = _issue_check(
-        audit_scene_external_handoff_contract_report(
-            external_handoff_contract_report
-        )
-    )
+    boundary_capability_report = early_reports.boundary_capability_report
+    plugin_boundary_report = early_reports.plugin_boundary_report
+    external_handoff_contract_report = early_reports.external_handoff_contract_report
     boundary_guarded_completion_report = (
         build_scene_boundary_guarded_completion_audit_report(project_root=ROOT)
     )

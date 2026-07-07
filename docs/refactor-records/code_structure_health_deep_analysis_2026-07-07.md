@@ -5059,3 +5059,51 @@ python scripts\verify_scene_matrix_release_gate.py
 
 - 下一轮建议进入 early report context 拆分，优先处理 ambiguity/import/input/family/control/count/user-journey/business-capability 这一段。
 - 在 early report context 稳定前，不建议立即拆 counts 字典，因为 counts 目前跨所有 report 读取，直接拆会扩大风险面。
+
+### 10.81 后续优化第六刀: early report context 抽取
+
+执行日期: 2026-07-08
+
+本轮开始处理主聚合函数前半段的大块 report build/audit 流水线。选择先抽取 early report context，是因为这一段虽然变量很多，但依赖关系相对直线: 从 ambiguity/import/input/family/control/count/object/user-journey/business-capability 到 boundary entry reports，主要职责都是生成 report、audit report、写入 checks，后续 counts 和 payload 再读取这些 report 对象。
+
+已完成改动:
+
+- 新增 `_ReleaseGateEarlyReports` dataclass
+  - 承载 `ambiguous_boundary_report`、`ambiguity_clarification_report`、`import_handoff_report`、`input_source_report`、`family_subscene_report`、`family_fixture_depth_report`、`scene_control_report`、`scene_control_runtime_report`、`count_profile_report`、`word_risk_report`、`object_preflight_action_report`、`user_journey_fixture_report`、`business_capability_matrix_report`、`boundary_capability_report`、`plugin_boundary_report`、`external_handoff_contract_report`。
+- 新增 `_build_release_gate_early_reports(checks=...)`
+  - 集中执行 early report build/audit/check 写入。
+  - 覆盖 ambiguity、clarification UI、import handoff、input source、family subscene、fixture depth、control consistency、control runtime、count profile、word risk、object preflight、user journey、business capability、boundary capability、plugin boundary、external handoff contract。
+- 收窄 `build_scene_matrix_release_gate_payload()`
+  - 将上述内联流水线替换为一次 helper 调用。
+  - 保留原有局部变量名，继续给后续 dashboard residual、release governance、counts 与 payload 使用。
+
+规模变化:
+
+| 指标 | 调整后 | 说明 |
+| --- | ---: | --- |
+| `scripts/scene_matrix_release_gate_payload.py` 总行数 | `2662` | 新增 dataclass/helper 后总行数上升，但主聚合函数明显收窄 |
+| `build_scene_matrix_release_gate_payload()` | `1819` 行 | 从 `1904` 行降到 `1819` 行 |
+| `_build_release_gate_early_reports()` | `125` 行 | early report build/audit/check 写入的独立 context 边界 |
+
+验证命令:
+
+```powershell
+python -m compileall -q scripts\scene_matrix_release_gate_payload.py scripts\verify_scene_matrix_release_gate.py
+python -m pytest -q tests\test_release_shell.py
+python -m pytest -q tests\test_scene_matrix_dashboard.py tests\test_scene_matrix_drilldown.py tests\test_scene_retained_gap_exit_criteria_audit.py
+python scripts\verify_scene_matrix_release_gate.py
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| release shell pytest | `12 passed in 0.07s` |
+| scene matrix focused pytest | `16 passed in 123.45s` |
+| real scene matrix release gate | `Scene matrix release gate: passed`；early report context 覆盖的 checks 全部 `passed (0 issues)`；`input_sources=12/12`、`family_subscenes=15`、`control_runtime=12/12`、`count_profiles=14/15 ready`、`user_journeys=12/12 packs/100 paths`、`business_capabilities=18/18 (0 gaps)`、`boundary_capabilities=6/6`、`external_handoffs=6/6` |
+
+后续仍可继续优化:
+
+- 下一刀可处理 release governance report context: boundary guarded completion、residual warning governance、readiness reconciliation、terminal exceptions、subject dossiers、trace partition、closure ledger、maturity envelope、retained gap、residual ratio、acceptance certificate。
+- 这组 report 依赖略复杂，尤其 retained gap 和 residual explanation 会引用前序 report，建议继续用 dataclass context + 局部变量过渡，逐步拆而不是直接改 payload counts。
