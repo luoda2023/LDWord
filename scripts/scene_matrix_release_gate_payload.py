@@ -296,6 +296,12 @@ class _ReleaseGateMaterialDeliveryReports:
     maturity_upgrade_report: object
 
 
+@dataclass(slots=True)
+class _ReleaseGateDashboardResidualReports:
+    matrix_dashboard: object
+    release_residual_explanation_report: object
+
+
 def _build_release_governance_export_script_evidence(
     reports: tuple[tuple[str, object], ...],
 ) -> list[dict[str, object]]:
@@ -575,6 +581,47 @@ def _build_release_gate_material_delivery_reports(
     )
 
 
+def _build_release_gate_dashboard_residual_reports(
+    *,
+    checks: dict[str, object],
+    input_source_report: object,
+    count_profile_report: object,
+    residual_warning_governance_report: object,
+    terminal_release_exception_report: object,
+    boundary_maturity_release_envelope_report: object,
+    release_residual_ratio_ledger_report: object,
+    maturity_upgrade_report: object,
+) -> _ReleaseGateDashboardResidualReports:
+    matrix_dashboard = build_scene_matrix_dashboard()
+    checks["scene_matrix_dashboard"] = _issue_check(
+        audit_scene_matrix_dashboard(matrix_dashboard)
+    )
+    release_residual_explanation_report = (
+        build_scene_release_residual_explanation_audit_report(
+            project_root=ROOT,
+            input_source_report=input_source_report,
+            count_profile_report=count_profile_report,
+            residual_warning_governance_report=residual_warning_governance_report,
+            terminal_release_exception_report=terminal_release_exception_report,
+            boundary_maturity_release_envelope_report=(
+                boundary_maturity_release_envelope_report
+            ),
+            release_residual_ratio_ledger_report=release_residual_ratio_ledger_report,
+            maturity_upgrade_report=maturity_upgrade_report,
+            matrix_dashboard=matrix_dashboard,
+        )
+    )
+    checks["scene_release_residual_explanation_audit"] = _issue_check(
+        audit_scene_release_residual_explanation_report(
+            release_residual_explanation_report
+        )
+    )
+    return _ReleaseGateDashboardResidualReports(
+        matrix_dashboard=matrix_dashboard,
+        release_residual_explanation_report=release_residual_explanation_report,
+    )
+
+
 def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, object]:
     global _PYTEST_RELEASE_GATE_PAYLOAD_CACHE
     if (
@@ -840,29 +887,21 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
         material_delivery_reports.formula_output_watermark_report
     )
     maturity_upgrade_report = material_delivery_reports.maturity_upgrade_report
-    matrix_dashboard = build_scene_matrix_dashboard()
-    checks["scene_matrix_dashboard"] = _issue_check(
-        audit_scene_matrix_dashboard(matrix_dashboard)
+    dashboard_residual_reports = _build_release_gate_dashboard_residual_reports(
+        checks=checks,
+        input_source_report=input_source_report,
+        count_profile_report=count_profile_report,
+        residual_warning_governance_report=residual_warning_governance_report,
+        terminal_release_exception_report=terminal_release_exception_report,
+        boundary_maturity_release_envelope_report=(
+            boundary_maturity_release_envelope_report
+        ),
+        release_residual_ratio_ledger_report=release_residual_ratio_ledger_report,
+        maturity_upgrade_report=maturity_upgrade_report,
     )
+    matrix_dashboard = dashboard_residual_reports.matrix_dashboard
     release_residual_explanation_report = (
-        build_scene_release_residual_explanation_audit_report(
-            project_root=ROOT,
-            input_source_report=input_source_report,
-            count_profile_report=count_profile_report,
-            residual_warning_governance_report=residual_warning_governance_report,
-            terminal_release_exception_report=terminal_release_exception_report,
-            boundary_maturity_release_envelope_report=(
-                boundary_maturity_release_envelope_report
-            ),
-            release_residual_ratio_ledger_report=release_residual_ratio_ledger_report,
-            maturity_upgrade_report=maturity_upgrade_report,
-            matrix_dashboard=matrix_dashboard,
-        )
-    )
-    checks["scene_release_residual_explanation_audit"] = _issue_check(
-        audit_scene_release_residual_explanation_report(
-            release_residual_explanation_report
-        )
+        dashboard_residual_reports.release_residual_explanation_report
     )
     release_governance_export_gate = (
         _build_release_governance_export_evidence_gate(

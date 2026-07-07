@@ -5010,3 +5010,52 @@ python scripts\verify_scene_matrix_release_gate.py
 
 - 下一步可抽取 matrix dashboard + release residual explanation gate，因为它们当前紧跟 material/delivery 阶段，且只向后暴露 `matrix_dashboard` 和 `release_residual_explanation_report`。
 - 更大的一步是拆 early report context，但涉及变量更多，建议在下一轮继续保持小步提交和 release gate 逐次验证。
+
+### 10.80 后续优化第五刀: dashboard/residual explanation gate 抽取
+
+执行日期: 2026-07-08
+
+本轮继续在第 10.79 节之后收窄 `scripts/scene_matrix_release_gate_payload.py` 的主聚合函数。选择抽取 matrix dashboard 与 release residual explanation 这一小段，是因为它们紧跟 material/delivery 阶段，依赖明确，并且向后只暴露 `matrix_dashboard` 与 `release_residual_explanation_report` 两个对象。
+
+已完成改动:
+
+- 新增 `_ReleaseGateDashboardResidualReports` dataclass
+  - 承载 `matrix_dashboard` 与 `release_residual_explanation_report`。
+- 新增 `_build_release_gate_dashboard_residual_reports(...)`
+  - 集中执行 `build_scene_matrix_dashboard()` 与 `audit_scene_matrix_dashboard()`。
+  - 集中执行 `build_scene_release_residual_explanation_audit_report(...)` 与 `audit_scene_release_residual_explanation_report(...)`。
+  - 在 helper 内写入 `scene_matrix_dashboard` 与 `scene_release_residual_explanation_audit` 两个 checks。
+- 收窄 `build_scene_matrix_release_gate_payload()`
+  - 将 dashboard/residual explanation 的 build/audit/check 写入替换为一次 helper 调用。
+  - 保留原有局部变量名，继续供 release governance export evidence、counts 与 payload 组装使用。
+
+规模变化:
+
+| 指标 | 调整后 | 说明 |
+| --- | ---: | --- |
+| `scripts/scene_matrix_release_gate_payload.py` 总行数 | `2600` | 新增 dataclass/helper 后总行数上升，但主聚合函数继续收窄 |
+| `build_scene_matrix_release_gate_payload()` | `1904` 行 | 从 `1912` 行降到 `1904` 行 |
+| `_build_release_gate_dashboard_residual_reports()` | `39` 行 | dashboard/residual explanation 的独立 gate 边界 |
+
+验证命令:
+
+```powershell
+python -m compileall -q scripts\scene_matrix_release_gate_payload.py scripts\verify_scene_matrix_release_gate.py
+python -m pytest -q tests\test_release_shell.py
+python -m pytest -q tests\test_scene_matrix_dashboard.py tests\test_scene_matrix_drilldown.py tests\test_scene_retained_gap_exit_criteria_audit.py
+python scripts\verify_scene_matrix_release_gate.py
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| release shell pytest | `12 passed in 0.07s` |
+| scene matrix focused pytest | `16 passed in 119.22s` |
+| real scene matrix release gate | `Scene matrix release gate: passed`；`scene_matrix_dashboard: passed (0 issues)`；`scene_release_residual_explanation_audit: passed (0 issues)`；`residual_explanations=14/14 covered`；`dashboard_packs=12` |
+
+后续仍可继续优化:
+
+- 下一轮建议进入 early report context 拆分，优先处理 ambiguity/import/input/family/control/count/user-journey/business-capability 这一段。
+- 在 early report context 稳定前，不建议立即拆 counts 字典，因为 counts 目前跨所有 report 读取，直接拆会扩大风险面。
