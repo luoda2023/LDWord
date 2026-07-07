@@ -25,7 +25,7 @@ PANEL_SPECS: tuple[PanelSpec, ...] = (
     PanelSpec(id="scene",       title="场景配置", icon="target"),
     PanelSpec(id="template",    title="模板管理", icon="file-text"),
     PanelSpec(id="pipeline",    title="流水线",   icon="git-branch", transitional=True),
-    PanelSpec(id="assets",      title="素材管理", icon="package"),
+    PanelSpec(id="assets",      title="资料包",   icon="package"),
     PanelSpec(id="theme",       title="主题",     icon="palette",  group="bottom"),
     PanelSpec(id="preferences", title="偏好设置", icon="settings",  group="bottom"),
 )
@@ -48,6 +48,10 @@ def create_panel(panel_id: str, bridge):
         from src.ui.panels.template_panel import TemplatePanel
 
         return TemplatePanel(bridge)
+    if panel_id == "assets":
+        from src.ui.panels.assets_panel import AssetsPanel
+
+        return AssetsPanel(bridge)
     if panel_id == "theme":
         from src.ui.panels.theme_panel import ThemePanel
 
