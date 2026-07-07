@@ -13,6 +13,7 @@ from src.config.loader import load_template, load_scene
 from src.config.template import TemplateConfig
 from src.config.scene import SceneWorkspace
 from src.config.resolver import resolve_config
+from src.config.style_source_report_summary import build_style_source_report_summary
 from src.modules.registry import create_all_modules
 from src.pipeline.runner import Pipeline
 from src.pipeline.scheduler import select_enabled_modules
@@ -45,6 +46,7 @@ def run(
     template = _load_template(template_path, root)
     scene = _load_scene(scene_path)
     config = resolve_config(template, scene)
+    style_source_summary = build_style_source_report_summary(scene, template)
 
     # ── 创建模块 ──
     modules = create_all_modules()
@@ -99,6 +101,7 @@ def run(
             elapsed=elapsed,
             modules_enabled=len(enabled),
             modules_total=len(modules),
+            style_source_summary=style_source_summary,
         )
         print(f"📊 报告: {report_json}")
 
@@ -111,6 +114,7 @@ def run(
             elapsed=elapsed,
             modules_enabled=len(enabled),
             modules_total=len(modules),
+            style_source_summary=style_source_summary,
         )
         print(f"📝 报告: {report_md}")
 
