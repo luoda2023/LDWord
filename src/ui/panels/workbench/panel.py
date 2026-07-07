@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread
 
 from src.config.scene import SceneWorkspace
+from src.config.style_source_report_summary import build_style_source_report_summary
 from src.config.template import TemplateConfig
 
 from src.config.resolver import resolve_config
@@ -18,7 +19,10 @@ from src.report_writer import write_json_report, write_markdown_report
 from src.shared.ui.dynamic_navigation_rail import DynamicNavigationRail
 from src.shared.ui.navigation_card import NavigationCard
 from src.shared.ui.theme import bind_theme, get_theme
-from src.ui.adapters.workbench_execution_adapter import WorkbenchExecutionAdapter
+from src.ui.adapters.workbench_execution_adapter import (
+    WorkbenchExecutionAdapter,
+    material_readiness_reasons,
+)
 from src.ui.adapters.workbench_strategy_adapter import WorkbenchStrategyAdapter
 from src.ui.base_panel import BasePanel
 
@@ -53,6 +57,7 @@ class _WorkbenchProductionRunner:
 
         template = self._template or TemplateConfig()
         scene = self._scene or SceneWorkspace()
+        style_source_summary = build_style_source_report_summary(scene, template)
         config = resolve_config(template, scene)
 
         modules = create_all_modules()
@@ -87,6 +92,8 @@ class _WorkbenchProductionRunner:
                 "error_text": str(getattr(result, "error", "") or ""),
                 "diagnostics_count": int(diagnostics["count"]),
                 "diagnostics_summary": str(diagnostics["summary"] or ""),
+                "diagnostics_items": list(diagnostics.get("items") or []),
+                "style_source": dict(style_source_summary or {}),
             }
 
         output_path = ""
@@ -110,6 +117,7 @@ class _WorkbenchProductionRunner:
                 elapsed=elapsed,
                 modules_enabled=len(enabled),
                 modules_total=len(modules),
+                style_source_summary=style_source_summary,
             )
             report_paths.append(str(report_json))
 
@@ -122,6 +130,7 @@ class _WorkbenchProductionRunner:
                 elapsed=elapsed,
                 modules_enabled=len(enabled),
                 modules_total=len(modules),
+                style_source_summary=style_source_summary,
             )
             report_paths.append(str(report_md))
 
@@ -133,6 +142,8 @@ class _WorkbenchProductionRunner:
             "error_text": str(getattr(result, "error", "") or ""),
             "diagnostics_count": int(diagnostics["count"]),
             "diagnostics_summary": str(diagnostics["summary"] or ""),
+            "diagnostics_items": list(diagnostics.get("items") or []),
+            "style_source": dict(style_source_summary or {}),
         }
 
 
@@ -469,7 +480,13 @@ class WorkbenchPanel(BasePanel):
     def set_current_task_state(self, state: CurrentTaskState) -> None:
         self._last_task_state = state
         self._command_bar.set_state(state)
-        self._last_readiness_state = ReadinessState(ready=state.ready, label=state.status_text, reasons=[])
+        material_reasons = material_readiness_reasons(self._current_scene)
+        readiness_reasons = list(material_reasons)
+        self._last_readiness_state = ReadinessState(
+            ready=state.ready and not material_reasons,
+            label=state.status_text,
+            reasons=readiness_reasons,
+        )
         self._execution_center.set_readiness(self._last_readiness_state)
         if self._execution_worker is not None:
             self._command_bar._run_button.setEnabled(False)
@@ -682,11 +699,28 @@ class WorkbenchPanel(BasePanel):
             result_state = self._execution_adapter.build_result_state(
                 status=str(payload.get("status") or "failed"),
                 output_path=str(payload.get("output_path") or ""),
+                output_paths=_path_map(payload.get("output_paths")),
+                compare_paths=_path_map(payload.get("compare_paths")),
                 report_paths=list(payload.get("report_paths") or []),
+                intermediate_paths=_path_map(payload.get("intermediate_paths")),
+                material_manifest_paths=_path_map(payload.get("material_manifest_paths")),
+                material_package_paths=_path_map(payload.get("material_package_paths")),
+                output_target_preflight=_dict_payload(payload.get("output_target_preflight")),
                 failed_count=int(payload.get("failed_count") or 0),
                 error_text=str(payload.get("error_text") or ""),
                 diagnostics_count=int(payload.get("diagnostics_count") or 0),
                 diagnostics_summary=str(payload.get("diagnostics_summary") or ""),
+                style_source=_dict_payload(payload.get("style_source")),
+                object_preflight=_dict_payload(payload.get("object_preflight")),
+                material_field_consistency=_dict_payload(
+                    payload.get("material_field_consistency")
+                ),
+                batch_isolation=_dict_payload(payload.get("batch_isolation")),
+                question_figure_repair_queue=_dict_payload(
+                    payload.get("question_figure_repair_queue")
+                ),
+                diagnostics_items=_diagnostics_items(payload),
+                batch_issue_items=list(payload.get("batch_issue_items") or []),
             )
 
         self._execution_center.set_result_state(result_state)
@@ -707,3 +741,28 @@ class WorkbenchPanel(BasePanel):
 
     def _apply_theme(self) -> None:
         self.setStyleSheet(build_workbench_stylesheet(get_theme()))
+
+
+def _path_map(value) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): str(path)
+        for key, path in value.items()
+        if str(key or "").strip() and str(path or "").strip()
+    }
+
+
+def _dict_payload(value) -> dict[str, object]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _diagnostics_items(payload: dict[str, object]) -> list[dict]:
+    raw_items = payload.get("diagnostics_items")
+    if not raw_items:
+        diagnostics = payload.get("diagnostics")
+        if isinstance(diagnostics, dict):
+            raw_items = diagnostics.get("items")
+    if not raw_items and not payload.get("batch_issue_items"):
+        raw_items = payload.get("material_diagnostics")
+    return [dict(item) for item in list(raw_items or []) if isinstance(item, dict)]

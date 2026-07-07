@@ -35,6 +35,16 @@ class WorkbenchDocumentPathController:
             )
         )
 
+    def selected_existing_document(self) -> str | None:
+        for candidate in (
+            self._quick_execution_detail.document_path(),
+            self._cached_document_path,
+        ):
+            normalized = self._normalize_existing_path(candidate)
+            if normalized:
+                return self._cache_and_sync(normalized)
+        return None
+
     def accept_detail_selection(self, file_path: str) -> str | None:
         normalized = self._normalize_any_path(file_path)
         if not normalized:

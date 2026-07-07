@@ -100,3 +100,24 @@ def test_document_path_controller_resolve_execution_document_skips_cached_path_w
     assert controller.cached_document_path == expected
     assert detail.document_path() == expected
     assert any("existing-path check" in record.getMessage() for record in caplog.records)
+
+
+def test_document_path_controller_selected_existing_document_does_not_call_picker(tmp_path):
+    cached_path = tmp_path / "cached.docx"
+    cached_path.write_bytes(b"")
+    expected = str(cached_path.resolve())
+    picker_calls: list[bool] = []
+
+    detail = _QuickExecutionDetailStub()
+    controller = WorkbenchDocumentPathController(
+        detail,
+        pick_document_path=lambda: picker_calls.append(True) or str(tmp_path / "picked.docx"),
+    )
+    controller._cached_document_path = expected
+
+    resolved = controller.selected_existing_document()
+
+    assert resolved == expected
+    assert controller.cached_document_path == expected
+    assert detail.document_path() == expected
+    assert picker_calls == []

@@ -11,6 +11,7 @@ from src.ui.panels.workbench.panel_v2 import WorkbenchPanel
 from src.ui.panels.workbench.scene_presets import (
     CAPABILITY_FEATURE_CARD_DEFINITIONS,
     CAPABILITY_FEATURE_CARD_ORDER,
+    UI_GROUP_MAP,
 )
 
 
@@ -42,13 +43,17 @@ def test_workbench_panel_uses_shared_capability_feature_card_registry():
 
     assert CAPABILITY_FEATURE_CARD_ORDER == (
         "table_chart",
-        "page_elements",
         "formula",
         "citation",
         "cleanup",
         "content_fill",
     )
-    assert CAPABILITY_FEATURE_CARD_DEFINITIONS["table_chart"] == ("表格与图表", "table")
-    assert CAPABILITY_FEATURE_CARD_DEFINITIONS["content_fill"] == ("内容与数据", "pen-tool")
+    assert CAPABILITY_FEATURE_CARD_DEFINITIONS["table_chart"] == ("图表处理", "table")
+    assert CAPABILITY_FEATURE_CARD_DEFINITIONS["cleanup"] == ("风险检查", "scan")
+    assert CAPABILITY_FEATURE_CARD_DEFINITIONS["content_fill"] == ("资料包与填充", "pen-tool")
+    assert "page_elements" not in CAPABILITY_FEATURE_CARD_DEFINITIONS
+    assert "page_elements" not in UI_GROUP_MAP
+    assert "figure_table_center" in UI_GROUP_MAP["table_chart"].module_names
+    assert "validation" in UI_GROUP_MAP["cleanup"].module_names
     assert "CAPABILITY_FEATURE_CARD_ORDER" in module_source
     assert "CAPABILITY_FEATURE_CARD_DEFINITIONS" in module_source

@@ -295,11 +295,19 @@ class _TemplateExportSection(QWidget):
         if self._current_template is None:
             raise RuntimeError("no current template is available to save")
 
+        previous_path = (
+            Path(self._template_path).expanduser().resolve(strict=False)
+            if self._template_path
+            else None
+        )
         saved_path = save_template(self._current_template, path)
+        saved_resolved = saved_path.expanduser().resolve(strict=False)
+        is_save_as = previous_path is None or saved_resolved != previous_path
         self._last_template_save_path = str(saved_path)
         self._template_path = str(saved_path)
         self._template_source = "library" if is_template_library_path(saved_path) else "file"
-        self._template_id = self._template_id or saved_path.stem
+        if is_save_as or not self._template_id:
+            self._template_id = saved_path.stem
 
         self._template_export_status.setText(f"已保存当前模板：{saved_path.name}")
         self._last_save_path_label.setText(f"保存到：{saved_path}")

@@ -11,7 +11,18 @@ from src.qt_api import (
     Signal,
 )
 
-from .state import ExecutionProgressState, ExecutionResultState, ReadinessState
+from src.shared.ui.style_difference_summary_slot import StyleDifferenceSummarySlot
+from src.shared.ui.style_receipt_slot_frame import StyleReceiptSlotFrame
+from src.shared.ui.style_management_block import StyleManagementBlock
+from src.ui.panels.style_object_projection_builders import (
+    build_execution_style_projection,
+)
+
+from .state import (
+    ExecutionProgressState,
+    ExecutionResultState,
+    ReadinessState,
+)
 
 
 class ExecutionCenter(QWidget):
@@ -56,6 +67,26 @@ class ExecutionCenter(QWidget):
         self._summary_box = QTextEdit()
         self._summary_box.setReadOnly(True)
         self._summary_box.setObjectName("wb_execution_summary")
+        self._style_receipt_slot = StyleReceiptSlotFrame(
+            self,
+            object_name_prefix="wb_execution_style_receipt",
+        )
+        self._style_receipt_row = self._style_receipt_slot.receipt_row
+        self._style_difference_slot = StyleDifferenceSummarySlot(
+            self,
+            object_name_prefix="wb_execution_style_difference",
+        )
+        self._style_difference_slot.setVisible(False)
+        self._style_receipt_block = StyleManagementBlock(
+            self,
+            title="样式回执",
+            icon_name="type-outline",
+            object_name_prefix="wb_execution_style_receipt",
+            mode="execution_receipt_review",
+            difference_slot=self._style_difference_slot,
+            receipt_slot=self._style_receipt_slot,
+        )
+        self._style_receipt_block.setVisible(False)
 
         layout.addWidget(self._center_title)
         layout.addWidget(self._ready_label)
@@ -76,6 +107,7 @@ class ExecutionCenter(QWidget):
 
         layout.addWidget(self._status_label)
         layout.addWidget(self._summary_title)
+        layout.addWidget(self._style_receipt_block)
         layout.addWidget(self._summary_box)
 
         self._execute_button.clicked.connect(self.execute_requested.emit)
@@ -119,10 +151,43 @@ class ExecutionCenter(QWidget):
         self._execution_running = False
         self._status_label.setText(self._friendly_status(state.status))
         summary_text = state.summary
+        style_projection = build_execution_style_projection(
+            style_source_envelope=state.style_source_envelope,
+            style_source_summary=state.style_source_summary,
+            difference=state.style_difference_summary,
+        )
+        self._style_receipt_block.apply_style_object_projection(style_projection)
+        self._style_difference_slot.setVisible(style_projection.difference is not None)
+        self._sync_style_receipt_block_visible()
+        if state.object_preflight_summary:
+            object_preflight_text = state.object_preflight_summary
+            if state.object_preflight_details:
+                object_preflight_text = (
+                    f"{object_preflight_text}\n"
+                    + "\n".join(f"- {line}" for line in state.object_preflight_details)
+                )
+            summary_text = f"{summary_text}\n\n{object_preflight_text}"
+        if state.material_field_consistency_summary:
+            summary_text = f"{summary_text}\n\n{state.material_field_consistency_summary}"
+        if state.batch_isolation_summary:
+            batch_text = state.batch_isolation_summary
+            if state.batch_isolation_details:
+                batch_text = (
+                    f"{batch_text}\n"
+                    + "\n".join(f"- {line}" for line in state.batch_isolation_details)
+                )
+            summary_text = f"{summary_text}\n\n{batch_text}"
         if state.diagnostics_summary:
             summary_text = f"{summary_text}\n\n{state.diagnostics_summary}"
         self.set_summary(summary_text)
         self._sync_action_buttons()
+
+    def _sync_style_receipt_block_visible(self) -> None:
+        self._style_receipt_block.setVisible(
+            self._style_receipt_slot.has_receipt()
+            or not self._style_difference_slot.isHidden()
+        )
+        self._style_receipt_block.updateGeometry()
 
     def _sync_action_buttons(self) -> None:
         if self._execution_running:

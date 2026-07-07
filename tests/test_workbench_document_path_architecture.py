@@ -32,6 +32,7 @@ def test_document_path_controller_owns_normalization_and_picker_fallback():
 
     assert "def accept_detail_selection" in controller_source
     assert "def apply_loaded_document" in controller_source
+    assert "def selected_existing_document" in controller_source
     assert "def resolve_execution_document" in controller_source
     assert "def has_selected_document" in controller_source
     assert "def _normalize_any_path" in controller_source

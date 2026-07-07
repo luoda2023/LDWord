@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-from src.qt_api import QLabel, QVBoxLayout, QWidget
+from src.config.material_context import MaterialExecutionContext
+from src.qt_api import QLabel, QLineEdit, QVBoxLayout, QWidget, Signal
 
 from src.shared.ui.card import Card
 from src.shared.ui.execution_progress_widget import ExecutionProgressWidget
 from src.shared.ui.file_drop_zone import FileDropZone
+from src.shared.ui.folder_picker import FolderPicker
+from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.module_status_list import ModuleStatusList
 from src.shared.ui.search_input import SearchInput
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.template_form_layout import TemplateFormStack, template_form_row
+from src.shared.ui.text_area import TextArea
 from src.shared.ui.themed_slider import ThemedSlider
 from src.shared.ui.toggle_switch import ToggleSwitch
 from src.shared.ui.theme import bind_theme, get_theme
@@ -71,12 +76,12 @@ class _FeatureDetailPaneBase(QWidget):
 
 
 class TableChartDetailPane(_FeatureDetailPaneBase):
-    """表格与图表能力组详情页。"""
+    """图表处理能力组详情页。"""
 
     def __init__(self, parent=None):
         super().__init__(
-            "表格与图表",
-            "集中管理图表题注、对齐方式和续表规则，后续可以直接接入 table_format / caption 等模块。",
+            "图表处理",
+            "选择运行时是否处理表格、题注和图表位置；边框、题注样式等外观基线来自模板。",
             parent=parent,
         )
 
@@ -93,7 +98,7 @@ class TableChartDetailPane(_FeatureDetailPaneBase):
         self._add_form_rows(
             caption_card,
             [
-                template_form_row("题注样式", self._caption_style_combo, parent=caption_card),
+                template_form_row("题注处理", self._caption_style_combo, parent=caption_card),
                 template_form_row(
                     "题注间距",
                     self._caption_gap_slider,
@@ -134,81 +139,17 @@ class TableChartDetailPane(_FeatureDetailPaneBase):
         )
 
 
-class PageElementsDetailPane(_FeatureDetailPaneBase):
-    """页面元素能力组详情页。"""
-
-    def __init__(self, parent=None):
-        super().__init__(
-            "页面元素",
-            "管理页眉页脚、页码和目录联动，后续适合接入 header_footer 与 toc 等模块。",
-            parent=parent,
-        )
-
-        header_card = self._build_card("页眉页脚策略")
-        self._header_footer_combo = StyledComboBox(header_card)
-        self._header_footer_combo.addItems(["首页不同", "全篇统一", "分节继承"])
-        self._header_footer_combo.currentTextChanged.connect(lambda *_: self._refresh_summary())
-
-        self._page_number_toggle = ToggleSwitch(header_card, checked=True)
-        self._page_number_toggle.toggled_signal.connect(lambda *_: self._refresh_summary())
-        self._add_form_rows(
-            header_card,
-            [
-                template_form_row("页眉页脚", self._header_footer_combo, parent=header_card),
-                template_form_row("页码联动", self._page_number_toggle, parent=header_card),
-            ],
-        )
-        self._layout.addWidget(header_card)
-
-        toc_card = self._build_card("目录与附加项")
-        self._toc_toggle = ToggleSwitch(toc_card, checked=True)
-        self._toc_toggle.toggled_signal.connect(lambda *_: self._refresh_summary())
-
-        self._toc_depth_slider = ThemedSlider(parent=toc_card)
-        self._toc_depth_slider.setRange(1, 6)
-        self._toc_depth_slider.setValue(3)
-        self._toc_depth_slider.valueChanged.connect(self._update_depth_label)
-        self._toc_depth_value = QLabel("3 级", toc_card)
-        self._add_form_rows(
-            toc_card,
-            [
-                template_form_row("自动刷新目录", self._toc_toggle, parent=toc_card),
-                template_form_row(
-                    "目录深度",
-                    self._toc_depth_slider,
-                    suffix_widget=self._toc_depth_value,
-                    parent=toc_card,
-                ),
-            ],
-        )
-        self._layout.addWidget(toc_card)
-
-        self._refresh_summary()
-        self.finish_setup()
-
-    def _update_depth_label(self, value: int) -> None:
-        self._toc_depth_value.setText(f"{value} 级")
-        self._refresh_summary()
-
-    def _refresh_summary(self) -> None:
-        page_number_text = "页码开启" if self._page_number_toggle.isChecked() else "页码关闭"
-        toc_text = "自动刷新目录" if self._toc_toggle.isChecked() else "目录手动维护"
-        self.set_summary(
-            f"当前策略：{self._header_footer_combo.currentText()} · {page_number_text} · {toc_text} · 目录 {self._toc_depth_slider.value()} 级"
-        )
-
-
 class FormulaDetailPane(_FeatureDetailPaneBase):
-    """公式规范能力组详情页。"""
+    """公式处理能力组详情页。"""
 
     def __init__(self, parent=None):
         super().__init__(
-            "公式规范",
-            "统一公式样式、化学式排版和展示对齐方式，后续可直接承接 equation_table_format 与 chem_typography。",
+            "公式处理",
+            "设置公式转换、低置信度处理和化学式修正；公式外观基线来自模板。",
             parent=parent,
         )
 
-        formula_card = self._build_card("公式样式")
+        formula_card = self._build_card("公式处理")
         self._formula_style_combo = StyledComboBox(formula_card)
         self._formula_style_combo.addItems(["学位论文公式", "期刊简洁样式", "技术文档样式"])
         self._formula_style_combo.currentTextChanged.connect(lambda *_: self._refresh_summary())
@@ -219,7 +160,7 @@ class FormulaDetailPane(_FeatureDetailPaneBase):
         self._add_form_rows(
             formula_card,
             [
-                template_form_row("公式样式", self._formula_style_combo, parent=formula_card),
+                template_form_row("处理方案", self._formula_style_combo, parent=formula_card),
                 template_form_row("显示方式", self._formula_align_combo, parent=formula_card),
             ],
         )
@@ -263,12 +204,12 @@ class FormulaDetailPane(_FeatureDetailPaneBase):
 
 
 class CitationDetailPane(_FeatureDetailPaneBase):
-    """参考文献能力组详情页。"""
+    """引用处理能力组详情页。"""
 
     def __init__(self, parent=None):
         super().__init__(
-            "参考文献",
-            "管理引文样式、上标联动和重排规则，后续可以直接接入 reference_format。",
+            "引用处理",
+            "处理正文引用和参考条目的编号/链接；参考文献列表排版来自模板。",
             parent=parent,
         )
 
@@ -282,7 +223,7 @@ class CitationDetailPane(_FeatureDetailPaneBase):
         self._add_form_rows(
             citation_card,
             [
-                template_form_row("引文样式", self._citation_style_combo, parent=citation_card),
+                template_form_row("引用规则", self._citation_style_combo, parent=citation_card),
                 template_form_row("正文上标联动", self._superscript_toggle, parent=citation_card),
             ],
         )
@@ -327,12 +268,12 @@ class CitationDetailPane(_FeatureDetailPaneBase):
 
 
 class CleanupDetailPane(_FeatureDetailPaneBase):
-    """校验与清理能力组详情页。"""
+    """风险检查能力域详情页。"""
 
     def __init__(self, parent=None):
         super().__init__(
-            "校验与清理",
-            "用于统一清洗 Markdown 残留、空白噪声和结构异常，适合作为最终执行前的质量闸门。",
+            "风险检查",
+            "用于统一清洗 Markdown 残留、空白噪声和结构异常，适合作为最终执行前的合规闸门。",
             parent=parent,
         )
 
@@ -397,12 +338,14 @@ class CleanupDetailPane(_FeatureDetailPaneBase):
 
 
 class ContentDataDetailPane(_FeatureDetailPaneBase):
-    """内容与数据能力组详情页。"""
+    """资料包与填充能力域详情页。"""
+
+    material_context_changed = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(
-            "内容与数据",
-            "从结构化数据源选择模板，再决定映射强度与预览策略，后续可以分拆为更细的填充和插入能力。",
+            "资料包与填充",
+            "从资料源选择模板，再决定映射强度与预览策略，后续可以分拆为更细的填充和插入能力。",
             parent=parent,
         )
 
@@ -445,6 +388,31 @@ class ContentDataDetailPane(_FeatureDetailPaneBase):
         source_card.add_widget(self._source_hint)
         self._layout.addWidget(source_card)
 
+        entity_card = self._build_card("当前资料")
+        self._profile_name_edit = QLineEdit(entity_card)
+        self._profile_name_edit.setPlaceholderText("未选择资料")
+        self._profile_name_edit.textChanged.connect(lambda *_: self._on_material_context_edited())
+
+        self._assets_picker = FolderPicker(placeholder="未选择图片目录", parent=entity_card)
+        self._assets_picker.folder_changed.connect(lambda *_: self._on_material_context_edited())
+
+        self._entity_fields_edit = TextArea(
+            placeholder="company_name=测试公司\nlegal_person=张三",
+            min_height=88,
+            max_height=140,
+            parent=entity_card,
+        )
+        self._entity_fields_edit.text_changed.connect(self._on_material_context_edited)
+        self._add_form_rows(
+            entity_card,
+            [
+                template_form_row("当前资料", self._profile_name_edit, parent=entity_card),
+                template_form_row("图片目录", self._assets_picker, parent=entity_card),
+                template_form_row("填资料", self._entity_fields_edit, parent=entity_card),
+            ],
+        )
+        self._layout.addWidget(entity_card)
+
         behavior_card = self._build_card("预览与映射强度")
         self._confidence_slider = ThemedSlider(parent=behavior_card)
         self._confidence_slider.setRange(50, 100)
@@ -475,20 +443,83 @@ class ContentDataDetailPane(_FeatureDetailPaneBase):
         self._confidence_value.setText(f"{value}%")
         self._refresh_summary()
 
+    def material_context(self) -> MaterialExecutionContext:
+        return MaterialExecutionContext(
+            profile_name=self._profile_name_edit.text().strip(),
+            entity_data=_parse_entity_fields_text(self._entity_fields_edit.get_text()),
+            entity_assets_dir=self._assets_picker.path().strip(),
+        )
+
+    def set_material_context(
+        self,
+        context: MaterialExecutionContext | None,
+        *,
+        emit_signal: bool = True,
+    ) -> None:
+        context = context.clone() if isinstance(context, MaterialExecutionContext) else MaterialExecutionContext()
+
+        self._profile_name_edit.blockSignals(True)
+        self._entity_fields_edit.blockSignals(True)
+        self._assets_picker.blockSignals(True)
+        try:
+            self._profile_name_edit.setText(context.profile_name)
+            self._entity_fields_edit.set_text(_format_entity_fields_text(context.entity_data))
+            self._assets_picker.set_path(context.entity_assets_dir)
+        finally:
+            self._assets_picker.blockSignals(False)
+            self._entity_fields_edit.blockSignals(False)
+            self._profile_name_edit.blockSignals(False)
+
+        self._refresh_summary()
+        if emit_signal:
+            self.material_context_changed.emit(self.material_context())
+
+    def _on_material_context_edited(self) -> None:
+        self._refresh_summary()
+        self.material_context_changed.emit(self.material_context())
+
     def _refresh_summary(self) -> None:
         template_name = self._template_combo.currentText() or "未选择模板"
         source_name = self._source_picker.file_path() or "未挂载数据源"
         source_label = source_name.split("\\")[-1] if source_name else "未挂载数据源"
         placeholder_text = "保留未匹配占位符" if self._placeholder_toggle.isChecked() else "直接落地替换"
         preview_text = "开启自动预览" if self._preview_toggle.isChecked() else "仅保存结果"
+        material = self.material_context()
+        entity_text = material.profile_name or "未选择资料"
+        field_text = f"资料已填 {len(material.entity_data)} 项" if material.entity_data else "资料未填写"
+        assets_text = "图片目录已选择" if material.entity_assets_dir else "图片目录未选择"
         self.set_summary(
-            f"当前流程：{template_name} · 数据源 {source_label} · 信心度 {self._confidence_slider.value()}% · {placeholder_text} · {preview_text}"
+            f"当前流程：{template_name} · 数据源 {source_label} · 当前资料 {entity_text} · {field_text} · {assets_text} · 信心度 {self._confidence_slider.value()}% · {placeholder_text} · {preview_text}"
         )
 
     def _apply_theme(self) -> None:
         super()._apply_theme()
         theme = get_theme()
         self._source_hint.setStyleSheet(f"font-size: {theme.font_size_sm}px; color: {theme.text_hint};")
+        apply_size_class(self._profile_name_edit, "md")
+        self._profile_name_edit.setStyleSheet(build_text_input_stylesheet(theme))
+
+
+def _parse_entity_fields_text(text: str) -> dict[str, str]:
+    entity_data: dict[str, str] = {}
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, value = line.split("=", 1)
+        elif ":" in line:
+            key, value = line.split(":", 1)
+        else:
+            continue
+        key = key.strip()
+        if key:
+            entity_data[key] = value.strip()
+    return entity_data
+
+
+def _format_entity_fields_text(entity_data: dict[str, str]) -> str:
+    return "\n".join(f"{key}={value}" for key, value in entity_data.items())
 
 
 class ExecutionHistoryDetailPane(_FeatureDetailPaneBase):
@@ -553,7 +584,6 @@ __all__ = [
     "ContentDataDetailPane",
     "ExecutionHistoryDetailPane",
     "FormulaDetailPane",
-    "PageElementsDetailPane",
     "QuickFillDetailPane",
     "TableChartDetailPane",
 ]
