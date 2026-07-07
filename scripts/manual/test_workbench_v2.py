@@ -3,11 +3,13 @@ Test script to preview Workbench V2 panel.
 """
 
 import sys
-from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
+try:
+    from ._bootstrap import ensure_project_root
+except ImportError:
+    from _bootstrap import ensure_project_root
+
+ensure_project_root()
 
 from src.qt_api import QApplication
 from src.ui.panels.workbench.panel_v2 import WorkbenchPanelV2

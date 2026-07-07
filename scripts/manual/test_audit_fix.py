@@ -1,4 +1,12 @@
 import sys, traceback
+
+try:
+    from ._bootstrap import ensure_project_root
+except ImportError:
+    from _bootstrap import ensure_project_root
+
+ensure_project_root()
+
 from src.qt_api import QApplication, QTimer
 
 sys.excepthook = lambda *a: (traceback.print_exception(*a),)

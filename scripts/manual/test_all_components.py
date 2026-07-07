@@ -2,13 +2,20 @@
 
 运行方式：
     cd \"c:/Users/Administrator/Desktop/Lark-Formatter 1.0/Lark-Formatter V1.0\"
-    python test_all_components.py
+    python scripts/manual/test_all_components.py
 """
 
 from __future__ import annotations
 
 import sys
 from datetime import date, timedelta
+
+try:
+    from ._bootstrap import ensure_project_root
+except ImportError:
+    from _bootstrap import ensure_project_root
+
+ensure_project_root()
 
 from src.qt_api import (
     QApplication,

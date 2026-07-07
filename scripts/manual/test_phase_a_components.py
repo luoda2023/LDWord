@@ -1,6 +1,14 @@
 """Phase A 控件测试脚本"""
 
 import sys
+
+try:
+    from ._bootstrap import ensure_project_root
+except ImportError:
+    from _bootstrap import ensure_project_root
+
+ensure_project_root()
+
 from src.qt_api import QApplication, QVBoxLayout, QWidget
 from src.shared.ui import Divider, TagChip, Spin, Typography
 from src.shared.ui.theme import set_theme, LIGHT
