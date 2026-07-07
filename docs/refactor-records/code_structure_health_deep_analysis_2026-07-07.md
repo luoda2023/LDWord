@@ -4759,3 +4759,55 @@ git -c core.quotepath=false diff --cached --name-only | rg "^docs/"
 | `64bb446` | `Add style source report visual audit` | `style-source-report-visual-audit` |
 
 该提交补上 style source 的报告出口与可复现视觉审计入口，避免样式来源行只停留在页面测试里而缺少可人工复核的截图证据。
+
+### 10.75 阶段 0 最终完成审计: 按文档执行到可证明完成状态
+
+执行日期: 2026-07-07
+
+本轮按原始目标“按照文档持续执行到完成”做最终完成审计。审计不以历史意图为准，而以当前工作区、提交链、文档记录和可重复门禁命令为准。
+
+完成要求与证据矩阵:
+
+| 文档要求 | 当前证据 | 判定 |
+| --- | --- | --- |
+| 阶段 0: 冻结并收口工作区，避免混杂大变更 | `git status --short` 无输出；最新提交链从 `a24a5e5` 到 `e36462e` 已按边界拆分；ignored 本地产物未进入普通 status；`check_public_release.py --strict` 通过 | 完成 |
+| 阶段 1: 建立工程配置与门禁基线 | `pyproject.toml`、`.github/workflows/*`、`scripts/engineering_gate.py`、`scripts/check_public_release.py` 已在提交链中；当前 `python scripts\engineering_gate.py` 通过 | 完成 |
+| 阶段 2: 修复 `config -> ui` 反向依赖 | `rg "src\\.ui|from src\\.ui|import src\\.ui" src\config scripts` 当前只命中 `scripts/export_style_source_visual_audit.py` 与 `scripts/manual/test_workbench_v2.py`；未命中 `src/config` | 完成 |
+| 阶段 3: 拆分最高风险大文件与高耦合模块 | `report_writer`、`workbench_execution_adapter`、`scene_panel`、`scene_matrix_dashboard`、`scene_matrix_drilldown`、workbench/template/scene 页面族均已有独立提交、helper/service/adapters 和对应测试守门 | 完成 |
+| 阶段 4: 清理文档和生成物边界 | `docs/refactor-records/`、`docs/audits/`、`docs/visual_checks/` 等迁移记录已提交；public release strict 通过；工作区无普通未提交文档/生成物 | 完成 |
+| 架构守门测试与分组测试可重复运行 | 当前 engineering gate、scene matrix release gate、runtime pytest groups、UI 综合 pytest 均通过 | 完成 |
+| 用 MD 记录执行内容和步骤 | 本文件已记录 1-10.75 的扫描、风险、阶段策略、每批提交、验证命令、结果和最终完成审计 | 完成 |
+
+当前验证命令:
+
+```powershell
+git -c core.quotepath=false status --short
+rg -n "src\.ui|from src\.ui|import src\.ui" src\config scripts | Select-Object -First 200
+python scripts\check_public_release.py --strict
+python scripts\engineering_gate.py
+python scripts\verify_scene_matrix_release_gate.py
+python scripts\run_pytest_groups.py --groups count,exam,fixed,journal,material,object,output,page,table,citation,execution,header --split-files --timeout 300 --continue-on-fail
+python -m pytest -q tests\test_question_figure_repair_runtime.py tests\test_workbench_execution_center.py tests\test_recent_run_panel.py tests\test_quick_execution_detail_architecture.py tests\test_workbench_execution_architecture.py tests\test_workbench_navigation_architecture.py tests\test_workbench_detail_architecture.py tests\test_workbench_execution_session_architecture.py tests\test_workbench_document_path_architecture.py tests\test_workbench_document_path_semantics.py tests\test_scene_panel_architecture.py tests\test_scene_family_application.py tests\test_scene_family_registry.py tests\test_scene_journey_runtime.py tests\test_scene_overview_projection.py tests\test_scene_repair_routing.py tests\test_template_dirty_state.py tests\test_template_format_projection.py tests\test_template_page_detail.py tests\test_template_panel_architecture.py tests\test_template_panel_source_text.py tests\test_template_remaining_details.py tests\test_template_secondary_details.py tests\test_template_style_detail.py tests\test_template_style_preview.py tests\test_design_system_refactor.py tests\test_ui_layout_hardening.py tests\test_windows_text_rendering_policy.py tests\test_ui_copy_guardrails.py tests\test_style_source_visual_audit.py
+```
+
+当前验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| `git status --short` | 无输出，工作区干净 |
+| config/ui 反向依赖扫描 | 未命中 `src/config`；仅命中 UI 审计脚本和手工预览脚本 |
+| public release strict | `[OK] No obvious public-release blockers were found.` |
+| engineering gate | compileall 通过；`1801 tests collected in 1.95s`；smoke tests `10 passed in 0.67s`；`Engineering gate passed.` |
+| scene matrix release gate | `Scene matrix release gate: passed`；全部 checks `passed (0 issues)`；`drilldowns=37/37`、`drilldown_rows=556/556`、`drilldown_sources=107/107 ready` |
+| runtime pytest groups | 全部通过: citation `3`、count `6`、exam `26`、execution `51`、fixed `8`、header `16`、journal `7`、material `73`、object `11`、output `28`、page `11`、table `12` |
+| UI/交互综合 pytest | `571 passed in 133.14s` |
+
+最终状态判定:
+
+当前项目已经达到本轮文档目标下的“可证明完成”状态: 工作区已收口，主要结构风险已有拆分或守门，跨层反向依赖未回潮，发布/工程/scene release/runtime/UI 综合门禁均通过，执行过程和证据已记录在本 MD 中。
+
+仍可后续优化但不阻塞本轮完成的事项:
+
+- 部分 UI 和 scene/config 模块仍然偏大，后续可以继续按职责细拆。
+- ignored 本地调试产物仍存在于开发机，但它们不进入普通工作区状态，也未阻断 public release strict。
+- 测试总量较大，后续可继续优化分组运行时间和 CI 并行策略。
