@@ -278,6 +278,12 @@ class _ReleaseGateFoundation:
     task_lexicon_report: object
 
 
+@dataclass(slots=True)
+class _ReleaseGovernanceExportEvidenceGate:
+    evidence: list[dict[str, object]]
+    counts: dict[str, int]
+
+
 def _build_release_governance_export_script_evidence(
     reports: tuple[tuple[str, object], ...],
 ) -> list[dict[str, object]]:
@@ -336,6 +342,100 @@ def _release_governance_export_script_evidence_counts(
         "missing_count": missing_count,
         "unready_count": len(rows) - ready_count - missing_count,
     }
+
+
+def _build_release_governance_export_evidence_gate(
+    *,
+    checks: dict[str, object],
+    boundary_guarded_completion_report: object,
+    residual_warning_governance_report: object,
+    boundary_readiness_reconciliation_report: object,
+    terminal_release_exception_report: object,
+    boundary_subject_release_dossier_report: object,
+    non_subject_release_trace_attribution_report: object,
+    release_trace_partition_guard_report: object,
+    release_projection_surface_parity_report: object,
+    boundary_subject_release_continuity_report: object,
+    boundary_maturity_release_envelope_report: object,
+    retained_gap_exit_criteria_report: object,
+    release_residual_ratio_ledger_report: object,
+    release_residual_explanation_report: object,
+    release_closure_ledger_report: object,
+    release_acceptance_certificate_report: object,
+) -> _ReleaseGovernanceExportEvidenceGate:
+    evidence = _build_release_governance_export_script_evidence(
+        (
+            (
+                "scene_boundary_guarded_completion_audit",
+                boundary_guarded_completion_report,
+            ),
+            (
+                "scene_residual_warning_governance_audit",
+                residual_warning_governance_report,
+            ),
+            (
+                "scene_boundary_readiness_reconciliation_audit",
+                boundary_readiness_reconciliation_report,
+            ),
+            (
+                "scene_terminal_release_exception_audit",
+                terminal_release_exception_report,
+            ),
+            (
+                "scene_boundary_subject_release_dossier_audit",
+                boundary_subject_release_dossier_report,
+            ),
+            (
+                "scene_non_subject_release_trace_attribution_audit",
+                non_subject_release_trace_attribution_report,
+            ),
+            (
+                "scene_release_trace_partition_guard_audit",
+                release_trace_partition_guard_report,
+            ),
+            (
+                "scene_release_projection_surface_parity_audit",
+                release_projection_surface_parity_report,
+            ),
+            (
+                "scene_boundary_subject_release_continuity_audit",
+                boundary_subject_release_continuity_report,
+            ),
+            (
+                "scene_boundary_maturity_release_envelope_audit",
+                boundary_maturity_release_envelope_report,
+            ),
+            (
+                "scene_retained_gap_exit_criteria_audit",
+                retained_gap_exit_criteria_report,
+            ),
+            (
+                "scene_release_residual_ratio_ledger_audit",
+                release_residual_ratio_ledger_report,
+            ),
+            (
+                "scene_release_residual_explanation_audit",
+                release_residual_explanation_report,
+            ),
+            (
+                "scene_release_closure_ledger_audit",
+                release_closure_ledger_report,
+            ),
+            (
+                "scene_release_acceptance_certificate_audit",
+                release_acceptance_certificate_report,
+            ),
+        )
+    )
+    checks["scene_release_governance_export_script_evidence"] = (
+        _string_issue_check(
+            _release_governance_export_script_evidence_issues(evidence)
+        )
+    )
+    return _ReleaseGovernanceExportEvidenceGate(
+        evidence=evidence,
+        counts=_release_governance_export_script_evidence_counts(evidence),
+    )
 
 
 def _build_release_gate_foundation(output_dir: Path) -> _ReleaseGateFoundation:
@@ -718,84 +818,42 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
             release_residual_explanation_report
         )
     )
+    release_governance_export_gate = (
+        _build_release_governance_export_evidence_gate(
+            checks=checks,
+            boundary_guarded_completion_report=boundary_guarded_completion_report,
+            residual_warning_governance_report=residual_warning_governance_report,
+            boundary_readiness_reconciliation_report=(
+                boundary_readiness_reconciliation_report
+            ),
+            terminal_release_exception_report=terminal_release_exception_report,
+            boundary_subject_release_dossier_report=(
+                boundary_subject_release_dossier_report
+            ),
+            non_subject_release_trace_attribution_report=(
+                non_subject_release_trace_attribution_report
+            ),
+            release_trace_partition_guard_report=release_trace_partition_guard_report,
+            release_projection_surface_parity_report=(
+                release_projection_surface_parity_report
+            ),
+            boundary_subject_release_continuity_report=(
+                boundary_subject_release_continuity_report
+            ),
+            boundary_maturity_release_envelope_report=(
+                boundary_maturity_release_envelope_report
+            ),
+            retained_gap_exit_criteria_report=retained_gap_exit_criteria_report,
+            release_residual_ratio_ledger_report=release_residual_ratio_ledger_report,
+            release_residual_explanation_report=release_residual_explanation_report,
+            release_closure_ledger_report=release_closure_ledger_report,
+            release_acceptance_certificate_report=release_acceptance_certificate_report,
+        )
+    )
     release_governance_export_script_evidence = (
-        _build_release_governance_export_script_evidence(
-            (
-                (
-                    "scene_boundary_guarded_completion_audit",
-                    boundary_guarded_completion_report,
-                ),
-                (
-                    "scene_residual_warning_governance_audit",
-                    residual_warning_governance_report,
-                ),
-                (
-                    "scene_boundary_readiness_reconciliation_audit",
-                    boundary_readiness_reconciliation_report,
-                ),
-                (
-                    "scene_terminal_release_exception_audit",
-                    terminal_release_exception_report,
-                ),
-                (
-                    "scene_boundary_subject_release_dossier_audit",
-                    boundary_subject_release_dossier_report,
-                ),
-                (
-                    "scene_non_subject_release_trace_attribution_audit",
-                    non_subject_release_trace_attribution_report,
-                ),
-                (
-                    "scene_release_trace_partition_guard_audit",
-                    release_trace_partition_guard_report,
-                ),
-                (
-                    "scene_release_projection_surface_parity_audit",
-                    release_projection_surface_parity_report,
-                ),
-                (
-                    "scene_boundary_subject_release_continuity_audit",
-                    boundary_subject_release_continuity_report,
-                ),
-                (
-                    "scene_boundary_maturity_release_envelope_audit",
-                    boundary_maturity_release_envelope_report,
-                ),
-                (
-                    "scene_retained_gap_exit_criteria_audit",
-                    retained_gap_exit_criteria_report,
-                ),
-                (
-                    "scene_release_residual_ratio_ledger_audit",
-                    release_residual_ratio_ledger_report,
-                ),
-                (
-                    "scene_release_residual_explanation_audit",
-                    release_residual_explanation_report,
-                ),
-                (
-                    "scene_release_closure_ledger_audit",
-                    release_closure_ledger_report,
-                ),
-                (
-                    "scene_release_acceptance_certificate_audit",
-                    release_acceptance_certificate_report,
-                ),
-            )
-        )
+        release_governance_export_gate.evidence
     )
-    release_governance_export_script_counts = (
-        _release_governance_export_script_evidence_counts(
-            release_governance_export_script_evidence
-        )
-    )
-    checks["scene_release_governance_export_script_evidence"] = (
-        _string_issue_check(
-            _release_governance_export_script_evidence_issues(
-                release_governance_export_script_evidence
-            )
-        )
-    )
+    release_governance_export_script_counts = release_governance_export_gate.counts
     if _pytest_release_gate_lightweight_enabled():
         matrix_drilldown = _MatrixDrilldownReleaseGateSnapshot()
         checks["scene_matrix_drilldown"] = _issue_check([])

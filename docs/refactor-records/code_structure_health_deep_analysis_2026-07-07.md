@@ -4913,3 +4913,53 @@ python scripts\verify_scene_matrix_release_gate.py
 - `build_scene_matrix_release_gate_payload()` 仍然偏长，下一步建议抽取 release governance/report-family 聚合段，优先拆出只生成 report 与 checks 的 helper，继续避免重排最终 payload 字典。
 - foundation helper 已经证明不会影响 release gate 输出；后续拆分可以沿用“先返回 dataclass 上下文，再由主 builder 组装 payload”的方式。
 - 当前 source evidence marker 仍由 CLI wrapper 明确保留；若后续审计规则支持多文件 source evidence，可以把 marker 与真实构建逻辑进一步合并到 payload 模块。
+
+### 10.78 后续优化第三刀: release governance export evidence gate 抽取
+
+执行日期: 2026-07-08
+
+本轮继续沿着第 10.77 节的方向处理 `scripts/scene_matrix_release_gate_payload.py`。这次没有直接搬动最终 payload 字典，而是选择 release governance export evidence 这段已有清晰输入/输出的内联逻辑: 它只负责把 15 个 release governance 相关 report 的 `source_evidence` 汇总成 export script evidence、统计 counts，并写入 `scene_release_governance_export_script_evidence` check。
+
+已完成改动:
+
+- 新增 `_ReleaseGovernanceExportEvidenceGate` dataclass
+  - 承载 `evidence` 与 `counts` 两个后续 payload 会继续使用的输出。
+- 新增 `_build_release_governance_export_evidence_gate(...)`
+  - 接收 15 个 release governance 相关 report。
+  - 复用既有 `_build_release_governance_export_script_evidence()`、`_release_governance_export_script_evidence_counts()`、`_release_governance_export_script_evidence_issues()`。
+  - 在 helper 内集中写入 `scene_release_governance_export_script_evidence` check，避免主 builder 继续内联证据拼装和 issue 转换。
+- 收窄 `build_scene_matrix_release_gate_payload()`
+  - 将原本的长 tuple 拼装、counts 计算、check 写入替换成一次 gate helper 调用。
+  - 保留 `release_governance_export_script_evidence` 与 `release_governance_export_script_counts` 变量名，降低对后续 counts/payload 组装的影响面。
+
+规模变化:
+
+| 指标 | 调整后 | 说明 |
+| --- | ---: | --- |
+| `scripts/scene_matrix_release_gate_payload.py` 总行数 | `2515` | 新增 dataclass/helper 后总行数上升，但主聚合函数继续收窄 |
+| `build_scene_matrix_release_gate_payload()` | `1951` 行 | 从 `1993` 行降到 `1951` 行 |
+| `_build_release_governance_export_evidence_gate()` | `92` 行 | release governance export evidence 的独立 gate 边界 |
+
+验证命令:
+
+```powershell
+python -m compileall -q scripts\scene_matrix_release_gate_payload.py scripts\verify_scene_matrix_release_gate.py
+python -m pytest -q tests\test_release_shell.py
+python -m pytest -q tests\test_scene_matrix_dashboard.py tests\test_scene_matrix_drilldown.py tests\test_scene_retained_gap_exit_criteria_audit.py
+python scripts\verify_scene_matrix_release_gate.py
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| release shell pytest | `12 passed in 0.11s` |
+| scene matrix focused pytest | `16 passed in 133.40s` |
+| real scene matrix release gate | `Scene matrix release gate: passed`；`scene_release_governance_export_script_evidence: passed (0 issues)`；`release_export_scripts=15/15 ready`；`drilldowns=37/37`、`drilldown_rows=556/556`、`drilldown_sources=107/107 ready` |
+
+后续仍可继续优化:
+
+- 下一刀可以开始抽取 report build/audit 阶段的上下文对象，例如把 ambiguity/import/input/family/control/count/user-journey/business-capability 这一段先收束为一个 early report context。
+- 对仍被最终 payload 大量引用的 report，不建议一次性全部改成 `context.xxx`，可以继续使用 dataclass 返回 + 主 builder 局部变量过渡的方式逐步降低风险。
+- 当 report context 边界稳定后，再考虑把 counts 字典拆成独立 payload counts builder。
