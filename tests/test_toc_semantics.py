@@ -27,43 +27,45 @@ from src.shared.engine.ooxml_ops import qn
 from src.shared.engine.toc_style_ops import sync_toc_styles
 
 
-def test_toc_style_sync_updates_heading_and_entry_styles():
+def test_toc_style_sync_updates_heading_and_entry_styles_from_toc_roles():
     doc = Document()
     if "TOC Heading" not in [style.name for style in doc.styles]:
         doc.styles.add_style("TOC Heading", WD_STYLE_TYPE.PARAGRAPH)
 
-    config_styles = {
-        "toc_title": StyleConfig(
-            font_cn="Heiti",
-            font_en="Arial",
-            size_pt=16,
-            alignment="center",
-            bold=True,
-            italic=True,
-        ),
-        "toc_level1": StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left"),
-        "toc_level2": StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=12, alignment="left"),
-        "toc_level3": StyleConfig(
-            font_cn="FangSong",
-            font_en="Calibri",
-            size_pt=11,
-            alignment="left",
-            italic=True,
-        ),
-    }
+    config = ResolvedConfig()
+    config.styles["toc_title"] = StyleConfig(
+        font_cn="Heiti",
+        font_en="Arial",
+        size_pt=18,
+        alignment="center",
+        bold=True,
+        italic=True,
+    )
+    config.styles["toc_level1"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=16, alignment="left")
+    config.styles["toc_level2"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
+    config.styles["toc_level3"] = StyleConfig(
+        font_cn="FangSong",
+        font_en="Calibri",
+        size_pt=12,
+        alignment="left",
+        italic=True,
+    )
+    config.styles["toc_level4"] = StyleConfig(font_cn="KaiTi", font_en="Calibri", size_pt=11, alignment="left")
 
-    changed = sync_toc_styles(doc, config_styles)
+    changed = sync_toc_styles(doc, config, max_level=4)
 
-    assert changed == 4
+    assert changed == 5
     toc_heading = doc.styles["TOC Heading"]
     toc_1 = doc.styles["TOC 1"]
     toc_2 = doc.styles["TOC 2"]
     toc_3 = doc.styles["TOC 3"]
+    toc_4 = doc.styles["TOC 4"]
 
-    assert toc_heading.font.size.pt == 16
-    assert toc_1.font.size.pt == 14
-    assert toc_2.font.size.pt == 12
-    assert toc_3.font.size.pt == 11
+    assert toc_heading.font.size.pt == 18
+    assert toc_1.font.size.pt == 16
+    assert toc_2.font.size.pt == 14
+    assert toc_3.font.size.pt == 12
+    assert toc_4.font.size.pt == 11
     assert toc_heading.font.bold is True
     assert toc_heading.font.italic is True
     assert toc_3.font.italic is True
@@ -73,7 +75,19 @@ def test_toc_style_sync_updates_heading_and_entry_styles():
     assert toc_heading_outline.get(qn("w:val")) == "9"
 
 
-def test_toc_style_sync_falls_back_to_shared_toc_style_when_role_styles_are_missing():
+def test_toc_style_sync_uses_toc_roles_when_config_is_passed():
+    doc = Document()
+    config = ResolvedConfig()
+    config.styles["heading1"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
+    config.styles["toc_level1"] = StyleConfig(font_cn="Legacy", font_en="Legacy", size_pt=30, alignment="right")
+
+    changed = sync_toc_styles(doc, config, max_level=1)
+
+    assert changed == 2
+    assert doc.styles["TOC 1"].font.size.pt == 30
+
+
+def test_legacy_toc_style_sync_still_accepts_raw_styles_dict():
     doc = Document()
     config_styles = {
         "toc": StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=12, alignment="left"),
@@ -81,11 +95,10 @@ def test_toc_style_sync_falls_back_to_shared_toc_style_when_role_styles_are_miss
 
     changed = sync_toc_styles(doc, config_styles)
 
-    assert changed == 4
+    assert changed == 7
     assert doc.styles["TOC Heading"].font.size.pt == 12
-    assert doc.styles["TOC 1"].font.size.pt == 12
-    assert doc.styles["TOC 2"].font.size.pt == 12
-    assert doc.styles["TOC 3"].font.size.pt == 12
+    for level in range(1, 7):
+        assert doc.styles[f"TOC {level}"].font.size.pt == 12
 
 
 def test_toc_insert_position_prefers_existing_toc_section_from_doc_tree():
@@ -159,7 +172,7 @@ def test_toc_formats_existing_paragraphs_using_doc_tree_range():
         alignment="left",
         italic=True,
     )
-    sync_toc_styles(doc, config.styles)
+    sync_toc_styles(doc, config, max_level=2)
 
     context = SimpleNamespace(
         doc_tree=SimpleNamespace(get_section=lambda section: SimpleNamespace(start_index=0, end_index=2) if section == "toc" else None)
@@ -201,7 +214,7 @@ def test_toc_resolve_existing_range_rejects_suspicious_doc_tree_section():
     config = ResolvedConfig()
     config.styles["toc_title"] = StyleConfig(font_cn="Heiti", font_en="Arial", size_pt=16, alignment="center")
     config.styles["toc_level1"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=14, alignment="left")
-    sync_toc_styles(doc, config.styles)
+    sync_toc_styles(doc, config, max_level=1)
 
     context = SimpleNamespace(
         doc_tree=SimpleNamespace(get_section=lambda section: SimpleNamespace(start_index=0, end_index=4) if section == "toc" else None)
@@ -245,6 +258,25 @@ def test_toc_plain_mode_inserts_plain_entries_from_front_body_and_back_matter():
     assert doc.paragraphs[3].style.name == "TOC 1"
     assert doc.paragraphs[4].style.name == "TOC 2"
     assert doc.paragraphs[5].style.name == "TOC 1"
+
+
+def test_toc_plain_mode_preserves_fourth_level_entry_style():
+    doc = Document()
+    doc.add_heading("1.1.1.1 Deep Topic", level=4)
+
+    context = PipelineContext(heading_map={0: 4})
+
+    config = ResolvedConfig()
+    config.toc.mode = "plain"
+    config.toc.max_level = 4
+    config.styles["toc_level4"] = StyleConfig(font_cn="KaiTi", font_en="Calibri", size_pt=11, alignment="left")
+
+    TocModule().apply(doc, config, ChangeTracker(), context)
+
+    assert doc.paragraphs[0].text == "目录"
+    assert doc.paragraphs[1].text == "1.1.1.1 Deep Topic"
+    assert doc.paragraphs[1].style.name == "TOC 4"
+    assert doc.styles["TOC 4"].font.size.pt == 11
 
 
 def test_toc_plain_mode_rebuilds_existing_plain_toc_block():

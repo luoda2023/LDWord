@@ -87,6 +87,26 @@ styles:
     line_spacing_type: "exact"
     line_spacing_pt: 20
 
+  references_body:
+    font_cn: "宋体"
+    font_en: "Times New Roman"
+    size_pt: 10.5
+    size_display: "五号"
+    alignment: "justify"
+    first_line_indent_chars: 0
+    hanging_indent_chars: 2
+    line_spacing_type: "exact"
+    line_spacing_pt: 20
+
+  abstract_body:
+    font_cn: "宋体"
+    font_en: "Times New Roman"
+    size_pt: 12
+    alignment: "justify"
+    first_line_indent_chars: 2
+    line_spacing_type: "exact"
+    line_spacing_pt: 20
+
   toc:
     font_cn: "宋体"
     font_en: "Times New Roman"
@@ -153,25 +173,50 @@ styles:
     space_before_pt: 6
     space_after_pt: 0
 
-  references_body:
+  toc_level4:
     font_cn: "宋体"
     font_en: "Times New Roman"
     size_pt: 10.5
-    size_display: "五号"
+    size_display: "10.5"
+    bold: false
     alignment: "justify"
     first_line_indent_chars: 0
-    hanging_indent_chars: 2
-    line_spacing_type: "exact"
-    line_spacing_pt: 20
+    left_indent_chars: 3
+    right_indent_chars: 0
+    line_spacing_type: "multiple"
+    line_spacing_pt: 1
+    space_before_pt: 6
+    space_after_pt: 0
 
-  abstract_body:
+  toc_level5:
     font_cn: "宋体"
     font_en: "Times New Roman"
-    size_pt: 12
+    size_pt: 10.5
+    size_display: "10.5"
+    bold: false
     alignment: "justify"
-    first_line_indent_chars: 2
-    line_spacing_type: "exact"
-    line_spacing_pt: 20
+    first_line_indent_chars: 0
+    left_indent_chars: 4
+    right_indent_chars: 0
+    line_spacing_type: "multiple"
+    line_spacing_pt: 1
+    space_before_pt: 6
+    space_after_pt: 0
+
+  toc_level6:
+    font_cn: "宋体"
+    font_en: "Times New Roman"
+    size_pt: 10.5
+    size_display: "10.5"
+    bold: false
+    alignment: "justify"
+    first_line_indent_chars: 0
+    left_indent_chars: 5
+    right_indent_chars: 0
+    line_spacing_type: "multiple"
+    line_spacing_pt: 1
+    space_before_pt: 6
+    space_after_pt: 0
 
 # 标题编号
 

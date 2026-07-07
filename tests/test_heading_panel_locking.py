@@ -9,10 +9,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.config.template import TemplateConfig
-from src.qt_api import QApplication
+from src.config.template import HeadingLevelBindingConfig, TemplateConfig
+from src.qt_api import QApplication, Qt
 from src.ui.adapters.heading_numbering_adapter import HeadingNumberingAdapter
 from src.ui.bridge import PanelBridge
+from src.ui.heading_numbering_logic import TEMPLATE_MODE_CUSTOM
 from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
 
 _PRESET_KEY = "thesis_standard"
@@ -42,7 +43,79 @@ def test_heading_numbering_panel_preset_combo_contains_only_real_presets():
     try:
         values = [panel._preset_cb.itemData(index) for index in range(panel._preset_cb.count())]
         assert "__custom__" not in values
+        assert "__current_scheme_display__" not in values
         assert panel._preset_cb.placeholderText() == "当前配置（自定义）"
+        assert panel._preset_cb.currentData() == _PRESET_KEY
+        assert panel._adapter.detect_active_preset() == _PRESET_KEY
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_heading_numbering_panel_scheme_actions_are_third_row_and_use_project_button_variants():
+    app, panel = _build_panel()
+
+    try:
+        items = panel._scheme_form._items
+        assert items.index(panel._preset_row) < items.index(panel._levels_row) < items.index(panel._scheme_actions_row)
+        assert panel._scheme_save_as_btn.property("variant") == "secondary"
+        assert panel._scheme_update_btn.property("variant") == "secondary"
+        assert panel._scheme_delete_btn.property("variant") == "ghost-danger"
+        assert panel._scheme_open_folder_btn.property("variant") == "secondary"
+        assert panel._scheme_open_folder_btn.text() == "打开方案文件夹"
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_heading_numbering_panel_scheme_action_row_keeps_buttons_fully_visible():
+    app, panel = _build_panel()
+
+    try:
+        panel.resize(960, 900)
+        app.processEvents()
+
+        buttons = (
+            panel._scheme_save_as_btn,
+            panel._scheme_update_btn,
+            panel._scheme_delete_btn,
+            panel._scheme_open_folder_btn,
+        )
+
+        assert all(button.property("sizeClass") == "md" for button in buttons)
+        assert panel._scheme_actions.layout().alignment() & Qt.AlignVCenter
+        assert panel._scheme_actions.minimumHeight() >= max(
+            button.sizeHint().height() for button in buttons
+        )
+        assert panel._scheme_actions_row.minimumHeight() > panel._scheme_actions.minimumHeight()
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_heading_numbering_panel_opens_user_scheme_folder(tmp_path, monkeypatch):
+    import src.config.heading_presets as heading_presets
+    from src.ui.panels import heading_numbering_panel as panel_module
+
+    target_dir = tmp_path / "heading_numbering_schemes"
+    opened_paths: list[str] = []
+
+    def _fake_open_url(url):
+        opened_paths.append(url.toLocalFile())
+        return True
+
+    monkeypatch.setattr(heading_presets, "USER_SCHEME_DIR", target_dir)
+    monkeypatch.setattr(panel_module.QDesktopServices, "openUrl", _fake_open_url)
+
+    app, panel = _build_panel()
+
+    try:
+        panel._on_scheme_open_folder_requested()
+        app.processEvents()
+
+        assert target_dir.is_dir()
+        assert len(opened_paths) == 1
+        assert Path(opened_paths[0]).resolve() == target_dir.resolve()
     finally:
         panel.close()
         app.processEvents()
@@ -160,8 +233,99 @@ def test_panel_preset_selection_changes_levels():
         app.processEvents()
 
 
-def test_panel_levels_change_clears_preset_when_mismatched():
-    """Changing max levels should make preset display show custom."""
+def test_panel_scheme_save_update_delete_chain(tmp_path, monkeypatch):
+    import src.config.heading_presets as heading_presets
+    from src.ui.panels import heading_numbering_panel as panel_module
+
+    monkeypatch.setattr(heading_presets, "USER_SCHEME_DIR", tmp_path)
+    monkeypatch.setattr(panel_module.QInputDialog, "getText", lambda *_args, **_kwargs: ("面板方案", True))
+    monkeypatch.setattr(panel_module.QMessageBox, "question", lambda *_args, **_kwargs: panel_module.QMessageBox.Yes)
+    monkeypatch.setattr(panel_module.Toast, "show_success", lambda *_args, **_kwargs: None)
+
+    app, panel = _build_panel()
+
+    try:
+        panel._on_scheme_save_as_requested()
+        app.processEvents()
+
+        scheme_id = panel._adapter.active_scheme_key()
+        assert scheme_id is not None and scheme_id.startswith("user.")
+        assert panel._preset_cb.currentData() == scheme_id
+        assert panel._scheme_update_btn.isEnabled() is False
+        assert panel._scheme_delete_btn.isEnabled() is True
+
+        panel._adapter.set_binding_field(1, "display_template_mode", TEMPLATE_MODE_CUSTOM)
+        panel._adapter.set_binding_field(1, "display_template", "第{nn}章")
+        panel._mark_dirty()
+        app.processEvents()
+        assert panel._scheme_update_btn.isEnabled() is True
+        panel._on_scheme_update_requested()
+        app.processEvents()
+        saved = heading_presets.get_preset_bindings(scheme_id)
+        assert saved is not None
+        assert saved["heading1"].display_template_mode == TEMPLATE_MODE_CUSTOM
+        assert saved["heading1"].display_template == "第{nn}章"
+        assert panel._scheme_update_btn.isEnabled() is False
+
+        panel._on_scheme_delete_requested()
+        app.processEvents()
+
+        assert heading_presets.is_user_preset(scheme_id) is False
+        assert panel._scheme_update_btn.isEnabled() is False
+        assert panel._scheme_delete_btn.isEnabled() is False
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_panel_custom_template_mode_survives_rebuild_and_validates():
+    app, panel = _build_panel()
+
+    try:
+        panel.set_save_enabled(True)
+        panel._expert_editor_expanded = True
+        panel._refresh_expert_summary()
+        app.processEvents()
+
+        panel._use_raw_cb.setChecked(True)
+        app.processEvents()
+
+        binding = panel._adapter.get_binding(1)
+        assert binding.display_template_mode == TEMPLATE_MODE_CUSTOM
+        assert panel._use_raw_cb.isChecked() is True
+        assert panel._raw_template_edit.isEnabled() is True
+
+        panel._rebuild_level_list()
+        app.processEvents()
+
+        binding = panel._adapter.get_binding(1)
+        assert binding.display_template_mode == TEMPLATE_MODE_CUSTOM
+        assert panel._use_raw_cb.isChecked() is True
+        assert panel._raw_template_edit.isEnabled() is True
+
+        panel._raw_template_edit.setText("{parent.nn}-{cn}")
+        panel._on_raw_template_edited("{parent.nn}-{cn}")
+        app.processEvents()
+
+        assert panel._adapter.get_binding(1).display_template == "{parent.nn}-{cn}"
+        assert panel._raw_template_error_label.text()
+        assert panel._save_btn.isEnabled() is False
+        assert panel._scheme_save_as_btn.isEnabled() is False
+
+        panel._raw_template_edit.setText("第{cn}章")
+        panel._on_raw_template_edited("第{cn}章")
+        app.processEvents()
+
+        assert panel._adapter.get_binding(1).display_template == "第{cn}章"
+        assert panel._raw_template_error_label.text() == ""
+        assert panel._save_btn.isEnabled() is True
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_panel_levels_change_shows_modified_scheme_state():
+    """Changing max levels keeps the last applied scheme visible as modified."""
     app, panel = _build_panel()
 
     try:
@@ -172,7 +336,45 @@ def test_panel_levels_change_clears_preset_when_mismatched():
         panel._on_levels_changed()
         app.processEvents()
 
+        assert panel._adapter.detect_active_preset() is None
         assert panel._preset_cb.currentIndex() == -1
+        assert panel._preset_cb.display_text() == "论文标准（内置，已修改）"
+        assert "论文标准（内置，已修改）" not in [
+            panel._preset_cb.itemText(index) for index in range(panel._preset_cb.count())
+        ]
+        assert panel._summary_grid.value_for("scheme") == "论文标准（内置，已修改）"
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_panel_custom_template_shows_custom_state_without_preset_compatibility():
+    app, panel = _build_panel()
+    custom_template = TemplateConfig()
+    custom_template.heading_numbering.level_bindings = {
+        "heading1": HeadingLevelBindingConfig(
+            enabled=True,
+            display_core_style="circled_decimal",
+            display_template="第{cc}章",
+        )
+    }
+
+    try:
+        _select_builtin_preset(panel)
+        panel._adapter.set_binding_field(1, "display_core_style", "roman_upper")
+        panel._mark_dirty()
+        app.processEvents()
+
+        assert panel._preset_cb.display_text() == "论文标准（内置，已修改）"
+
+        panel.on_template_changed(custom_template)
+        app.processEvents()
+
+        assert panel._adapter.detect_active_preset() is None
+        assert panel._adapter.active_scheme_key() is None
+        assert panel._preset_cb.currentIndex() == -1
+        assert panel._preset_cb.display_text() == "当前配置（自定义）"
+        assert panel._summary_grid.value_for("scheme") == "当前配置（自定义）"
     finally:
         panel.close()
         app.processEvents()

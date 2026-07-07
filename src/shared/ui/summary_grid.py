@@ -13,12 +13,18 @@ from src.qt_api import (
     QHBoxLayout,
     QLabel,
     QSizePolicy,
+    QSize,
     QVBoxLayout,
     QWidget,
     Qt,
 )
 
+from src.shared.ui.layout_sync import refresh_layout_chain, updates_suspended
 from src.shared.ui.theme import bind_theme, get_theme
+
+
+_SINGLE_ROW_NARROW_BREAKPOINT = 720
+_SINGLE_ROW_MEDIUM_BREAKPOINT = 1160
 
 
 def _rgba(color_value: str, alpha: int) -> str:
@@ -36,6 +42,71 @@ def _apply_font(widget: QLabel, *, pixel_size: int, weight: int) -> None:
     widget.setFont(font)
 
 
+class _ElidedLabel(QLabel):
+    """QLabel variant that keeps full text but paints a width-safe display string."""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__("", parent)
+        self._full_text = ""
+        self.setWordWrap(False)
+        self.setText(text)
+
+    @property
+    def full_text(self) -> str:
+        return self._full_text
+
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt API contract
+        self._full_text = str(text or "")
+        self._refresh_elide()
+
+    def refresh_elide(self) -> None:
+        self._refresh_elide()
+
+    def resizeEvent(self, event) -> None:
+        self._refresh_elide()
+        super().resizeEvent(event)
+
+    def _refresh_elide(self) -> None:
+        display_text = self._full_text
+        available_width = self.contentsRect().width()
+        if available_width > 0:
+            metrics = self.fontMetrics()
+            candidates = _elide_display_candidates(self._full_text)
+            for candidate in candidates:
+                if metrics.horizontalAdvance(candidate) <= available_width:
+                    display_text = candidate
+                    break
+            else:
+                display_text = metrics.elidedText(
+                    candidates[-1],
+                    Qt.ElideRight,
+                    max(1, available_width),
+                )
+        if super().text() != display_text:
+            super().setText(display_text)
+
+
+def _elide_display_candidates(text: str) -> list[str]:
+    candidates = [text]
+    if "\n" in text or " / " not in text:
+        return candidates
+
+    left, right = text.rsplit(" / ", 1)
+    right_words = right.split()
+    if len(right_words) <= 1:
+        return candidates
+
+    first_word = right_words[0]
+    candidates.extend(
+        [
+            f"{left} / {first_word}...",
+            f"{left}/{first_word}...",
+            f"{first_word}...",
+        ]
+    )
+    return candidates
+
+
 @dataclass(frozen=True)
 class SummaryGridItem:
     """Declarative summary cell payload."""
@@ -48,6 +119,7 @@ class SummaryGridItem:
     variant: str = "neutral"
     column_span: int = 1
     icon_name: str | None = None
+    tooltip: str = ""
 
 
 class _SummaryTile(QWidget):
@@ -76,6 +148,7 @@ class _SummaryTile(QWidget):
         layout.addWidget(self._detail)
 
         self._apply_theme()
+        self._apply_tooltip()
         bind_theme(self, self._apply_theme)
 
     @property
@@ -88,7 +161,15 @@ class _SummaryTile(QWidget):
         self._value.setText(item.value)
         self._detail.setText(item.detail)
         self._detail.setVisible(bool(item.detail))
+        self._apply_tooltip()
         self._apply_theme()
+
+    def _apply_tooltip(self) -> None:
+        tooltip = self._item.tooltip or _item_tooltip(self._item)
+        self.setToolTip(tooltip)
+        self._label.setToolTip(tooltip)
+        self._value.setToolTip(tooltip)
+        self._detail.setToolTip(tooltip)
 
     def _apply_theme(self) -> None:
         t = get_theme()
@@ -169,7 +250,8 @@ class _ModuleSummaryTile(QWidget):
         super().__init__(parent)
         self._item = item
         self.setObjectName("module_summary_tile")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         self.setMinimumHeight(self.TILE_MIN_HEIGHT)
         self.setAttribute(Qt.WA_StyledBackground, True)
 
@@ -186,15 +268,17 @@ class _ModuleSummaryTile(QWidget):
 
         text_column = QWidget(self)
         text_column.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        text_column.setMinimumWidth(0)
         self._text_layout = QVBoxLayout(text_column)
         self._text_layout.setContentsMargins(0, 0, 0, 0)
 
         self._label = QLabel(item.label, text_column)
-        self._value = QLabel(item.value, text_column)
-        self._detail = QLabel(item.detail, text_column)
-        self._label.setWordWrap(True)
-        self._value.setWordWrap(True)
-        self._detail.setWordWrap(True)
+        self._value = _ElidedLabel(item.value, text_column)
+        self._detail = _ElidedLabel(item.detail, text_column)
+        self._label.setWordWrap(False)
+        for label in (self._label, self._value, self._detail):
+            label.setMinimumWidth(0)
+            label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
 
         self._label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self._value.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -206,6 +290,7 @@ class _ModuleSummaryTile(QWidget):
         layout.addWidget(text_column, 1, Qt.AlignVCenter)
 
         self._apply_theme()
+        self._apply_tooltip()
         bind_theme(self, self._apply_theme)
 
     @property
@@ -217,8 +302,16 @@ class _ModuleSummaryTile(QWidget):
         self._label.setText(item.label)
         self._value.setText(item.value)
         self._detail.setText(item.detail)
-        self._detail.setVisible(bool(item.detail))
+        self._detail.setVisible(True)
+        self._apply_tooltip()
         self._apply_theme()
+
+    def _apply_tooltip(self) -> None:
+        tooltip = self._item.tooltip or _item_tooltip(self._item)
+        self.setToolTip(tooltip)
+        self._label.setToolTip(tooltip)
+        self._value.setToolTip(tooltip)
+        self._detail.setToolTip(tooltip)
 
     def _apply_theme(self) -> None:
         t = get_theme()
@@ -244,7 +337,7 @@ class _ModuleSummaryTile(QWidget):
         icon_container_size = t.module_summary_icon_container_size
         icon_size = t.module_summary_icon_size
 
-        self.setMinimumHeight(t.module_summary_tile_min_height)
+        self.setFixedHeight(t.module_summary_tile_min_height)
         self._layout.setContentsMargins(
             t.module_summary_tile_padding_x,
             t.module_summary_tile_padding_y,
@@ -281,6 +374,9 @@ class _ModuleSummaryTile(QWidget):
         self._label.setMinimumHeight(title_line_height)
         self._value.setMinimumHeight(line_height)
         self._detail.setMinimumHeight(line_height)
+        self._label.setMaximumHeight(title_line_height)
+        self._value.setMaximumHeight(line_height)
+        self._detail.setMaximumHeight(line_height)
         self._label.setStyleSheet(
             f"color: {t.text_primary}; background: transparent; line-height: {title_line_height}px;"
         )
@@ -290,7 +386,9 @@ class _ModuleSummaryTile(QWidget):
         self._detail.setStyleSheet(
             f"color: {t.text_secondary}; background: transparent; line-height: {line_height}px;"
         )
-        self._detail.setVisible(bool(item.detail))
+        self._value.refresh_elide()
+        self._detail.refresh_elide()
+        self._detail.setVisible(True)
 
         if item.icon_name:
             try:
@@ -316,13 +414,18 @@ class SummaryGrid(QWidget):
         columns: int = 3,
         parent=None,
         tile_style: Literal["metric", "module"] = "metric",
+        layout_policy: Literal["fixed", "single_row_preferred"] = "fixed",
     ):
         super().__init__(parent)
         self._columns = max(1, columns)
         self._tile_style = tile_style
+        self._layout_policy = layout_policy
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self._render_columns = self._effective_columns()
         self._items: list[SummaryGridItem] = []
         self._tiles: dict[str, _SummaryTile | _ModuleSummaryTile] = {}
+        self._row_count = 0
 
         self._layout = QGridLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -335,8 +438,13 @@ class SummaryGrid(QWidget):
         bind_theme(self, self._apply_theme)
 
     def set_items(self, items: Sequence[SummaryGridItem]) -> None:
-        self._items = list(items)
-        self._rebuild()
+        parent = self.parentWidget()
+        with updates_suspended(parent, self):
+            self._items = list(items)
+            self._rebuild()
+            self.updateGeometry()
+            self._sync_parent_summary_height()
+        refresh_layout_chain(parent or self, passes=2)
 
     def items(self) -> list[SummaryGridItem]:
         return list(self._items)
@@ -348,6 +456,12 @@ class SummaryGrid(QWidget):
     def detail_for(self, key: str) -> str:
         tile = self._tiles.get(key)
         return tile.item.detail if tile is not None else ""
+
+    def tooltip_for(self, key: str) -> str:
+        tile = self._tiles.get(key)
+        if tile is None:
+            return ""
+        return tile.item.tooltip or _item_tooltip(tile.item)
 
     def _rebuild(self) -> None:
         while self._layout.count():
@@ -363,8 +477,9 @@ class SummaryGrid(QWidget):
 
         row = 0
         column = 0
+        max_row = -1
         for item in self._items:
-            span = max(1, min(item.column_span, self._render_columns))
+            span = self._item_span(item, len(self._items))
             if column + span > self._render_columns:
                 row += 1
                 column = 0
@@ -372,11 +487,13 @@ class SummaryGrid(QWidget):
             tile = self._build_tile(item)
             self._tiles[item.key] = tile
             self._layout.addWidget(tile, row, column, 1, span)
+            max_row = max(max_row, row)
 
             column += span
             if column >= self._render_columns:
                 row += 1
                 column = 0
+        self._row_count = max_row + 1
 
     def _apply_theme(self) -> None:
         t = get_theme()
@@ -391,11 +508,138 @@ class SummaryGrid(QWidget):
             return _ModuleSummaryTile(item, parent=self)
         return _SummaryTile(item, parent=self)
 
+    def content_height_hint(self, width: int | None = None) -> int:
+        if self._tile_style != "module" or self._row_count <= 0:
+            return max(0, super().sizeHint().height())
+        t = get_theme()
+        render_columns = self._effective_columns_for_width(self._layout_width_hint(width))
+        row_count = self._row_count_for_columns(render_columns)
+        return (
+            row_count * t.module_summary_tile_min_height
+            + max(0, row_count - 1) * t.module_summary_grid_gap
+        )
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        hint = super().sizeHint()
+        if self._tile_style != "module" or self._row_count <= 0:
+            return hint
+        return QSize(0, self.content_height_hint(self._layout_width_hint()))
+
     def _effective_columns(self) -> int:
+        return self._effective_columns_for_width(self._layout_width_hint())
+
+    def _layout_width_hint(self, width: int | None = None) -> int:
+        resolved = int(width or self.width() or 0)
+        if self._layout_policy != "single_row_preferred":
+            return resolved
+
+        # The template summary grid is often populated while its detail pane is
+        # hidden.  In that phase Qt reports 0px or a stale narrow width, which
+        # used to rebuild the grid as a one-column mobile layout and let the
+        # parent card cache that height.  Prefer the nearest usable ancestor
+        # content width, and fall back to the full column model until a real
+        # resize event arrives.
+        if resolved >= _SINGLE_ROW_NARROW_BREAKPOINT:
+            return resolved
+
+        widget = self.parentWidget()
+        while widget is not None:
+            candidate = int(widget.width() or 0)
+            if candidate > resolved:
+                layout = widget.layout()
+                if layout is not None:
+                    margins = layout.contentsMargins()
+                    candidate = max(0, candidate - margins.left() - margins.right())
+                resolved = max(resolved, candidate)
+                if resolved >= _SINGLE_ROW_NARROW_BREAKPOINT:
+                    return resolved
+            widget = widget.parentWidget()
+        return resolved
+
+    def _effective_columns_for_width(self, width: int) -> int:
+        if self._layout_policy == "single_row_preferred":
+            if width <= 0:
+                return self._columns
+            if width < _SINGLE_ROW_NARROW_BREAKPOINT:
+                return 1
+            if width < _SINGLE_ROW_MEDIUM_BREAKPOINT:
+                return max(1, min(self._columns, 6))
         return self._columns
 
+    def _item_span(self, item: SummaryGridItem, item_count: int) -> int:
+        return self._item_span_for_columns(item, item_count, self._render_columns)
+
+    def _item_span_for_columns(
+        self,
+        item: SummaryGridItem,
+        item_count: int,
+        render_columns: int,
+    ) -> int:
+        if self._layout_policy != "single_row_preferred":
+            return max(1, min(item.column_span, render_columns))
+
+        if item.column_span > 1:
+            return self._scaled_span_for_columns(item.column_span, render_columns)
+
+        default_spans = {
+            2: (6, 6),
+            3: (4, 4, 4),
+            4: (3, 3, 3, 3),
+            5: (2, 2, 2, 3, 3),
+        }
+        spans = default_spans.get(item_count)
+        if spans is None:
+            return self._scaled_span_for_columns(item.column_span, render_columns)
+        index = self._items.index(item)
+        return self._scaled_span_for_columns(spans[index], render_columns)
+
+    def _scaled_span(self, span: int) -> int:
+        return self._scaled_span_for_columns(span, self._render_columns)
+
+    def _scaled_span_for_columns(self, span: int, render_columns: int) -> int:
+        base_span = max(1, min(int(span), self._columns))
+        if render_columns >= self._columns:
+            return max(1, min(base_span, render_columns))
+        scaled = (base_span * render_columns + self._columns - 1) // self._columns
+        return max(1, min(scaled, render_columns))
+
+    def _row_count_for_columns(self, render_columns: int) -> int:
+        row = 0
+        column = 0
+        max_row = -1
+        for item in self._items:
+            span = self._item_span_for_columns(item, len(self._items), render_columns)
+            if column + span > render_columns:
+                row += 1
+                column = 0
+            max_row = max(max_row, row)
+            column += span
+            if column >= render_columns:
+                row += 1
+                column = 0
+        return max_row + 1
+
     def resizeEvent(self, event) -> None:
+        next_columns = self._effective_columns()
+        rebuilt = False
+        if next_columns != self._render_columns:
+            self._rebuild()
+            rebuilt = True
         super().resizeEvent(event)
+        if rebuilt:
+            self.updateGeometry()
+            self._sync_parent_summary_height()
+
+    def _sync_parent_summary_height(self) -> None:
+        parent = self.parentWidget()
+        sync_height = getattr(parent, "_sync_content_height_limit", None)
+        if callable(sync_height):
+            sync_height()
+
+
+def _item_tooltip(item: SummaryGridItem) -> str:
+    parts = [item.label, item.value, item.detail]
+    return "\n".join(part for part in parts if part)
 
 
 __all__ = ["SummaryGrid", "SummaryGridItem"]

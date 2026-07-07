@@ -13,17 +13,39 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.config.builtin_templates import create_builtin_template, list_builtin_template_ids
+from src.config.builtin_templates import create_builtin_template
 from src.config.loader import load_scene, load_template, save_scene, save_template
 
 
 DEFAULT_TEMPLATE_ID = "default"
 DEFAULT_SCENE_ID = "custom"
+TEMPLATE_LIBRARY_SEED_IDS: tuple[str, ...] = ("default", "thesis_gbt")
+OBSOLETE_TEMPLATE_LIBRARY_IDS: tuple[str, ...] = (
+    "bid_custom",
+    "bid_engineering",
+    "bid_procurement",
+    "official_custom",
+    "official_gbt",
+    "report_custom",
+    "report_default",
+    "tech_custom",
+    "tech_standard",
+    "thesis_custom",
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_LIBRARY_DIR = _PROJECT_ROOT / "templates"
 SCENE_LIBRARY_DIR = _PROJECT_ROOT / "scenes"
 _CONFIG_SUFFIXES: tuple[str, ...] = (".json", ".yaml", ".yml")
+_BUILTIN_SCENE_DISPLAY_NAMES: dict[str, str] = {
+    "custom": "通用-默认",
+    "exam": "试卷-默认",
+    "thesis": "论文-默认",
+    "bidding": "标书-默认",
+    "official": "公文-默认",
+    "technical": "技术文档-默认",
+    "report": "通用报告-默认",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +78,7 @@ class SceneLibraryDescriptor:
 
 def ensure_config_library() -> None:
     _seed_template_library()
+    _prune_obsolete_template_library_entries()
     _seed_scene_library()
 
 
@@ -79,7 +102,7 @@ def list_scene_descriptors() -> list[SceneLibraryDescriptor]:
             descriptors.append(descriptor)
     descriptors.sort(
         key=lambda item: (
-            0 if item.config_id in builtin_order else 1,
+            1 if item.config_id in builtin_order else 0,
             builtin_order.get(item.config_id, len(builtin_order)),
             item.name,
             item.config_id,
@@ -165,6 +188,7 @@ def save_scene_to_library(scene, scene_id: str | None = None) -> ConfigLibraryEn
     ensure_config_library()
     entry_id = str(scene_id or "").strip() or _safe_config_id(getattr(scene, "name", "") or "scene")
     _set_scene_identity(scene, entry_id)
+    _normalize_scene_templates(scene)
     target = SCENE_LIBRARY_DIR / f"{entry_id}.json"
     save_scene(scene, target)
     reloaded = _load_scene_entry(ConfigLibraryEntry("scene", entry_id, entry_id, target))
@@ -173,16 +197,27 @@ def save_scene_to_library(scene, scene_id: str | None = None) -> ConfigLibraryEn
 
 def _seed_template_library() -> None:
     TEMPLATE_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
-    for template_id in list_builtin_template_ids():
+    for template_id in TEMPLATE_LIBRARY_SEED_IDS:
         target = TEMPLATE_LIBRARY_DIR / f"{template_id}.json"
         if target.exists():
             continue
         save_template(create_builtin_template(template_id), target)
 
 
+def _prune_obsolete_template_library_entries() -> None:
+    for template_id in OBSOLETE_TEMPLATE_LIBRARY_IDS:
+        for suffix in _CONFIG_SUFFIXES:
+            target = TEMPLATE_LIBRARY_DIR / f"{template_id}{suffix}"
+            if target.exists() and target.is_file():
+                try:
+                    target.unlink()
+                except OSError:
+                    continue
+
+
 def _seed_scene_library() -> None:
     SCENE_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
-    from src.ui.panels.workbench.scene_presets import SCENE_METAS
+    from src.config.scene_presets import SCENE_METAS
 
     for meta in SCENE_METAS:
         target = SCENE_LIBRARY_DIR / f"{meta.scene_id}.json"
@@ -192,14 +227,17 @@ def _seed_scene_library() -> None:
 
 
 def _create_builtin_scene(scene_id: str):
-    from src.ui.panels.workbench.scene_presets import create_scene
+    from src.config.scene_presets import create_scene
 
-    return create_scene(scene_id)
+    scene = create_scene(scene_id)
+    _normalize_scene_templates(scene)
+    return scene
 
 
 def _load_scene_entry(entry: ConfigLibraryEntry):
     scene = load_scene(entry.path)
     _set_scene_identity(scene, entry.config_id)
+    _normalize_scene_templates(scene)
     return scene
 
 
@@ -216,6 +254,82 @@ def _set_scene_identity(scene, scene_id: str) -> None:
         pass
 
 
+def _normalize_scene_templates(scene) -> None:
+    candidate_ids = [
+        str(getattr(scene, "template_id", "") or "").strip(),
+        str(getattr(scene, "default_template_id", "") or "").strip(),
+        *[
+            str(template_id or "").strip()
+            for template_id in getattr(scene, "compatible_template_ids", []) or []
+        ],
+    ]
+    compatible_ids = _available_scene_template_ids(
+        candidate_ids,
+        scene_id=str(getattr(scene, "scene_id", "") or "").strip(),
+        category=str(getattr(scene, "category", "") or "").strip(),
+    )
+    if not compatible_ids:
+        compatible_ids = [DEFAULT_TEMPLATE_ID]
+    try:
+        scene.compatible_template_ids = compatible_ids
+    except Exception:
+        pass
+
+    current_template_id = str(getattr(scene, "template_id", "") or "").strip()
+    if not _template_id_is_available(current_template_id):
+        try:
+            scene.template_id = compatible_ids[0]
+        except Exception:
+            pass
+
+    default_template_id = str(getattr(scene, "default_template_id", "") or "").strip()
+    if not _template_id_is_available(default_template_id):
+        try:
+            scene.default_template_id = compatible_ids[0]
+        except Exception:
+            pass
+
+
+def _available_scene_template_ids(
+    template_ids,
+    *,
+    scene_id: str = "",
+    category: str = "",
+) -> list[str]:
+    filtered: list[str] = []
+    raw_ids = [str(template_id or "").strip() for template_id in template_ids]
+    for template_id in raw_ids:
+        if not _template_id_is_available(template_id):
+            continue
+        if template_id not in filtered:
+            filtered.append(template_id)
+    if filtered:
+        return filtered
+    fallback_id = (
+        "thesis_gbt"
+        if (
+            "thesis_gbt" in raw_ids
+            or str(scene_id or "").strip() == "thesis"
+            or str(category or "").strip() == "academic"
+        )
+        else DEFAULT_TEMPLATE_ID
+    )
+    return [fallback_id if _template_id_is_available(fallback_id) else DEFAULT_TEMPLATE_ID]
+
+
+def _template_id_is_available(template_id: str) -> bool:
+    normalized = str(template_id or "").strip()
+    if not normalized or normalized in OBSOLETE_TEMPLATE_LIBRARY_IDS:
+        return False
+    if normalized in TEMPLATE_LIBRARY_SEED_IDS:
+        return True
+    for suffix in _CONFIG_SUFFIXES:
+        path = TEMPLATE_LIBRARY_DIR / f"{normalized}{suffix}"
+        if path.exists() and path.is_file():
+            return True
+    return False
+
+
 def _build_scene_descriptor(entry: ConfigLibraryEntry) -> SceneLibraryDescriptor | None:
     return _build_scene_descriptor_from_path(entry.path)
 
@@ -227,15 +341,30 @@ def _build_scene_descriptor_from_path(path: Path) -> SceneLibraryDescriptor | No
         scene = _load_scene_entry(ConfigLibraryEntry("scene", config_id, config_id, path))
     except Exception as exc:
         fallback_name = (fallback_meta.name if fallback_meta is not None else config_id) or config_id
+        fallback_name = _builtin_scene_display_name(config_id, fallback_name)
         fallback_description = str(
             fallback_meta.description if fallback_meta is not None else ""
         ).strip()
         fallback_template_id = str(
             fallback_meta.default_template_id if fallback_meta is not None else ""
         ).strip()
-        compatible_template_ids = ()
+        compatible_template_ids: tuple[str, ...] = ()
         if fallback_meta is not None:
-            compatible_template_ids = tuple(meta.template_id for meta in fallback_meta.compatible_templates)
+            compatible_template_ids = tuple(
+                _available_scene_template_ids(
+                    (
+                        fallback_template_id,
+                        *(meta.template_id for meta in fallback_meta.compatible_templates),
+                    ),
+                    scene_id=config_id,
+                )
+            )
+        if not _template_id_is_available(fallback_template_id):
+            fallback_template_id = (
+                compatible_template_ids[0]
+                if compatible_template_ids
+                else DEFAULT_TEMPLATE_ID
+            )
         return SceneLibraryDescriptor(
             config_id=config_id,
             scene_id=config_id,
@@ -251,6 +380,7 @@ def _build_scene_descriptor_from_path(path: Path) -> SceneLibraryDescriptor | No
     name = str(
         getattr(scene, "name", "") or (fallback_meta.name if fallback_meta is not None else "") or config_id
     ).strip() or config_id
+    name = _builtin_scene_display_name(config_id, name)
     description = str(
         getattr(scene, "description", "") or (fallback_meta.description if fallback_meta is not None else "")
     ).strip()
@@ -287,11 +417,13 @@ def _build_scene_descriptor_from_path(path: Path) -> SceneLibraryDescriptor | No
 def _list_entries(kind: str, directory: Path, loader) -> list[ConfigLibraryEntry]:
     entries: list[ConfigLibraryEntry] = []
     for path in _iter_config_files(directory):
+        config_id = path.stem
+        if kind == "template" and config_id in OBSOLETE_TEMPLATE_LIBRARY_IDS:
+            continue
         try:
             cfg = loader(path)
         except Exception:
             continue
-        config_id = path.stem
         name = str(getattr(cfg, "name", "") or config_id).strip() or config_id
         entries.append(ConfigLibraryEntry(kind, config_id, name, path))
     entries.sort(key=lambda item: (item.name, item.config_id))
@@ -305,6 +437,8 @@ def _get_entry(kind: str, directory: Path, config_id: str, loader) -> ConfigLibr
     for suffix in _CONFIG_SUFFIXES:
         path = directory / f"{target_id}{suffix}"
         if not path.exists():
+            continue
+        if kind == "template" and target_id in OBSOLETE_TEMPLATE_LIBRARY_IDS:
             continue
         try:
             cfg = loader(path)
@@ -360,13 +494,18 @@ def _safe_config_id(value: str) -> str:
 
 
 def _builtin_scene_order() -> dict[str, int]:
-    from src.ui.panels.workbench.scene_presets import SCENE_METAS
+    from src.config.scene_presets import SCENE_METAS
 
     return {meta.scene_id: index for index, meta in enumerate(SCENE_METAS)}
 
 
+def _builtin_scene_display_name(scene_id: str, fallback: str) -> str:
+    normalized = str(scene_id or "").strip()
+    return _BUILTIN_SCENE_DISPLAY_NAMES.get(normalized, fallback)
+
+
 def _builtin_scene_meta_map():
-    from src.ui.panels.workbench.scene_presets import SCENE_META_MAP
+    from src.config.scene_presets import SCENE_META_MAP
 
     return SCENE_META_MAP
 
@@ -375,7 +514,9 @@ __all__ = [
     "ConfigLibraryEntry",
     "DEFAULT_SCENE_ID",
     "DEFAULT_TEMPLATE_ID",
+    "OBSOLETE_TEMPLATE_LIBRARY_IDS",
     "SCENE_LIBRARY_DIR",
+    "TEMPLATE_LIBRARY_SEED_IDS",
     "SceneLibraryDescriptor",
     "TEMPLATE_LIBRARY_DIR",
     "default_scene_descriptor",

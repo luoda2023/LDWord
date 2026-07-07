@@ -223,6 +223,7 @@ class HeadingNumberingModule(BaseModule):
         non_numbered_pfx = list(config.heading_model.non_numbered_prefixes or [])
         max_levels = config.heading_model.max_heading_levels
         counters: list[int] = [0] * 10
+        counter_started: list[bool] = [False] * 10
         count = 0
 
         for i, para in enumerate(doc.paragraphs):
@@ -230,24 +231,28 @@ class HeadingNumberingModule(BaseModule):
             if level is None:
                 continue
 
+            binding_key = f"heading{level}"
+            binding = level_bindings.get(binding_key)
+
             # 超出级数上限 → 只设 outline level, 不编号
             if level > max_levels:
-                _set_outline_level(para, level)
+                _set_toc_outline_level(para, level, binding)
                 continue
 
             if _should_skip_numbering(para, non_numbered, non_numbered_pfx):
-                _set_outline_level(para, level)
+                _set_toc_outline_level(para, level, binding)
                 continue
 
-            binding_key = f"heading{level}"
-            binding = level_bindings.get(binding_key)
             if not binding or not binding.enabled:
-                _set_outline_level(para, level)
+                _set_toc_outline_level(para, level, binding)
                 continue
 
-            counters[level] += 1
-            for j in range(level + 1, 10):
-                counters[j] = 0
+            if not counter_started[level]:
+                start_at = getattr(binding, "start_at", 1)
+                counters[level] = 1 if start_at is None else int(start_at)
+                counter_started[level] = True
+            else:
+                counters[level] += 1
 
             number_text = _format_level_number(level, counters, binding, level_bindings)
             _strip_existing_number(para)
@@ -256,7 +261,8 @@ class HeadingNumberingModule(BaseModule):
                 _prepend_number(para, number_text)
                 count += 1
 
-            _set_outline_level(para, level)
+            _set_toc_outline_level(para, level, binding)
+            _reset_deeper_counters(level, counters, counter_started, level_bindings)
 
         if count:
             tracker.record(
@@ -353,3 +359,53 @@ def _set_outline_level(para: Paragraph, level: int) -> None:
     pPr = find_or_create(para._element, "w:pPr")
     outline_lvl = find_or_create(pPr, "w:outlineLvl")
     outline_lvl.set(qn("w:val"), str(level - 1))
+
+
+def _set_toc_excluded_outline_level(para: Paragraph) -> None:
+    pPr = find_or_create(para._element, "w:pPr")
+    outline_lvl = find_or_create(pPr, "w:outlineLvl")
+    outline_lvl.set(qn("w:val"), "9")
+
+
+def _set_toc_outline_level(para: Paragraph, level: int, binding) -> None:
+    if binding is not None and not bool(getattr(binding, "include_in_toc", True)):
+        _set_toc_excluded_outline_level(para)
+        return
+    _set_outline_level(para, level)
+
+
+def _normalize_restart_on(value) -> str:
+    return str(value or "parent").strip().lower().replace("_", "-")
+
+
+def _restart_target_level(value: str) -> int | None:
+    match = re.fullmatch(r"(?:heading|level)?\s*(\d+)", value.replace("-", ""))
+    if not match:
+        return None
+    level = int(match.group(1))
+    return level if 1 <= level <= 8 else None
+
+
+def _should_reset_counter_on_level(child_level: int, trigger_level: int, binding) -> bool:
+    if child_level <= trigger_level:
+        return False
+    mode = _normalize_restart_on(getattr(binding, "restart_on", None))
+    if mode in {"document", "never", "continuous", "none"}:
+        return False
+    target_level = _restart_target_level(mode)
+    if target_level is not None:
+        return trigger_level == target_level
+    return True
+
+
+def _reset_deeper_counters(
+    trigger_level: int,
+    counters: list[int],
+    counter_started: list[bool],
+    level_bindings: dict[str, HeadingLevelBindingConfig],
+) -> None:
+    for child_level in range(trigger_level + 1, min(len(counters), len(counter_started))):
+        binding = level_bindings.get(f"heading{child_level}")
+        if _should_reset_counter_on_level(child_level, trigger_level, binding):
+            counters[child_level] = 0
+            counter_started[child_level] = False

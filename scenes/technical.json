@@ -35,6 +35,107 @@
     "abstract_en",
     "toc"
   ],
+  "input_source_profile": {
+    "accepted_formats": ["docx", "markdown"],
+    "structured_formats": ["json"],
+    "markdown_policy": "preview_and_cleanup",
+    "latex_policy": "formula_fragments_only",
+    "require_material_package": false,
+    "material_schema_id": "technical_document_v1",
+    "material_schema_ids": ["technical_document_v1", "long_document_metadata_v1"],
+    "required_material_fields": [],
+    "required_image_roles": ["diagram", "figure"],
+    "high_risk_imports": ["full_latex_project"],
+    "failure_policy": "warn"
+  },
+  "compliance_profile": {
+    "profile_id": "long_document_publishing",
+    "rule_family": "long_document_structure",
+    "count_profile_id": "chapter_inventory",
+    "enabled_checks": ["validation", "object_preflight", "technical_chapter_inventory"],
+    "check_scopes": ["body", "toc", "tables", "figures", "appendix", "headers_footers", "fields", "relationships"],
+    "report_level": "detailed",
+    "failure_policy": "warn",
+    "object_preflight": {
+      "enabled": true,
+      "preservation_mode": "strict",
+      "block_on": ["macros", "ole_objects", "embedded_workbooks"],
+      "skip_high_risk_modules": true
+    }
+  },
+  "default_delivery_preset_id": "final_docx",
+  "delivery_presets": [
+    {
+      "preset_id": "review_copy",
+      "label": "Review copy",
+      "target_template_id": "tech_standard",
+      "output_dir_template": "technical/{preset_id}",
+      "filename_template": "{stem}_{preset_id}",
+      "artifacts": {
+        "final_docx": true,
+        "compare_docx": true,
+        "compare_text": true,
+        "compare_formatting": true,
+        "report_json": true,
+        "report_markdown": true
+      },
+      "include_structured_intermediate": true,
+      "report_level": "detailed"
+    },
+    {
+      "preset_id": "proof_copy",
+      "label": "Proof copy",
+      "target_template_id": "tech_standard",
+      "output_dir_template": "technical/{preset_id}",
+      "filename_template": "{stem}_{preset_id}",
+      "artifacts": {
+        "final_docx": true,
+        "compare_docx": true,
+        "compare_text": true,
+        "compare_formatting": true,
+        "report_json": true,
+        "report_markdown": true
+      },
+      "include_structured_intermediate": true,
+      "report_level": "detailed"
+    },
+    {
+      "preset_id": "final_docx",
+      "label": "Final DOCX",
+      "target_template_id": "tech_standard",
+      "output_dir_template": "technical/{preset_id}",
+      "filename_template": "{stem}_{preset_id}",
+      "artifacts": {
+        "final_docx": true,
+        "compare_docx": false,
+        "compare_text": false,
+        "compare_formatting": false,
+        "report_json": true,
+        "report_markdown": true
+      },
+      "include_structured_intermediate": false,
+      "report_level": "summary"
+    },
+    {
+      "preset_id": "archive_package",
+      "label": "Archive package",
+      "target_template_id": "tech_standard",
+      "output_dir_template": "technical/{preset_id}",
+      "filename_template": "{stem}_{preset_id}",
+      "artifacts": {
+        "final_docx": false,
+        "compare_docx": false,
+        "compare_text": false,
+        "compare_formatting": false,
+        "report_json": true,
+        "report_markdown": true,
+        "material_manifest": true,
+        "material_package": true
+      },
+      "include_structured_intermediate": true,
+      "report_level": "detailed"
+    }
+  ],
   "module_switches": {
     "page_setup": true,
     "section_format": true,
@@ -53,6 +154,9 @@
     "watermark": true,
     "chem_typography": true,
     "md_cleanup": true,
+    "whitespace_normalize": true,
+    "validation": true,
+    "citation_link": false,
     "equation_table_format": true,
     "reference_format": false
   },
@@ -114,7 +218,6 @@
     "three_line_bottom_width_pt": 0.5,
     "line_spacing_mode": "single",
     "repeat_header": false,
-    "row_height_pt": null,
     "font_cn": null,
     "font_en": null,
     "size_pt": null,
@@ -185,9 +288,9 @@
   "section_styles": {},
   "output": {
     "final_docx": true,
-    "compare_docx": true,
-    "compare_text": true,
-    "compare_formatting": true,
+    "compare_docx": false,
+    "compare_text": false,
+    "compare_formatting": false,
     "report_json": true,
     "report_markdown": true
   },

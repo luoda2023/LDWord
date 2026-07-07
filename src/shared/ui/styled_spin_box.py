@@ -23,6 +23,7 @@ class StyledSpinBox(QDoubleSpinBox):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        self._style_initialized = False
         StyledSpinBox._id_counter += 1
         spin_id = StyledSpinBox._id_counter
         self.setObjectName(f"styled_spin_{spin_id}")
@@ -33,8 +34,15 @@ class StyledSpinBox(QDoubleSpinBox):
         apply_size_class(self, "md")
         self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
+        self._style_initialized = True
         self._refresh_style()
         bind_theme(self, self._refresh_style)
+
+    def setObjectName(self, name: str) -> None:  # noqa: N802 - Qt API contract
+        previous_name = self.objectName()
+        super().setObjectName(name)
+        if getattr(self, "_style_initialized", False) and self.objectName() != previous_name:
+            self._refresh_style()
 
     @staticmethod
     def build_spin_stylesheet(object_name: str, theme) -> str:

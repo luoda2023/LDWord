@@ -26,6 +26,10 @@ if TYPE_CHECKING:
 
 
 LEVEL_PATTERNS: list[tuple[int, re.Pattern[str]]] = [
+    (8, re.compile(r"^\d+(?:\.\d+){7}\.?\s+")),
+    (7, re.compile(r"^\d+(?:\.\d+){6}\.?\s+")),
+    (6, re.compile(r"^\d+(?:\.\d+){5}\.?\s+")),
+    (5, re.compile(r"^\d+(?:\.\d+){4}\.?\s+")),
     (4, re.compile(r"^\d+\.\d+\.\d+\.\d+[\s\u3000\t]")),
     (3, re.compile(r"^\d+\.\d+\.\d+[\s\u3000\t]")),
     (2, re.compile(r"^\d+\.\d+[\s\u3000\t]")),
@@ -48,6 +52,8 @@ BODY_START_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 NARRATIVE_PUNCT = re.compile(r"[。；;！？!?]")
+SENTENCE_END_PUNCT = {"。", ".", "！", "!", "？", "?", "；", ";", "：", ":"}
+NUMERIC_CHAIN_HEADING_RE = re.compile(r"^(\d+(?:\.\d+){1,7})\.?[\s\u3000\t]+\S")
 TOC_LEVEL_STYLE_RE = re.compile(r"^(toc|\u76ee\u5f55)\s*\d+$", re.IGNORECASE)
 TOC_TITLE_RE = re.compile(r"^(\u76ee\u5f55|\u76ee\s*\u5f55|contents|tableofcontents)$", re.IGNORECASE)
 BROKEN_TOC_BOOKMARK_HINTS = (
@@ -306,13 +312,17 @@ class HeadingRecognitionModule(BaseModule):
 
 def _scan_heading_infos(doc: Document) -> list[HeadingInfo]:
     headings: list[HeadingInfo] = []
+    previous_level: int | None = None
     for index, para in enumerate(doc.paragraphs):
         text = (para.text or "").strip()
         if not text:
             continue
         level = _detect_heading(para, text)
+        if level is None:
+            level = _detect_heading_from_context(para, text, previous_level)
         if level is not None:
             headings.append(HeadingInfo(index, level, text[:80]))
+            previous_level = level
     return headings
 
 
@@ -454,6 +464,50 @@ def _detect_by_pattern(text: str) -> int | None:
         if pattern.match(text):
             return level
     return None
+
+
+def _detect_numeric_chain_level(text: str) -> int | None:
+    match = NUMERIC_CHAIN_HEADING_RE.match((text or "").strip())
+    if not match:
+        return None
+    level = match.group(1).count(".") + 1
+    return level if 2 <= level <= 8 else None
+
+
+def _is_disqualified_heading_candidate(para: Paragraph, raw: str) -> bool:
+    if not raw:
+        return True
+    if len(raw) > 80 and NARRATIVE_PUNCT.search(raw):
+        return True
+    if _is_toc_style_para(para):
+        return True
+    if looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
+        return True
+    if _para_has_pageref_field(para):
+        return True
+    if looks_like_reference_entry_line(raw) or looks_like_date_placeholder_line(raw):
+        return True
+    if _looks_like_broken_toc_entry_line(raw):
+        return True
+    if _looks_like_tabular_numeric_line(raw) or _looks_like_tabular_structured_line(raw):
+        return True
+    if _looks_like_chapter_outline_sentence(raw):
+        return True
+    return False
+
+
+def _detect_heading_from_context(para: Paragraph, text: str, previous_level: int | None) -> int | None:
+    raw = (text or "").strip()
+    if previous_level is None or _is_disqualified_heading_candidate(para, raw):
+        return None
+    if raw[-1:] in SENTENCE_END_PUNCT:
+        return None
+    level = _detect_numeric_chain_level(raw)
+    if level is None:
+        return None
+    if level > previous_level + 1:
+        return None
+    return level
 
 
 def _detect_special_section(text: str) -> str | None:

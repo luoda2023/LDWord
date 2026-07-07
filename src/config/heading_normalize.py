@@ -153,6 +153,10 @@ def _normalize_level_binding_payload(payload: Mapping[str, Any]) -> dict[str, An
     normalized["display_core_style"] = core_style
     normalized["chain"] = chain
     normalized.setdefault("chain_number_style", _normalize_chain_number_style(core_style))
+    if "start_at" in normalized:
+        normalized["start_at"] = _coerce_nonnegative_int(normalized.get("start_at"), default=1)
+    if "restart_on" in normalized:
+        normalized["restart_on"] = _normalize_restart_on(normalized.get("restart_on"))
 
     if not normalized.get("display_template"):
         should_derive = (
@@ -201,7 +205,7 @@ def _normalize_legacy_levels(levels: Mapping[str, Any]) -> dict[str, Any]:
             or payload.get("title_separator")
             or payload.get("custom_separator")
             or "\u3000",
-            "start_at": _coerce_positive_int(payload.get("start_at"), default=1),
+            "start_at": _coerce_nonnegative_int(payload.get("start_at"), default=1),
             "include_in_toc": bool(payload.get("include_in_toc", True)),
         }
 
@@ -368,6 +372,29 @@ def _coerce_positive_int(value: Any, *, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+
+
+def _coerce_nonnegative_int(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
+
+
+def _normalize_restart_on(value: Any) -> str | None:
+    normalized = str(value or "").strip().lower().replace("_", "-")
+    if normalized in {"", "parent", "parents", "previous", "hierarchy", "default"}:
+        return None
+    if normalized in {"document", "never", "continuous", "none"}:
+        return "document"
+    compact = normalized.replace("-", "").replace(" ", "")
+    match = re.fullmatch(r"(?:heading|level)?(\d+)", compact)
+    if match:
+        level = int(match.group(1))
+        if 1 <= level <= 8:
+            return f"heading{level}"
+    return normalized
 
 
 def _copy_mapping(payload: Mapping[str, Any] | None) -> dict[str, Any]:

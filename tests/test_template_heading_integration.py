@@ -158,7 +158,7 @@ def test_heading_detail_save_button_persists_template_via_template_panel(tmp_pat
         target = tmp_path / "heading_saved_template.json"
         panel._current_template_path = str(target)
         panel._current_template_source = "file"
-        panel._overview_detail.set_source_text(panel._template_source_text())
+        panel._sync_template_file_status()
 
         heading = panel._heading_detail
         heading._adv_list.setCurrentRow(0)
@@ -220,8 +220,8 @@ def test_heading_detail_updates_overview_preview_on_every_style_edit():
         app.processEvents()
 
 
-def test_heading_detail_uses_summary_first_inspector_without_action_button():
-    """Heading detail should expose summaries first, with editor areas expandable on demand."""
+def test_heading_detail_uses_preview_first_inspector_without_explanation_text_or_action_button():
+    """Heading detail should expose preview first, with heading style always available."""
     app = _app()
     bridge = PanelBridge()
     panel = TemplatePanel(bridge)
@@ -231,16 +231,16 @@ def test_heading_detail_uses_summary_first_inspector_without_action_button():
         heading._adv_list.setCurrentRow(0)
         app.processEvents()
 
-        # Summary-first inspector should be available immediately
+        # Preview-first inspector should be available immediately without explanatory text blocks.
         assert not heading._result_heading_label.isHidden()
-        assert not heading._style_summary_primary.isHidden()
-        assert not heading._expert_summary_primary.isHidden()
-        assert heading._style_editor_container.isHidden()
-        assert heading._expert_editor_container.isHidden()
-
-        heading._style_toggle_btn.click()
-        app.processEvents()
+        assert not hasattr(heading, "_result_meta_label")
+        assert not hasattr(heading, "_detail_hint")
+        assert not hasattr(heading, "_style_summary_primary")
+        assert not hasattr(heading, "_expert_summary_primary")
+        assert not hasattr(heading, "_ref_style_hint_label")
+        assert not hasattr(heading, "_style_toggle_btn")
         assert not heading._style_editor_container.isHidden()
+        assert heading._expert_editor_container.isHidden()
 
         heading._expert_toggle_btn.click()
         app.processEvents()

@@ -21,7 +21,7 @@ from src.config.template import StyleConfig, TemplateConfig
 from src.modules.basic.paragraph_style import ParagraphStyleModule
 from src.pipeline.runner import Pipeline
 from src.ui.adapters.heading_numbering_adapter import HeadingNumberingAdapter
-from src.ui.panels.template_panel import _resolve_preview_style
+from src.ui.panels.template_style_preview import _resolve_preview_style
 
 
 def test_resolve_heading_style_uses_shared_fallback_chain():

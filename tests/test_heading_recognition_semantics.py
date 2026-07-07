@@ -104,6 +104,53 @@ def test_heading_recognition_detects_toc_section_from_toc_styles():
     assert doc_tree.get_section_for_paragraph(2) == "toc"
 
 
+def test_heading_recognition_promotes_deep_numeric_chains_from_context_without_word_styles():
+    doc = Document()
+    doc.add_heading("第一章 绪论", level=1)
+    doc.add_paragraph("1.1 研究背景")
+    doc.add_paragraph("1.1.1 国内现状")
+    doc.add_paragraph("1.1.1.1 技术路线")
+    doc.add_paragraph("1.1.1.1.1 参数设置")
+    doc.add_paragraph("1.1.1.1.1.1 采样流程")
+    doc.add_paragraph("1.1.1.1.1.1.1 清洗规则")
+    doc.add_paragraph("1.1.1.1.1.1.1.1 异常处理")
+
+    context = _apply_heading_recognition(doc)
+
+    assert context.heading_map == {
+        0: 1,
+        1: 2,
+        2: 3,
+        3: 4,
+        4: 5,
+        5: 6,
+        6: 7,
+        7: 8,
+    }
+
+
+def test_heading_recognition_contextual_deep_detection_rejects_sentence_like_lines():
+    doc = Document()
+    doc.add_heading("第一章 绪论", level=1)
+    doc.add_paragraph("1.1 研究背景")
+    doc.add_paragraph("1.1.1.1.1 This sentence explains a version number.")
+
+    context = _apply_heading_recognition(doc)
+
+    assert context.heading_map == {0: 1, 1: 2}
+
+
+def test_heading_recognition_contextual_deep_detection_rejects_toc_like_lines():
+    doc = Document()
+    doc.add_heading("第一章 绪论", level=1)
+    doc.add_paragraph("1.1 研究背景")
+    doc.add_paragraph("1.1.1.1.1 参数设置\t12")
+
+    context = _apply_heading_recognition(doc)
+
+    assert context.heading_map == {0: 1, 1: 2}
+
+
 def test_heading_recognition_detects_cover_section_from_content():
     doc = Document()
     doc.add_paragraph("硕士学位论文")

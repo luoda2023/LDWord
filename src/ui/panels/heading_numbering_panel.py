@@ -16,9 +16,9 @@ Layout:
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from src.config.heading_presets import get_preset_labels
+from src.config.heading_presets import get_scheme_catalog, is_user_preset, scheme_label_exists
 from src.config.style_semantics import (
     CM_TO_PT,
     LINE_SPACING_OPTIONS,
@@ -44,14 +44,17 @@ from src.qt_api import (
     QCheckBox,
     QColor,
     QComboBox,
+    QDesktopServices,
     QFont,
     QFontMetricsF,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPainter,
     QPen,
     QRectF,
@@ -59,6 +62,7 @@ from src.qt_api import (
     QSize,
     QSizePolicy,
     QTimer,
+    QUrl,
     QVBoxLayout,
     QWidget,
     Qt,
@@ -68,13 +72,16 @@ from src.shared.ui import (
     Badge,
     DashedSeparator,
     FlowSection,
-    SummaryGrid,
     SummaryGridItem,
+    TemplateSummaryCard,
+    apply_template_summary_action_button,
 )
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
+from src.shared.ui.form_action_row import FormActionButtonRow
 from src.shared.ui.font_combo import FontCombo
 from src.shared.ui.inspector_form import InspectorForm
+from src.shared.ui.layout_sync import refresh_layout_chain, refresh_layout_chain_later, updates_suspended
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.style_preview_utils import (
@@ -96,19 +103,32 @@ from src.shared.ui.template_form_layout import (
 from src.shared.ui.theme import get_theme, bind_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 from src.shared.ui.typography_controls import build_emphasis_widget
+from src.shared.ui.toast import Toast
 from src.ui.adapters.heading_numbering_adapter import HeadingNumberingAdapter
 from src.ui.base_panel import BasePanel
 from src.ui.heading_numbering_logic import (
     STYLE_OPTIONS,
+    TEMPLATE_MODE_CUSTOM,
+    TEMPLATE_MODE_STRUCTURED,
     build_detail_state,
     build_editor_enable_state,
     build_expert_toggle_text,
     build_non_numbered_toggle_text,
     compose_display_template,
     format_csv_items,
+    normalize_display_template_mode,
     parse_csv_items,
     should_show_chain_separator,
+    validate_display_template,
 )
+from src.ui.panels.template_summary_projection import build_template_detail_summary_items
+
+
+HEADING_INSPECTOR_ROW_HEIGHT = 44
+
+
+def heading_inspector_control_height(theme=None) -> int:
+    return resolved_control_height(theme or get_theme(), "md")
 
 
 ALIGNMENT_OPTIONS: tuple[tuple[str, str], ...] = (
@@ -131,20 +151,13 @@ SEPARATOR_OPTIONS: tuple[tuple[str, str, str | None], ...] = (
     ("custom", "自定义", None),
 )
 
-SEPARATOR_COMPACT_LABELS: dict[str, str] = {
-    "fullwidth_space": "□",
-    "halfwidth_space": "·",
-    "tab": "➡",
-    "underscore": "_",
-    "custom": "自定义",
-}
-
-SEPARATOR_VALUE_TO_KEY: dict[str, str] = {
-    value: key
-    for key, _label, value in SEPARATOR_OPTIONS
-    if value is not None
-}
-
+CHAIN_SEPARATOR_OPTIONS: tuple[tuple[str, str, str | None], ...] = (
+    ("dot", "小数点 (.)", "."),
+    ("hyphen", "短横线 (-)", "-"),
+    ("halfwidth_space", "半角空格 (·)", " "),
+    ("none", "无连接", ""),
+    ("custom", "自定义", None),
+)
 
 # ── Inline Heading Preview ─────────────────────────────────
 
@@ -345,15 +358,17 @@ class _WhitespacePresetWidget(QWidget):
         self,
         *,
         text: str = "",
+        options: tuple[tuple[str, str, str | None], ...] = SEPARATOR_OPTIONS,
+        display_labels: dict[str, str] | None = None,
         control_height: int | None = None,
-        compact_mode_width: int = 72,
+        compact_mode_width: int = 144,
         parent=None,
     ):
         super().__init__(parent)
-        self._preset_values = {key: value for key, _label, value in SEPARATOR_OPTIONS if value is not None}
-        self._preset_labels = {key: label for key, label, _value in SEPARATOR_OPTIONS}
-        self._compact_labels = dict(SEPARATOR_COMPACT_LABELS)
-        self._value_to_key = dict(SEPARATOR_VALUE_TO_KEY)
+        self._preset_values = {key: value for key, _label, value in options if value is not None}
+        self._preset_labels = {key: label for key, label, _value in options}
+        self._display_labels = dict(display_labels or self._preset_labels)
+        self._value_to_key = {value: key for key, _label, value in options if value is not None}
         self._custom_raw_text = ""
         self._current_mode_key = "custom"
         self._control_height = max(24, int(control_height or resolved_control_height(get_theme(), "md")))
@@ -373,9 +388,9 @@ class _WhitespacePresetWidget(QWidget):
         combo_line_edit = self._mode_combo.lineEdit()
         if combo_line_edit is not None:
             combo_line_edit.setReadOnly(True)
-            combo_line_edit.setAlignment(Qt.AlignCenter)
+            combo_line_edit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             combo_line_edit.setTextMargins(0, 0, 0, 0)
-        for key, label, _value in SEPARATOR_OPTIONS:
+        for key, label, _value in options:
             self._mode_combo.addItem(label, key)
             self._mode_combo.setItemData(self._mode_combo.count() - 1, label, Qt.ToolTipRole)
 
@@ -426,9 +441,12 @@ class _WhitespacePresetWidget(QWidget):
             self.textChanged.emit(self.text())
 
     def _on_mode_changed(self) -> None:
+        target_mode = str(self._mode_combo.currentData() or "custom")
+        if target_mode == "custom" and self._current_mode_key != "custom" and not self._custom_raw_text:
+            self._custom_raw_text = self.text()
         if self._current_mode_key == "custom":
             self._custom_raw_text = self._edit.text()
-        self._set_mode(str(self._mode_combo.currentData() or "custom"), emit=True)
+        self._set_mode(target_mode, emit=target_mode != "custom")
 
     def _on_edit_text_changed(self) -> None:
         if self._current_mode_key == "custom":
@@ -436,14 +454,17 @@ class _WhitespacePresetWidget(QWidget):
         self.textChanged.emit(self.text())
 
     def _on_mode_activated(self) -> None:
-        self._set_mode(str(self._mode_combo.currentData() or "custom"), emit=True)
+        target_mode = str(self._mode_combo.currentData() or "custom")
+        if target_mode == "custom" and self._current_mode_key != "custom" and not self._custom_raw_text:
+            self._custom_raw_text = self.text()
+        self._set_mode(target_mode, emit=target_mode != "custom")
 
     def _sync_mode_combo_display(self) -> None:
         line_edit = self._mode_combo.lineEdit()
         if line_edit is None:
             return
         mode_key = str(self._mode_combo.currentData() or "custom")
-        display_text = self._compact_labels.get(mode_key, self._preset_labels.get(mode_key, mode_key))
+        display_text = self._display_labels.get(mode_key, self._preset_labels.get(mode_key, mode_key))
         blocked = line_edit.blockSignals(True)
         line_edit.setText(display_text)
         line_edit.blockSignals(blocked)
@@ -452,11 +473,11 @@ class _WhitespacePresetWidget(QWidget):
         line_edit = self._mode_combo.lineEdit()
         if line_edit is None:
             return
-        line_edit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter if self._current_mode_key == "custom" else Qt.AlignCenter)
+        line_edit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
     def _minimum_mode_combo_width(self) -> int:
         metrics = self._mode_combo.fontMetrics()
-        labels = [str(self._compact_labels.get(key, self._preset_labels.get(key, key)) or "") for key in self._preset_labels]
+        labels = [str(self._display_labels.get(key, self._preset_labels.get(key, key)) or "") for key in self._preset_labels]
         widest = max((metrics.horizontalAdvance(label) for label in labels), default=0)
         return max(self._compact_mode_width, widest + 34)
 
@@ -496,6 +517,16 @@ class _WhitespacePresetWidget(QWidget):
     def minimumSizeHint(self) -> QSize:
         return QSize(self._minimum_mode_combo_width(), self._control_height)
 
+    def set_control_height(self, height: int) -> None:
+        resolved_height = max(24, int(height))
+        if resolved_height == self._control_height:
+            return
+        self._control_height = resolved_height
+        self.setMinimumHeight(resolved_height)
+        self.setMaximumHeight(resolved_height)
+        self._relayout_children()
+        self.updateGeometry()
+
 
 # ── Main Panel ─────────────────────────────────────────────
 
@@ -503,9 +534,21 @@ class HeadingNumberingPanel(BasePanel):
     """标题编号配置面板 — 统一选级 + 局部覆盖模型。"""
 
     panel_title = "标题编号"
-    panel_icon = "hash"
+    panel_icon = "list-ordered"
     template_edited = Signal(object)
     save_requested = Signal()
+
+    def __init__(
+        self,
+        bridge,
+        parent=None,
+        *,
+        embedded_mode: str = "full",
+        max_level_provider=None,
+    ):
+        self._embedded_mode = str(embedded_mode or "full")
+        self._max_level_provider = max_level_provider
+        super().__init__(bridge, parent=parent)
 
     # ━━ Setup ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -513,20 +556,22 @@ class HeadingNumberingPanel(BasePanel):
         self._initialize_panel_state()
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(8)
+        root.setSpacing(get_theme().template_detail_section_gap)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        self._build_summary_card()
-        root.addWidget(self._summary_card)
+        if not self._is_embedded:
+            self._build_summary_card()
+            root.addWidget(self._summary_card)
 
-        self._build_scheme_section()
-        root.addWidget(self._scheme_section)
+            self._build_scheme_section()
+            root.addWidget(self._scheme_section)
 
         self._build_level_editor()
         root.addWidget(self._level_editor_card)
 
-        self._build_non_numbered_section()
-        root.addWidget(self._nn_section)
+        if not self._is_embedded:
+            self._build_non_numbered_section()
+            root.addWidget(self._nn_section)
 
         root.addStretch(1)
         self._apply_theme()
@@ -538,50 +583,45 @@ class HeadingNumberingPanel(BasePanel):
         self._selected_adv_level = 1
         self._is_syncing_ui = False
         self._save_enabled = False
-        self._style_editor_expanded = False
         self._expert_editor_expanded = False
         self._header_icons: list[tuple[str, QLabel]] = []
         self._header_titles: list[QLabel] = []
-        self._desc_labels: list[QLabel] = []
         self._unit_labels: list[QLabel] = []
+
+    @property
+    def _is_embedded(self) -> bool:
+        return self._embedded_mode != "full"
+
+    def _visible_level_count(self) -> int:
+        if self._max_level_provider is not None:
+            try:
+                value = int(self._max_level_provider() or 1)
+            except (TypeError, ValueError):
+                value = 1
+            return max(1, min(value, 8))
+        if self._adapter.has_template:
+            return max(1, min(int(self._adapter.max_levels or 1), 8))
+        return 1
 
     # ━━ 1. Summary Card ━━━━━━━━━━━━━━━━━━━━━━━━━
 
     def _build_summary_card(self) -> None:
-        self._summary_card = Card(parent=self)
-
-        header = QWidget(self._summary_card)
-        h = QHBoxLayout(header)
-        h.setContentsMargins(0, 0, 0, 6)
-        h.setSpacing(6)
-
-        icon_label = QLabel(header)
-        icon_label.setFixedSize(18, 18)
-        self._header_icons.append(("hash", icon_label))
-        h.addWidget(icon_label)
-
-        title = QLabel("标题编号", header)
-        title.setObjectName("tpl_card_title")
-        self._header_titles.append(title)
-        h.addWidget(title)
-        h.addStretch(1)
+        self._summary_card = TemplateSummaryCard("标题编号", "list-ordered", parent=self)
+        header = self._summary_card.header
 
         self._restore_btn = QPushButton("恢复", header)
         self._restore_btn.setCursor(Qt.PointingHandCursor)
         self._restore_btn.setIconSize(QSize(16, 16))
         self._restore_btn.clicked.connect(self._on_restore)
-        h.addWidget(self._restore_btn)
+        self._summary_card.add_action(self._restore_btn)
 
         self._save_btn = QPushButton("保存", header)
         self._save_btn.setCursor(Qt.PointingHandCursor)
         self._save_btn.setIconSize(QSize(16, 16))
         self._save_btn.clicked.connect(self._on_save_requested)
-        h.addWidget(self._save_btn)
+        self._summary_card.add_action(self._save_btn)
 
-        self._summary_card.add_widget(header)
-
-        self._summary_grid = SummaryGrid(columns=6, tile_style="module", parent=self._summary_card)
-        self._summary_card.add_widget(self._summary_grid)
+        self._summary_grid = self._summary_card.summary_grid
 
     # ━━ 2. Scheme Section ━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -593,11 +633,10 @@ class HeadingNumberingPanel(BasePanel):
         # Preset combo
         self._preset_cb = StyledComboBox(self)
         self._preset_cb.setSizeAdjustPolicy(self._preset_cb.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
-        for key, label in get_preset_labels():
-            self._preset_cb.addItem(label, key)
+        self._populate_preset_combo()
         self._preset_cb.setPlaceholderText("当前配置（自定义）")
         self._preset_cb.setCurrentIndex(-1)
-        self._preset_row = self._scheme_form.add_field("编号库", self._preset_cb)
+        self._preset_row = self._scheme_form.add_field("编号方案", self._preset_cb)
 
         # Max levels
         self._levels_input = SpacingInput(
@@ -617,9 +656,72 @@ class HeadingNumberingPanel(BasePanel):
             self._levels_input,
             suffix_widget=levels_suffix,
         )
+
+        self._scheme_actions = FormActionButtonRow(self)
+        self._scheme_save_as_btn = self._scheme_actions.add_button("另存为方案", "secondary")
+        self._scheme_update_btn = self._scheme_actions.add_button("更新方案", "secondary")
+        self._scheme_delete_btn = self._scheme_actions.add_button("删除方案", "ghost-danger")
+        self._scheme_open_folder_btn = self._scheme_actions.add_button("打开方案文件夹", "secondary")
+        self._scheme_save_as_btn.clicked.connect(self._on_scheme_save_as_requested)
+        self._scheme_update_btn.clicked.connect(self._on_scheme_update_requested)
+        self._scheme_delete_btn.clicked.connect(self._on_scheme_delete_requested)
+        self._scheme_open_folder_btn.clicked.connect(self._on_scheme_open_folder_requested)
+        self._scheme_actions_row = self._scheme_form.add_field("方案操作", self._scheme_actions)
         self._scheme_section.add_widget(self._scheme_form)
         # Backward-compatible alias used by older tests/callers.
         self._levels_slider = self._levels_input.spin_box
+
+    def _populate_preset_combo(self) -> None:
+        current_key = self._preset_cb.currentData() if hasattr(self, "_preset_cb") else None
+        self._preset_cb.blockSignals(True)
+        try:
+            self._preset_cb.set_display_text_override(None)
+            self._preset_cb.clear()
+            for key, entry in get_scheme_catalog().items():
+                label = str(entry.get("label", key))
+                suffix = "用户" if entry.get("source") == "user" else "内置"
+                self._preset_cb.addItem(f"{label}（{suffix}）", key)
+            if current_key:
+                index = self._find_preset_index(current_key)
+                self._preset_cb.setCurrentIndex(index)
+            else:
+                self._preset_cb.setCurrentIndex(-1)
+        finally:
+            self._preset_cb.blockSignals(False)
+
+    def _find_preset_index(self, key: str | None) -> int:
+        if not key:
+            return -1
+        for index in range(self._preset_cb.count()):
+            if self._preset_cb.itemData(index) == key:
+                return index
+        return -1
+
+    def _scheme_display_text(self) -> str:
+        custom_text = "当前配置（自定义）"
+        if not self._adapter.has_template:
+            return custom_text
+        text = self._adapter.active_scheme_label()
+        if text == "当前模板自定义":
+            return custom_text
+        return text or custom_text
+
+    def _default_scheme_save_as_name(self) -> str:
+        active_key = self._adapter.active_scheme_key()
+        label = ""
+        if active_key:
+            label = str(get_scheme_catalog().get(active_key, {}).get("label", "") or "")
+        if not label or label == "当前模板自定义":
+            label = "自定义编号方案"
+        if not scheme_label_exists(label):
+            return label
+        base = f"{label}副本"
+        candidate = base
+        suffix = 2
+        while scheme_label_exists(candidate):
+            candidate = f"{base} {suffix}"
+            suffix += 1
+        return candidate
 
     # ━━ 3. Level Editor ━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -627,15 +729,14 @@ class HeadingNumberingPanel(BasePanel):
         self._level_editor_card = Card(parent=self)
         self._add_card_header(self._level_editor_card, "list-ordered", "按级编辑")
 
-        content = QWidget(self._level_editor_card)
-        layout = QHBoxLayout(content)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        self._level_editor_content = QWidget(self._level_editor_card)
+        content_layout = QHBoxLayout(self._level_editor_content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(get_theme().template_detail_section_gap)
+        content_layout.addWidget(self._build_sidebar())
+        content_layout.addWidget(self._build_detail_panel_inspector(), 1)
 
-        layout.addWidget(self._build_sidebar())
-        layout.addWidget(self._build_detail_panel_inspector(), 1)
-
-        self._level_editor_card.add_widget(content)
+        self._level_editor_card.add_widget(self._level_editor_content)
 
     def _build_sidebar(self) -> QFrame:
         t = get_theme()
@@ -656,6 +757,7 @@ class HeadingNumberingPanel(BasePanel):
 
         self._adv_list = QListWidget()
         self._adv_list.setObjectName("hn_level_list")
+        self._adv_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._adv_list.currentRowChanged.connect(self._on_level_selected)
         left_layout.addWidget(self._adv_list)
         return left_frame
@@ -691,22 +793,20 @@ class HeadingNumberingPanel(BasePanel):
 
     def _build_detail_panel_inspector(self) -> QWidget:
         detail = QWidget()
+        self._detail_inspector_panel = detail
         layout = QVBoxLayout(detail)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
+        layout.setSpacing(get_theme().template_detail_section_gap)
 
         self._detail_title = QLabel("级别配置")
         self._detail_title.setObjectName("hn_detail_title")
         layout.addWidget(self._detail_title)
 
-        self._detail_hint = QLabel("先看结果，再展开需要调整的部分。")
-        self._detail_hint.setObjectName("hn_detail_hint")
-        self._detail_hint.setWordWrap(True)
-        layout.addWidget(self._detail_hint)
-
         self._build_result_strip(layout)
         self._build_numbering_block(layout)
-        self._build_output_block(layout)
+        self._build_counter_block(layout)
+        self._build_output_reference_block(layout)
+        self._build_title_spacing_block(layout)
         self._build_style_inspector(layout)
         self._build_expert_inspector(layout)
 
@@ -722,10 +822,7 @@ class HeadingNumberingPanel(BasePanel):
 
         self._result_heading_label = QLabel("正文预览", card)
         self._result_heading_label.setObjectName("hn_result_heading")
-        self._result_meta_label = QLabel("下面展示的是该级标题在正文里的实际呈现。", card)
-        self._result_meta_label.setObjectName("hn_result_meta")
         layout.addWidget(self._result_heading_label)
-        layout.addWidget(self._result_meta_label)
 
         preview_shell = QFrame(card)
         preview_shell.setObjectName("hn_result_preview_shell")
@@ -742,17 +839,29 @@ class HeadingNumberingPanel(BasePanel):
         body_layout, _ = self._build_inspector_block(
             parent_layout,
             "编号组成",
-            "决定当前级的编号外观，以及是否需要带上上级编号。",
         )
         self._build_numbering_section(body_layout)
 
-    def _build_output_block(self, parent_layout: QVBoxLayout) -> None:
+    def _build_counter_block(self, parent_layout: QVBoxLayout) -> None:
         body_layout, _ = self._build_inspector_block(
             parent_layout,
-            "输出与衔接",
-            "决定目录、交叉引用以及标题正文之间如何衔接。",
+            "编号计数",
         )
-        self._build_output_section(body_layout)
+        self._build_counter_section(body_layout)
+
+    def _build_title_spacing_block(self, parent_layout: QVBoxLayout) -> None:
+        body_layout, _ = self._build_inspector_block(
+            parent_layout,
+            "标题显示",
+        )
+        self._build_title_spacing_section(body_layout)
+
+    def _build_output_reference_block(self, parent_layout: QVBoxLayout) -> None:
+        body_layout, _ = self._build_inspector_block(
+            parent_layout,
+            "目录与下级引用",
+        )
+        self._build_output_reference_section(body_layout)
 
     def _build_style_inspector(self, parent_layout: QVBoxLayout) -> None:
         block = QFrame(self)
@@ -762,57 +871,12 @@ class HeadingNumberingPanel(BasePanel):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
 
-        header = QWidget(block)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(8)
-
-        title = QLabel("标题样式", header)
+        title = QLabel("标题样式", block)
         title.setObjectName("hn_block_title")
-        header_layout.addWidget(title)
-        header_layout.addStretch(1)
-
-        self._style_toggle_btn = QPushButton("展开样式细节", header)
-        self._style_toggle_btn.setObjectName("hn_inline_action")
-        self._style_toggle_btn.setCursor(Qt.PointingHandCursor)
-        apply_size_class(self._style_toggle_btn, "sm")
-        self._style_toggle_btn.clicked.connect(self._toggle_style_editor)
-        header_layout.addWidget(self._style_toggle_btn)
-        layout.addWidget(header)
-
-        self._style_summary_shell = QFrame(block)
-        self._style_summary_shell.setObjectName("hn_summary_shell")
-        summary_layout = QVBoxLayout(self._style_summary_shell)
-        summary_layout.setContentsMargins(12, 10, 12, 10)
-        summary_layout.setSpacing(6)
-
-        badges = QWidget(self._style_summary_shell)
-        badges_layout = QHBoxLayout(badges)
-        badges_layout.setContentsMargins(0, 0, 0, 0)
-        badges_layout.setSpacing(6)
-        self._style_mode_badge = Badge("", parent=badges)
-        self._style_source_badge = Badge("", parent=badges)
-        badges_layout.addWidget(self._style_mode_badge, 0, Qt.AlignLeft | Qt.AlignVCenter)
-        badges_layout.addWidget(self._style_source_badge, 0, Qt.AlignLeft | Qt.AlignVCenter)
-        badges_layout.addStretch(1)
-        summary_layout.addWidget(badges)
-
-        self._style_summary_primary = QLabel("", self._style_summary_shell)
-        self._style_summary_primary.setObjectName("hn_summary_primary")
-        self._style_summary_secondary = QLabel("", self._style_summary_shell)
-        self._style_summary_secondary.setObjectName("hn_summary_secondary")
-        self._style_summary_secondary.setWordWrap(True)
-        summary_layout.addWidget(self._style_summary_primary)
-        summary_layout.addWidget(self._style_summary_secondary)
-        layout.addWidget(self._style_summary_shell)
-
-        self._style_editor_divider = QFrame(block)
-        self._style_editor_divider.setObjectName("hn_editor_divider")
-        self._style_editor_divider.setVisible(False)
-        layout.addWidget(self._style_editor_divider)
+        layout.addWidget(title)
 
         self._style_editor_container = QWidget(block)
-        self._style_editor_container.setVisible(False)
+        self._style_editor_container.setVisible(True)
         editor_layout = QVBoxLayout(self._style_editor_container)
         editor_layout.setContentsMargins(0, 0, 0, 0)
         editor_layout.setSpacing(10)
@@ -834,7 +898,7 @@ class HeadingNumberingPanel(BasePanel):
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(8)
 
-        title = QLabel("模板表达式", header)
+        title = QLabel("编号模板", header)
         title.setObjectName("hn_block_title")
         header_layout.addWidget(title)
         header_layout.addStretch(1)
@@ -846,30 +910,6 @@ class HeadingNumberingPanel(BasePanel):
         self._expert_toggle_btn.clicked.connect(self._toggle_expert_editor)
         header_layout.addWidget(self._expert_toggle_btn)
         layout.addWidget(header)
-
-        self._expert_summary_shell = QFrame(block)
-        self._expert_summary_shell.setObjectName("hn_summary_shell")
-        summary_layout = QVBoxLayout(self._expert_summary_shell)
-        summary_layout.setContentsMargins(12, 10, 12, 10)
-        summary_layout.setSpacing(6)
-
-        badges = QWidget(self._expert_summary_shell)
-        badges_layout = QHBoxLayout(badges)
-        badges_layout.setContentsMargins(0, 0, 0, 0)
-        badges_layout.setSpacing(6)
-        self._expert_mode_badge = Badge("", parent=badges)
-        badges_layout.addWidget(self._expert_mode_badge, 0, Qt.AlignLeft | Qt.AlignVCenter)
-        badges_layout.addStretch(1)
-        summary_layout.addWidget(badges)
-
-        self._expert_summary_primary = QLabel("", self._expert_summary_shell)
-        self._expert_summary_primary.setObjectName("hn_summary_primary")
-        self._expert_summary_label = QLabel("", self._expert_summary_shell)
-        self._expert_summary_label.setObjectName("hn_summary_secondary")
-        self._expert_summary_label.setWordWrap(True)
-        summary_layout.addWidget(self._expert_summary_primary)
-        summary_layout.addWidget(self._expert_summary_label)
-        layout.addWidget(self._expert_summary_shell)
 
         self._expert_editor_divider = QFrame(block)
         self._expert_editor_divider.setObjectName("hn_editor_divider")
@@ -890,7 +930,6 @@ class HeadingNumberingPanel(BasePanel):
         self,
         parent_layout: QVBoxLayout,
         title: str,
-        description: str | None = None,
     ) -> tuple[QVBoxLayout, QFrame]:
         block = QFrame(self)
         block.setObjectName("hn_inspector_block")
@@ -902,12 +941,6 @@ class HeadingNumberingPanel(BasePanel):
         title_label.setObjectName("hn_block_title")
         layout.addWidget(title_label)
 
-        if description:
-            desc = QLabel(description, block)
-            desc.setObjectName("hn_block_desc")
-            desc.setWordWrap(True)
-            layout.addWidget(desc)
-
         body = QWidget(block)
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(0, 0, 0, 0)
@@ -916,122 +949,38 @@ class HeadingNumberingPanel(BasePanel):
         parent_layout.addWidget(block)
         return body_layout, block
 
-    def _toggle_style_editor(self) -> None:
-        self._style_editor_expanded = not self._style_editor_expanded
-        self._refresh_style_summary()
-
     def _toggle_expert_editor(self) -> None:
         self._expert_editor_expanded = not self._expert_editor_expanded
         self._refresh_expert_summary()
 
     def _refresh_inspector_toggles(self) -> None:
-        if hasattr(self, "_style_editor_container"):
-            self._style_editor_container.setVisible(self._style_editor_expanded)
-        if hasattr(self, "_style_editor_divider"):
-            self._style_editor_divider.setVisible(self._style_editor_expanded)
-        if hasattr(self, "_expert_editor_container"):
-            self._expert_editor_container.setVisible(self._expert_editor_expanded)
-        if hasattr(self, "_expert_editor_divider"):
-            self._expert_editor_divider.setVisible(self._expert_editor_expanded)
-        if hasattr(self, "_style_toggle_btn"):
-            self._style_toggle_btn.setText("收起样式细节" if self._style_editor_expanded else "展开样式细节")
-        if hasattr(self, "_expert_toggle_btn"):
-            self._expert_toggle_btn.setText(build_expert_toggle_text(self._expert_editor_expanded))
-        if hasattr(self, "_style_block"):
-            _set_state_property(self._style_block, "expanded", self._style_editor_expanded)
-        if hasattr(self, "_expert_block"):
-            _set_state_property(self._expert_block, "expanded", self._expert_editor_expanded)
+        root = getattr(self, "_detail_inspector_panel", self)
+        expert_block = getattr(self, "_expert_block", None)
+        with updates_suspended(root, expert_block, self):
+            if hasattr(self, "_style_editor_container"):
+                self._style_editor_container.setVisible(True)
+            if hasattr(self, "_expert_editor_container"):
+                self._expert_editor_container.setVisible(self._expert_editor_expanded)
+            if hasattr(self, "_expert_editor_divider"):
+                self._expert_editor_divider.setVisible(self._expert_editor_expanded)
+            if hasattr(self, "_expert_toggle_btn"):
+                self._expert_toggle_btn.setText(build_expert_toggle_text(self._expert_editor_expanded))
+            if hasattr(self, "_style_block"):
+                _set_state_property(self._style_block, "expanded", True)
+            if hasattr(self, "_expert_block"):
+                _set_state_property(self._expert_block, "expanded", self._expert_editor_expanded)
+            refresh_layout_chain(root)
+        refresh_layout_chain_later(root)
 
     def _refresh_result_strip(self) -> None:
         if not self._adapter.has_template or not hasattr(self, "_result_heading_label"):
             return
-        level = self._selected_adv_level
-        binding = self._adapter.get_binding(level)
-        binding_from_preset = self._adapter.is_level_binding_from_preset(level)
-        has_style_override = self._adapter.has_heading_style_override(level)
         self._result_heading_label.setText("正文预览")
-        if not binding.enabled:
-            meta_text = "本级已关闭编号，下面只展示标题文字本身。"
-        else:
-            source_text = "编号沿用预设" if binding_from_preset else "编号已在本级调整"
-            style_text = "样式已独立" if has_style_override else "样式沿用继承链"
-            meta_text = f"{source_text}，{style_text}。"
-        self._result_meta_label.setText(meta_text)
-
-    def _refresh_output_hint(self) -> None:
-        if not self._adapter.has_template or not hasattr(self, "_ref_style_hint_label"):
-            return
-        level = self._selected_adv_level
-        binding = self._adapter.get_binding(level)
-        if not binding.enabled:
-            self._ref_style_hint_label.setText("当前级未启用编号，交叉引用样式暂不会参与下级组合。")
-            return
-
-        ref_preview = self._adapter.preview_reference_number(level)
-        usage = self._adapter.preview_reference_usage(level)
-        if usage is None:
-            text = (
-                f"被下级引用时，本级编号会写成 {ref_preview}；"
-                "当前预设里还没有下级在组合中引用本级编号。"
-            )
-        else:
-            child_level, child_preview = usage
-            child_preview = child_preview.replace("\t", "   ")
-            text = (
-                f"被下级引用时，本级编号会写成 {ref_preview}；"
-                f"按当前链路，级别 {child_level} 组合后会显示为 {child_preview}。"
-            )
-        self._ref_style_hint_label.setText(text)
 
     def _refresh_style_summary(self) -> None:
-        if not self._adapter.has_template or not hasattr(self, "_style_summary_primary"):
-            return
-        level = self._selected_adv_level
-        style_source = self._adapter.get_heading_style_source(level)
-        has_style_override = self._adapter.has_heading_style_override(level)
-        override_text = (
-            "当前级已经单独覆写标题样式。"
-            if has_style_override
-            else "当前级还没有单独覆写标题样式。"
-        )
-        self._style_summary_primary.setText(self._adapter.heading_style_summary(level))
-        self._style_summary_secondary.setText(
-            f"{override_text}{self._adapter.heading_style_source_text(level)}"
-        )
-        if hasattr(self, "_style_mode_badge"):
-            self._style_mode_badge.set_text("样式独立" if has_style_override else "沿用继承")
-            self._style_mode_badge.set_variant("info" if has_style_override else "neutral")
-
-            source_badge_text = "来源未定"
-            source_badge_variant = "neutral"
-            if style_source == f"heading{level}":
-                source_badge_text = "本级样式"
-                source_badge_variant = "info"
-            elif style_source == "heading":
-                source_badge_text = "通用标题"
-            elif style_source == "body":
-                source_badge_text = "正文回退"
-            elif style_source == "normal":
-                source_badge_text = "普通回退"
-            self._style_source_badge.set_text(source_badge_text)
-            self._style_source_badge.set_variant(source_badge_variant)
         self._refresh_inspector_toggles()
 
     def _refresh_expert_summary(self) -> None:
-        if not self._adapter.has_template or not hasattr(self, "_expert_summary_label"):
-            return
-        level = self._selected_adv_level
-        binding = self._adapter.get_binding(level)
-        raw_template = binding.display_template or "{nn}"
-        using_raw = self._use_raw_cb.isChecked()
-        edit_mode = "当前正在直接编辑 display_template。" if using_raw else "默认建议优先使用上面的结构化控件。"
-        self._expert_summary_primary.setText(f"当前表达式：{raw_template}")
-        self._expert_summary_label.setText(
-            f"{edit_mode}只有复杂规则无法通过结构化控件表达时，再切换到这里。"
-        )
-        if hasattr(self, "_expert_mode_badge"):
-            self._expert_mode_badge.set_text("表达式模式" if using_raw else "结构化优先")
-            self._expert_mode_badge.set_variant("warning" if using_raw else "neutral")
         self._refresh_inspector_toggles()
 
     def _section_header(self, title: str) -> QWidget:
@@ -1050,19 +999,15 @@ class HeadingNumberingPanel(BasePanel):
     # ── Numbering rules (flat) ─────────────────────────
 
     def _build_numbering_section(self, parent_layout: QVBoxLayout) -> None:
-        # Row 1: Enabled toggle + Number style
         self._level_enabled_switch = ToggleSwitch(self, checked=True)
         self._level_enabled_switch.toggled_signal.connect(self._on_level_enabled_changed)
-        enabled_row = self._compact_form_row("启用编号", self._level_enabled_switch, parent=self)
 
         self._core_style_cb = StyledComboBox(self)
         self._core_style_cb.setSizeAdjustPolicy(self._core_style_cb.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
         for key, desc in STYLE_OPTIONS:
             self._core_style_cb.addItem(desc, key)
         self._core_style_cb.currentIndexChanged.connect(self._on_editor_changed)
-        core_style_row = self._compact_form_row("编号样式", self._core_style_cb, parent=self)
 
-        # Row 2: Prefix / Suffix
         self._prefix_edit = QLineEdit(self)
         self._prefix_edit.setPlaceholderText("如: 第")
         apply_size_class(self._prefix_edit, "md")
@@ -1073,37 +1018,37 @@ class HeadingNumberingPanel(BasePanel):
         apply_size_class(self._suffix_edit, "md")
         self._suffix_edit.textEdited.connect(self._on_editor_changed)
 
-        prefix_row = self._compact_form_row("前缀", self._prefix_edit, parent=self)
-        suffix_row = self._compact_form_row("后缀", self._suffix_edit, parent=self)
-
-        # Row 3: Chain + separator
         self._chain_cb = StyledComboBox(self)
         self._chain_cb.setSizeAdjustPolicy(self._chain_cb.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
         self._chain_cb.currentIndexChanged.connect(self._on_chain_selected)
 
-        self._chain_sep_edit = QLineEdit(self)
-        self._chain_sep_edit.setFixedWidth(50)
-        self._chain_sep_edit.setAlignment(Qt.AlignCenter)
-        apply_size_class(self._chain_sep_edit, "md")
-        self._chain_sep_edit.textEdited.connect(self._on_chain_sep_edited)
-        self._chain_sep_lbl_row = self._compact_form_row("级间分隔符", self._chain_sep_edit, parent=self)
-        chain_row = self._compact_form_row("带上上级编号", self._chain_cb, parent=self)
-        parent_layout.addWidget(
-            self._form_grid(
-                [
-                    [enabled_row, core_style_row],
-                    [prefix_row, suffix_row],
-                    [chain_row, self._chain_sep_lbl_row],
-                ]
-            )
+        self._chain_sep_edit = _WhitespacePresetWidget(
+            options=CHAIN_SEPARATOR_OPTIONS,
+            compact_mode_width=150,
+            parent=self,
         )
+        self._chain_sep_edit.setToolTip("选择上级编号与当前级编号之间的连接符，少数特殊规范可切换到自定义。")
+        self._chain_sep_edit.setMinimumWidth(170)
+        self._chain_sep_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._chain_sep_edit.textChanged.connect(self._on_chain_sep_edited)
 
-    def _build_output_section(self, parent_layout: QVBoxLayout) -> None:
-        # Row 1: TOC toggle + Start at
-        self._toc_switch = ToggleSwitch(self, checked=True)
-        self._toc_switch.toggled_signal.connect(self._on_detail_toc_changed)
-        toc_row = self._compact_form_row("计入目录", self._toc_switch, parent=self)
+        numbering_enabled_row = self._compact_form_row("启用编号", self._level_enabled_switch, parent=self)
+        core_style_row = self._compact_form_row("编号样式", self._core_style_cb, parent=self)
+        prefix_row = self._compact_form_row("前缀", self._prefix_edit, parent=self)
+        suffix_row = self._compact_form_row("后缀", self._suffix_edit, parent=self)
+        chain_row = self._compact_form_row("包含上级编号", self._chain_cb, parent=self)
+        self._chain_sep_lbl_row = self._compact_form_row("连接符", self._chain_sep_edit, parent=self)
 
+        self._numbering_grid = self._form_grid(
+            [
+                [numbering_enabled_row, core_style_row],
+                [prefix_row, suffix_row],
+                [chain_row, self._chain_sep_lbl_row],
+            ]
+        )
+        parent_layout.addWidget(self._numbering_grid)
+
+    def _build_counter_section(self, parent_layout: QVBoxLayout) -> None:
         self._start_at_input = SpacingInput(
             unit="", min_val=0, max_val=99, step=1, decimals=0,
             units=(), show_unit=False, parent=self,
@@ -1111,52 +1056,87 @@ class HeadingNumberingPanel(BasePanel):
         self._start_at_input.value_changed.connect(self._on_start_at_changed)
         start_at_row = self._compact_form_row("起始编号", self._start_at_input, parent=self)
 
-        # Row 2: Reference style + title separator
-        self._ref_style_cb = StyledComboBox(self)
-        self._ref_style_cb.setSizeAdjustPolicy(self._ref_style_cb.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
-        for key, desc in STYLE_OPTIONS:
-            self._ref_style_cb.addItem(desc, key)
-        self._ref_style_cb.currentIndexChanged.connect(self._on_ref_style_edited)
-        ref_style_row = self._compact_form_row("交叉引用样式", self._ref_style_cb, parent=self)
+        self._restart_on_cb = StyledComboBox(self)
+        self._restart_on_cb.setSizeAdjustPolicy(self._restart_on_cb.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
+        self._restart_on_cb.currentIndexChanged.connect(self._on_restart_on_selected)
+        restart_on_row = self._compact_form_row("重新计数", self._restart_on_cb, parent=self)
 
-        self._title_sep_edit = _WhitespacePresetWidget(parent=self)
-        self._title_sep_edit.setToolTip("标题编号和正文之间的分隔符。0.2 设计支持空格、全角空格、Tab 与自定义。")
-        self._title_sep_edit.setMinimumWidth(132)
-        self._title_sep_edit.setMaximumWidth(176)
-        self._title_sep_edit.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self._title_sep_edit.textChanged.connect(self._on_title_sep_edited)
-        title_sep_row = self._compact_form_row("标题分隔符", self._title_sep_edit, parent=self)
+        self._restart_trigger_cb = StyledComboBox(self)
+        self._restart_trigger_cb.setSizeAdjustPolicy(
+            self._restart_trigger_cb.SizeAdjustPolicy.AdjustToContentsOnFirstShow
+        )
+        self._restart_trigger_cb.currentIndexChanged.connect(self._on_restart_trigger_selected)
+        self._restart_trigger_row = self._compact_form_row("触发级别", self._restart_trigger_cb, parent=self)
+
         parent_layout.addWidget(
             self._form_grid(
                 [
-                    [toc_row, start_at_row],
-                    [ref_style_row, title_sep_row],
+                    [start_at_row, restart_on_row],
+                    [self._restart_trigger_row],
                 ]
             )
         )
-        self._ref_style_hint_label = QLabel("", self)
-        self._ref_style_hint_label.setObjectName("hn_summary_secondary")
-        self._ref_style_hint_label.setWordWrap(True)
-        parent_layout.addWidget(self._ref_style_hint_label)
 
+    def _build_title_spacing_section(self, parent_layout: QVBoxLayout) -> None:
+        self._title_sep_edit = _WhitespacePresetWidget(compact_mode_width=190, parent=self)
+        self._title_sep_edit.setToolTip("编号和标题正文之间的间隔。")
+        self._title_sep_edit.setMinimumWidth(self._title_sep_edit.sizeHint().width())
+        self._title_sep_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._title_sep_edit.textChanged.connect(self._on_title_sep_edited)
+        title_sep_row = self._compact_form_row("编号后间隔", self._title_sep_edit, parent=self)
+
+        parent_layout.addWidget(
+            self._form_grid(
+                [
+                    [title_sep_row],
+                ]
+            )
+        )
+
+    def _build_output_reference_section(self, parent_layout: QVBoxLayout) -> None:
+        self._toc_switch = ToggleSwitch(self, checked=True)
+        self._toc_switch.toggled_signal.connect(self._on_detail_toc_changed)
+        toc_row = self._compact_form_row("加入目录", self._toc_switch, parent=self)
+
+        self._ref_style_cb = StyledComboBox(self)
+        self._ref_style_cb.setSizeAdjustPolicy(self._ref_style_cb.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
+        self._ref_style_cb.setToolTip("当下级标题包含本级编号时，本级编号在下级标题中使用的数字样式。")
+        for key, desc in STYLE_OPTIONS:
+            self._ref_style_cb.addItem(desc, key)
+        self._ref_style_cb.currentIndexChanged.connect(self._on_ref_style_edited)
+        ref_style_row = self._compact_form_row("下级引用样式", self._ref_style_cb, parent=self)
+
+        parent_layout.addWidget(
+            self._form_grid(
+                [
+                    [toc_row],
+                    [ref_style_row],
+                ]
+            )
+        )
     def _build_expert_section(self, parent_layout: QVBoxLayout) -> None:
         raw_row = QWidget()
         raw_layout = QHBoxLayout(raw_row)
         raw_layout.setContentsMargins(0, 0, 0, 0)
         raw_layout.setSpacing(8)
 
-        self._use_raw_cb = QCheckBox("改用模板表达式", self)
+        self._use_raw_cb = QCheckBox("手写编号模板", self)
         self._use_raw_cb.toggled.connect(self._on_use_raw_toggled)
         raw_layout.addWidget(self._use_raw_cb)
 
         self._raw_template_edit = QLineEdit(self)
-        self._raw_template_edit.setPlaceholderText("例如: {parent.nn}-{cn}")
+        self._raw_template_edit.setPlaceholderText("例如: 第{cn}章 / {chain} / 附录 {AL}")
         self._raw_template_edit.setEnabled(False)
         self._raw_template_edit.setMinimumWidth(180)
         apply_size_class(self._raw_template_edit, "md")
         self._raw_template_edit.textEdited.connect(self._on_raw_template_edited)
         raw_layout.addWidget(self._raw_template_edit, 1)
         parent_layout.addWidget(raw_row)
+
+        self._raw_template_error_label = QLabel("", self)
+        self._raw_template_error_label.setObjectName("hn_template_error")
+        self._raw_template_error_label.setVisible(False)
+        parent_layout.addWidget(self._raw_template_error_label)
 
     # ── Heading format (flat) ─────────────────────────
 
@@ -1179,10 +1159,15 @@ class HeadingNumberingPanel(BasePanel):
         self._hd_italic = ToggleSwitch(self, checked=False)
         self._hd_italic.toggled_signal.connect(self._on_heading_format_edited)
 
-        emphasis_w = build_emphasis_widget(self, self._hd_bold, self._hd_italic)
+        self._hd_emphasis_widget = build_emphasis_widget(
+            self,
+            self._hd_bold,
+            self._hd_italic,
+        )
+        self._hd_emphasis_widget.setObjectName("hn_emphasis_control")
 
         size_row = self._compact_form_row("字号", self._hd_size_combo, parent=self)
-        emphasis_row = self._compact_form_row("字形", emphasis_w, parent=self)
+        emphasis_row = self._compact_form_row("字形", self._hd_emphasis_widget, parent=self)
 
         # Alignment
         self._hd_alignment = StyledComboBox(self)
@@ -1261,11 +1246,6 @@ class HeadingNumberingPanel(BasePanel):
         self._nn_section = FlowSection(build_non_numbered_toggle_text(False), expanded=False, parent=self)
         self._nn_section.expanded_changed.connect(self._sync_non_numbered_section_title)
 
-        desc = QLabel("忽略以下列表中匹配的标题，不为其添加编号。")
-        desc.setWordWrap(True)
-        self._desc_labels.append(desc)
-        self._nn_section.add_widget(desc)
-
         self._nn_texts_edit = QLineEdit(self)
         apply_size_class(self._nn_texts_edit, "md")
         self._nn_texts_edit.setPlaceholderText("如: 参考文献, 致谢, 摘要")
@@ -1287,11 +1267,6 @@ class HeadingNumberingPanel(BasePanel):
         self._nn_section.add_widget(
             self._form_row("样式来源", self._nn_style_mode_combo, parent=self._nn_section)
         )
-
-        self._nn_style_summary = QLabel("", self)
-        self._nn_style_summary.setWordWrap(True)
-        self._nn_style_summary.setObjectName("hn_summary_secondary")
-        self._nn_section.add_widget(self._nn_style_summary)
 
         self._nn_style_editor = QWidget(self)
         nn_style_layout = QVBoxLayout(self._nn_style_editor)
@@ -1341,7 +1316,7 @@ class HeadingNumberingPanel(BasePanel):
     # ━━ Helpers ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     def _add_card_header(
-        self, card: Card, icon_name: str, title: str, description: str | None = None,
+        self, card: Card, icon_name: str, title: str,
     ) -> None:
         header = QWidget(card)
         layout = QHBoxLayout(header)
@@ -1360,12 +1335,6 @@ class HeadingNumberingPanel(BasePanel):
         layout.addStretch(1)
         card.add_widget(header)
 
-        if description:
-            desc = QLabel(description, card)
-            desc.setWordWrap(True)
-            self._desc_labels.append(desc)
-            card.add_widget(desc)
-
     def _form_row(
         self, label: str, widget: QWidget, *, parent,
         suffix: QWidget | None = None, label_width: int | None = None,
@@ -1374,6 +1343,15 @@ class HeadingNumberingPanel(BasePanel):
             label, widget, suffix_widget=suffix,
             label_width=label_width, parent=parent,
         )
+
+    def _apply_heading_form_row_height(self, row: QWidget) -> None:
+        row.setProperty("headingInspectorFormRow", True)
+        row.setMinimumHeight(HEADING_INSPECTOR_ROW_HEIGHT)
+        row.setMaximumHeight(HEADING_INSPECTOR_ROW_HEIGHT)
+        policy = row.sizePolicy()
+        policy.setVerticalPolicy(QSizePolicy.Fixed)
+        row.setSizePolicy(policy)
+        row.updateGeometry()
 
     def _compact_form_row(
         self, label: str, widget: QWidget, *, parent,
@@ -1388,6 +1366,7 @@ class HeadingNumberingPanel(BasePanel):
         )
         if label_width is None:
             row.set_label_width(row.preferred_label_width())
+        self._apply_heading_form_row_height(row)
         return row
 
     def _form_grid(self, rows: list[list[QWidget]]) -> TemplateFormGrid:
@@ -1407,13 +1386,13 @@ class HeadingNumberingPanel(BasePanel):
             self._adv_list.blockSignals(False)
             return
 
-        levels = self._adapter.max_levels
+        levels = self._visible_level_count()
         for level in range(1, levels + 1):
             binding = self._adapter.get_binding(level)
             preview = self._adapter.preview_number(level)
             style_summary = self._sidebar_meta_text(level, binding)
             item = QListWidgetItem()
-            item.setSizeHint(QSize(t.heading_panel_sidebar_width, t.control_height_md + 18))
+            item.setSizeHint(QSize(max(0, t.heading_panel_sidebar_width - 2), t.control_height_md + 18))
             item.setData(Qt.UserRole, level)
             self._adv_list.addItem(item)
             self._adv_list.setItemWidget(item, self._build_level_row(level, binding, preview, style_summary))
@@ -1493,31 +1472,51 @@ class HeadingNumberingPanel(BasePanel):
         self._toc_switch.setChecked(state.include_in_toc)
         self._start_at_input.set_value(state.start_at, "")
 
+        self._restart_on_cb.blockSignals(True)
+        self._restart_on_cb.clear()
+        for label, value in state.restart_mode_options:
+            self._restart_on_cb.addItem(label, value)
+        _select(self._restart_on_cb, state.restart_mode)
+        self._restart_on_cb.blockSignals(False)
+
+        self._restart_trigger_cb.blockSignals(True)
+        self._restart_trigger_cb.clear()
+        for label, value in state.restart_trigger_options:
+            self._restart_trigger_cb.addItem(label, value)
+        trigger_value = (
+            f"heading{state.restart_trigger_level}"
+            if state.restart_trigger_level is not None
+            else (state.restart_trigger_options[0][1] if state.restart_trigger_options else "")
+        )
+        _select(self._restart_trigger_cb, trigger_value)
+        self._restart_trigger_cb.blockSignals(False)
+        self._sync_restart_trigger_visibility()
+
         self._chain_cb.blockSignals(True)
         self._chain_cb.clear()
         for label, value in state.chain_options:
             self._chain_cb.addItem(label, value)
         _select(self._chain_cb, state.chain_value)
         self._chain_cb.blockSignals(False)
-        self._chain_sep_edit.setText(state.chain_separator)
+        self._chain_sep_edit.setRawText(state.chain_separator)
 
         _select(self._ref_style_cb, state.reference_core_style)
         self._title_sep_edit.setRawText(state.title_separator)
         self._raw_template_edit.setText(state.raw_template)
 
         self._use_raw_cb.blockSignals(True)
-        self._use_raw_cb.setChecked(False)
+        self._use_raw_cb.setChecked(state.template_mode == TEMPLATE_MODE_CUSTOM)
         self._use_raw_cb.blockSignals(False)
 
         self._sync_chain_sep_visibility()
         self._sync_numbering_lock_state()
+        self._sync_raw_template_validation()
 
         # ── Heading format — always populate from resolved style ──
         self._sync_heading_style_editor(level)
 
         # Update inspector summaries + inline preview
         self._refresh_result_strip()
-        self._refresh_output_hint()
         self._refresh_style_summary()
         self._refresh_expert_summary()
         self._refresh_inline_preview()
@@ -1527,13 +1526,34 @@ class HeadingNumberingPanel(BasePanel):
     def _sync_chain_sep_visibility(self) -> None:
         val = self._chain_cb.currentData()
         visible = should_show_chain_separator(val)
-        self._chain_sep_lbl_row.setVisible(visible)
+        with updates_suspended(self._chain_sep_lbl_row, self._chain_sep_edit):
+            self._chain_sep_lbl_row.setVisible(visible)
+            self._chain_sep_edit.setVisible(visible)
+            refresh_layout_chain(self._chain_sep_lbl_row)
+
+    def _current_template_mode(self) -> str:
+        if hasattr(self, "_use_raw_cb") and self._use_raw_cb.isChecked():
+            return TEMPLATE_MODE_CUSTOM
+        return TEMPLATE_MODE_STRUCTURED
+
+    def _sync_raw_template_validation(self) -> bool:
+        if not hasattr(self, "_raw_template_edit"):
+            return True
+        validation = validate_display_template(self._raw_template_edit.text())
+        show_error = self._current_template_mode() == TEMPLATE_MODE_CUSTOM and not validation.is_valid
+        _set_state_property(self._raw_template_edit, "templateInvalid", show_error)
+        if hasattr(self, "_raw_template_error_label"):
+            self._raw_template_error_label.setText(validation.message if show_error else "")
+            with updates_suspended(self._raw_template_error_label):
+                self._raw_template_error_label.setVisible(show_error)
+                refresh_layout_chain(self._raw_template_error_label)
+        return validation.is_valid
 
     def _sync_numbering_lock_state(self) -> None:
         """Enable/disable numbering editors based on raw template mode."""
         state = build_editor_enable_state(
             is_binding_overridden=True,  # We're in override mode if editors are visible
-            use_raw_template=self._use_raw_cb.isChecked(),
+            use_raw_template=self._current_template_mode() == TEMPLATE_MODE_CUSTOM,
         )
         self._prefix_edit.setEnabled(state.prefix)
         self._core_style_cb.setEnabled(state.core_style)
@@ -1543,8 +1563,19 @@ class HeadingNumberingPanel(BasePanel):
         self._ref_style_cb.setEnabled(state.reference_core_style)
         self._title_sep_edit.setEnabled(state.title_separator)
         self._start_at_input.setEnabled(state.start_at)
+        self._restart_on_cb.setEnabled(state.restart_on)
+        self._restart_trigger_cb.setEnabled(state.restart_on)
         self._use_raw_cb.setEnabled(state.use_raw_toggle)
         self._raw_template_edit.setEnabled(state.raw_template)
+        self._sync_raw_template_validation()
+
+    def _sync_restart_trigger_visibility(self) -> None:
+        if not hasattr(self, "_restart_trigger_row"):
+            return
+        visible = str(self._restart_on_cb.currentData() or "") == "specific" and self._restart_trigger_cb.count() > 0
+        with updates_suspended(self._restart_trigger_row):
+            self._restart_trigger_row.setVisible(visible)
+            refresh_layout_chain(self._restart_trigger_row)
 
     def _sync_heading_style_editor(self, level: int) -> None:
         """Sync the heading format section with the selected level's style."""
@@ -1606,6 +1637,11 @@ class HeadingNumberingPanel(BasePanel):
         if not key or not self._adapter.has_template:
             return
         self._adapter.apply_preset(key)
+        self._is_syncing_ui = True
+        try:
+            self._levels_input.set_value(max(1, min(self._adapter.max_levels, 8)), "")
+        finally:
+            self._is_syncing_ui = False
         self._mark_dirty()
         self._rebuild_level_list()
         self._refresh_summary()
@@ -1617,15 +1653,103 @@ class HeadingNumberingPanel(BasePanel):
         self._preset_cb.blockSignals(True)
         try:
             self._preset_cb.setPlaceholderText(custom_text)
+            self._preset_cb.set_display_text_override(None)
+            matched = False
             for i in range(self._preset_cb.count()):
                 if self._preset_cb.itemData(i) == key:
                     self._preset_cb.setCurrentIndex(i)
                     self._preset_cb.setToolTip(self._preset_cb.itemText(i))
-                    return
-            self._preset_cb.setCurrentIndex(-1)
-            self._preset_cb.setToolTip(custom_text)
+                    matched = True
+                    break
+            if not matched:
+                display_text = self._scheme_display_text()
+                self._preset_cb.setCurrentIndex(-1)
+                self._preset_cb.set_display_text_override(display_text)
+                self._preset_cb.setToolTip(display_text)
         finally:
             self._preset_cb.blockSignals(False)
+        self._refresh_scheme_action_state()
+
+    def _refresh_scheme_action_state(self) -> None:
+        if not hasattr(self, "_scheme_update_btn"):
+            return
+        active_key = self._adapter.active_scheme_key() if self._adapter.has_template else None
+        user_scheme = bool(active_key and is_user_preset(active_key))
+        has_valid_templates = not self._has_invalid_custom_templates()
+        self._scheme_save_as_btn.setEnabled(self._adapter.has_template and has_valid_templates)
+        self._scheme_update_btn.setEnabled(
+            user_scheme and self._adapter.active_scheme_has_changes() and has_valid_templates
+        )
+        self._scheme_delete_btn.setEnabled(user_scheme)
+
+    def _on_scheme_save_as_requested(self) -> None:
+        if not self._adapter.has_template:
+            return
+        if self._has_invalid_custom_templates():
+            Toast.show_warning("请先修正手写编号模板")
+            return
+        text, ok = QInputDialog.getText(
+            self,
+            "另存为编号方案",
+            "方案名称",
+            QLineEdit.Normal,
+            self._default_scheme_save_as_name(),
+        )
+        label = str(text or "").strip()
+        if not ok or not label:
+            return
+        try:
+            self._adapter.save_current_as_user_scheme(label)
+        except ValueError as exc:
+            Toast.show_warning(str(exc) or "编号方案名称已存在")
+            return
+        self._populate_preset_combo()
+        self._sync_preset_display()
+        self._refresh_summary()
+        Toast.show_success("编号方案已保存")
+
+    def _on_scheme_update_requested(self) -> None:
+        if not self._adapter.has_template:
+            return
+        if self._has_invalid_custom_templates():
+            Toast.show_warning("请先修正手写编号模板")
+            return
+        if not self._adapter.update_active_user_scheme():
+            return
+        self._populate_preset_combo()
+        self._sync_preset_display()
+        self._refresh_summary()
+        Toast.show_success("编号方案已更新")
+
+    def _on_scheme_delete_requested(self) -> None:
+        if not self._adapter.has_template:
+            return
+        active_key = self._adapter.active_scheme_key()
+        if not active_key or not is_user_preset(active_key):
+            return
+        answer = QMessageBox.question(
+            self,
+            "删除编号方案",
+            "删除该用户编号方案？当前模板里的编号设置会保留为自定义配置。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        if self._adapter.delete_active_user_scheme():
+            self._populate_preset_combo()
+            self._sync_preset_display()
+            self._refresh_summary()
+            Toast.show_success("编号方案已删除")
+
+    def _on_scheme_open_folder_requested(self) -> None:
+        from src.config import heading_presets
+
+        folder = heading_presets.USER_SCHEME_DIR
+        folder.mkdir(parents=True, exist_ok=True)
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder.resolve())))
+        if not opened:
+            Toast.show_error(f"无法打开编号方案文件夹: {folder}")
 
     def _on_level_enabled_changed(self, checked: bool) -> None:
         if self._is_syncing_ui:
@@ -1650,23 +1774,57 @@ class HeadingNumberingPanel(BasePanel):
         self._mark_dirty()
         self._rebuild_level_list()
 
+    def _on_restart_on_selected(self, *_args) -> None:
+        if self._is_syncing_ui:
+            return
+        mode = str(self._restart_on_cb.currentData() or "parent")
+        self._sync_restart_trigger_visibility()
+        value = self._restart_trigger_cb.currentData() if mode == "specific" else mode
+        self._adapter.set_binding_field(
+            self._selected_adv_level,
+            "restart_on",
+            None if value == "parent" else value,
+        )
+        self._mark_dirty()
+        self._rebuild_level_list()
+
+    def _on_restart_trigger_selected(self, *_args) -> None:
+        if self._is_syncing_ui:
+            return
+        if str(self._restart_on_cb.currentData() or "") != "specific":
+            return
+        value = self._restart_trigger_cb.currentData()
+        if not value:
+            return
+        self._adapter.set_binding_field(self._selected_adv_level, "restart_on", value)
+        self._mark_dirty()
+        self._rebuild_level_list()
+
     def _on_editor_changed(self, *_args) -> None:
         if self._is_syncing_ui:
+            return
+        if self._current_template_mode() == TEMPLATE_MODE_CUSTOM:
             return
         prefix = self._prefix_edit.text()
         suffix = self._suffix_edit.text()
         core_key = self._core_style_cb.currentData()
         tmpl = compose_display_template(prefix, core_key, suffix)
+        self._adapter.set_binding_field(self._selected_adv_level, "display_template_mode", TEMPLATE_MODE_STRUCTURED)
         self._adapter.set_binding_field(self._selected_adv_level, "display_template", tmpl)
         self._adapter.set_binding_field(self._selected_adv_level, "display_core_style", core_key)
         self._raw_template_edit.setText(tmpl)
+        self._sync_raw_template_validation()
         self._mark_dirty()
         self._rebuild_level_list()
 
     def _on_raw_template_edited(self, text: str) -> None:
         if self._is_syncing_ui:
             return
+        if self._current_template_mode() != TEMPLATE_MODE_CUSTOM:
+            return
+        self._adapter.set_binding_field(self._selected_adv_level, "display_template_mode", TEMPLATE_MODE_CUSTOM)
         self._adapter.set_binding_field(self._selected_adv_level, "display_template", text)
+        self._sync_raw_template_validation()
         self._mark_dirty()
         self._rebuild_level_list()
 
@@ -1714,11 +1872,30 @@ class HeadingNumberingPanel(BasePanel):
     def _on_use_raw_toggled(self, checked: bool) -> None:
         if self._is_syncing_ui:
             return
+        mode = TEMPLATE_MODE_CUSTOM if checked else TEMPLATE_MODE_STRUCTURED
+        self._adapter.set_binding_field(self._selected_adv_level, "display_template_mode", mode)
         self._sync_numbering_lock_state()
         if checked:
-            self._on_raw_template_edited(self._raw_template_edit.text())
+            text = self._raw_template_edit.text().strip()
+            if not text:
+                text = compose_display_template(
+                    self._prefix_edit.text(),
+                    self._core_style_cb.currentData(),
+                    self._suffix_edit.text(),
+                )
+                self._raw_template_edit.setText(text)
+            self._adapter.set_binding_field(self._selected_adv_level, "display_template", text)
         else:
-            self._on_editor_changed()
+            prefix = self._prefix_edit.text()
+            suffix = self._suffix_edit.text()
+            core_key = self._core_style_cb.currentData()
+            tmpl = compose_display_template(prefix, core_key, suffix)
+            self._adapter.set_binding_field(self._selected_adv_level, "display_template", tmpl)
+            self._adapter.set_binding_field(self._selected_adv_level, "display_core_style", core_key)
+            self._raw_template_edit.setText(tmpl)
+        self._sync_raw_template_validation()
+        self._mark_dirty()
+        self._rebuild_level_list()
 
     def _on_nn_texts_changed(self, text: str) -> None:
         if self._adapter.has_template:
@@ -1739,7 +1916,9 @@ class HeadingNumberingPanel(BasePanel):
         self._adapter.set_non_numbered_heading_style_mode(mode)
         self._mark_dirty()
         self._sync_non_numbered_style_ui()
-        self._nn_style_editor.setVisible(mode == NON_NUMBERED_HEADING_CUSTOM)
+        with updates_suspended(self._nn_style_editor):
+            self._nn_style_editor.setVisible(mode == NON_NUMBERED_HEADING_CUSTOM)
+            refresh_layout_chain(getattr(self, "_nn_section", self._nn_style_editor))
         self._refresh_inline_preview()
 
     def _sync_non_numbered_style_ui(self) -> None:
@@ -1765,12 +1944,9 @@ class HeadingNumberingPanel(BasePanel):
             self._nn_bold.setChecked(bool(style.bold))
             self._nn_italic.setChecked(bool(style.italic))
             _select(self._nn_alignment, style.alignment or "justify")
-            self._nn_style_editor.setVisible(mode == NON_NUMBERED_HEADING_CUSTOM)
-            source = self._adapter.get_non_numbered_heading_style_source() or "heading1"
-            source_text = "沿用一级标题" if mode != NON_NUMBERED_HEADING_CUSTOM else f"独立设置（来源 {source}）"
-            self._nn_style_summary.setText(
-                f"{source_text}：{self._adapter.non_numbered_heading_style_summary()}"
-            )
+            with updates_suspended(self._nn_style_editor):
+                self._nn_style_editor.setVisible(mode == NON_NUMBERED_HEADING_CUSTOM)
+                refresh_layout_chain(getattr(self, "_nn_section", self._nn_style_editor))
         finally:
             self._is_syncing_ui = was_syncing
 
@@ -1869,11 +2045,15 @@ class HeadingNumberingPanel(BasePanel):
     def _mark_dirty(self) -> None:
         if not self._adapter.has_template:
             return
-        self._sync_preset_display()
-        self.bridge.mark_template_dirty()
+        if hasattr(self, "_preset_cb"):
+            self._sync_preset_display()
+        if hasattr(self.bridge, "mark_template_dirty"):
+            self.bridge.mark_template_dirty()
         self._refresh_result_strip()
         self._refresh_style_summary()
         self._refresh_expert_summary()
+        if hasattr(self, "_summary_grid"):
+            self._refresh_summary()
         self._refresh_action_state()
         self._emit_template_edited()
 
@@ -1882,43 +2062,52 @@ class HeadingNumberingPanel(BasePanel):
             self.template_edited.emit(self._adapter.template)
 
     def _refresh_summary(self) -> None:
+        if not hasattr(self, "_summary_grid"):
+            return
         if not self._adapter.has_template:
-            self._summary_grid.set_items([
+            self._summary_card.set_summary_items([
                 SummaryGridItem(
                     key="empty",
                     label="当前状态",
                     value="未选择模板。",
-                    column_span=6,
+                    column_span=12,
                     icon_name="info",
                 ),
             ])
             return
-        items_data = self._adapter.summary_items()
-        grid_items = [
-            SummaryGridItem(
-                key=f"hn_{i}",
-                label=d["label"],
-                value=d["value"],
-                column_span=d.get("span", 1),
-                icon_name=(
-                    "settings"
-                    if i == 0
-                    else "sliders-horizontal"
-                    if i == 1
-                    else "list-ordered"
-                ),
-            )
-            for i, d in enumerate(items_data)
-        ]
-        self._summary_grid.set_items(grid_items)
+        items = build_template_detail_summary_items(self._adapter.template, "tpl_heading")
+        scheme_text = self._scheme_display_text()
+        self._summary_card.set_summary_items([
+            replace(item, value=scheme_text) if item.key == "scheme" else item
+            for item in items
+        ])
 
     def _refresh_action_state(self) -> None:
+        if not hasattr(self, "_restore_btn") or not hasattr(self, "_save_btn"):
+            self._refresh_scheme_action_state()
+            return
         has_changes = self._adapter.has_unsaved_changes if self._adapter.has_template else False
+        has_valid_templates = not self._has_invalid_custom_templates()
         self._restore_btn.setEnabled(has_changes)
-        self._save_btn.setEnabled(self._save_enabled)
+        self._save_btn.setEnabled(self._save_enabled and has_valid_templates)
+        self._refresh_scheme_action_state()
         self._refresh_action_icons()
 
+    def _has_invalid_custom_templates(self) -> bool:
+        if not self._adapter.has_template:
+            return False
+        for level in range(1, self._adapter.max_levels + 1):
+            binding = self._adapter.get_binding(level)
+            mode = normalize_display_template_mode(getattr(binding, "display_template_mode", None))
+            if mode != TEMPLATE_MODE_CUSTOM:
+                continue
+            if not validate_display_template(getattr(binding, "display_template", "")).is_valid:
+                return True
+        return False
+
     def _refresh_action_icons(self) -> None:
+        if not hasattr(self, "_restore_btn") or not hasattr(self, "_save_btn"):
+            return
         try:
             from src.ui.icons.catalog import get_icon
         except Exception:
@@ -1935,30 +2124,43 @@ class HeadingNumberingPanel(BasePanel):
             self._emit_template_edited()
 
     def _on_save_requested(self) -> None:
+        if self._has_invalid_custom_templates():
+            Toast.show_warning("请先修正手写编号模板")
+            return
         self.save_requested.emit()
 
     # ━━ Lifecycle ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     def _connect_signals(self) -> None:
-        self._levels_input.value_changed.connect(self._on_levels_changed)
-        self._preset_cb.currentIndexChanged.connect(self._on_preset_changed)
-        self._nn_texts_edit.textChanged.connect(self._on_nn_texts_changed)
-        self._nn_prefix_edit.textChanged.connect(self._on_nn_prefix_changed)
+        if hasattr(self, "_levels_input"):
+            self._levels_input.value_changed.connect(self._on_levels_changed)
+        if hasattr(self, "_preset_cb"):
+            self._preset_cb.currentIndexChanged.connect(self._on_preset_changed)
+        if hasattr(self, "_nn_texts_edit"):
+            self._nn_texts_edit.textChanged.connect(self._on_nn_texts_changed)
+        if hasattr(self, "_nn_prefix_edit"):
+            self._nn_prefix_edit.textChanged.connect(self._on_nn_prefix_changed)
 
     def on_template_changed(self, template) -> None:
         self._adapter.set_template(template)
         self._adapter.capture_snapshot()
-        self.bridge.clear_template_dirty()
+        if hasattr(self.bridge, "clear_template_dirty"):
+            self.bridge.clear_template_dirty()
         self._sync_from_template()
 
     def _sync_from_template(self) -> None:
         self._is_syncing_ui = True
-        self._levels_input.set_value(max(1, min(self._adapter.max_levels, 8)), "")
-        self._sync_preset_display()
+        if hasattr(self, "_levels_input"):
+            self._levels_input.set_value(max(1, min(self._adapter.max_levels, 8)), "")
+        if hasattr(self, "_preset_cb"):
+            self._sync_preset_display()
         self._rebuild_level_list()
-        self._sync_non_numbered_ui()
-        self._sync_non_numbered_style_ui()
-        self._refresh_summary()
+        if hasattr(self, "_nn_texts_edit"):
+            self._sync_non_numbered_ui()
+        if hasattr(self, "_nn_style_mode_combo"):
+            self._sync_non_numbered_style_ui()
+        if hasattr(self, "_summary_grid"):
+            self._refresh_summary()
         self._refresh_action_state()
         self._is_syncing_ui = False
 
@@ -1980,31 +2182,52 @@ class HeadingNumberingPanel(BasePanel):
         self._adapter.capture_snapshot()
         self._refresh_action_state()
 
+    def set_template(self, template) -> None:
+        self.on_template_changed(template)
+
+    def ensure_max_levels(self, value: int) -> None:
+        if not self._adapter.has_template:
+            return
+        target = max(1, min(int(value or 1), 8))
+        if target > self._adapter.max_levels:
+            self._adapter.set_max_levels(target)
+
+    def refresh_embedded_levels(self) -> None:
+        self._rebuild_level_list()
+
     # ━━ Theme ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    def apply_theme(self) -> None:
+        self._apply_theme()
 
     def _apply_theme(self) -> None:
         t = get_theme()
         self.setStyleSheet(self._build_stylesheet(t))
+        gap = t.template_detail_section_gap
+        if self.layout() is not None:
+            self.layout().setSpacing(gap)
+        if hasattr(self, "_level_editor_content") and self._level_editor_content.layout() is not None:
+            self._level_editor_content.layout().setSpacing(gap)
+        if hasattr(self, "_detail_inspector_panel") and self._detail_inspector_panel.layout() is not None:
+            self._detail_inspector_panel.layout().setSpacing(gap)
 
         title_ss = (
             f"font-size: {t.font_size_lg}px; "
             f"font-weight: {t.font_weight_emphasis}; "
             f"color: {t.primary}; background: transparent;"
         )
-        desc_ss = f"font-size: {t.font_size_sm}px; color: {t.text_secondary};"
         unit_ss = f"font-size: {t.font_size_sm}px; color: {t.text_secondary};"
 
         for label in self._header_titles:
             label.setStyleSheet(title_ss)
-        for label in self._desc_labels:
-            label.setStyleSheet(desc_ss)
         for label in self._unit_labels:
             label.setStyleSheet(unit_ss)
 
-        apply_button_variant(self._restore_btn, "ghost-primary")
-        apply_button_variant(self._save_btn, "primary")
-        if hasattr(self, "_style_toggle_btn"):
-            apply_button_variant(self._style_toggle_btn, "ghost-primary")
+        if hasattr(self, "_restore_btn"):
+            apply_template_summary_action_button(self._restore_btn, "ghost-primary")
+        if hasattr(self, "_save_btn"):
+            apply_template_summary_action_button(self._save_btn, "primary")
+        self._apply_action_button_variants(t)
         if hasattr(self, "_expert_toggle_btn"):
             apply_button_variant(self._expert_toggle_btn, "ghost-primary")
 
@@ -2020,6 +2243,11 @@ class HeadingNumberingPanel(BasePanel):
         self._refresh_inspector_toggles()
         self._refresh_action_state()
 
+    def _apply_action_button_variants(self, theme) -> None:
+        if not hasattr(self, "_scheme_save_as_btn"):
+            return
+        self._scheme_actions.apply_theme()
+
     @staticmethod
     def _build_stylesheet(t) -> str:
         from src.shared.ui.input_style import build_text_input_stylesheet
@@ -2031,10 +2259,6 @@ class HeadingNumberingPanel(BasePanel):
                 font-size: {t.font_size_lg + 1}px;
                 color: {t.text_primary};
                 font-weight: {t.font_weight_emphasis};
-            }}
-            #hn_detail_hint {{
-                font-size: {t.font_size_sm}px;
-                color: {t.text_secondary};
             }}
             #hn_list_lv {{
                 font-size: {t.font_size_sm}px; color: {t.text_secondary};
@@ -2076,22 +2300,15 @@ class HeadingNumberingPanel(BasePanel):
                 color: {t.text_primary};
                 font-weight: {t.font_weight_emphasis};
             }}
-            #hn_result_meta,
-            #hn_block_desc,
-            #hn_summary_secondary {{
-                font-size: {t.font_size_sm}px;
-                color: {t.text_secondary};
-            }}
-            #hn_block_title,
-            #hn_summary_primary {{
+            #hn_block_title {{
                 font-size: {t.font_size_md}px;
                 color: {t.text_primary};
                 font-weight: {t.font_weight_emphasis};
             }}
-            #hn_summary_shell {{
-                background: {t.bg_window};
-                border: 1px solid {t.border_light};
-                border-radius: {t.radius_sm}px;
+            QLabel#hn_form_label {{
+                font-size: {t.font_size_md}px;
+                color: {t.text_primary};
+                background: transparent;
             }}
             #hn_editor_divider {{
                 min-height: 1px;
@@ -2102,6 +2319,14 @@ class HeadingNumberingPanel(BasePanel):
             #hn_inline_action {{
                 padding-left: 8px;
                 padding-right: 8px;
+            }}
+            #hn_template_error {{
+                font-size: {t.font_size_sm}px;
+                color: {t.error};
+                background: transparent;
+            }}
+            #HeadingNumberingPanel QLineEdit[templateInvalid="true"] {{
+                border-color: {t.border_error};
             }}
 
             #hn_section_title {{
@@ -2141,11 +2366,50 @@ class HeadingNumberingPanel(BasePanel):
 
     def _sync_input_heights(self, theme) -> None:
         reference_height = resolved_control_height(theme, "md")
+        if hasattr(self, "_scheme_section"):
+            normalize_form_control_heights(
+                self._scheme_section,
+                reference_height,
+                marker="/* heading-panel-form-control-height */",
+            )
+        self._sync_heading_inspector_heights(theme)
+
+    def _sync_heading_inspector_heights(self, theme=None) -> None:
+        target = getattr(self, "_level_editor_card", None)
+        if target is None:
+            return
+
+        control_height = heading_inspector_control_height(theme)
         normalize_form_control_heights(
-            self,
-            reference_height,
-            marker="/* heading-panel-form-control-height */",
+            target,
+            control_height,
+            marker="/* heading-inspector-form-control-height */",
         )
+        for widget in [target, *target.findChildren(QWidget)]:
+            if widget.property("headingInspectorFormRow"):
+                self._apply_heading_form_row_height(widget)
+            if isinstance(widget, _WhitespacePresetWidget):
+                widget.set_control_height(control_height)
+            elif isinstance(widget, QLineEdit) and not self._is_combo_editor(widget):
+                self._apply_heading_control_height(widget, control_height)
+            elif widget.objectName() in {"option_toggle_chip", "hn_emphasis_control"}:
+                self._apply_heading_control_height(widget, control_height)
+
+    def _apply_heading_control_height(self, widget: QWidget, height: int) -> None:
+        widget.setMinimumHeight(height)
+        widget.setMaximumHeight(height)
+        policy = widget.sizePolicy()
+        policy.setVerticalPolicy(QSizePolicy.Fixed)
+        widget.setSizePolicy(policy)
+        widget.updateGeometry()
+
+    def _is_combo_editor(self, widget: QWidget) -> bool:
+        parent = widget.parentWidget()
+        while parent is not None:
+            if isinstance(parent, StyledComboBox):
+                return True
+            parent = parent.parentWidget()
+        return False
 
 
 # ── Utility ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -48,7 +48,36 @@ def test_scene_workspace():
     assert scene.format_scope.mode == "auto"
     assert scene.format_scope.page_ranges_text == ""
     assert scene.format_scope.sections["body"] is True
+    assert scene.application_boundary.mode == "follow_template"
+    assert scene.application_boundary.confirm_before_apply is False
     print("  ✅ SceneWorkspace 实例化正确")
+
+
+def test_scene_application_boundary_normalizes_legacy_format_scope():
+    """旧 format_scope 门禁会归一成新的高层处理范围。"""
+    from src.config.migration import normalize_scene_payload
+
+    normalized = normalize_scene_payload(
+        {
+            "scene_id": "legacy_body_only",
+            "format_scope": {
+                "sections": {
+                    "body": True,
+                    "references": False,
+                    "appendix": False,
+                }
+            },
+        }
+    )
+
+    assert normalized["application_boundary"] == {
+        "mode": "body_only",
+        "confirm_before_apply": False,
+    }
+
+    scene = SceneWorkspace(application_boundary={"mode": "confirm_before_apply"})
+    assert scene.application_boundary.mode == "confirm_before_apply"
+    assert scene.application_boundary.confirm_before_apply is True
 
 
 def test_resolve_config_basic():
@@ -60,7 +89,46 @@ def test_resolve_config_basic():
     assert resolved.page_setup.paper_size == "A4"
     assert resolved.is_module_enabled("page_setup") is True
     assert resolved.is_module_enabled("md_cleanup") is False
+    assert resolved.application_boundary.mode == "follow_template"
     print("  ✅ resolve_config() 基本合并正确")
+
+
+def test_resolve_config_projects_application_boundary_to_runtime_scope():
+    """新处理范围应投影成旧模块可消费的 runtime scope。"""
+    scene = SceneWorkspace(name="body_only_scene")
+    scene.application_boundary.mode = "body_only"
+    scene.format_scope.sections["references"] = True
+    scene.format_scope.sections["appendix"] = True
+
+    resolved = resolve_config(TemplateConfig(), scene)
+
+    assert resolved.application_boundary.mode == "body_only"
+    assert resolved.format_scope.mode == "auto"
+    assert resolved.format_scope.sections["body"] is True
+    assert all(
+        enabled is False
+        for key, enabled in resolved.format_scope.sections.items()
+        if key != "body"
+    )
+
+
+def test_resolve_config_infers_boundary_from_legacy_scope_when_needed():
+    """直接旧字段配置仍可进入新边界，避免破坏旧场景。"""
+    scene = SceneWorkspace(name="legacy_body_only")
+    scene.format_scope.sections = {
+        key: key == "body"
+        for key in scene.format_scope.sections
+    }
+
+    resolved = resolve_config(TemplateConfig(), scene)
+
+    assert resolved.application_boundary.mode == "body_only"
+    assert resolved.format_scope.sections["body"] is True
+    assert all(
+        enabled is False
+        for key, enabled in resolved.format_scope.sections.items()
+        if key != "body"
+    )
 
 
 def test_resolve_config_override():
@@ -130,6 +198,31 @@ def test_entity_archive():
                 profile_name="投标人主体",
                 fields={"company_name": "中建三局", "legal_person": "张三"},
                 assets_dir="/tmp/assets",
+                asset_paths={"question_figure": "/tmp/assets/question.png"},
+                asset_metadata={"question_figure": {"alt_text": "题目示意图"}},
+                asset_items=[
+                    {
+                        "item_id": "question_figure_1",
+                        "role": "question_figure",
+                        "path": "/tmp/assets/question_1.png",
+                        "metadata": {"question_index": "1", "alt_text": "第一题图"},
+                    }
+                ],
+                asset_item_history=[
+                    {
+                        "schema_version": "1",
+                        "action": "question_figure_library_metadata_update",
+                        "changed_at": "2026-06-21T00:00:00Z",
+                        "role": "question_figure",
+                        "item_id": "question_figure_1",
+                        "target_label": "题1",
+                        "question_index": "1",
+                        "changed_fields": "alt_text",
+                        "alt_text_before": "旧说明",
+                        "alt_text_after": "第一题图",
+                        "change_summary": "图片说明: 旧说明 -> 第一题图",
+                    }
+                ],
             ),
             EntityProfile(
                 profile_id="sub",
@@ -151,6 +244,33 @@ def test_entity_archive():
         loaded = load_entity_archive(tmp.name)
         assert loaded.archive_name == "中建三局"
         assert len(loaded.profiles) == 2
+        assert loaded.get_profile("main").asset_paths == {"question_figure": "/tmp/assets/question.png"}
+        assert loaded.get_profile("main").asset_metadata == {
+            "question_figure": {"alt_text": "题目示意图"}
+        }
+        assert loaded.get_profile("main").asset_items == [
+            {
+                "item_id": "question_figure_1",
+                "role": "question_figure",
+                "path": "/tmp/assets/question_1.png",
+                "metadata": {"question_index": "1", "alt_text": "第一题图"},
+            }
+        ]
+        assert loaded.get_profile("main").asset_item_history == [
+            {
+                "schema_version": "1",
+                "action": "question_figure_library_metadata_update",
+                "changed_at": "2026-06-21T00:00:00Z",
+                "role": "question_figure",
+                "item_id": "question_figure_1",
+                "target_label": "题1",
+                "question_index": "1",
+                "changed_fields": "alt_text",
+                "alt_text_before": "旧说明",
+                "alt_text_after": "第一题图",
+                "change_summary": "图片说明: 旧说明 -> 第一题图",
+            }
+        ]
         assert loaded.get_profile("sub").fields["legal_person"] == "李四"
         print("  ✅ EntityArchive JSON 读写正确")
     finally:
@@ -741,6 +861,135 @@ def test_resolve_config_keeps_non_page_number_header_footer_scene_overrides():
     assert resolved.header_footer.page_number_enabled is True
     assert resolved.get_with_source("header_footer.header_mode").source == "scene"
     assert resolved.get_with_source("header_footer.page_number_enabled").source == "template"
+
+
+def test_load_scene_preserves_high_level_scene_profiles():
+    from src.config.loader import load_scene, save_scene
+
+    payload = {
+        "name": "profile_scene",
+        "input_sources": {
+            "accepted_formats": ["docx", "markdown"],
+            "structured_formats": ["json"],
+            "markdown_policy": "preview_and_cleanup",
+            "latex_policy": "formula_fragments_only",
+            "require_material_package": True,
+            "material_schema_id": "journal_materials_v1",
+            "required_material_fields": ["author", "affiliation"],
+            "required_image_roles": ["graphical_abstract"],
+            "failure_policy": "block",
+        },
+        "compliance": {
+            "profile_id": "journal_en",
+            "rule_family": "journal_submission",
+            "count_profile_id": "journal_words",
+            "check_scopes": ["body", "references", "figures"],
+            "report_level": "detailed",
+            "failure_policy": "warn",
+        },
+        "object_preservation": {
+            "preservation_mode": "strict",
+            "block_on": ["ole_objects", "embedded_workbooks"],
+        },
+        "delivery": {
+            "default_preset_id": "submission",
+            "presets": [
+                {
+                    "preset_id": "submission",
+                    "label": "Submission package",
+                    "target_template_id": "journal_default",
+                    "artifacts": {
+                        "final_docx": True,
+                        "compare_docx": False,
+                        "compare_text": False,
+                        "compare_formatting": False,
+                        "report_json": True,
+                        "report_markdown": True,
+                    },
+                    "content_visibility_rules": [
+                        {
+                            "rule_id": "hide_answers",
+                            "label": "Hide answers",
+                            "selector_type": "marker_block",
+                            "selector": "answer",
+                            "action": "remove",
+                        }
+                    ],
+                    "include_structured_intermediate": True,
+                    "report_level": "detailed",
+                }
+            ],
+        },
+    }
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w", encoding="utf-8")
+    target = Path(tmp.name)
+    try:
+        json.dump(payload, tmp, ensure_ascii=False, indent=2)
+        tmp.close()
+
+        scene = load_scene(target)
+        assert scene.input_source_profile.accepted_formats == ["docx", "markdown"]
+        assert scene.input_source_profile.require_material_package is True
+        assert scene.input_source_profile.material_schema_id == "journal_materials_v1"
+        assert scene.compliance_profile.profile_id == "journal_en"
+        assert scene.compliance_profile.object_preflight.preservation_mode == "strict"
+        assert scene.compliance_profile.object_preflight.block_on == [
+            "ole_objects",
+            "embedded_workbooks",
+        ]
+        assert scene.default_delivery_preset_id == "submission"
+        assert scene.delivery_presets[0].artifacts.final_docx is True
+        assert scene.delivery_presets[0].content_visibility_rules[0].selector == "answer"
+        assert scene.delivery_presets[0].content_visibility_rules[0].action == "remove"
+        assert scene.delivery_presets[0].include_structured_intermediate is True
+
+        resolved = resolve_config(TemplateConfig(), scene)
+        assert resolved.input_source_profile.material_schema_id == "journal_materials_v1"
+        assert resolved.compliance_profile.rule_family == "journal_submission"
+        assert resolved.default_delivery_preset_id == "submission"
+        assert resolved.delivery_presets[0].preset_id == "submission"
+
+        save_scene(scene, target)
+        reloaded = load_scene(target)
+        assert reloaded.input_source_profile.required_material_fields == [
+            "author",
+            "affiliation",
+        ]
+        assert reloaded.delivery_presets[0].artifacts.report_markdown is True
+        assert reloaded.delivery_presets[0].content_visibility_rules[0].rule_id == "hide_answers"
+    finally:
+        target.unlink(missing_ok=True)
+
+
+def test_builtin_scene_library_profiles_cover_current_matrix():
+    from src.config.library import load_scene_from_library
+
+    expected = {
+        "custom": ("custom_basic", "final", False, "disabled"),
+        "thesis": ("thesis_cn", "final", False, "formula_fragments_only"),
+        "bidding": ("bid_package", "original", True, "disabled"),
+        "official": ("official_document", "formal", True, "disabled"),
+        "technical": ("long_document_publishing", "final_docx", False, "formula_fragments_only"),
+        "report": ("general_report", "final", False, "disabled"),
+    }
+
+    for scene_id, (
+        profile_id,
+        default_preset_id,
+        requires_materials,
+        latex_policy,
+    ) in expected.items():
+        scene = load_scene_from_library(scene_id)
+        preset_ids = [preset.preset_id for preset in scene.delivery_presets]
+
+        assert scene.compliance_profile.profile_id == profile_id
+        assert scene.default_delivery_preset_id == default_preset_id
+        assert scene.default_delivery_preset_id in preset_ids
+        assert scene.input_source_profile.require_material_package is requires_materials
+        assert scene.input_source_profile.latex_policy == latex_policy
+        assert scene.compliance_profile.object_preflight.enabled is True
+        assert scene.delivery_presets
 
 
 if __name__ == "__main__":

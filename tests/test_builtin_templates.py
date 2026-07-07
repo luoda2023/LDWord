@@ -28,10 +28,12 @@ def test_thesis_template_uses_real_config_payload_instead_of_name_only_shell():
     assert "body" in template.styles
     assert template.styles["body"].font_cn
     assert "heading1" in template.heading_numbering.level_bindings
+    assert "toc" in template.styles
     assert "toc_title" in template.styles
     assert "toc_level1" in template.styles
     assert "toc_level2" in template.styles
     assert "toc_level3" in template.styles
+    assert "toc_level6" in template.styles
 
     assert template.styles["toc_title"].size_pt == 16
     assert template.styles["toc_title"].bold is True
@@ -41,6 +43,7 @@ def test_thesis_template_uses_real_config_payload_instead_of_name_only_shell():
     assert template.styles["toc_level2"].left_indent_chars == 1
     assert template.styles["toc_level3"].size_pt == 10.5
     assert template.styles["toc_level3"].left_indent_chars == 2
+    assert template.styles["toc_level6"].left_indent_chars == 5
     assert [phase.phase_id for phase in template.header_footer.page_number_plan.phases] == [
         "front",
         "body",
@@ -114,6 +117,10 @@ def test_thesis_builtin_toc_style_syncs_into_word_toc_styles():
     template = create_builtin_template("thesis_gbt")
     doc = Document()
 
-    changed = sync_toc_styles(doc, template.styles)
+    changed = sync_toc_styles(doc, template, max_level=3)
 
     assert changed == 4
+    assert doc.styles["TOC Heading"].font.size.pt == template.styles["toc_title"].size_pt
+    assert doc.styles["TOC 1"].font.size.pt == template.styles["toc_level1"].size_pt
+    assert doc.styles["TOC 2"].font.size.pt == template.styles["toc_level2"].size_pt
+    assert doc.styles["TOC 3"].font.size.pt == template.styles["toc_level3"].size_pt

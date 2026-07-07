@@ -1,6 +1,6 @@
 {
   "name": "论文排版",
-  "description": "学位论文·期刊论文·学术报告",
+  "description": "中文学位论文·课程论文·综述·开题",
   "category": "academic",
   "category_label": "学术文档",
   "scene_id": "thesis",
@@ -35,6 +35,95 @@
     "abstract_en",
     "toc"
   ],
+  "input_source_profile": {
+    "accepted_formats": ["docx", "markdown"],
+    "structured_formats": ["json"],
+    "markdown_policy": "preview_and_cleanup",
+    "latex_policy": "formula_fragments_only",
+    "require_material_package": false,
+    "material_schema_id": "",
+    "required_material_fields": [],
+    "required_image_roles": [],
+    "high_risk_imports": ["full_latex_project"],
+    "failure_policy": "warn"
+  },
+  "compliance_profile": {
+    "profile_id": "thesis_cn",
+    "rule_family": "academic_thesis",
+    "count_profile_id": "school_thesis",
+    "enabled_checks": ["validation", "object_preflight"],
+    "check_scopes": [
+      "abstract_cn",
+      "abstract_en",
+      "body",
+      "references",
+      "tables",
+      "figures",
+      "appendix"
+    ],
+    "report_level": "detailed",
+    "failure_policy": "warn",
+    "object_preflight": {
+      "enabled": true,
+      "preservation_mode": "warn",
+      "block_on": ["macros"],
+      "skip_high_risk_modules": true
+    }
+  },
+  "default_delivery_preset_id": "final",
+  "delivery_presets": [
+    {
+      "preset_id": "final",
+      "label": "Final manuscript",
+      "target_template_id": "thesis_gbt",
+      "output_dir_template": "{document_dir}/output",
+      "filename_template": "{stem}_{preset_id}",
+      "artifacts": {
+        "final_docx": true,
+        "compare_docx": false,
+        "compare_text": false,
+        "compare_formatting": false,
+        "report_json": true,
+        "report_markdown": true
+      },
+      "include_structured_intermediate": false,
+      "report_level": "summary"
+    },
+    {
+      "preset_id": "review",
+      "label": "Review copy",
+      "target_template_id": "thesis_gbt",
+      "output_dir_template": "{document_dir}/output",
+      "filename_template": "{stem}_{preset_id}",
+      "artifacts": {
+        "final_docx": true,
+        "compare_docx": true,
+        "compare_text": true,
+        "compare_formatting": true,
+        "report_json": true,
+        "report_markdown": true
+      },
+      "include_structured_intermediate": true,
+      "report_level": "detailed"
+    },
+    {
+      "preset_id": "compliance_report",
+      "label": "Compliance report",
+      "target_template_id": "thesis_gbt",
+      "output_dir_template": "{document_dir}/output",
+      "filename_template": "{stem}_{preset_id}",
+      "artifacts": {
+        "final_docx": false,
+        "compare_docx": false,
+        "compare_text": false,
+        "compare_formatting": false,
+        "report_json": true,
+        "report_markdown": true
+      },
+      "include_structured_intermediate": false,
+      "report_level": "detailed"
+    }
+  ],
   "module_switches": {
     "page_setup": true,
     "section_format": true,
@@ -53,6 +142,9 @@
     "watermark": false,
     "chem_typography": true,
     "md_cleanup": true,
+    "whitespace_normalize": true,
+    "validation": true,
+    "citation_link": true,
     "equation_table_format": true,
     "reference_format": true
   },
@@ -114,7 +206,6 @@
     "three_line_bottom_width_pt": 0.5,
     "line_spacing_mode": "single",
     "repeat_header": false,
-    "row_height_pt": null,
     "font_cn": null,
     "font_en": null,
     "size_pt": null,

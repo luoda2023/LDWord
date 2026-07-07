@@ -34,6 +34,53 @@
     "abstract_en",
     "toc"
   ],
+  "input_source_profile": {
+    "accepted_formats": ["docx", "markdown"],
+    "structured_formats": ["json"],
+    "markdown_policy": "cleanup_only",
+    "latex_policy": "disabled",
+    "require_material_package": false,
+    "material_schema_id": "",
+    "required_material_fields": [],
+    "required_image_roles": [],
+    "high_risk_imports": ["full_latex_project"],
+    "failure_policy": "warn"
+  },
+  "compliance_profile": {
+    "profile_id": "custom_basic",
+    "rule_family": "manual",
+    "count_profile_id": "",
+    "enabled_checks": ["validation", "object_preflight"],
+    "check_scopes": ["body", "references", "tables", "figures"],
+    "report_level": "summary",
+    "failure_policy": "warn",
+    "object_preflight": {
+      "enabled": true,
+      "preservation_mode": "warn",
+      "block_on": ["macros"],
+      "skip_high_risk_modules": true
+    }
+  },
+  "default_delivery_preset_id": "final",
+  "delivery_presets": [
+    {
+      "preset_id": "final",
+      "label": "Final DOCX",
+      "target_template_id": "default",
+      "output_dir_template": "{document_dir}/output",
+      "filename_template": "{stem}_{preset_id}",
+      "artifacts": {
+        "final_docx": true,
+        "compare_docx": false,
+        "compare_text": false,
+        "compare_formatting": false,
+        "report_json": true,
+        "report_markdown": true
+      },
+      "include_structured_intermediate": false,
+      "report_level": "summary"
+    }
+  ],
   "module_switches": {
     "page_setup": true,
     "section_format": true,
@@ -44,7 +91,7 @@
     "toc": false,
     "caption": false,
     "table_format": false,
-    "figure_table_center": true,
+    "figure_table_center": false,
     "entity_fill": false,
     "source_fill": false,
     "placeholder_replace": false,
@@ -52,6 +99,9 @@
     "watermark": false,
     "chem_typography": false,
     "md_cleanup": false,
+    "whitespace_normalize": false,
+    "validation": false,
+    "citation_link": false,
     "equation_table_format": false,
     "reference_format": false
   },
@@ -113,7 +163,6 @@
     "three_line_bottom_width_pt": 0.5,
     "line_spacing_mode": "single",
     "repeat_header": false,
-    "row_height_pt": null,
     "font_cn": null,
     "font_en": null,
     "size_pt": null,

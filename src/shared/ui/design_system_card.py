@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.qt_api import QColor, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from src.qt_api import QColor, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QSize, QVBoxLayout, QWidget
 
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.shared.ui.theme import bind_theme, get_theme
@@ -136,7 +136,10 @@ class DesignSystemCard(RoundedSurfaceFrame):
 
         if self._title_label:
             self._title_label.setStyleSheet(
-                f"font-size: {t.font_size_xl}px; font-weight: bold; color: {t.text_primary};"
+                f"font-size: {t.font_size_lg}px; "
+                f"font-weight: {t.font_weight_emphasis}; "
+                f"color: {t.primary}; "
+                f"background: transparent;"
             )
         if self._header_icon_label:
             self._header_icon_label.setVisible(bool(self._header_icon_name))
@@ -159,6 +162,12 @@ class DesignSystemCard(RoundedSurfaceFrame):
 
     def add_layout(self, layout) -> None:
         self._content_layout.addLayout(layout)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        return self._layout.sizeHint()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        return self._layout.minimumSize()
 
 
 __all__ = ["DesignSystemCard"]

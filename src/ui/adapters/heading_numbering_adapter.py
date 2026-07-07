@@ -31,6 +31,7 @@ _EXISTING_NUMBER_RE = __import__("re").compile(
     r"[一二三四五六七八九十]+[、.．]\s*|"
     r"[（(]?[一二三四五六七八九十]+[）)]\s*)"
 )
+DEFAULT_HEADING_PRESET_KEY = "thesis_standard"
 
 if TYPE_CHECKING:
     from src.config.template import (
@@ -53,7 +54,9 @@ class HeadingNumberingAdapter(QObject):
         self._last_applied_preset_key: str | None = None
 
     def set_template(self, template: TemplateConfig) -> None:
+        self._last_applied_preset_key = None
         self._template = template
+        self.ensure_default_scheme()
         self.numbering_changed.emit()
 
     @property
@@ -135,11 +138,41 @@ class HeadingNumberingAdapter(QObject):
             ),
         }
 
+    def ensure_default_scheme(self, preset_key: str = DEFAULT_HEADING_PRESET_KEY) -> bool:
+        if not self.has_template:
+            return False
+        bindings = self.template.heading_numbering.level_bindings
+        if any(str(key).startswith("heading") for key in bindings):
+            return False
+
+        from src.config.heading_presets import get_preset_bindings, get_preset_max_levels
+
+        preset_bindings = get_preset_bindings(preset_key)
+        if preset_bindings is None:
+            return False
+        for key, binding in preset_bindings.items():
+            bindings[key] = deepcopy(binding)
+        max_levels = get_preset_max_levels(preset_key)
+        if max_levels is not None:
+            self.template.heading_model.max_heading_levels = max(1, min(int(max_levels), 8))
+        self._last_applied_preset_key = preset_key
+        return True
+
     def detect_active_preset(self) -> str | None:
-        from src.config.heading_presets import PRESET_CATALOG
+        from src.config.heading_presets import get_scheme_catalog
 
         bindings = self.template.heading_numbering.level_bindings
-        for preset_key, entry in PRESET_CATALOG.items():
+        catalog = get_scheme_catalog()
+        preferred_key = self._last_applied_preset_key
+        if preferred_key and preferred_key in catalog:
+            entry = catalog[preferred_key]
+            if int(entry.get("max_levels") or self.max_levels) == self.max_levels:
+                if self._bindings_match(bindings, entry["bindings"]):
+                    return preferred_key
+
+        for preset_key, entry in catalog.items():
+            if int(entry.get("max_levels") or self.max_levels) != self.max_levels:
+                continue
             if self._bindings_match(bindings, entry["bindings"]):
                 return preset_key
         return None
@@ -147,7 +180,7 @@ class HeadingNumberingAdapter(QObject):
     def _bindings_match(self, current: dict, preset: dict) -> bool:
         from src.config.template import HeadingLevelBindingConfig as BindingConfig
 
-        for level in range(1, self.max_levels + 1):
+        for level in range(1, 9):
             key = f"heading{level}"
             current_binding = current.get(key) or BindingConfig()
             preset_binding = preset.get(key) or BindingConfig()
@@ -300,13 +333,25 @@ class HeadingNumberingAdapter(QObject):
         for level in range(1, max_levels + 1):
             key = f"heading{level}"
             if key not in bindings:
-                bindings[key] = BindingConfig(
+                preset_binding = self._scheme_binding_for_level(level)
+                bindings[key] = deepcopy(preset_binding) if preset_binding is not None else BindingConfig(
                     enabled=True,
                     display_core_style="arabic",
                     reference_core_style="arabic",
                     chain=default_chain_value(level),
                     chain_separator=".",
                 )
+
+    def _scheme_binding_for_level(self, level: int):
+        from src.config.heading_presets import get_scheme_catalog
+
+        preset_key = self._last_applied_preset_key or self.detect_active_preset()
+        if not preset_key:
+            return None
+        entry = get_scheme_catalog().get(preset_key)
+        if not entry:
+            return None
+        return entry["bindings"].get(f"heading{int(level)}")
 
     def set_binding_field(self, level: int, field_name: str, value) -> None:
         key = f"heading{level}"
@@ -392,9 +437,9 @@ class HeadingNumberingAdapter(QObject):
 
         preset_key = self.detect_active_preset()
         if preset_key:
-            from src.config.heading_presets import PRESET_CATALOG
+            from src.config.heading_presets import get_scheme_catalog
 
-            preset_label = PRESET_CATALOG.get(preset_key, {}).get("label", preset_key)
+            preset_label = get_scheme_catalog().get(preset_key, {}).get("label", preset_key)
         else:
             preset_label = "自定义"
 
@@ -415,7 +460,7 @@ class HeadingNumberingAdapter(QObject):
         return items
 
     def apply_preset(self, preset_key: str) -> None:
-        from src.config.heading_presets import get_preset_bindings
+        from src.config.heading_presets import get_preset_bindings, get_preset_max_levels
 
         preset_bindings = get_preset_bindings(preset_key)
         if preset_bindings is None:
@@ -427,6 +472,9 @@ class HeadingNumberingAdapter(QObject):
         for key, binding in preset_bindings.items():
             bindings[key] = deepcopy(binding)
 
+        max_levels = get_preset_max_levels(preset_key)
+        if max_levels is not None:
+            self.template.heading_model.max_heading_levels = max(1, min(int(max_levels), 8))
         self._last_applied_preset_key = preset_key
         self.numbering_changed.emit()
 
@@ -445,14 +493,15 @@ class HeadingNumberingAdapter(QObject):
 
     def is_level_binding_from_preset(self, level: int) -> bool:
         """Return True when the level's binding matches the currently active preset."""
-        from src.config.heading_presets import PRESET_CATALOG
+        from src.config.heading_presets import get_scheme_catalog
         from src.config.template import HeadingLevelBindingConfig as BindingConfig
 
         preset_key = self._last_applied_preset_key or self.detect_active_preset()
-        if preset_key is None or preset_key not in PRESET_CATALOG:
+        catalog = get_scheme_catalog()
+        if preset_key is None or preset_key not in catalog:
             return False
 
-        preset_bindings = PRESET_CATALOG[preset_key]["bindings"]
+        preset_bindings = catalog[preset_key]["bindings"]
         key = f"heading{level}"
         current = self.template.heading_numbering.level_bindings.get(key) or BindingConfig()
         preset = preset_bindings.get(key) or BindingConfig()
@@ -460,13 +509,14 @@ class HeadingNumberingAdapter(QObject):
 
     def reset_level_binding_to_preset(self, level: int) -> bool:
         """Reset this level's binding to the last-applied preset value."""
-        from src.config.heading_presets import PRESET_CATALOG
+        from src.config.heading_presets import get_scheme_catalog
 
         preset_key = self._last_applied_preset_key or self.detect_active_preset()
-        if preset_key is None or preset_key not in PRESET_CATALOG:
+        catalog = get_scheme_catalog()
+        if preset_key is None or preset_key not in catalog:
             return False
 
-        preset_bindings = PRESET_CATALOG[preset_key]["bindings"]
+        preset_bindings = catalog[preset_key]["bindings"]
         key = f"heading{level}"
         if key in preset_bindings:
             self.template.heading_numbering.level_bindings[key] = deepcopy(preset_bindings[key])
@@ -477,10 +527,100 @@ class HeadingNumberingAdapter(QObject):
 
     def numbering_source_text(self, level: int) -> str:
         """Human-readable description of the numbering source for this level."""
-        from src.config.heading_presets import PRESET_CATALOG
+        from src.config.heading_presets import get_scheme_catalog
 
         preset_key = self._last_applied_preset_key or self.detect_active_preset()
-        if preset_key and preset_key in PRESET_CATALOG and self.is_level_binding_from_preset(level):
-            label = PRESET_CATALOG[preset_key].get("label", preset_key)
-            return f"来源：预设 {label}"
+        catalog = get_scheme_catalog()
+        if preset_key and preset_key in catalog and self.is_level_binding_from_preset(level):
+            entry = catalog[preset_key]
+            label = entry.get("label", preset_key)
+            source = "用户预设方案" if entry.get("source") == "user" else "内置预设方案"
+            return f"来源：{source} {label}"
         return "来源：本级自定义"
+
+    def active_scheme_source(self) -> str:
+        from src.config.heading_presets import get_preset_source
+
+        preset_key = self.active_scheme_key()
+        return get_preset_source(preset_key) if preset_key else ""
+
+    def active_scheme_key(self) -> str | None:
+        return self._last_applied_preset_key or self.detect_active_preset()
+
+    def scheme_matches_current(self, preset_key: str | None) -> bool:
+        if not preset_key:
+            return False
+        from src.config.heading_presets import get_scheme_catalog
+
+        entry = get_scheme_catalog().get(preset_key)
+        if not entry:
+            return False
+        if int(entry.get("max_levels") or self.max_levels) != self.max_levels:
+            return False
+        return self._bindings_match(
+            self.template.heading_numbering.level_bindings,
+            entry["bindings"],
+        )
+
+    def active_scheme_has_changes(self) -> bool:
+        preset_key = self.active_scheme_key()
+        if not preset_key:
+            return False
+        return not self.scheme_matches_current(preset_key)
+
+    def active_scheme_label(self) -> str:
+        from src.config.heading_presets import get_scheme_catalog
+
+        preset_key = self.active_scheme_key()
+        if not preset_key:
+            return "当前模板自定义"
+        entry = get_scheme_catalog().get(preset_key)
+        if not entry:
+            return "当前模板自定义"
+        suffix = "用户" if entry.get("source") == "user" else "内置"
+        label = entry.get("label", preset_key)
+        if self.scheme_matches_current(preset_key):
+            return f"{label}（{suffix}）"
+        return f"{label}（{suffix}，已修改）"
+
+    def save_current_as_user_scheme(self, label: str) -> str:
+        from src.config.heading_presets import save_user_preset
+
+        scheme_id = save_user_preset(
+            label,
+            deepcopy(self.template.heading_numbering.level_bindings),
+            max_levels=self.max_levels,
+        )
+        self._last_applied_preset_key = scheme_id
+        self.numbering_changed.emit()
+        return scheme_id
+
+    def update_active_user_scheme(self) -> bool:
+        from src.config.heading_presets import is_user_preset, save_user_preset, get_scheme_catalog
+
+        preset_key = self._last_applied_preset_key or self.detect_active_preset()
+        if not preset_key or not is_user_preset(preset_key):
+            return False
+        if not self.active_scheme_has_changes():
+            return False
+        label = get_scheme_catalog().get(preset_key, {}).get("label", preset_key.replace("user.", ""))
+        save_user_preset(
+            str(label),
+            deepcopy(self.template.heading_numbering.level_bindings),
+            max_levels=self.max_levels,
+            scheme_id=preset_key,
+        )
+        self.numbering_changed.emit()
+        return True
+
+    def delete_active_user_scheme(self) -> bool:
+        from src.config.heading_presets import delete_user_preset, is_user_preset
+
+        preset_key = self._last_applied_preset_key or self.detect_active_preset()
+        if not preset_key or not is_user_preset(preset_key):
+            return False
+        if delete_user_preset(preset_key):
+            self._last_applied_preset_key = None
+            self.numbering_changed.emit()
+            return True
+        return False

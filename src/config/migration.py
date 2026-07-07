@@ -132,8 +132,12 @@ def _add_header_footer_compat_aliases(flat: dict[str, Any]) -> None:
 
     if "header_footer.header.mode" in flat:
         flat.setdefault("header_footer.header_mode", flat["header_footer.header.mode"])
+    if "header_footer.header.enabled" in flat:
+        flat.setdefault("header_footer.header_enabled", flat["header_footer.header.enabled"])
     if "header_footer.header.fixed_text" in flat:
         flat.setdefault("header_footer.header_text", flat["header_footer.header.fixed_text"])
+    if "header_footer.header.alignment" in flat:
+        flat.setdefault("header_footer.header_alignment", flat["header_footer.header.alignment"])
     if "header_footer.header.styleref_level" in flat:
         flat.setdefault(
             "header_footer.styleref_level",
@@ -141,6 +145,16 @@ def _add_header_footer_compat_aliases(flat: dict[str, Any]) -> None:
         )
     if "header_footer.header.border" in flat:
         flat.setdefault("header_footer.header_border", flat["header_footer.header.border"])
+    if "header_footer.header.typography.font_cn" in flat:
+        flat.setdefault("header_footer.font_cn", flat["header_footer.header.typography.font_cn"])
+    if "header_footer.header.typography.font_en" in flat:
+        flat.setdefault("header_footer.font_en", flat["header_footer.header.typography.font_en"])
+    if "header_footer.header.typography.size_pt" in flat:
+        flat.setdefault("header_footer.size_pt", flat["header_footer.header.typography.size_pt"])
+    if "header_footer.header.typography.bold" in flat:
+        flat.setdefault("header_footer.bold", flat["header_footer.header.typography.bold"])
+    if "header_footer.header.typography.italic" in flat:
+        flat.setdefault("header_footer.italic", flat["header_footer.header.typography.italic"])
 
     if "header_footer.typography.font_cn" in flat:
         flat.setdefault("header_footer.font_cn", flat["header_footer.typography.font_cn"])
@@ -161,6 +175,8 @@ def _add_header_footer_compat_aliases(flat: dict[str, Any]) -> None:
             "header_footer.page_number_enabled",
             footer_mode in {"page_number", "page_number_with_text"},
         )
+    if "header_footer.footer.enabled" in flat:
+        flat.setdefault("header_footer.footer_enabled", flat["header_footer.footer.enabled"])
     if "header_footer.footer.fixed_text" in flat:
         flat.setdefault("header_footer.footer_text", flat["header_footer.footer.fixed_text"])
     if "header_footer.footer.alignment" in flat:
@@ -431,9 +447,8 @@ def _normalize_style_payload(style: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_toc_style_keys(styles: dict[str, dict[str, Any]]) -> None:
-    if "toc" in styles:
-        for key in ("toc_level1", "toc_level2", "toc_level3"):
-            styles.setdefault(key, copy.deepcopy(styles["toc"]))
+    """Keep legacy TOC style payloads loadable without generating new role styles."""
+    return
 
 
 def _normalize_style_line_spacing(style: dict[str, Any]) -> None:
@@ -564,7 +579,6 @@ def _ensure_runtime_style_aliases(styles: dict[str, dict[str, Any]]) -> None:
     alias_groups = {
         "heading": ("heading", "heading1", "heading2", "heading3"),
         "caption": ("caption", "figure_caption", "table_caption"),
-        "toc": ("toc", "toc_level1", "toc_level2", "toc_level3", "toc_title"),
         "references_body": ("references_body",),
         "abstract_body": ("abstract_body", "abstract_body_en"),
         "appendix_body": ("appendix_body",),
@@ -588,7 +602,7 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
     update_page_number = normalized.pop("update_page_number", None)
     update_header_line = normalized.pop("update_header_line", None)
 
-    typography = (
+    legacy_typography = (
         _copy_mapping(normalized.get("typography"))
         if isinstance(normalized.get("typography"), Mapping)
         else {}
@@ -608,17 +622,40 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
         if isinstance(normalized.get("page_number_plan"), Mapping)
         else {}
     )
+    behavior = (
+        _copy_mapping(normalized.get("behavior"))
+        if isinstance(normalized.get("behavior"), Mapping)
+        else {}
+    )
+    variants = (
+        _copy_mapping(normalized.get("variants"))
+        if isinstance(normalized.get("variants"), Mapping)
+        else {}
+    )
 
-    if "font_cn" in normalized and "font_cn" not in typography:
-        typography["font_cn"] = normalized["font_cn"]
-    if "font_en" in normalized and "font_en" not in typography:
-        typography["font_en"] = normalized["font_en"]
-    if "size_pt" in normalized and "size_pt" not in typography:
-        typography["size_pt"] = normalized["size_pt"]
-    if "bold" in normalized and "bold" not in typography:
-        typography["bold"] = bool(normalized["bold"])
-    if "italic" in normalized and "italic" not in typography:
-        typography["italic"] = bool(normalized["italic"])
+    header_typography = (
+        _copy_mapping(header.get("typography"))
+        if isinstance(header.get("typography"), Mapping)
+        else {}
+    )
+    footer_typography = (
+        _copy_mapping(footer.get("typography"))
+        if isinstance(footer.get("typography"), Mapping)
+        else {}
+    )
+    for key in ("font_cn", "font_en", "size_pt", "bold", "italic"):
+        if key in legacy_typography and key not in header_typography:
+            header_typography[key] = legacy_typography[key]
+        if key in normalized and key not in header_typography:
+            header_typography[key] = normalized[key]
+    if "bold" in header_typography:
+        header_typography["bold"] = bool(header_typography["bold"])
+    if "italic" in header_typography:
+        header_typography["italic"] = bool(header_typography["italic"])
+    if "bold" in footer_typography:
+        footer_typography["bold"] = bool(footer_typography["bold"])
+    if "italic" in footer_typography:
+        footer_typography["italic"] = bool(footer_typography["italic"])
 
     if "mode" not in header:
         header_text = str(normalized.get("header_text", "") or "").strip()
@@ -633,6 +670,11 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
 
     if "fixed_text" not in header:
         header["fixed_text"] = str(normalized.get("header_text", "") or "")
+    if "alignment" not in header:
+        header["alignment"] = str(normalized.get("header_alignment", "center") or "center")
+    header["alignment"] = str(header.get("alignment", "center") or "center").strip().lower()
+    if header["alignment"] not in {"left", "center", "right"}:
+        header["alignment"] = "center"
     if "styleref_level" not in header:
         header["styleref_level"] = int(normalized.get("styleref_level", 1) or 1)
     if "border" not in header:
@@ -642,10 +684,17 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
             header["border"] = bool(update_header_line)
         else:
             header["border"] = True
+    if not isinstance(header.get("border_style"), Mapping):
+        header["border_style"] = {}
+    if "enabled" not in header["border_style"]:
+        header["border_style"]["enabled"] = bool(header.get("border", True))
 
     hide_cover = normalized.get("hide_cover_header_footer")
+    if "enabled" not in header:
+        header["enabled"] = bool(normalized.get("header_enabled", True))
     if "hide_on_cover" not in header:
         header["hide_on_cover"] = True if hide_cover is None else bool(hide_cover)
+    header["typography"] = header_typography
     if "content_mode" not in footer:
         page_number_enabled = normalized.get("page_number_enabled")
         if page_number_enabled is None and update_page_number is not None:
@@ -666,8 +715,13 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
     footer["alignment"] = str(footer.get("alignment", "center") or "center").strip().lower()
     if footer["alignment"] not in {"left", "center", "right"}:
         footer["alignment"] = "center"
+    if "page_number_template" not in footer:
+        footer["page_number_template"] = str(normalized.get("page_number_template", "{page}") or "{page}")
     if "hide_on_cover" not in footer:
         footer["hide_on_cover"] = True if hide_cover is None else bool(hide_cover)
+    if "enabled" not in footer:
+        footer["enabled"] = bool(normalized.get("footer_enabled", True))
+    footer["typography"] = footer_typography
 
     suppress_selectors_raw = normalized.get("suppress_header_footer_selectors")
     suppress_selectors: list[str] = []
@@ -746,9 +800,10 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
     )
 
     return {
-        "typography": typography,
         "header": header,
         "footer": footer,
+        "behavior": behavior,
+        "variants": variants,
         "page_number_plan": page_number_plan,
         "suppress_header_footer_selectors": suppress_selectors,
     }
@@ -777,7 +832,7 @@ _LEGACY_SCENE_OPTION_BLOCKS: tuple[tuple[str, str | None, str | None], ...] = (
     ("equation_table_format", None, "equation_table_format"),
 )
 
-_SCENE_DIRECT_FEATURE_ROOTS = ("header_footer", "toc")
+_SCENE_DIRECT_FEATURE_ROOTS = ("header_footer", "toc", "reference_style")
 
 _SCENE_LIFTED_TEMPLATE_KEYS = {
     "page_setup",
@@ -826,6 +881,53 @@ def normalize_scene_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]
         normalized["format_scope"] = copy.deepcopy(dict(raw["format_scope"]))
     if isinstance(raw.get("available_sections"), list):
         normalized["available_sections"] = copy.deepcopy(list(raw["available_sections"]))
+    if isinstance(raw.get("application_boundary"), Mapping):
+        normalized["application_boundary"] = _copy_mapping(raw["application_boundary"])
+    elif isinstance(raw.get("format_scope"), Mapping):
+        normalized["application_boundary"] = _infer_application_boundary_from_format_scope(
+            raw["format_scope"]
+        )
+    if isinstance(raw.get("exam_paper"), Mapping):
+        normalized["exam_paper"] = _copy_mapping(raw["exam_paper"])
+
+    input_source_profile = raw.get("input_source_profile")
+    if not isinstance(input_source_profile, Mapping):
+        input_source_profile = raw.get("input_sources")
+    if isinstance(input_source_profile, Mapping):
+        normalized["input_source_profile"] = _copy_mapping(input_source_profile)
+
+    compliance_profile = raw.get("compliance_profile")
+    if not isinstance(compliance_profile, Mapping):
+        compliance_profile = raw.get("compliance")
+    if isinstance(compliance_profile, Mapping):
+        normalized["compliance_profile"] = _copy_mapping(compliance_profile)
+    if isinstance(raw.get("object_preservation"), Mapping):
+        compliance_payload = _copy_mapping(normalized.get("compliance_profile"))
+        compliance_payload.setdefault(
+            "object_preflight",
+            _copy_mapping(raw.get("object_preservation")),
+        )
+        normalized["compliance_profile"] = compliance_payload
+
+    delivery_presets = raw.get("delivery_presets")
+    delivery_payload = raw.get("delivery")
+    if isinstance(delivery_payload, Mapping):
+        if "default_preset_id" in delivery_payload:
+            normalized["default_delivery_preset_id"] = str(
+                delivery_payload.get("default_preset_id") or ""
+            )
+        if not isinstance(delivery_presets, list):
+            delivery_presets = delivery_payload.get("presets")
+    if "default_delivery_preset_id" in raw:
+        normalized["default_delivery_preset_id"] = str(
+            raw.get("default_delivery_preset_id") or ""
+        )
+    if isinstance(delivery_presets, list):
+        normalized["delivery_presets"] = [
+            _copy_mapping(item)
+            for item in delivery_presets
+            if isinstance(item, Mapping)
+        ]
 
     pipeline_switches = _extract_switches_from_pipeline(raw.get("pipeline"))
     capability_switches = _extract_switches_from_capabilities(raw.get("capabilities"))
@@ -880,6 +982,10 @@ def normalize_scene_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]
         )
     if "toc" in direct_feature_payloads:
         normalized["toc"] = direct_feature_payloads["toc"]
+    if "reference_style" in direct_feature_payloads:
+        normalized["reference_style"] = _normalize_reference_style_payload(
+            direct_feature_payloads["reference_style"]
+        )
 
     if remaining_overrides:
         normalized["template_overrides"] = remaining_overrides
@@ -908,6 +1014,40 @@ def normalize_scene_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]
             normalized["compatible_template_ids"] = [seed]
 
     return normalized
+
+
+def _infer_application_boundary_from_format_scope(
+    format_scope: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Infer the new high-level boundary from legacy section gates."""
+
+    raw_mode = str(format_scope.get("mode") or "").strip()
+    if raw_mode in {
+        "follow_template",
+        "body_only",
+        "full_document",
+        "confirm_before_apply",
+    }:
+        return {
+            "mode": raw_mode,
+            "confirm_before_apply": raw_mode == "confirm_before_apply",
+        }
+    if raw_mode in {"manual", "manual_review", "confirm"}:
+        return {"mode": "confirm_before_apply", "confirm_before_apply": True}
+
+    sections = format_scope.get("sections")
+    if not isinstance(sections, Mapping) or not sections:
+        return {"mode": "follow_template", "confirm_before_apply": False}
+
+    enabled = {str(key) for key, value in sections.items() if bool(value)}
+    total = len(sections)
+    if enabled == {"body"}:
+        return {"mode": "body_only", "confirm_before_apply": False}
+    if len(enabled) == total:
+        return {"mode": "full_document", "confirm_before_apply": False}
+    if len(enabled) >= max(3, total // 2):
+        return {"mode": "follow_template", "confirm_before_apply": False}
+    return {"mode": "confirm_before_apply", "confirm_before_apply": True}
 
 
 def _extract_switches_from_capabilities(

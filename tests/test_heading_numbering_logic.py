@@ -25,24 +25,40 @@ from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
 def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_helpers():
     from src.ui.heading_numbering_logic import (
         STYLE_OPTIONS,
+        TEMPLATE_MODE_CUSTOM,
+        TEMPLATE_MODE_STRUCTURED,
         build_chain_options,
         build_detail_state,
         build_editor_enable_state,
         build_expert_toggle_text,
         build_non_numbered_toggle_text,
+        build_restart_mode_options,
+        build_restart_trigger_options,
         compose_display_template,
         default_chain_value,
         format_csv_items,
+        normalize_display_template_mode,
         parse_csv_items,
+        restart_mode_from_value,
+        restart_trigger_level_from_value,
         should_show_chain_separator,
         split_display_template,
+        validate_display_template,
     )
 
     assert STYLE_OPTIONS
     assert split_display_template("第{cn}章") == ("第", "chinese_lower", "章")
     assert split_display_template("") == ("", "arabic", "")
+    assert split_display_template("", "circled") == ("", "circled", "")
     assert compose_display_template("第", "roman_upper", "章") == "第{RN}章"
     assert compose_display_template("", "arabic", "") == "{nn}"
+    assert normalize_display_template_mode(None) == TEMPLATE_MODE_STRUCTURED
+    assert normalize_display_template_mode("custom") == TEMPLATE_MODE_CUSTOM
+    assert normalize_display_template_mode("legacy") == TEMPLATE_MODE_STRUCTURED
+    assert validate_display_template("第{cn}章").is_valid is True
+    assert validate_display_template("{chain}").is_valid is True
+    assert validate_display_template("{parent.nn}-{cn}").is_valid is False
+    assert validate_display_template("第一章").is_valid is False
 
     assert default_chain_value(1) == "current_only"
     assert default_chain_value(2) == "parent.current"
@@ -63,6 +79,7 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
         2,
         SimpleNamespace(
             display_template="第{cn}章",
+            display_template_mode="custom",
             include_in_toc=False,
             chain="parent.current",
             chain_separator="-",
@@ -71,7 +88,10 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
         ),
     )
     assert state.title == "级别 2 编号设置"
+    assert state.template_mode == TEMPLATE_MODE_CUSTOM
     assert state.raw_template == "第{cn}章"
+    assert state.raw_template_valid is True
+    assert state.raw_template_error == ""
     assert state.prefix == "第"
     assert state.core_style == "chinese_lower"
     assert state.suffix == "章"
@@ -81,6 +101,20 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
     assert state.chain_separator == "-"
     assert state.reference_core_style == "roman_upper"
     assert state.title_separator == "　"
+    assert state.restart_mode == "parent"
+    assert state.restart_trigger_level is None
+    assert build_restart_mode_options(1) == [
+        ("上级变化时重新开始", "parent"),
+        ("全文连续编号", "document"),
+    ]
+    assert build_restart_mode_options(3) == [
+        ("上级变化时重新开始", "parent"),
+        ("全文连续编号", "document"),
+        ("指定级别变化时重新开始", "specific"),
+    ]
+    assert build_restart_trigger_options(3) == [("级别 1", "heading1"), ("级别 2", "heading2")]
+    assert restart_mode_from_value("heading2") == "specific"
+    assert restart_trigger_level_from_value("heading2") == 2
 
     assert should_show_chain_separator("current_only") is False
     assert should_show_chain_separator("parent.current") is True
@@ -114,10 +148,10 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
     assert custom_raw.use_raw_toggle is True
     assert custom_raw.raw_template is True
 
-    assert build_expert_toggle_text(False) == "▾ 展开表达式编辑"
-    assert build_expert_toggle_text(True) == "▴ 收起表达式编辑"
-    assert build_non_numbered_toggle_text(False) == "▸ 非编号标题 (忽略以下列表中的内容)"
-    assert build_non_numbered_toggle_text(True) == "▾ 非编号标题 (忽略以下列表中的内容)"
+    assert build_expert_toggle_text(False) == "▾ 展开模板编辑"
+    assert build_expert_toggle_text(True) == "▴ 收起模板编辑"
+    assert build_non_numbered_toggle_text(False) == "▸ 非编号标题"
+    assert build_non_numbered_toggle_text(True) == "▾ 非编号标题"
 
 
 def test_panel_and_adapter_delegate_heading_numbering_pure_logic_to_shared_module():
@@ -143,8 +177,12 @@ def test_panel_and_adapter_delegate_heading_numbering_pure_logic_to_shared_modul
     assert "def split_display_template" in helper_source
     assert "def default_chain_value" in helper_source
     assert "def build_chain_options" in helper_source
+    assert "def build_restart_mode_options" in helper_source
+    assert "def build_restart_trigger_options" in helper_source
     assert "def build_detail_state" in helper_source
     assert "def build_editor_enable_state" in helper_source
+    assert "def normalize_display_template_mode" in helper_source
+    assert "def validate_display_template" in helper_source
     assert "def should_show_chain_separator" in helper_source
     assert "def parse_csv_items" in helper_source
     assert "def format_csv_items" in helper_source
@@ -193,11 +231,17 @@ def test_panel_has_inspector_structure_without_override_actions():
     assert "_build_detail_panel_inspector" in panel_source
     assert "_build_result_strip" in panel_source
     assert "_build_numbering_block" in panel_source
-    assert "_build_output_block" in panel_source
+    assert "_build_counter_block" in panel_source
+    assert "_build_title_spacing_block" in panel_source
+    assert "_build_output_reference_block" in panel_source
     assert "_build_style_inspector" in panel_source
     assert "_build_expert_inspector" in panel_source
-    assert "_style_toggle_btn" in panel_source
+    assert "_style_toggle_btn" not in panel_source
     assert "_expert_toggle_btn" in panel_source
+
+    detail_source = inspect.getsource(HeadingNumberingPanel._build_detail_panel_inspector)
+    assert detail_source.index("_build_counter_block") < detail_source.index("_build_output_reference_block")
+    assert detail_source.index("_build_output_reference_block") < detail_source.index("_build_title_spacing_block")
 
 
 def test_panel_no_minipage_preview():

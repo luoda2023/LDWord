@@ -23,12 +23,14 @@ from src.shared.engine.field_refresh import (
 )
 from src.shared.engine.ooxml_ops import clone_element, find_or_create, qn
 from src.shared.engine.toc_style_ops import (
-    LEVEL_TO_WORD_STYLE,
     TOC_HEADING_STYLE_CANDIDATES,
     apply_toc_paragraph_style,
-    resolve_toc_style_config,
+    resolve_toc_entry_style_config,
+    resolve_toc_title_style_config,
     sync_toc_styles,
-    toc_style_key_for_heading_level,
+    toc_heading_key,
+    toc_heading_level,
+    toc_word_style_for_heading_level,
 )
 
 if TYPE_CHECKING:
@@ -44,8 +46,9 @@ TOC_TITLE_RE = re.compile(r"^(\u76ee\u5f55|\u76ee\s*\u5f55|contents|tableofconte
 TOC_LEVEL_STYLE_RE = re.compile(r"^(toc|\u76ee\u5f55)\s*(\d+)$", re.IGNORECASE)
 RE_TOC_LEVEL1_CN = re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+(?:\u7ae0|\u7bc7)")
 RE_TOC_LEVEL2_CN = re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+\u8282")
-RE_LEVEL2 = re.compile(r"^\d+\.\d+\.\d+(?:[\.、．])?\s*\S")
-RE_LEVEL1 = re.compile(r"^\d+\.\d+(?:[\.、．])?\s*\S")
+RE_LEVEL4 = re.compile(r"^\d+\.\d+\.\d+\.\d+(?:[\.、．])?\s*\S")
+RE_LEVEL3 = re.compile(r"^\d+\.\d+\.\d+(?:[\.、．])?\s*\S")
+RE_LEVEL2 = re.compile(r"^\d+\.\d+(?:[\.、．])?\s*\S")
 BACK_MATTER_TITLES = {
     "references": "\u53c2\u8003\u6587\u732e",
     "errata": "\u52d8\u8bef",
@@ -77,14 +80,14 @@ class TocModule(BaseModule):
         if not toc_cfg.enabled:
             return
 
-        max_level = toc_cfg.max_level
+        max_level = _clamp_toc_level(toc_cfg.max_level)
         insert_position = toc_cfg.insert_position
         mode = str(getattr(toc_cfg, "mode", "word_native") or "word_native").strip().lower()
-        style_sync_count = sync_toc_styles(doc, config.styles)
+        style_sync_count = sync_toc_styles(doc, config, max_level=max_level)
         existing_plain_range = _resolve_existing_toc_range(doc, context)
 
         if mode == "plain":
-            entries = _collect_plain_toc_entries(doc, context, max_level=max_level)
+            entries = _collect_plain_toc_entries(doc, config, context, max_level=max_level)
             if existing_plain_range is not None:
                 start, end = existing_plain_range
                 inserted = _replace_paragraph_toc_range_with_plain(doc, start, end, entries)
@@ -152,6 +155,14 @@ class TocModule(BaseModule):
 
 def _has_existing_toc(doc: Document) -> bool:
     return document_has_toc(doc)
+
+
+def _clamp_toc_level(value) -> int:
+    try:
+        level = int(value or 3)
+    except (TypeError, ValueError):
+        level = 3
+    return max(1, min(level, 6))
 
 
 def _mark_toc_for_update(doc: Document) -> None:
@@ -247,21 +258,18 @@ def _infer_toc_level_from_paragraph(para) -> str:
     for value in (style_name, style_id):
         match = TOC_LEVEL_STYLE_RE.match(value)
         if match:
-            level_num = int(match.group(2))
-            if level_num <= 1:
-                return "heading1"
-            if level_num == 2:
-                return "heading2"
-            return "heading3"
+            return toc_heading_key(int(match.group(2)))
 
     raw = (para.text or "").strip()
     if RE_TOC_LEVEL2_CN.match(raw):
         return "heading2"
     if RE_TOC_LEVEL1_CN.match(raw):
         return "heading1"
-    if RE_LEVEL2.match(raw):
+    if RE_LEVEL4.match(raw):
+        return "heading4"
+    if RE_LEVEL3.match(raw):
         return "heading3"
-    if RE_LEVEL1.match(raw):
+    if RE_LEVEL2.match(raw):
         return "heading2"
     return "heading1"
 
@@ -353,7 +361,7 @@ def _format_existing_toc_paragraphs(doc: Document, config: ResolvedConfig, conte
         if not raw:
             continue
         if _is_toc_title_paragraph(para):
-            style_config = resolve_toc_style_config(config.styles, "toc_title")
+            style_config = resolve_toc_title_style_config(config)
             if style_config is not None:
                 apply_toc_paragraph_style(para, style_config, is_title=True)
                 try:
@@ -365,13 +373,12 @@ def _format_existing_toc_paragraphs(doc: Document, config: ResolvedConfig, conte
 
         if _is_toc_level_style_para(para) or looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
             level = _infer_toc_level_from_paragraph(para)
-            level_key = toc_style_key_for_heading_level(level)
-            style_config = resolve_toc_style_config(config.styles, level_key)
+            style_config = resolve_toc_entry_style_config(config, level)
             if style_config is None:
                 continue
             apply_toc_paragraph_style(para, style_config, is_title=False)
             try:
-                para.style = doc.styles[LEVEL_TO_WORD_STYLE[level]]
+                para.style = doc.styles[toc_word_style_for_heading_level(level)]
             except Exception:
                 pass
             formatted += 1
@@ -384,7 +391,7 @@ def _format_inserted_toc_title(doc: Document, config: ResolvedConfig, insert_idx
     para = doc.paragraphs[insert_idx]
     if not _is_toc_title_paragraph(para):
         return
-    style_config = resolve_toc_style_config(config.styles, "toc_title")
+    style_config = resolve_toc_title_style_config(config)
     if style_config is None:
         return
     apply_toc_paragraph_style(para, style_config, is_title=True)
@@ -478,7 +485,22 @@ def _insert_toc(doc: Document, position: int, max_level: int) -> None:
     _insert_paragraph_elements(doc, position, [title_para, field_para])
 
 
-def _collect_plain_toc_entries(doc: Document, context: PipelineContext, *, max_level: int) -> list[dict]:
+def _heading_included_in_toc(config: ResolvedConfig, level_num: int) -> bool:
+    heading_numbering = getattr(config, "heading_numbering", None)
+    level_bindings = getattr(heading_numbering, "level_bindings", None) or {}
+    binding = level_bindings.get(f"heading{level_num}")
+    if binding is None:
+        return True
+    return bool(getattr(binding, "include_in_toc", True))
+
+
+def _collect_plain_toc_entries(
+    doc: Document,
+    config: ResolvedConfig,
+    context: PipelineContext,
+    *,
+    max_level: int,
+) -> list[dict]:
     doc_tree = getattr(context, "doc_tree", None)
     heading_map = getattr(context, "heading_map", None) or {}
     entries: list[dict] = []
@@ -506,14 +528,15 @@ def _collect_plain_toc_entries(doc: Document, context: PipelineContext, *, max_l
         level_num = int(heading_map[para_index])
         if level_num < 1 or level_num > max_level:
             continue
+        if not _heading_included_in_toc(config, level_num):
+            continue
         if doc_tree is not None:
             sec_type = getattr(doc_tree, "get_section_for_paragraph", lambda *_: "body")(para_index)
             if sec_type != "body":
                 continue
         title = (doc.paragraphs[para_index].text or "").strip()
         if title:
-            level = {1: "heading1", 2: "heading2"}.get(level_num, "heading3")
-            push(level, title, para_index)
+            push(toc_heading_key(level_num), title, para_index)
 
     if doc_tree is not None:
         for sec_type, fallback_title in BACK_MATTER_TITLES.items():
@@ -560,7 +583,7 @@ def _format_inserted_plain_toc(doc: Document, config: ResolvedConfig, inserted_e
 
     title_para = el_to_para.get(inserted_elements[0]) if inserted_elements else None
     if title_para is not None:
-        title_style = resolve_toc_style_config(config.styles, "toc_title")
+        title_style = resolve_toc_title_style_config(config)
         if title_style is not None:
             apply_toc_paragraph_style(title_para, title_style, is_title=True)
             try:
@@ -572,14 +595,13 @@ def _format_inserted_plain_toc(doc: Document, config: ResolvedConfig, inserted_e
         para = el_to_para.get(elem)
         if para is None:
             continue
-        level = str(entry.get("level", "heading3"))
-        level_key = toc_style_key_for_heading_level(level)
-        style_config = resolve_toc_style_config(config.styles, level_key)
+        level = toc_heading_level(entry.get("level", "heading6"))
+        style_config = resolve_toc_entry_style_config(config, level)
         if style_config is None:
             continue
         apply_toc_paragraph_style(para, style_config, is_title=False)
         try:
-            para.style = doc.styles[LEVEL_TO_WORD_STYLE.get(level, "TOC 3")]
+            para.style = doc.styles[toc_word_style_for_heading_level(level)]
         except Exception:
             pass
 
