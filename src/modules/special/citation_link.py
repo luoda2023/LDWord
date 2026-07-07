@@ -46,6 +46,14 @@ class CitationLinkModule(BaseModule):
 
         ref_range = _resolve_reference_range(doc, doc_tree)
         if ref_range is None:
+            tracker.record(
+                rule_name=self.meta.name,
+                target="references",
+                section="global",
+                change_type="skip",
+                before="reference section detection",
+                after="skipped because reference section was not found",
+            )
             return
 
         ref_start, ref_end = ref_range

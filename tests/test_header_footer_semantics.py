@@ -7,7 +7,9 @@ from docx import Document
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.config.feature_configs import PageNumberPhaseConfig
+from src.config.dataclass_utils import dict_to_dataclass
+from src.config.feature_configs import HeaderFooterConfig, PageNumberPhaseConfig
+from src.config.migration import normalize_template_payload
 from src.config.resolved import ResolvedConfig
 from src.modules.basic.header_footer import (
     HeaderFooterModule,
@@ -88,11 +90,51 @@ def test_header_footer_page_number_can_append_footer_text():
     assert para._element.find(qn("w:pPr")).find(qn("w:jc")).get(qn("w:val")) == "left"
 
 
+def test_header_footer_enabled_switches_clear_output_without_losing_config():
+    doc = Document()
+    section = doc.sections[0]
+    section.header.paragraphs[0].add_run("Legacy Header")
+    section.first_page_header.paragraphs[0].add_run("Legacy First Header")
+    section.even_page_footer.paragraphs[0].add_run("Legacy Even Footer")
+    _set_header_border(section, True)
+    _set_page_number(section, ResolvedConfig().header_footer)
+
+    config = ResolvedConfig()
+    hf = config.header_footer
+    hf.behavior.different_first_page = True
+    hf.behavior.different_odd_even_pages = True
+    hf.header.enabled = False
+    hf.header_mode = "fixed"
+    hf.header_text = "Hidden Header"
+    hf.header_border = True
+    hf.footer.enabled = False
+    hf.footer.content_mode = "page_number_with_text"
+    hf.footer_text = "Hidden Footer"
+
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), PipelineContext())
+
+    header_para = section.header.paragraphs[0]
+    footer_para = section.footer.paragraphs[0]
+    bottom = header_para._element.find(qn("w:pPr")).find(qn("w:pBdr")).find(qn("w:bottom"))
+    assert header_para.text == ""
+    assert bottom is not None
+    assert bottom.get(qn("w:val")) == "none"
+    assert footer_para.text == ""
+    assert section.first_page_header.paragraphs[0].text == ""
+    assert section.even_page_footer.paragraphs[0].text == ""
+    assert _paragraph_has_field(footer_para, "PAGE") is False
+    assert hf.header_mode == "fixed"
+    assert hf.header_text == "Hidden Header"
+    assert hf.footer.content_mode == "page_number_with_text"
+    assert hf.footer_text == "Hidden Footer"
+
+
 def test_header_footer_fixed_header_applies_emphasis_typography():
     doc = Document()
     config = ResolvedConfig()
     config.header_footer.header_mode = "fixed"
     config.header_footer.header_text = "Fixed Header"
+    config.header_footer.header_alignment = "right"
     config.header_footer.font_cn = "SimSun"
     config.header_footer.font_en = "Times New Roman"
     config.header_footer.size_pt = 9
@@ -102,9 +144,154 @@ def test_header_footer_fixed_header_applies_emphasis_typography():
     HeaderFooterModule().apply(doc, config, ChangeTracker(), PipelineContext())
 
     run = doc.sections[0].header.paragraphs[0].runs[0]
+    assert _paragraph_alignment(doc.sections[0].header.paragraphs[0]) == "right"
     assert run.font.size.pt == 9
     assert run.font.bold is True
     assert run.font.italic is True
+
+
+def test_header_footer_header_and_footer_typography_are_independent():
+    doc = Document()
+    config = ResolvedConfig()
+    hf = config.header_footer
+    hf.header_mode = "fixed"
+    hf.header_text = "Fixed Header"
+    hf.footer.content_mode = "fixed"
+    hf.footer_text = "Fixed Footer"
+    hf.header.typography.size_pt = 9
+    hf.header.typography.bold = True
+    hf.footer.typography.size_pt = 11
+    hf.footer.typography.italic = True
+
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), PipelineContext())
+
+    header_run = doc.sections[0].header.paragraphs[0].runs[0]
+    footer_run = doc.sections[0].footer.paragraphs[0].runs[0]
+    assert header_run.font.size.pt == 9
+    assert header_run.font.bold is True
+    assert header_run.font.italic is False
+    assert footer_run.font.size.pt == 11
+    assert footer_run.font.bold is False
+    assert footer_run.font.italic is True
+
+
+def test_header_footer_config_exposes_word_variant_model():
+    cfg = HeaderFooterConfig()
+
+    assert cfg.behavior.different_first_page is False
+    assert cfg.behavior.different_odd_even_pages is False
+    assert cfg.behavior.link_to_previous == "never"
+    assert cfg.variants.default.header.mode == "inherit"
+    assert cfg.variants.first.header.mode == "none"
+    assert cfg.variants.first.footer.mode == "none"
+    assert cfg.variants.even.footer.mode == "inherit"
+    assert cfg.header.border_style.width_pt == 0.5
+    assert cfg.page_number_template == "{page}"
+    assert cfg.header.typography is not cfg.footer.typography
+
+
+def test_header_footer_template_normalization_preserves_word_variant_model():
+    payload = normalize_template_payload(
+        {
+            "header_footer": {
+                "behavior": {
+                    "different_first_page": True,
+                    "different_odd_even_pages": True,
+                    "link_to_previous": "preserve",
+                },
+                "variants": {
+                    "first": {
+                        "header": {"mode": "fixed", "fixed_text": "First Header"},
+                        "footer": {"mode": "none"},
+                    },
+                    "even": {
+                        "footer": {
+                            "mode": "template",
+                            "template": "第 {page} 页 / 共 {pages} 页",
+                        }
+                    },
+                },
+                "footer": {"page_number_template": "第 {page} 页"},
+            }
+        }
+    )
+
+    cfg = dict_to_dataclass(HeaderFooterConfig, payload["header_footer"])
+
+    assert cfg.behavior.different_first_page is True
+    assert cfg.behavior.different_odd_even_pages is True
+    assert cfg.behavior.link_to_previous == "preserve"
+    assert cfg.variants.first.header.mode == "fixed"
+    assert cfg.variants.first.header.fixed_text == "First Header"
+    assert cfg.variants.even.footer.template == "第 {page} 页 / 共 {pages} 页"
+    assert cfg.page_number_template == "第 {page} 页"
+
+
+def test_header_footer_applies_first_and_even_page_variants():
+    doc = Document()
+    config = ResolvedConfig()
+    hf = config.header_footer
+    hf.behavior.different_first_page = True
+    hf.behavior.different_odd_even_pages = True
+    hf.variants.first.header.mode = "fixed"
+    hf.variants.first.header.fixed_text = "First Header"
+    hf.variants.first.header.alignment = "left"
+    hf.variants.first.footer.mode = "fixed"
+    hf.variants.first.footer.fixed_text = "First Footer"
+    hf.variants.even.header.mode = "fixed"
+    hf.variants.even.header.fixed_text = "Even Header"
+    hf.variants.even.header.alignment = "right"
+    hf.variants.even.footer.mode = "template"
+    hf.variants.even.footer.template = "第 {page} 页 / 共 {pages} 页"
+
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), PipelineContext())
+
+    section = doc.sections[0]
+    assert section.different_first_page_header_footer is True
+    assert doc.settings.odd_and_even_pages_header_footer is True
+    assert section.first_page_header.paragraphs[0].text == "First Header"
+    assert _paragraph_alignment(section.first_page_header.paragraphs[0]) == "left"
+    assert section.first_page_footer.paragraphs[0].text == "First Footer"
+    assert section.even_page_header.paragraphs[0].text == "Even Header"
+    assert _paragraph_alignment(section.even_page_header.paragraphs[0]) == "right"
+    even_instrs = _field_instr_texts(section.even_page_footer.paragraphs[0])
+    assert any(instr.startswith("PAGE") for instr in even_instrs)
+    assert any(instr.startswith("NUMPAGES") for instr in even_instrs)
+
+
+def test_header_footer_page_number_template_can_include_total_pages():
+    doc = Document()
+    config = ResolvedConfig()
+    config.header_footer.footer.page_number_template = "第 {page} 页 / 共 {pages} 页"
+
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), PipelineContext())
+
+    para = doc.sections[0].footer.paragraphs[0]
+    instrs = _field_instr_texts(para)
+    assert any(instr.startswith("PAGE") for instr in instrs)
+    assert any(instr.startswith("NUMPAGES") for instr in instrs)
+    assert "第 " in para.text
+    assert " / 共 " in para.text
+    assert " 页" in para.text
+
+
+def test_header_footer_border_style_controls_line_width_color_and_spacing():
+    doc = Document()
+    config = ResolvedConfig()
+    border = config.header_footer.header.border_style
+    border.line_style = "double"
+    border.width_pt = 1.5
+    border.spacing_pt = 3
+    border.color = "FF0000"
+
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), PipelineContext())
+
+    para = doc.sections[0].header.paragraphs[0]
+    bottom = para._element.find(qn("w:pPr")).find(qn("w:pBdr")).find(qn("w:bottom"))
+    assert bottom.get(qn("w:val")) == "double"
+    assert bottom.get(qn("w:sz")) == "12"
+    assert bottom.get(qn("w:space")) == "3"
+    assert bottom.get(qn("w:color")) == "FF0000"
 
 
 def _build_sectioned_doc():
@@ -157,6 +344,14 @@ def _page_num_type(section):
     elem = section._sectPr.find(qn("w:pgNumType"))
     assert elem is not None
     return elem.get(qn("w:fmt")), elem.get(qn("w:start"))
+
+
+def _paragraph_alignment(para):
+    p_pr = para._element.find(qn("w:pPr"))
+    assert p_pr is not None
+    jc = p_pr.find(qn("w:jc"))
+    assert jc is not None
+    return jc.get(qn("w:val"))
 
 
 def _field_instr_texts(para):

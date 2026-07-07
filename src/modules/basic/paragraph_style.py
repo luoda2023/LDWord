@@ -69,6 +69,8 @@ class ParagraphStyleModule(BaseModule):
                 continue
 
             style_key = _resolve_style_key(para, context)
+            if style_key == "toc":
+                continue
             if style_key.startswith("heading") and style_key != "heading":
                 level_num = int(style_key.replace("heading", "") or "0")
                 if level_num > max_levels:

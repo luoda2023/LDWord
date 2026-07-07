@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Iterator, TYPE_CHECKING
 
+from docx.table import _Cell
+
 if TYPE_CHECKING:
     from docx import Document
     from docx.text.paragraph import Paragraph
@@ -86,14 +88,9 @@ def iter_tables(doc: Document):
 
 def iter_table_cells(table):
     """遍历表格所有单元格（去重合并单元格），返回 (row, col, Cell)。"""
-    seen = set()
-    for row_idx, row in enumerate(table.rows):
-        for col_idx, cell in enumerate(row.cells):
-            cell_id = id(cell._element)
-            if cell_id in seen:
-                continue
-            seen.add(cell_id)
-            yield row_idx, col_idx, cell
+    for row_idx, row in enumerate(table._element.tr_lst):
+        for col_idx, tc in enumerate(row.tc_lst):
+            yield row_idx, col_idx, _Cell(tc, table)
 
 
 def count_paragraphs(doc: Document) -> int:

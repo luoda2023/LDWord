@@ -94,6 +94,7 @@ def validate_data_flow(modules: list) -> list[str]:
     available: set[str] = {
         "source_doc_path",
         "source_doc_dir",
+        "application_boundary",
         "format_scope",
     }
 

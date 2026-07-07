@@ -277,6 +277,10 @@ def refresh_doc_fields_with_word(doc_path: str, timeout_sec: int = 30) -> tuple[
     """Best-effort in-place field refresh using local Microsoft Word on Windows."""
     if os.name != "nt":
         return False, "Word COM refresh requires Windows."
+    if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get(
+        "LARK_ENABLE_WORD_COM_IN_TESTS"
+    ):
+        return False, "Word COM refresh skipped under pytest."
 
     target = Path(doc_path)
     if not target.exists():

@@ -31,6 +31,7 @@ class PipelineResult:
     failed_items: list[dict] = field(default_factory=list)
     error: str | None = None
     cancelled: bool = False
+    config: Any | None = None
 
     def __post_init__(self) -> None:
         if self.cancelled:

@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 from lxml import etree
 
 from src.shared.engine.ooxml_ops import qn, find_or_create
-from src.shared.engine.units import pt_to_emu
 
 if TYPE_CHECKING:
     from docx import Document
@@ -48,16 +47,6 @@ def set_column_width(table: Table, col: int, width_cm: float) -> None:
         tcW = find_or_create(tcPr, "w:tcW")
         tcW.set(qn("w:w"), str(width))
         tcW.set(qn("w:type"), "dxa")
-
-
-def set_row_height(table: Table, row: int, height_pt: float) -> None:
-    """设置行高 (pt)。"""
-    from src.shared.engine.units import pt_to_twip
-    tr = table.rows[row]._element
-    trPr = find_or_create(tr, "w:trPr")
-    trHeight = find_or_create(trPr, "w:trHeight")
-    trHeight.set(qn("w:val"), str(pt_to_twip(height_pt)))
-    trHeight.set(qn("w:hRule"), "atLeast")
 
 
 def merge_cells(

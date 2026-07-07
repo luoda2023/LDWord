@@ -61,3 +61,18 @@ def test_citation_link_uses_number_bookmark_targets_when_auto_numbering_is_enabl
 
     assert "_RefNum_1" in bookmark_names
     assert any("REF _RefNum_1" in text for text in instr_texts)
+
+
+def test_citation_link_reports_skip_when_reference_section_is_missing():
+    doc = Document()
+    doc.add_paragraph("See [1] for details.")
+
+    tracker = _apply_citation_link(doc, auto_number_reference_entries=False)
+
+    records = tracker.get_by_module("citation_link")
+    assert any(
+        record.change_type == "skip"
+        and record.target == "references"
+        and "reference section was not found" in record.after
+        for record in records
+    )

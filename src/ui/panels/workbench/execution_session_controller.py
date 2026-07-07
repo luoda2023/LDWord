@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.config.entity import EntityArchive
+from src.config.material_context import MaterialExecutionContext
 from src.config.scene import SceneWorkspace
 from src.config.template import TemplateConfig
 
 from .diagnostics import log_best_effort_shutdown_failure
-from .execution_runtime import ThreadedExecutionHandle, WorkbenchProductionRunner
-from .execution_worker import ExecutionWorker
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,7 @@ class WorkbenchExecutionSessionController:
         template: TemplateConfig | None,
         scene: SceneWorkspace | None,
         session_overrides: dict[str, object] | None = None,
+        material_context: MaterialExecutionContext | None = None,
     ) -> ExecutionBuildResult:
         if self._active_worker is not None:
             return ExecutionBuildResult(
@@ -52,11 +53,56 @@ class WorkbenchExecutionSessionController:
         if doc_path is None:
             return ExecutionBuildResult(worker=None, cancelled=True)
 
+        from .execution_runtime import ThreadedExecutionHandle, WorkbenchProductionRunner
+        from .execution_worker import ExecutionWorker
+
         runner = WorkbenchProductionRunner(
             doc_path=doc_path,
             template=template or TemplateConfig(),
             scene=scene or SceneWorkspace(),
             session_overrides=session_overrides,
+            material_context=material_context,
+        )
+        worker = ExecutionWorker(runner, parent=None)
+        return ExecutionBuildResult(
+            worker=ThreadedExecutionHandle(worker, parent=self._worker_parent),
+        )
+
+    def build_batch_worker(
+        self,
+        *,
+        template: TemplateConfig | None,
+        scene: SceneWorkspace | None,
+        archive: EntityArchive,
+        profile_ids: list[str] | None = None,
+        base_output_dir: str | None = None,
+        output_dir_template: str = "{entity_name}",
+        session_overrides: dict[str, object] | None = None,
+        base_context: MaterialExecutionContext | None = None,
+    ) -> ExecutionBuildResult:
+        if self._active_worker is not None:
+            return ExecutionBuildResult(
+                worker=self._active_worker,
+                already_running=True,
+            )
+
+        doc_path = self._resolve_document_path()
+        if doc_path is None:
+            return ExecutionBuildResult(worker=None, cancelled=True)
+
+        from .execution_runtime import ThreadedExecutionHandle, WorkbenchBatchProductionRunner
+        from .execution_worker import ExecutionWorker
+
+        runner = WorkbenchBatchProductionRunner(
+            doc_path=doc_path,
+            template=template or TemplateConfig(),
+            scene=scene or SceneWorkspace(),
+            archive=archive,
+            profile_ids=profile_ids,
+            base_output_dir=base_output_dir,
+            output_dir_template=output_dir_template,
+            session_overrides=session_overrides,
+            base_context=base_context,
         )
         worker = ExecutionWorker(runner, parent=None)
         return ExecutionBuildResult(

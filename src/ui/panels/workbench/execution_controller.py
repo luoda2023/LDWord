@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+from src.ui.adapters.workbench_execution_adapter import workbench_artifact_display_items
+
 from .state import ExecutionResultState
 
 
@@ -57,11 +59,31 @@ class WorkbenchExecutionController:
             result_state = self._execution_adapter.build_result_state(
                 status=str(payload.get("status") or "failed"),
                 output_path=str(payload.get("output_path") or ""),
+                output_paths=_path_map(payload.get("output_paths")),
+                compare_paths=_path_map(payload.get("compare_paths")),
                 report_paths=list(payload.get("report_paths") or []),
+                intermediate_paths=_path_map(payload.get("intermediate_paths")),
+                material_manifest_paths=_path_map(payload.get("material_manifest_paths")),
+                material_package_paths=_path_map(payload.get("material_package_paths")),
+                scene_sample_manifest_paths=_path_map(
+                    payload.get("scene_sample_manifest_paths")
+                ),
+                output_target_preflight=_dict_payload(payload.get("output_target_preflight")),
                 failed_count=int(payload.get("failed_count") or 0),
                 error_text=str(payload.get("error_text") or ""),
                 diagnostics_count=int(payload.get("diagnostics_count") or 0),
                 diagnostics_summary=str(payload.get("diagnostics_summary") or ""),
+                style_source=_dict_payload(payload.get("style_source")),
+                object_preflight=_dict_payload(payload.get("object_preflight")),
+                material_field_consistency=_dict_payload(
+                    payload.get("material_field_consistency")
+                ),
+                batch_isolation=_dict_payload(payload.get("batch_isolation")),
+                question_figure_repair_queue=_dict_payload(
+                    payload.get("question_figure_repair_queue")
+                ),
+                diagnostics_items=_diagnostics_items(payload),
+                batch_issue_items=list(payload.get("batch_issue_items") or []),
             )
 
         self._quick_execution_detail.set_execution_result(result_state)
@@ -117,7 +139,13 @@ class WorkbenchExecutionController:
             self._execution_adapter.build_result_state(
                 status="cancelled",
                 output_path="",
+                output_paths={},
+                compare_paths={},
                 report_paths=[],
+                intermediate_paths={},
+                material_manifest_paths={},
+                material_package_paths={},
+                output_target_preflight={},
                 failed_count=0,
                 error_text="",
                 diagnostics_count=0,
@@ -191,13 +219,101 @@ class WorkbenchExecutionController:
             progress_widget.update_module_status(final_stage, final_status, final_progress)
         progress_widget.set_completed(success, {"success_count": 1 if success else 0})
         progress_widget.append_log("info", result_state.summary)
-        if result_state.output_path:
+        for label, path in workbench_artifact_display_items(
+            result_state.output_paths,
+            delivery_preset_labels=True,
+        ):
+            progress_widget.append_log("info", f"输出文件[{label}]：{path}")
+        if result_state.output_path and not result_state.output_paths:
             progress_widget.append_log("info", f"输出文件：{result_state.output_path}")
+        for label, path in workbench_artifact_display_items(
+            result_state.compare_paths,
+            delivery_preset_labels=True,
+        ):
+            progress_widget.append_log("info", f"对比稿[{label}]：{path}")
+        for label, path in workbench_artifact_display_items(
+            result_state.intermediate_paths,
+            delivery_preset_labels=True,
+        ):
+            progress_widget.append_log("info", f"中间产物[{label}]：{path}")
+        for label, path in workbench_artifact_display_items(
+            result_state.material_manifest_paths
+        ):
+            progress_widget.append_log("info", f"资料清单[{label}]：{path}")
+        for label, path in workbench_artifact_display_items(
+            result_state.material_package_paths
+        ):
+            progress_widget.append_log("info", f"资料包[{label}]：{path}")
+        for item in list(result_state.artifact_items or []):
+            if item.detail:
+                progress_widget.append_log(
+                    "warning",
+                    f"产物预检[{item.label}]：{item.detail}",
+                )
+        if result_state.report_paths:
+            progress_widget.append_log("info", f"报告文件：{', '.join(result_state.report_paths)}")
+        if result_state.object_preflight_summary:
+            level = _object_preflight_log_level(result_state)
+            progress_widget.append_log(level, result_state.object_preflight_summary)
+            for line in list(result_state.object_preflight_details or []):
+                progress_widget.append_log(level, f"对象预检明细：{line}")
         if result_state.diagnostics_summary:
             progress_widget.append_log("warning", result_state.diagnostics_summary)
+        if result_state.material_field_consistency_summary:
+            progress_widget.append_log(
+                _material_field_consistency_log_level(result_state),
+                result_state.material_field_consistency_summary,
+            )
         if result_state.error_text:
             progress_widget.append_log("error", result_state.error_text)
         if hasattr(self._execution_history_detail, "set_summary"):
             self._execution_history_detail.set_summary(
                 f"执行历史 · {result_state.summary}"
             )
+
+
+def _path_map(value) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): str(path)
+        for key, path in value.items()
+        if str(key or "").strip() and str(path or "").strip()
+    }
+
+
+def _dict_payload(value) -> dict[str, object]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _diagnostics_items(payload: dict[str, object]) -> list[dict]:
+    raw_items = payload.get("diagnostics_items")
+    if not raw_items:
+        diagnostics = payload.get("diagnostics")
+        if isinstance(diagnostics, dict):
+            raw_items = diagnostics.get("items")
+    if not raw_items and not payload.get("batch_issue_items"):
+        raw_items = payload.get("material_diagnostics")
+    return [dict(item) for item in list(raw_items or []) if isinstance(item, dict)]
+
+
+def _object_preflight_log_level(result_state: ExecutionResultState) -> str:
+    payload = getattr(result_state, "object_preflight", {}) or {}
+    if not isinstance(payload, dict):
+        return "info"
+    findings_count = _safe_int(payload.get("findings_count"))
+    module_skips_count = _safe_int(payload.get("module_skips_count"))
+    return "warning" if findings_count > 0 or module_skips_count > 0 else "info"
+
+
+def _material_field_consistency_log_level(result_state: ExecutionResultState) -> str:
+    payload = getattr(result_state, "material_field_consistency", {}) or {}
+    issue_count = _safe_int(payload.get("issue_count")) if isinstance(payload, dict) else 0
+    return "warning" if issue_count > 0 else "info"
+
+
+def _safe_int(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0

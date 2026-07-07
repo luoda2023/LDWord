@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from docx.shared import Cm
 
 from src.modules.base import BaseModule, ModuleMeta
+from src.shared.engine.run_ops import get_full_text, replace_run_text
 if TYPE_CHECKING:
     from docx import Document
     from src.config.resolved import ResolvedConfig
@@ -57,13 +58,7 @@ class ImageInsertionModule(BaseModule):
             if not img_path or not Path(img_path).exists():
                 continue
 
-            # 确定插入位置
-            if position == "end":
-                para = doc.add_paragraph()
-            elif isinstance(position, int) and position < len(doc.paragraphs):
-                para = doc.paragraphs[position]
-            else:
-                para = doc.add_paragraph()
+            para = _resolve_image_paragraph(doc, position)
 
             run = para.add_run()
             run.add_picture(img_path, width=Cm(width_cm))
@@ -85,3 +80,20 @@ class ImageInsertionModule(BaseModule):
                 before="无",
                 after="已插入",
             )
+
+
+def _resolve_image_paragraph(doc: Document, position: int | str):
+    if position == "end":
+        return doc.add_paragraph()
+    if isinstance(position, int) and position < len(doc.paragraphs):
+        return doc.paragraphs[position]
+
+    if isinstance(position, str):
+        anchor = position.strip()
+        if anchor and anchor != "end":
+            for para in doc.paragraphs:
+                if anchor in get_full_text(para):
+                    replace_run_text(para, anchor, "")
+                    return para
+
+    return doc.add_paragraph()

@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.config.resolved import ResolvedConfig
+from src.config.fixed_layout import FixedLayoutRowHeightPolicy
 from src.config.table_style_presets import COLOR_TABLE_VARIANTS, color_variant
 from src.modules.structure.heading_recognition import DocSection, DocTree
 from src.modules.table.table_format import (
@@ -20,6 +21,11 @@ from src.modules.table.table_format import (
 )
 from src.pipeline.context import PipelineContext
 from src.pipeline.tracker import ChangeTracker
+from src.shared.engine.fixed_layout_tables import (
+    apply_fixed_layout_row_height_policy,
+    row_height_state,
+    set_fixed_layout_row_height,
+)
 from src.shared.engine.ooxml_ops import qn
 
 
@@ -229,18 +235,59 @@ def test_table_format_compact_mode_is_narrower_than_full_mode():
     assert _table_width(compact_table) < _table_width(full_table)
 
 
-def test_table_format_ignores_legacy_row_height_setting():
-    doc = Document()
-    table = _build_compactable_table(doc)
-
+def test_table_config_no_longer_exposes_legacy_row_height_setting():
     config = ResolvedConfig()
-    config.table.border_mode = "keep"
-    config.table.layout_mode = "keep"
-    config.table.row_height_pt = 24
 
-    TableFormatModule().apply(doc, config, ChangeTracker(), PipelineContext())
+    assert not hasattr(config.table, "row_height_pt")
 
-    assert table._element.find(f".//{qn('w:trHeight')}") is None
+
+def test_fixed_layout_row_height_policy_writes_trheight_without_generic_table_config():
+    doc = Document()
+    table = doc.add_table(rows=2, cols=2)
+    policy = FixedLayoutRowHeightPolicy(
+        policy_id="form_batch_documents.enforce_18pt",
+        family_id="form_batch_documents",
+        label="测试固定行高",
+        mode="enforce_exact",
+        row_height_pt=18.0,
+        parameter_path="form_batch_documents.table.row_height_pt",
+    )
+
+    result = apply_fixed_layout_row_height_policy(table, policy)
+
+    assert not hasattr(ResolvedConfig().table, "row_height_pt")
+    assert result.policy_id == "form_batch_documents.enforce_18pt"
+    assert result.mode == "enforce_exact"
+    assert result.row_count == 2
+    assert result.changed_count == 2
+    assert result.target_twips == 360
+    assert result.target_rule == "exact"
+    for index, row in enumerate(table.rows):
+        state = row_height_state(row, row_index=index)
+        assert state.height_twips == 360
+        assert state.rule == "exact"
+
+
+def test_fixed_layout_row_height_preserve_policy_does_not_mutate_existing_trheight():
+    doc = Document()
+    table = doc.add_table(rows=2, cols=2)
+    set_fixed_layout_row_height(table.rows[0], 20.0, rule="atLeast")
+    policy = FixedLayoutRowHeightPolicy(
+        policy_id="form_batch_documents.preserve",
+        family_id="form_batch_documents",
+        label="保留固定行高",
+        mode="preserve_existing",
+        row_height_pt=None,
+        parameter_path="form_batch_documents.table.row_height_pt",
+    )
+
+    result = apply_fixed_layout_row_height_policy(table, policy)
+
+    assert result.changed_count == 0
+    assert result.preserved_count == 1
+    assert row_height_state(table.rows[0]).height_twips == 400
+    assert row_height_state(table.rows[0]).rule == "atLeast"
+    assert row_height_state(table.rows[1]).height_twips is None
 
 
 def test_table_format_normalizes_header_unit_and_body_parenthesis_breaks():

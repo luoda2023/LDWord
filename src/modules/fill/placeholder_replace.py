@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from src.modules.base import BaseModule, ModuleMeta
 from src.shared.engine.run_ops import replace_run_text, get_full_text
+from src.shared.engine.fixed_layout_text import replace_fixed_layout_placeholders
 
 if TYPE_CHECKING:
     from docx import Document
@@ -67,6 +68,12 @@ class PlaceholderReplaceModule(BaseModule):
                         if old_text in text:
                             replace_run_text(para, old_text, new_text)
                             total += 1
+
+            fixed_layout_result = replace_fixed_layout_placeholders(
+                doc,
+                {old_text: new_text},
+            )
+            total += fixed_layout_result.total_replacements
 
         if total:
             tracker.record(

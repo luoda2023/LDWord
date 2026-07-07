@@ -10,8 +10,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.modules.base import BaseModule, ModuleMeta
+from src.config.material_schema_registry import resolve_material_schema_ids
 from src.shared.engine.patterns import PLACEHOLDER_DBL_BRACE, PLACEHOLDER_DOLLAR
 from src.shared.engine.run_ops import replace_run_text, get_full_text
+from src.shared.engine.fixed_layout_text import (
+    replace_fixed_layout_mapped_fields,
+    replace_fixed_layout_placeholders,
+)
 
 if TYPE_CHECKING:
     from docx import Document
@@ -88,12 +93,54 @@ class EntityFillModule(BaseModule):
                                 filled_values[key] = value
                                 text = get_full_text(para)
 
+        fixed_layout_replacements: dict[str, str] = {}
+        token_to_key: dict[str, str] = {}
+        for key, value in entity_data.items():
+            for token in ("{{" + key + "}}", "${" + key + "}"):
+                fixed_layout_replacements[token] = value
+                token_to_key[token] = key
+        fixed_layout_result = replace_fixed_layout_placeholders(
+            doc,
+            fixed_layout_replacements,
+        )
+        total_replaced += fixed_layout_result.total_replacements
+        for token in fixed_layout_result.replaced_tokens:
+            key = token_to_key.get(token)
+            if key:
+                filled_values[key] = entity_data[key]
+
+        input_profile = getattr(config, "input_source_profile", None)
+        schema_ids = resolve_material_schema_ids(
+            str(getattr(input_profile, "material_schema_id", "") or "").strip(),
+            list(getattr(input_profile, "material_schema_ids", []) or []),
+        )
+        mapped_result = replace_fixed_layout_mapped_fields(
+            doc,
+            entity_data,
+            field_aliases=getattr(config, "field_aliases", {}) or {},
+            schema_ids=schema_ids,
+        )
+        total_replaced += mapped_result.total_replacements
+        for key in mapped_result.replaced_fields:
+            filled_values[key] = entity_data[key]
+        if mapped_result.has_replacements:
+            tracker.record(
+                rule_name=self.meta.name,
+                target=(
+                    f"{mapped_result.total_replacements} 处固定版位字段映射"
+                ),
+                section="fixed_layout",
+                change_type="fixed_layout_field_mapping",
+                before=", ".join(mapped_result.matched_identifiers),
+                after=", ".join(mapped_result.replaced_fields),
+            )
+
         context.entity_values = filled_values
 
         if total_replaced:
             tracker.record(
                 rule_name=self.meta.name,
-                target=f"{total_replaced} 处占位符",
+                target=f"{total_replaced} 处占位符/字段",
                 section="global",
                 change_type="replace",
                 before="{{...}} / ${...}",

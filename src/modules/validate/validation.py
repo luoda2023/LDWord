@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.modules.base import BaseModule, Issue, ModuleMeta
+from src.shared.engine.count_engine import count_document
 
 if TYPE_CHECKING:
     from docx import Document
@@ -29,7 +30,7 @@ class ValidationModule(BaseModule):
         category="validate",
         depends_on=("heading_recognition",),
         consumes=("doc_tree", "heading_map"),
-        provides=("validation_issues",),
+        provides=("validation_issues", "count_result"),
         enabled_by_default=True,
     )
 
@@ -41,6 +42,21 @@ class ValidationModule(BaseModule):
         context: PipelineContext,
     ) -> None:
         context.validation_issues = self.validate(doc, config, context)
+        count_profile_id = str(
+            getattr(getattr(config, "compliance_profile", None), "count_profile_id", "")
+            or ""
+        ).strip()
+        if count_profile_id:
+            context.count_result = count_document(doc, profile_id=count_profile_id)
+            tracker.record(
+                rule_name="count_engine",
+                target=count_profile_id,
+                section="global",
+                change_type="count_summary",
+                after=context.count_result.summary(),
+                paragraph_index=-1,
+                success=True,
+            )
 
     def validate(
         self,

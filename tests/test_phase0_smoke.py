@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from docx import Document
 
-from src.config.scene import FormatScopeConfig
+from src.config.scene import FormatScopeConfig, SceneApplicationBoundaryConfig
 from src.modules.base import BaseModule, ModuleMeta
 from src.modules.registry import create_all_modules
 from src.pipeline.context import PipelineContext
@@ -181,6 +181,38 @@ def test_pipeline_execute_runs_basic_chain():
             Path(result.output_paths.get("final", "")).unlink(missing_ok=True)
 
 
+def test_pipeline_progress_emits_user_flow_preflight_and_report_steps():
+    tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    Document().save(tmp_path)
+    progress: list[tuple[int, int, str]] = []
+
+    try:
+        pipeline = Pipeline(
+            modules=[],
+            config=SimpleNamespace(strict_mode=False),
+            progress_callback=lambda cur, total, stage: progress.append(
+                (cur, total, stage)
+            ),
+        )
+        result = pipeline.execute(tmp_path)
+
+        assert result.success
+        stages = [stage for _cur, _total, stage in progress]
+        assert stages == [
+            "Loading document",
+            "Object preflight",
+            "Writing report",
+            "Saving output",
+            "Completed",
+        ]
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+        if "result" in locals():
+            Path(result.output_paths.get("final", "")).unlink(missing_ok=True)
+
+
 def test_pipeline_cancelled_result():
     tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
     tmp_path = tmp.name
@@ -234,11 +266,16 @@ def test_pipeline_injects_format_scope_into_context():
     Document().save(tmp_path)
 
     custom_scope = FormatScopeConfig(mode="manual", page_ranges_text="2-5")
+    custom_boundary = SceneApplicationBoundaryConfig(mode="confirm_before_apply")
 
     try:
         pipeline = Pipeline(
             modules=[],
-            config=SimpleNamespace(strict_mode=True, format_scope=custom_scope),
+            config=SimpleNamespace(
+                strict_mode=True,
+                application_boundary=custom_boundary,
+                format_scope=custom_scope,
+            ),
         )
         result = pipeline.execute(tmp_path)
 
@@ -247,6 +284,8 @@ def test_pipeline_injects_format_scope_into_context():
         assert result.context.format_scope.mode == "manual"
         assert result.context.format_scope.page_ranges_text == "2-5"
         assert result.context.format_scope is not custom_scope
+        assert result.context.application_boundary.mode == "confirm_before_apply"
+        assert result.context.application_boundary is not custom_boundary
     finally:
         Path(tmp_path).unlink(missing_ok=True)
         if 'result' in locals():

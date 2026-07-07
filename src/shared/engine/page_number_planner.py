@@ -218,8 +218,8 @@ def _resolve_phase_rules(
         diagnostics.append(
             PageNumberDiagnostic(
                 level="error",
-                message=f"页码结果名称“{phase_id}”重复出现。",
-                suggestion="为每个页码结果使用唯一名称，便于诊断和维护。",
+                message=f"编号分组名称“{phase_id}”重复。",
+                suggestion="为每个编号分组使用不同名称。",
                 location="header_footer.page_number_plan",
             )
         )
@@ -273,11 +273,11 @@ def collect_page_number_diagnostics(
 
     diagnostics: list[PageNumberDiagnostic] = []
     if plan.missing_doc_tree and on_missing_doc_tree == "warn_and_fallback":
-        message = "当前页码和分区排除规则依赖文档结构识别，但本次没有识别到文档结构。"
-        suggestion = "先运行标题/结构识别，或把模板里的“无结构识别时”改成“直接使用默认规则”。"
+        message = "未识别到文档结构，页码编号和分区排除将按默认结构处理。"
+        suggestion = "先运行标题/结构识别，可获得更准确的页码范围。"
         if not page_number_enabled and suppress_header_footer:
-            message = "页眉页脚分区排除依赖文档结构识别，但本次没有识别到文档结构。"
-            suggestion = "先运行标题/结构识别，或关闭“分区排除”。"
+            message = "未识别到文档结构，分区排除将按默认结构处理。"
+            suggestion = "先运行标题/结构识别，或关闭分区排除。"
         diagnostics.append(
             PageNumberDiagnostic(
                 level="warning",
@@ -329,8 +329,8 @@ def collect_static_page_number_diagnostics(header_footer) -> list[PageNumberDiag
             diagnostics.append(
                 PageNumberDiagnostic(
                     level=level,
-                    message=f"第 {index} 条页码结果尚未选择编号分区。",
-                    suggestion="为这一项选择要编号的分区，或者直接删除这个空项。",
+                    message=f"第 {index} 个编号分组尚未选择范围。",
+                    suggestion="选择包含部分，或删除这个空分组。",
                     location=location,
                 )
             )
@@ -339,8 +339,8 @@ def collect_static_page_number_diagnostics(header_footer) -> list[PageNumberDiag
             diagnostics.append(
                 PageNumberDiagnostic(
                     level=level,
-                    message=f"规则“{phase_id}”的编号分区没有命中任何已知分区。",
-                    suggestion="检查分区名称；如果这是自定义分区，请确认结构识别里确实会产出同名分区。",
+                    message=f"编号分组“{phase_id}”没有匹配到已知分区。",
+                    suggestion="检查范围名称，或确认结构识别会产出对应分区。",
                     location=location,
                 )
             )
@@ -364,8 +364,8 @@ def collect_static_page_number_diagnostics(header_footer) -> list[PageNumberDiag
         diagnostics.append(
             PageNumberDiagnostic(
                 level="warning",
-                message=f"规则“{rule.phase_id}”命中的分区已被设置为分区排除：{hidden_text}。",
-                suggestion="这些分区不会输出页码；如需显示页码，请从排除分区中移除对应分区。",
+                message=f"编号分组“{rule.phase_id}”包含已排除部分：{hidden_text}。",
+                suggestion="这些部分不会显示页码；如需显示，请从分区排除中移除。",
                 location=location,
             )
         )
@@ -456,7 +456,7 @@ def format_page_number_diagnostic_text(diagnostic: PageNumberDiagnostic) -> str:
     suggestion = str(diagnostic.suggestion or "").strip()
     if not suggestion:
         return message
-    return f"{message}\n建议：{suggestion}"
+    return f"{message}\n处理：{suggestion}"
 
 
 def _section_type_label(section_type: str) -> str:
@@ -474,8 +474,8 @@ def _build_phase_overlap_diagnostic(
     phase_text = "、".join(str(phase_id or "").strip() for phase_id in phase_ids if str(phase_id or "").strip())
     return PageNumberDiagnostic(
         level=level,
-        message=f"分区“{section_label}”同时命中了多个页码结果：{phase_text}。",
-        suggestion="让同一分区只属于一个页码结果；如果只是想续号，请保留一项并把起号方式改为“延续前段”。",
+        message=f"“{section_label}”同时属于多个编号分组：{phase_text}。",
+        suggestion="让同一部分只属于一个编号分组；如需续号，请保留一组并把起号方式改为“延续前段”。",
         location=location,
     )
 
@@ -489,8 +489,8 @@ def _build_uncovered_section_diagnostic(
     section_label = _section_type_label(section_type)
     return PageNumberDiagnostic(
         level=level,
-        message=f"可编号分区“{section_label}”没有对应页码结果。",
-        suggestion="新增一项覆盖该分区的页码结果，或把它并入现有项。",
+        message=f"“{section_label}”没有对应编号分组。",
+        suggestion="新增编号分组覆盖这一部分，或把它并入现有分组。",
         location=location,
     )
 

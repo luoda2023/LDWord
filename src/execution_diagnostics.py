@@ -74,8 +74,11 @@ def build_execution_diagnostics(
 
 
 def _is_diagnostic_record(record) -> bool:
-    return str(getattr(record, "change_type", "") or "") == "skip" or not bool(
-        getattr(record, "success", True)
+    change_type = str(getattr(record, "change_type", "") or "")
+    return (
+        change_type == "skip"
+        or change_type.startswith("preflight_")
+        or not bool(getattr(record, "success", True))
     )
 
 

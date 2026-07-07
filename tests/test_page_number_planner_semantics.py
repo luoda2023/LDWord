@@ -181,8 +181,8 @@ def test_header_footer_validate_warns_when_doc_tree_is_missing():
 
     assert issues
     assert issues[0].level == "warning"
-    assert "没有识别到文档结构" in issues[0].message
-    assert "建议：" in issues[0].message
+    assert "未识别到文档结构" in issues[0].message
+    assert "处理：" in issues[0].message
     assert issues[0].location == "context.doc_tree"
 
 
@@ -195,7 +195,7 @@ def test_header_footer_validate_warns_for_cover_hide_even_when_page_numbers_are_
 
     assert issues
     assert issues[0].level == "warning"
-    assert "页眉页脚分区排除" in issues[0].message
+    assert "分区排除" in issues[0].message
     assert issues[0].location == "context.doc_tree"
 
 
@@ -206,8 +206,8 @@ def test_section_format_validate_rejects_overlapping_page_number_phases_in_stric
     issues = SectionFormatModule().validate(_build_doc(), config, _build_context())
 
     assert any(issue.level == "error" for issue in issues)
-    assert any("同时命中了多个页码结果" in issue.message for issue in issues)
-    assert any("建议：" in issue.message for issue in issues)
+    assert any("同时属于多个编号分组" in issue.message for issue in issues)
+    assert any("处理：" in issue.message for issue in issues)
 
 
 def test_header_footer_validate_downgrades_phase_overlap_to_warning_in_warn_mode():
@@ -217,7 +217,7 @@ def test_header_footer_validate_downgrades_phase_overlap_to_warning_in_warn_mode
     issues = HeaderFooterModule().validate(_build_doc(), config, _build_context())
 
     assert any(issue.level == "error" for issue in issues)
-    assert any("同时命中了多个页码结果" in issue.message for issue in issues)
+    assert any("同时属于多个编号分组" in issue.message for issue in issues)
 
 
 def test_empty_page_number_plan_defaults_to_continuous_decimal():
@@ -259,8 +259,8 @@ def test_collect_static_page_number_diagnostics_flags_empty_selectors():
     diagnostics = collect_static_page_number_diagnostics(config.header_footer)
 
     assert len(diagnostics) == 1
-    assert "尚未选择编号分区" in diagnostics[0].message
-    assert "删除这个空项" in diagnostics[0].suggestion
+    assert "尚未选择范围" in diagnostics[0].message
+    assert "删除这个空分组" in diagnostics[0].suggestion
 
 
 def test_collect_static_page_number_diagnostics_flags_duplicate_phase_ids():
@@ -270,7 +270,7 @@ def test_collect_static_page_number_diagnostics_flags_duplicate_phase_ids():
     diagnostics = collect_static_page_number_diagnostics(config.header_footer)
 
     assert any(item.level == "error" for item in diagnostics)
-    assert any("重复出现" in item.message for item in diagnostics)
+    assert any("编号分组名称" in item.message and "重复" in item.message for item in diagnostics)
 
 
 def test_collect_static_page_number_diagnostics_warns_when_hidden_range_masks_rule():
@@ -280,4 +280,4 @@ def test_collect_static_page_number_diagnostics_warns_when_hidden_range_masks_ru
     diagnostics = collect_static_page_number_diagnostics(config.header_footer)
 
     assert any(item.level == "warning" for item in diagnostics)
-    assert any("已被设置为分区排除" in item.message for item in diagnostics)
+    assert any("包含已排除部分" in item.message for item in diagnostics)
