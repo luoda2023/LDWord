@@ -18,8 +18,8 @@ def test_build_feature_navigation_snapshot_returns_catalog_entry():
     snapshot = build_feature_navigation_snapshot("content_fill")
 
     assert snapshot == {
-        "subtitle": "Excel / 5 个映射字段",
-        "badge_text": "数据就绪",
+        "subtitle": "资料源 / 5 个映射字段",
+        "badge_text": "资料就绪",
         "badge_variant": "neutral",
     }
 
@@ -115,6 +115,20 @@ def test_build_ready_status_returns_hint_or_ready_summary():
     assert ready == QuickExecutionStatusViewModel(
         text="就绪：report.docx · 汇报演示 · 标准模式",
         tone="success",
+    )
+
+
+def test_build_ready_status_reports_material_schema_reasons_before_ready_summary():
+    status = build_ready_status(
+        document_path="C:/docs/report.docx",
+        strategy_name="汇报演示",
+        strict_mode=False,
+        material_schema_reasons=["资料 Schema 未注册：missing_schema_v1"],
+    )
+
+    assert status == QuickExecutionStatusViewModel(
+        text="资料 Schema 未注册：missing_schema_v1",
+        tone="warning",
     )
 
 

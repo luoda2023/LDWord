@@ -28,7 +28,7 @@ class QuickExecutionStatusViewModel:
     tone: str
 
 
-# Build feature definitions from real UI capability groups (6 groups)
+# Build feature definitions from real UI capability groups.
 _FEATURE_SNAPSHOT_OVERRIDES: dict[str, dict[str, str]] = {
     "table_chart": {
         "subtitle": "标题层级 / 目录联动",
@@ -36,8 +36,8 @@ _FEATURE_SNAPSHOT_OVERRIDES: dict[str, dict[str, str]] = {
         "badge_variant": "neutral",
     },
     "content_fill": {
-        "subtitle": "Excel / 5 个映射字段",
-        "badge_text": "数据就绪",
+        "subtitle": "资料源 / 5 个映射字段",
+        "badge_text": "资料就绪",
         "badge_variant": "neutral",
     },
 }
@@ -119,11 +119,19 @@ def build_ready_status(
     strict_mode: bool | None = None,
     scene_name: str | None = None,
     strategy: str | None = None,
+    material_schema_reasons: list[str] | None = None,
 ) -> QuickExecutionStatusViewModel:
     if not document_path:
         return QuickExecutionStatusViewModel(
             text="请先选择输入文档",
             tone="hint",
+        )
+
+    schema_reasons = _clean_status_reasons(material_schema_reasons)
+    if schema_reasons:
+        return QuickExecutionStatusViewModel(
+            text="；".join(schema_reasons),
+            tone="warning",
         )
 
     if strict_mode is None:
@@ -135,6 +143,14 @@ def build_ready_status(
         text=f"就绪：{Path(document_path).name} · {strategy_label} · {mode_text}",
         tone="success",
     )
+
+
+def _clean_status_reasons(reasons: list[str] | None) -> list[str]:
+    return [
+        text
+        for text in (str(item or "").strip() for item in list(reasons or []))
+        if text
+    ]
 
 
 def build_running_status(document_path: str) -> str:
