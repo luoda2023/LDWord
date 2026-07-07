@@ -13,7 +13,7 @@ def build_emphasis_widget(
     bold_toggle: ToggleSwitch,
     italic_toggle: ToggleSwitch,
     *,
-    variant: OptionToggleChipVariant = "contained",
+    variant: OptionToggleChipVariant = "compact",
     fill: bool = True,
     spacing: int = 8,
 ) -> QWidget:

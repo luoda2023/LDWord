@@ -143,6 +143,26 @@ def test_special_indent_chars_preserved_after_reference_size_change():
 # must be safe to write back into config
 # ──────────────────────────────────────────────────────────
 
+def test_special_indent_mode_change_enables_editor_with_default_value():
+    _app()
+    w = SpecialIndentInput(reference_size_pt=12.0)
+
+    try:
+        assert w.mode() == "none"
+        assert w.value() == 0.0
+        assert w._indent_input.isEnabled() is False
+        assert w._mode_combo.property("inline") != "true"
+
+        w._mode_combo.setCurrentIndex(w._mode_combo.findData("first_line"))
+
+        assert w.mode() == "first_line"
+        assert w.value() == 2.0
+        assert w.unit() == "chars"
+        assert w._indent_input.isEnabled() is True
+    finally:
+        w.close()
+
+
 def test_value_after_reference_size_change_is_safe_for_config_writeback():
     """Simulates _on_form_edited: read value() after set_reference_size.
 

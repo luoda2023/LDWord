@@ -279,7 +279,7 @@ class AppTheme:
     module_summary_icon_size: int = 28
     module_summary_icon_bg_alpha: int = 13
     module_summary_icon_text_gap: int = 18
-    module_summary_grid_gap: int = 15
+    module_summary_grid_gap: int = 16
     module_summary_content_spacing: int = 4
     module_summary_title_font_size: int = 14
     module_summary_title_line_height: int = 30
@@ -294,6 +294,7 @@ class AppTheme:
     card_padding_bottom: int = 14
     card_spacing: int = 8
     card_content_spacing: int = 2
+    template_detail_section_gap: int = 16
 
     dialog_icon_container_size: int = 40
     dialog_icon_size: int = 24

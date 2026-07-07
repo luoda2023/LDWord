@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from src.qt_api import QBoxLayout, QSizePolicy, QVBoxLayout, QWidget, Qt
+from src.qt_api import QBoxLayout, QSize, QSizePolicy, QVBoxLayout, QWidget, Qt
 
 from src.shared.ui.adaptive_pair_row import AdaptivePairRow
 from src.shared.ui.dashed_separator import DashedSeparator
 from src.shared.ui.form_row import FormRow
 from src.shared.ui.theme import bind_theme, get_theme
+
+
+TEMPLATE_FORM_ROW_HEIGHT = 44
 
 
 def standard_form_column_gap() -> int:
@@ -42,6 +45,7 @@ def template_form_row(
         label_alignment=Qt.AlignLeft | Qt.AlignVCenter,
         parent=parent,
     )
+    row.set_minimum_row_height(TEMPLATE_FORM_ROW_HEIGHT)
     if label_width is None:
         row.set_label_width(row.preferred_label_width())
     return row
@@ -97,6 +101,7 @@ def template_form_pair_row(
     *,
     parent=None,
     column_gap: int | None = None,
+    stacked_spacing: int | None = 0,
     column_stretches: Sequence[int] = (1, 1),
     normalize_labels: bool = False,
 ) -> "TemplateFormGrid":
@@ -108,6 +113,7 @@ def template_form_pair_row(
         [[left_row, right_row]],
         parent=parent,
         column_gap=compact_form_column_gap() if column_gap is None else column_gap,
+        stacked_spacing=stacked_spacing,
         column_stretches=column_stretches,
     )
 
@@ -233,13 +239,17 @@ class TemplateFormGrid(QWidget):
         *,
         parent=None,
         column_gap: int | None = None,
+        stacked_spacing: int | None = 0,
         column_stretches: Sequence[int] | None = None,
         align_trailing_labels: bool | None = None,
         show_row_separators: bool = False,
+        stack_slack: int = 0,
     ):
         super().__init__(parent)
         self._rows = [tuple(row) for row in rows if row]
         self._column_gap = _resolve_column_gap(column_gap)
+        self._stacked_spacing = stacked_spacing
+        self._stack_slack = max(0, int(stack_slack))
         self._align_trailing_labels = (
             self._column_gap >= standard_form_column_gap()
             if align_trailing_labels is None
@@ -247,6 +257,7 @@ class TemplateFormGrid(QWidget):
         )
         self._column_stretches = tuple(column_stretches or ())
         self._separators: list[DashedSeparator] = []
+        self._pair_rows: list[AdaptivePairRow] = []
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -255,14 +266,16 @@ class TemplateFormGrid(QWidget):
         self._normalize_columns()
         self._apply_trailing_label_alignment()
         for row_index, row in enumerate(self._rows):
-            self._layout.addWidget(
-                AdaptivePairRow(
-                    *row,
-                    parent=self,
-                    spacing=self._column_gap,
-                    stretches=self._stretches_for_row(row),
-                )
+            pair_row = AdaptivePairRow(
+                *row,
+                parent=self,
+                spacing=self._column_gap,
+                stacked_spacing=self._stacked_spacing,
+                stretches=self._stretches_for_row(row),
+                stack_slack=self._stack_slack,
             )
+            self._pair_rows.append(pair_row)
+            self._layout.addWidget(pair_row)
             if show_row_separators and row_index < len(self._rows) - 1:
                 separator = DashedSeparator(orientation="horizontal", parent=self)
                 self._separators.append(separator)
@@ -295,12 +308,62 @@ class TemplateFormGrid(QWidget):
     def refresh_template_form_alignment(self) -> None:
         self._apply_trailing_label_alignment()
 
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        return self._rows_size(minimum=False)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        return self._rows_size(minimum=True)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt API contract
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt API contract
+        margins = self._layout.contentsMargins()
+        available_width = max(0, int(width or 0) - margins.left() - margins.right())
+        row_heights = [row.heightForWidth(available_width) for row in self._pair_rows]
+        separator_heights = [separator.sizeHint().height() for separator in self._separators]
+        spacing = self._layout.spacing() * max(
+            0,
+            len(row_heights) + len(separator_heights) - 1,
+        )
+        return (
+            sum(row_heights)
+            + sum(separator_heights)
+            + spacing
+            + margins.top()
+            + margins.bottom()
+        )
+
     def _stretches_for_row(self, row: Sequence[QWidget]) -> tuple[int, ...]:
         if not self._column_stretches:
             return tuple(1 for _widget in row)
         return tuple(
             self._column_stretches[index] if index < len(self._column_stretches) else 1
             for index, _widget in enumerate(row)
+        )
+
+    def _rows_size(self, *, minimum: bool) -> QSize:
+        if not self._pair_rows:
+            return super().minimumSizeHint() if minimum else super().sizeHint()
+        margins = self._layout.contentsMargins()
+        row_sizes = [
+            row.minimumSizeHint() if minimum else row.sizeHint()
+            for row in self._pair_rows
+        ]
+        separator_sizes = [separator.sizeHint() for separator in self._separators]
+        spacing = self._layout.spacing() * max(
+            0,
+            len(row_sizes) + len(separator_sizes) - 1,
+        )
+        return QSize(
+            max([size.width() for size in row_sizes + separator_sizes] or [0])
+            + margins.left()
+            + margins.right(),
+            sum(size.height() for size in row_sizes)
+            + sum(size.height() for size in separator_sizes)
+            + spacing
+            + margins.top()
+            + margins.bottom(),
         )
 
     def template_form_label_controls(self) -> list[QWidget]:

@@ -24,9 +24,22 @@ def apply_master_detail_shell_theme(
     nav_rail.setStyleSheet(
         f"#{nav_rail.objectName()} {{ background: {nav_color}; }}"
     )
+    if hasattr(nav_rail, "set_background_color"):
+        nav_rail.set_background_color(nav_color)
     detail_scroll.setStyleSheet(
         f"#{detail_scroll.objectName()} {{ border: none; background: {theme.bg_window}; "
         f"border-bottom-right-radius: {radius}px; }}"
+        f"#{detail_scroll.objectName()} QScrollBar:vertical {{ "
+        f"background: {theme.scrollbar_track}; width: 8px; border: none; margin: 2px 0px 2px 0px; }}"
+        f"#{detail_scroll.objectName()} QScrollBar::handle:vertical {{ "
+        f"background: {theme.scrollbar_thumb}; border-radius: 4px; min-height: 24px; }}"
+        f"#{detail_scroll.objectName()} QScrollBar::handle:vertical:hover {{ "
+        f"background: {theme.scrollbar_thumb_hover}; }}"
+        f"#{detail_scroll.objectName()} QScrollBar::add-line:vertical, "
+        f"#{detail_scroll.objectName()} QScrollBar::sub-line:vertical {{ "
+        f"height: 0px; background: transparent; border: none; }}"
+        f"#{detail_scroll.objectName()} QScrollBar::add-page:vertical, "
+        f"#{detail_scroll.objectName()} QScrollBar::sub-page:vertical {{ background: transparent; }}"
     )
     detail_container.setStyleSheet(
         f"#{detail_container.objectName()} {{ background: {theme.bg_window}; "

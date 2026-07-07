@@ -18,6 +18,16 @@ def test_button_stylesheet_uses_theme_tokens():
     assert f'font-weight: {LIGHT.button_font_weight};' in qss
 
 
+def test_button_disabled_state_keeps_secondary_shape_and_mutes_ghosts():
+    qss = build_button_stylesheet(LIGHT)
+
+    assert f"background: {LIGHT.bg_input};" in qss
+    assert f"color: {LIGHT.text_disabled};" in qss
+    assert f"border: 1px solid {LIGHT.border_light};" in qss
+    assert '[variant="ghost-danger"]:disabled' in qss
+    assert '[variant="ghost-primary"]:disabled' in qss
+
+
 def test_theme_exposes_combo_and_input_tokens():
     assert LIGHT.input_radius > 0
     assert LIGHT.input_icon_size > 0

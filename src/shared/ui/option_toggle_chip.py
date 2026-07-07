@@ -10,7 +10,7 @@ from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 
 
-OptionToggleChipVariant = Literal["contained", "inline"]
+OptionToggleChipVariant = Literal["contained", "compact", "inline"]
 
 
 class OptionToggleChip(QWidget):
@@ -22,7 +22,7 @@ class OptionToggleChip(QWidget):
     using ``FeatureToggleRow``.
     """
 
-    _VALID_VARIANTS = {"contained", "inline"}
+    _VALID_VARIANTS = {"contained", "compact", "inline"}
 
     def __init__(
         self,
@@ -49,7 +49,7 @@ class OptionToggleChip(QWidget):
 
         self._layout = QHBoxLayout(self)
         self._layout.addWidget(self._label)
-        if self._variant == "contained":
+        if self._variant in {"contained", "compact"}:
             if self._fill:
                 self._layout.addStretch(1)
             self._layout.addWidget(self._toggle)
@@ -69,9 +69,13 @@ class OptionToggleChip(QWidget):
 
     def _apply_theme(self) -> None:
         theme = get_theme()
-        if self._variant == "contained":
-            self._layout.setContentsMargins(12, 8, 12, 8)
-            self._layout.setSpacing(10)
+        if self._variant in {"contained", "compact"}:
+            if self._variant == "compact":
+                self._layout.setContentsMargins(10, 4, 10, 4)
+                self._layout.setSpacing(8)
+            else:
+                self._layout.setContentsMargins(12, 8, 12, 8)
+                self._layout.setSpacing(10)
             self.setStyleSheet(
                 f"""
                 QWidget#option_toggle_chip {{

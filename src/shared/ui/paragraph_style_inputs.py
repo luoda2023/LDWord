@@ -199,7 +199,8 @@ class SpecialIndentInput(QWidget):
         layout.setSpacing(8)
 
         self._mode_combo = StyledComboBox(self)
-        self._mode_combo.set_inline(True)
+        self._mode_combo.setSizeAdjustPolicy(self._mode_combo.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
+        self._mode_combo.setMinimumWidth(76)
         for value, label in _SPECIAL_MODES:
             self._mode_combo.addItem(label, value)
         self._mode_combo.currentIndexChanged.connect(self._on_any_changed)
@@ -233,6 +234,8 @@ class SpecialIndentInput(QWidget):
     def _on_any_changed(self, _index: int) -> None:
         if self._is_syncing:
             return
+        if self._mode() != "none" and self._indent_input.value() <= 0:
+            self._indent_input.set_value(2.0, self._indent_input.unit())
         self._sync_enabled_state()
         self._emit()
 

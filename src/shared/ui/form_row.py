@@ -25,6 +25,7 @@ class FormRow(QWidget):
         super().__init__(parent)
         self._label_width = label_width
         self._label_alignment = label_alignment or (Qt.AlignRight | Qt.AlignVCenter)
+        self._minimum_row_height: int | None = None
 
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(0, 2, 0, 2)
@@ -53,20 +54,52 @@ class FormRow(QWidget):
 
     def _apply_theme(self) -> None:
         t = get_theme()
+        self._label.setFixedWidth(self._label_width or t.form_row_label_width)
+        row_height = self._row_height_for_width(self.width() if self.width() > 0 else None)
+        self.setMinimumHeight(row_height)
+        self._label.setStyleSheet(f'font-size: {t.font_size_md}px; color: {t.text_primary};')
+        self.updateGeometry()
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt API contract
+        return bool(self._widget.hasHeightForWidth())
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt API contract
+        return self._row_height_for_width(max(0, int(width or 0)))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.hasHeightForWidth():
+            self.setMinimumHeight(self.heightForWidth(self.width()))
+
+    def _row_height_for_width(self, width: int | None) -> int:
+        t = get_theme()
+        margins = self._layout.contentsMargins()
         content_heights = [
             t.form_row_height,
             self._label.sizeHint().height(),
-            self._widget.sizeHint().height(),
-            self._widget.minimumSizeHint().height(),
         ]
+        if width is not None and self._widget.hasHeightForWidth():
+            content_heights.append(self._widget.heightForWidth(self._available_widget_width(width)))
+        else:
+            content_heights.append(self._widget.sizeHint().height())
+            content_heights.append(self._widget.minimumSizeHint().height())
         if self._suffix is not None:
             content_heights.append(self._suffix.sizeHint().height())
             content_heights.append(self._suffix.minimumSizeHint().height())
+        row_height = max(content_heights) + margins.top() + margins.bottom()
+        if self._minimum_row_height is not None:
+            row_height = max(row_height, self._minimum_row_height)
+        return row_height
+
+    def _available_widget_width(self, width: int) -> int:
         margins = self._layout.contentsMargins()
-        self._label.setFixedWidth(self._label_width or t.form_row_label_width)
-        self.setMinimumHeight(max(content_heights) + margins.top() + margins.bottom())
-        self._label.setStyleSheet(f'font-size: {t.font_size_md}px; color: {t.text_primary};')
-        self.updateGeometry()
+        available = max(0, int(width or 0) - margins.left() - margins.right())
+        available -= self._label.width() if self._label.width() > 0 else self._label.sizeHint().width()
+        available -= self._layout.spacing()
+        if self._suffix is not None:
+            available -= self._suffix.sizeHint().width()
+            available -= self._layout.spacing()
+        return max(0, available)
 
     @property
     def widget(self) -> QWidget:
@@ -92,4 +125,8 @@ class FormRow(QWidget):
 
     def set_label_width(self, width: int | None) -> None:
         self._label_width = width
+        self._apply_theme()
+
+    def set_minimum_row_height(self, height: int | None) -> None:
+        self._minimum_row_height = None if height is None else max(0, int(height))
         self._apply_theme()

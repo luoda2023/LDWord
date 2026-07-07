@@ -1,4 +1,4 @@
-"""Header primitive for template detail summary cards."""
+"""Header primitive for detail summary cards."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from src.qt_api import QHBoxLayout, QLabel, QSizePolicy, QWidget, Qt
 from src.shared.ui.theme import bind_theme, get_theme
 
 
-class TemplateSummaryHeader(QWidget):
-    """Large title row used by the first summary card in template details."""
+class DetailSummaryHeader(QWidget):
+    """Large title row used by the first summary card in detail panes."""
 
     ICON_SIZE = 28
     TITLE_FONT_SIZE = 20
@@ -16,25 +16,37 @@ class TemplateSummaryHeader(QWidget):
     ACTION_GAP = 12
     BOTTOM_MARGIN = 14
 
-    def __init__(self, title: str, icon_name: str, *, parent=None):
+    def __init__(
+        self,
+        title: str,
+        icon_name: str,
+        *,
+        compact: bool = False,
+        parent=None,
+    ):
         super().__init__(parent)
         self._icon_name = icon_name
+        self._compact = bool(compact)
+        self._icon_size = 18 if self._compact else self.ICON_SIZE
+        self._title_font_size = None if self._compact else self.TITLE_FONT_SIZE
         self._controls: list[QWidget] = []
         self._actions: list[QWidget] = []
+        self.setMinimumWidth(0)
 
         self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, self.BOTTOM_MARGIN)
+        self._layout.setContentsMargins(0, 0, 0, 6 if self._compact else self.BOTTOM_MARGIN)
         self._layout.setSpacing(0)
 
         self._icon = QLabel(self)
-        self._icon.setFixedSize(self.ICON_SIZE, self.ICON_SIZE)
+        self._icon.setFixedSize(self._icon_size, self._icon_size)
         self._icon.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._layout.addWidget(self._icon, 0, Qt.AlignVCenter)
 
-        self._layout.addSpacing(self.ICON_TITLE_GAP)
+        self._layout.addSpacing(6 if self._compact else self.ICON_TITLE_GAP)
 
         self._title = QLabel(title, self)
-        self._title.setObjectName("tpl_summary_header_title")
+        self._title.setObjectName("detail_summary_header_title")
+        self._title.setMinimumWidth(0)
         self._title.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self._layout.addWidget(self._title, 0, Qt.AlignVCenter)
 
@@ -71,8 +83,11 @@ class TemplateSummaryHeader(QWidget):
 
     def _apply_theme(self) -> None:
         theme = get_theme()
+        title_font_size = (
+            theme.font_size_lg if self._title_font_size is None else self._title_font_size
+        )
         self._title.setStyleSheet(
-            f"font-size: {self.TITLE_FONT_SIZE}px; "
+            f"font-size: {title_font_size}px; "
             f"font-weight: {theme.font_weight_emphasis}; "
             f"color: {theme.primary}; "
             f"background: transparent;"
@@ -81,12 +96,15 @@ class TemplateSummaryHeader(QWidget):
             from src.ui.icons.catalog import get_icon
 
             self._icon.setPixmap(
-                get_icon(self._icon_name, self.ICON_SIZE, theme.primary).pixmap(
-                    self.ICON_SIZE, self.ICON_SIZE
+                get_icon(self._icon_name, self._icon_size, theme.primary).pixmap(
+                    self._icon_size, self._icon_size
                 )
             )
         except Exception:
             self._icon.clear()
 
 
-__all__ = ["TemplateSummaryHeader"]
+TemplateSummaryHeader = DetailSummaryHeader
+
+
+__all__ = ["DetailSummaryHeader", "TemplateSummaryHeader"]

@@ -64,6 +64,7 @@ class NavigationCard(Card):
         self._disabled = False
         self._icon_name = icon_name
         self._full_subtitle = ""
+        self._solid_background = False
 
         # --- Icon area ---
         self._icon_container = QLabel()
@@ -76,8 +77,10 @@ class NavigationCard(Card):
         # --- Text area ---
         self._title = QLabel(title)
         self._title.setObjectName("nav_card_title")
+        self._title.setAutoFillBackground(False)
         self._subtitle = QLabel("")
         self._subtitle.setObjectName("nav_card_subtitle")
+        self._subtitle.setAutoFillBackground(False)
         self._subtitle.setWordWrap(False)
         self._subtitle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
@@ -126,15 +129,27 @@ class NavigationCard(Card):
     def _apply_navigation_theme(self) -> None:
         t = get_theme()
 
-        # --- Card container (WeChat style: no border, no shadow) ---
         if self._selected:
             bg = t.primary
+            border = t.primary
         elif self._hovered:
             bg = t.bg_hover
+            border = t.border
+        elif self._solid_background:
+            bg = t.bg_card
+            border = t.border_light
         else:
-            bg = "transparent"
+            # Paint the rail background explicitly so stale selected-state pixels
+            # cannot survive when a blue card returns to its idle state.
+            bg = t.bg_nav_rail
+            border = "transparent"
 
-        self.set_card_surface(background=bg, border_color="transparent", border_width=0.0, shadow=False)
+        self.set_card_surface(
+            background=bg,
+            border_color=border,
+            border_width=1.0 if self._solid_background else 0.0,
+            shadow=False,
+        )
         self.setStyleSheet("")
 
         if self._selected:
@@ -153,15 +168,30 @@ class NavigationCard(Card):
         # --- Title ---
         title_color = t.text_on_primary if self._selected else t.text_primary
         self._title.setStyleSheet(
-            f"font-size: {t.font_size_md}px; "
-            f"font-weight: {t.font_weight_emphasis if self._selected else t.font_weight_normal}; "
-            f"color: {title_color};"
+            f"""
+            QLabel#nav_card_title {{
+                background: transparent;
+                border: none;
+                padding: 0px;
+                font-size: {t.font_size_md}px;
+                font-weight: {t.font_weight_emphasis if self._selected else t.font_weight_normal};
+                color: {title_color};
+            }}
+            """
         )
 
         # --- Subtitle ---
         sub_color = "rgba(255, 255, 255, 0.85)" if self._selected else t.text_secondary
         self._subtitle.setStyleSheet(
-            f"font-size: {t.font_size_sm}px; color: {sub_color};"
+            f"""
+            QLabel#nav_card_subtitle {{
+                background: transparent;
+                border: none;
+                padding: 0px;
+                font-size: {t.font_size_sm}px;
+                color: {sub_color};
+            }}
+            """
         )
         self._subtitle.setVisible(bool(self._subtitle.text()))
 
@@ -219,6 +249,13 @@ class NavigationCard(Card):
 
     def is_disabled(self) -> bool:
         return self._disabled
+
+    def set_solid_background(self, enabled: bool) -> None:
+        self._solid_background = bool(enabled)
+        self._apply_navigation_theme()
+
+    def has_solid_background(self) -> bool:
+        return self._solid_background
 
     def set_subtitle(self, text: str) -> None:
         self._full_subtitle = str(text or "").strip()

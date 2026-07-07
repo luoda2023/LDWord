@@ -68,18 +68,55 @@ class ToggleSwitch(QAbstractButton):
         self._checked_track_color = str(color).strip() if color else None
         self.update()
 
+    def set_checked(self, checked: bool, *, animate: bool = False) -> None:
+        """Synchronize the checked state and thumb position without fighting clicks.
+
+        User clicks own the animated transition. Programmatic state projection should
+        use this method with ``animate=False`` so it can avoid snapping the thumb while
+        a user-started animation is already travelling to the same target.
+        """
+
+        checked = bool(checked)
+        target = self._thumb_target_for_checked(checked)
+        if animate:
+            if self.isChecked() != checked:
+                self.setChecked(checked)
+            self._animate_thumb_to(target)
+            return
+
+        if self.isChecked() == checked and self._animation_targets(target):
+            return
+
+        self._anim.stop()
+        if self.isChecked() != checked:
+            self.setChecked(checked)
+        self.thumb_position = target
+
     def _on_click(self) -> None:
         checked = self.isChecked()
-        end = (
+        self._animate_thumb_to(self._thumb_target_for_checked(checked))
+        self.toggled_signal.emit(checked)
+
+    def _thumb_target_for_checked(self, checked: bool) -> float:
+        return float(
             self.TRACK_W - self.THUMB_D - self.THUMB_MARGIN
             if checked
             else self.THUMB_MARGIN
         )
+
+    def _animate_thumb_to(self, target: float) -> None:
         self._anim.stop()
         self._anim.setStartValue(self._thumb_x)
-        self._anim.setEndValue(end)
+        self._anim.setEndValue(float(target))
         self._anim.start()
-        self.toggled_signal.emit(checked)
+
+    def _animation_targets(self, target: float) -> bool:
+        if self._anim.state() != QAbstractAnimation.Running:
+            return False
+        try:
+            return abs(float(self._anim.endValue()) - float(target)) < 0.5
+        except (TypeError, ValueError):
+            return False
 
     def _has_off_track_border(self) -> bool:
         return (not self.isChecked()) and self.isEnabled()

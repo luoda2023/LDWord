@@ -7,6 +7,7 @@ from __future__ import annotations
 from src.qt_api import QSizePolicy, QToolButton, QVBoxLayout, QWidget, Signal, Qt
 
 from src.shared.ui.card import Card
+from src.shared.ui.layout_sync import refresh_layout_chain
 from src.shared.ui.theme import bind_theme, get_theme
 
 
@@ -61,6 +62,7 @@ class FlowSection(Card):
     def set_expanded(self, expanded: bool) -> None:
         new_state = bool(expanded)
         if new_state == self._expanded:
+            refresh_layout_chain(self)
             return
         self._expanded = new_state
         self._apply_expanded_state(emit_signal=True)
@@ -75,19 +77,9 @@ class FlowSection(Card):
             QSizePolicy.Minimum if self._expanded else QSizePolicy.Ignored,
         )
         self._content.updateGeometry()
-        self._refresh_layout_chain()
+        refresh_layout_chain(self)
         if emit_signal:
             self.expanded_changed.emit(self._expanded)
-
-    def _refresh_layout_chain(self) -> None:
-        widget: QWidget | None = self
-        while widget is not None:
-            layout = widget.layout()
-            if layout is not None:
-                layout.invalidate()
-                layout.activate()
-            widget.updateGeometry()
-            widget = widget.parentWidget()
 
     def is_expanded(self) -> bool:
         return self._expanded

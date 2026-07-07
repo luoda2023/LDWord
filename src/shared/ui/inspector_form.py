@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from src.qt_api import QSizePolicy, QVBoxLayout, QWidget
+from src.qt_api import QSize, QSizePolicy, QVBoxLayout, QWidget
 
 from src.shared.ui.template_form_layout import (
     TemplateFormGrid,
@@ -74,6 +74,8 @@ class InspectorForm(QWidget):
         *,
         column_gap: int | None = None,
         column_stretches: Sequence[int] | None = None,
+        align_trailing_labels: bool | None = None,
+        stack_slack: int = 0,
     ) -> TemplateFormGrid:
         resolved_gap = self._resolve_column_gap(column_gap, column_stretches)
         grid = TemplateFormGrid(
@@ -81,6 +83,8 @@ class InspectorForm(QWidget):
             parent=self,
             column_gap=resolved_gap,
             column_stretches=column_stretches,
+            align_trailing_labels=align_trailing_labels,
+            stack_slack=stack_slack,
         )
         self.add_widget(grid)
         return grid
@@ -110,12 +114,52 @@ class InspectorForm(QWidget):
         self._normalize_label_scope()
         return widget
 
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        return self._items_size(minimum=False)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        return self._items_size(minimum=True)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt API contract
+        return any(item.hasHeightForWidth() for item in self._items)
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt API contract
+        margins = self._layout.contentsMargins()
+        available_width = max(0, int(width or 0) - margins.left() - margins.right())
+        heights = [
+            item.heightForWidth(available_width)
+            if item.hasHeightForWidth()
+            else item.sizeHint().height()
+            for item in self._items
+            if not item.isHidden()
+        ]
+        spacing = self._layout.spacing() * max(0, len(heights) - 1)
+        return sum(heights) + spacing + margins.top() + margins.bottom()
+
     def _normalize_label_scope(self) -> None:
         normalize_template_form_rows(self._label_scope)
         for item in self._label_scope:
             refresh = getattr(item, "refresh_template_form_alignment", None)
             if callable(refresh):
                 refresh()
+
+    def _items_size(self, *, minimum: bool) -> QSize:
+        visible_items = [item for item in self._items if not item.isHidden()]
+        if not visible_items:
+            return super().minimumSizeHint() if minimum else super().sizeHint()
+        margins = self._layout.contentsMargins()
+        sizes = [
+            item.minimumSizeHint() if minimum else item.sizeHint()
+            for item in visible_items
+        ]
+        spacing = self._layout.spacing() * max(0, len(sizes) - 1)
+        return QSize(
+            max(size.width() for size in sizes) + margins.left() + margins.right(),
+            sum(size.height() for size in sizes)
+            + spacing
+            + margins.top()
+            + margins.bottom(),
+        )
 
     def _empty_cell(self) -> QWidget:
         cell = QWidget(self)

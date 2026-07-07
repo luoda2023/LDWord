@@ -104,6 +104,12 @@ def build_button_stylesheet(
         {selector}:disabled {{
             background: {theme.bg_input};
             color: {theme.text_disabled};
+            border: 1px solid {theme.border_light};
+        }}
+        {selector}[variant="ghost-danger"]:disabled,
+        {selector}[variant="ghost-primary"]:disabled {{
+            background: transparent;
+            color: {theme.text_disabled};
             border: none;
         }}
 

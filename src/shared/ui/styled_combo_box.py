@@ -4,7 +4,7 @@ Shared combo-box foundation with an anchored in-window popup panel.
 
 from __future__ import annotations
 
-from src.qt_api import QComboBox, QListView, QPoint, QRect, QColor, QEvent, QPainter, QPen, Qt
+from src.qt_api import QComboBox, QListView, QPoint, QRect, QColor, QEvent, QPainter, QPen, QSizePolicy, Signal, Qt
 
 from src.shared.ui.combo_popup_panel import ComboPopupPanel
 from src.shared.ui.input_metrics import (
@@ -21,11 +21,14 @@ from src.shared.ui.theme import bind_theme, get_theme
 
 
 class StyledComboBox(QComboBox):
+    popup_about_to_show = Signal()
+
     _id_counter = 0
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        self._style_initialized = False
         StyledComboBox._id_counter += 1
         combo_id = StyledComboBox._id_counter
 
@@ -56,10 +59,31 @@ class StyledComboBox(QComboBox):
         self._inline = False
         self._editor_widget = None
         self._syncing_editor_geometry = False
+        self._display_text_override: str | None = None
         apply_size_class(self, "md")
 
+        self._style_initialized = True
         bind_theme(self, self._refresh_style)
         self._refresh_style()
+
+    def setObjectName(self, name: str) -> None:  # noqa: N802 - Qt API contract
+        previous_name = self.objectName()
+        super().setObjectName(name)
+        if getattr(self, "_style_initialized", False) and self.objectName() != previous_name:
+            self._refresh_style()
+
+    def set_full_width_mode(self, enabled: bool = True) -> None:
+        """Use this combo as a stable full-row selector in a form layout."""
+        if enabled:
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            self.setMinimumContentsLength(1)
+        else:
+            self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            self.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+            self.setMinimumContentsLength(0)
+        self.setProperty("fullWidthMode", bool(enabled))
+        self.updateGeometry()
 
     @staticmethod
     def build_popup_container_qss(popup_id: str, theme) -> str:
@@ -249,6 +273,14 @@ class StyledComboBox(QComboBox):
             theme=get_theme(),
         )
 
+    def set_display_text_override(self, text: str | None) -> None:
+        normalized = str(text or "").strip()
+        self._display_text_override = normalized or None
+        self.update()
+
+    def display_text(self) -> str:
+        return self._display_text_override or self.currentText()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if self.isEditable():
@@ -263,6 +295,7 @@ class StyledComboBox(QComboBox):
         if self._popup_panel.isVisible():
             self.hidePopup()
             return
+        self.popup_about_to_show.emit()
         geometry = self._popup_geometry_in_window()
         if geometry.width() <= 0 or geometry.height() <= 0:
             return
@@ -416,7 +449,7 @@ class StyledComboBox(QComboBox):
         painter.end()
 
     def _paint_current_text(self, painter: QPainter, rect: QRect, *, theme) -> None:
-        text = self.currentText()
+        text = self.display_text()
         if not text:
             return
         painter.setFont(self.font())

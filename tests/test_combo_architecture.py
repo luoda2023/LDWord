@@ -6,15 +6,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.qt_api import QApplication, Qt
+from src.qt_api import QApplication, QComboBox, QSizePolicy, Qt, QVBoxLayout, QWidget
 from src.shared.ui.input_metrics import INPUT_EDITOR_TEXT_MARGIN_LEFT
 from src.shared.ui.font_combo import FontCombo
 from src.shared.ui.numbering_preset import NumberingPreset
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
+from src.shared.ui.sizing import resolved_control_height
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.styled_spin_box import StyledSpinBox
-from src.shared.ui.theme import LIGHT
+from src.shared.ui.theme import LIGHT, get_theme
 from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
 
 
@@ -40,6 +41,49 @@ def test_combo_widgets_inherit_shared_base():
     assert issubclass(FontCombo, StyledComboBox)
     assert issubclass(SizeCombo, StyledComboBox)
     assert issubclass(NumberingPreset, StyledComboBox)
+
+
+def test_styled_combo_box_full_width_mode_uses_expanding_layout_policy():
+    _app()
+    combo = StyledComboBox()
+    try:
+        combo.set_full_width_mode(True)
+
+        assert combo.property("fullWidthMode") is True
+        assert combo.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
+        assert combo.sizePolicy().verticalPolicy() == QSizePolicy.Fixed
+        assert combo.sizeAdjustPolicy() == QComboBox.AdjustToMinimumContentsLengthWithIcon
+    finally:
+        combo.close()
+        combo.deleteLater()
+
+
+def test_styled_controls_refresh_stylesheet_after_object_name_change():
+    app = _app()
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    combo = StyledComboBox(host)
+    spin = StyledSpinBox(host)
+
+    combo.setObjectName("renamed_combo")
+    spin.setObjectName("renamed_spin")
+    combo.addItems(["宋体", "黑体"])
+    layout.addWidget(combo)
+    layout.addWidget(spin)
+
+    try:
+        host.resize(320, 120)
+        host.show()
+        app.processEvents()
+
+        expected_height = resolved_control_height(get_theme(), "md")
+        assert f"#{combo.objectName()}" in combo.styleSheet()
+        assert f"#{spin.objectName()}" in spin.styleSheet()
+        assert combo.height() == expected_height
+        assert spin.height() == expected_height
+    finally:
+        host.close()
+        app.processEvents()
 
 
 def test_styled_combo_box_normalizes_editable_editor_text_inset():

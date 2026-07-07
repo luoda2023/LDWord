@@ -45,6 +45,22 @@ def test_option_toggle_chip_supports_inline_non_filling_mode():
         chip.close()
 
 
+def test_option_toggle_chip_compact_variant_keeps_contained_chrome_shorter():
+    _app()
+    chip = OptionToggleChip("Bold", variant="compact")
+    default_chip = OptionToggleChip("Bold")
+
+    try:
+        margins = chip.layout().contentsMargins()
+        assert margins.left() == 10
+        assert margins.top() == 4
+        assert chip.layout().spacing() == 8
+        assert chip.sizeHint().height() < default_chip.sizeHint().height()
+    finally:
+        chip.close()
+        default_chip.close()
+
+
 def test_binary_toggle_primitives_document_their_roles():
     assert "OptionToggleChip" in (ToggleSwitch.__doc__ or "")
     assert "FeatureToggleRow" in (ToggleSwitch.__doc__ or "")

@@ -74,4 +74,8 @@ class FolderPicker(QWidget):
         return self._path.text()
 
     def set_path(self, path: str):
-        self._path.setText(path)
+        text = str(path or "")
+        if self._path.text() == text:
+            return
+        self._path.setText(text)
+        self.folder_changed.emit(text)

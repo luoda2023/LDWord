@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from src.qt_api import QSizePolicy, QToolButton, QVBoxLayout, QWidget, Qt
 
+from src.shared.ui.layout_sync import refresh_layout_chain, refresh_layout_chain_later, updates_suspended
 from src.shared.ui.theme import bind_theme, get_theme
 from src.ui.icons.catalog import get_icon
 
@@ -78,13 +79,16 @@ class CollapsibleSection(QWidget):
 
     def _on_toggle(self, checked: bool) -> None:
         self._expanded = checked
-        self._update_icon()
-        if checked:
-            self._content.setVisible(True)
-            self._content.setMaximumHeight(16777215)
-        else:
-            self._content.setMaximumHeight(0)
-            self._content.setVisible(False)
+        with updates_suspended(self, self._content):
+            self._update_icon()
+            if checked:
+                self._content.setVisible(True)
+                self._content.setMaximumHeight(16777215)
+            else:
+                self._content.setMaximumHeight(0)
+                self._content.setVisible(False)
+            refresh_layout_chain(self)
+        refresh_layout_chain_later(self)
 
     @property
     def is_expanded(self) -> bool:
