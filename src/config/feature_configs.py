@@ -27,20 +27,79 @@ class HeaderFooterTypographyConfig:
 
 
 @dataclass
+class HeaderFooterBorderConfig:
+    enabled: bool = True
+    line_style: str = "single"
+    width_pt: float = 0.5
+    spacing_pt: float = 1.0
+    color: str = "auto"
+
+
+@dataclass
+class HeaderFooterBehaviorConfig:
+    different_first_page: bool = False
+    different_odd_even_pages: bool = False
+    link_to_previous: str = "never"         # "never" | "always" | "preserve"
+    preserve_existing_content: bool = False
+
+
+@dataclass
+class HeaderFooterContentConfig:
+    mode: str = "inherit"                  # "inherit" | "none" | "fixed" | "styleref" | "page_number" | "page_number_with_text" | "template" | "preserve"
+    fixed_text: str = ""
+    template: str = ""
+    alignment: str = "center"              # "left" | "center" | "right" | "inside" | "outside"
+    styleref_level: int = 1
+    styleref_style: str = ""
+    styleref_include_number: bool = True
+
+
+@dataclass
+class HeaderFooterVariantConfig:
+    header: HeaderFooterContentConfig = field(default_factory=HeaderFooterContentConfig)
+    footer: HeaderFooterContentConfig = field(default_factory=HeaderFooterContentConfig)
+
+
+def _empty_header_footer_variant() -> HeaderFooterVariantConfig:
+    return HeaderFooterVariantConfig(
+        header=HeaderFooterContentConfig(mode="none"),
+        footer=HeaderFooterContentConfig(mode="none"),
+    )
+
+
+@dataclass
+class HeaderFooterVariantsConfig:
+    default: HeaderFooterVariantConfig = field(default_factory=HeaderFooterVariantConfig)
+    first: HeaderFooterVariantConfig = field(default_factory=_empty_header_footer_variant)
+    even: HeaderFooterVariantConfig = field(default_factory=HeaderFooterVariantConfig)
+
+
+@dataclass
 class HeaderConfig:
+    enabled: bool = True
     mode: str = "styleref"          # "styleref" | "fixed" | "none"
     fixed_text: str = ""
+    alignment: str = "center"       # "left" | "center" | "right"
     styleref_level: int = 1
     border: bool = True
+    border_style: HeaderFooterBorderConfig = field(default_factory=HeaderFooterBorderConfig)
     hide_on_cover: bool = True
+    typography: HeaderFooterTypographyConfig = field(
+        default_factory=HeaderFooterTypographyConfig
+    )
 
 
 @dataclass
 class FooterConfig:
+    enabled: bool = True
     content_mode: str = "page_number"   # "page_number" | "fixed" | "page_number_with_text" | "none"
     fixed_text: str = ""
     alignment: str = "center"           # "left" | "center" | "right"
+    page_number_template: str = "{page}"
     hide_on_cover: bool = True
+    typography: HeaderFooterTypographyConfig = field(
+        default_factory=HeaderFooterTypographyConfig
+    )
 
 
 @dataclass
@@ -48,7 +107,7 @@ class PageNumberPhaseConfig:
     phase_id: str = ""
     selectors: list[str] = field(default_factory=list)
     visible: bool = True
-    number_format: str = "decimal"      # "decimal" | "upperRoman" | "lowerRoman"
+    number_format: str = "decimal"      # Word w:pgNumType/@w:fmt, e.g. "decimal" | "upperRoman" | "lowerRoman"
     start_mode: str = "continue"        # "continue" | "restart"
     start_value: int = 1
 
@@ -77,11 +136,10 @@ class PageNumberPlanConfig:
 
 @dataclass
 class HeaderFooterConfig:
-    typography: HeaderFooterTypographyConfig = field(
-        default_factory=HeaderFooterTypographyConfig
-    )
     header: HeaderConfig = field(default_factory=HeaderConfig)
     footer: FooterConfig = field(default_factory=FooterConfig)
+    behavior: HeaderFooterBehaviorConfig = field(default_factory=HeaderFooterBehaviorConfig)
+    variants: HeaderFooterVariantsConfig = field(default_factory=HeaderFooterVariantsConfig)
     page_number_plan: PageNumberPlanConfig = field(default_factory=PageNumberPlanConfig)
     suppress_header_footer_selectors: list[str] = field(
         default_factory=lambda: list(_DEFAULT_SUPPRESS_HEADER_FOOTER_SELECTORS)
@@ -132,6 +190,14 @@ class HeaderFooterConfig:
         return phase
 
     @property
+    def header_enabled(self) -> bool:
+        return bool(getattr(self.header, "enabled", True))
+
+    @header_enabled.setter
+    def header_enabled(self, value: bool) -> None:
+        self.header.enabled = bool(value)
+
+    @property
     def header_mode(self) -> str:
         return str(self.header.mode or "styleref")
 
@@ -148,20 +214,43 @@ class HeaderFooterConfig:
         self.header.fixed_text = str(value or "")
 
     @property
+    def header_alignment(self) -> str:
+        return str(getattr(self.header, "alignment", "center") or "center")
+
+    @header_alignment.setter
+    def header_alignment(self, value: str) -> None:
+        normalized = str(value or "center").strip().lower()
+        self.header.alignment = normalized if normalized in {"left", "center", "right"} else "center"
+
+    @property
     def header_border(self) -> bool:
         return bool(self.header.border)
 
     @header_border.setter
     def header_border(self, value: bool) -> None:
-        self.header.border = bool(value)
+        enabled = bool(value)
+        self.header.border = enabled
+        self.header.border_style.enabled = enabled
+
+    @property
+    def footer_enabled(self) -> bool:
+        return bool(getattr(self.footer, "enabled", True))
+
+    @footer_enabled.setter
+    def footer_enabled(self, value: bool) -> None:
+        self.footer.enabled = bool(value)
 
     @property
     def page_number_enabled(self) -> bool:
-        return str(self.footer.content_mode or "page_number") in {"page_number", "page_number_with_text"}
+        return self.footer_enabled and str(self.footer.content_mode or "page_number") in {
+            "page_number",
+            "page_number_with_text",
+        }
 
     @page_number_enabled.setter
     def page_number_enabled(self, value: bool) -> None:
         if bool(value):
+            self.footer.enabled = True
             self.footer.content_mode = "page_number_with_text" if self.footer.fixed_text else "page_number"
         else:
             self.footer.content_mode = "fixed" if self.footer.fixed_text else "none"
@@ -184,6 +273,14 @@ class HeaderFooterConfig:
         self.footer.alignment = normalized if normalized in {"left", "center", "right"} else "center"
 
     @property
+    def page_number_template(self) -> str:
+        return str(self.footer.page_number_template or "{page}")
+
+    @page_number_template.setter
+    def page_number_template(self, value: str) -> None:
+        self.footer.page_number_template = str(value or "{page}")
+
+    @property
     def styleref_level(self) -> int:
         return int(self.header.styleref_level or 1)
 
@@ -193,43 +290,83 @@ class HeaderFooterConfig:
 
     @property
     def font_cn(self) -> str | None:
-        return self.typography.font_cn
+        return self.header.typography.font_cn
 
     @font_cn.setter
     def font_cn(self, value: str | None) -> None:
-        self.typography.font_cn = str(value) if value not in (None, "") else None
+        self.header.typography.font_cn = str(value) if value not in (None, "") else None
 
     @property
     def font_en(self) -> str | None:
-        return self.typography.font_en
+        return self.header.typography.font_en
 
     @font_en.setter
     def font_en(self, value: str | None) -> None:
-        self.typography.font_en = str(value) if value not in (None, "") else None
+        self.header.typography.font_en = str(value) if value not in (None, "") else None
 
     @property
     def size_pt(self) -> float | None:
-        return self.typography.size_pt
+        return self.header.typography.size_pt
 
     @size_pt.setter
     def size_pt(self, value: float | None) -> None:
-        self.typography.size_pt = None if value in (None, "") else float(value)
+        self.header.typography.size_pt = None if value in (None, "") else float(value)
 
     @property
     def bold(self) -> bool:
-        return bool(self.typography.bold)
+        return bool(self.header.typography.bold)
 
     @bold.setter
     def bold(self, value: bool) -> None:
-        self.typography.bold = bool(value)
+        self.header.typography.bold = bool(value)
 
     @property
     def italic(self) -> bool:
-        return bool(self.typography.italic)
+        return bool(self.header.typography.italic)
 
     @italic.setter
     def italic(self, value: bool) -> None:
-        self.typography.italic = bool(value)
+        self.header.typography.italic = bool(value)
+
+    @property
+    def footer_font_cn(self) -> str | None:
+        return self.footer.typography.font_cn
+
+    @footer_font_cn.setter
+    def footer_font_cn(self, value: str | None) -> None:
+        self.footer.typography.font_cn = str(value) if value not in (None, "") else None
+
+    @property
+    def footer_font_en(self) -> str | None:
+        return self.footer.typography.font_en
+
+    @footer_font_en.setter
+    def footer_font_en(self, value: str | None) -> None:
+        self.footer.typography.font_en = str(value) if value not in (None, "") else None
+
+    @property
+    def footer_size_pt(self) -> float | None:
+        return self.footer.typography.size_pt
+
+    @footer_size_pt.setter
+    def footer_size_pt(self, value: float | None) -> None:
+        self.footer.typography.size_pt = None if value in (None, "") else float(value)
+
+    @property
+    def footer_bold(self) -> bool:
+        return bool(self.footer.typography.bold)
+
+    @footer_bold.setter
+    def footer_bold(self, value: bool) -> None:
+        self.footer.typography.bold = bool(value)
+
+    @property
+    def footer_italic(self) -> bool:
+        return bool(self.footer.typography.italic)
+
+    @footer_italic.setter
+    def footer_italic(self, value: bool) -> None:
+        self.footer.typography.italic = bool(value)
 
     @property
     def hide_cover_header_footer(self) -> bool:
@@ -451,7 +588,6 @@ class TableConfig:
     color_table_variant: str = "header_grid"
     line_spacing_mode: str = "single"   # "single" | "one_half" | "double"
     repeat_header: bool = False
-    row_height_pt: float | None = None
     font_cn: str | None = "微软雅黑"
     font_en: str | None = "Times New Roman"
     size_pt: float | None = 10.5
@@ -472,3 +608,5 @@ class OutputConfig:
     compare_formatting: bool = True
     report_json: bool = True
     report_markdown: bool = True
+    material_manifest: bool = False
+    material_package: bool = False

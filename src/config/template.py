@@ -1,9 +1,10 @@
 """
 TemplateConfig — 核心排版参数定义
 
-只定义「文档的基础外观」：页面、字体、标题编号、表格。
-不包含功能专属参数（公式/参考文献/页眉/水印），那些在 feature_configs.py 中，
-归 SceneWorkspace 管理。
+定义可复用的文档外观与排版策略：页面、字体、标题编号、表格、
+页眉页脚、目录、题注、参考文献等。
+部分功能配置的数据类集中在 feature_configs.py 中，TemplateConfig 提供模板基线，
+SceneWorkspace 可在解析阶段覆盖对应字段。
 """
 
 from __future__ import annotations
@@ -114,6 +115,7 @@ class HeadingLevelBindingConfig:
     restart_on: str | None = None
     include_in_toc: bool = True
     # 模板化编号字段
+    display_template_mode: str = "structured"  # "structured"=字段生成, "custom"=手写编号模板
     display_template: str = ""          # 例: "第{cn}章", "({cn})", "{nn})" — 空=用 display_core_style 自动展开
     chain_separator: str = "."          # 多级 chain 连接符: "." → 3.1, "-" → 3-1
     chain_number_style: str = "arabic"  # 多级 chain 默认数字格式
@@ -167,11 +169,16 @@ class SectionConfig:
 
 
 # ── 功能专属配置的向后兼容 re-export ─────────────────
-# 这些类型已移到 feature_configs.py，由 SceneWorkspace 管理。
+# 这些类型已移到 feature_configs.py，由 TemplateConfig 和 SceneWorkspace 共享。
 # 此处 re-export 以保持下游 import 不中断。
 from src.config.feature_configs import (  # noqa: E402, F401
     HeaderFooterConfig,
     HeaderFooterTypographyConfig,
+    HeaderFooterBorderConfig,
+    HeaderFooterBehaviorConfig,
+    HeaderFooterContentConfig,
+    HeaderFooterVariantConfig,
+    HeaderFooterVariantsConfig,
     HeaderConfig,
     FooterConfig,
     PageNumberPhaseConfig,
@@ -194,8 +201,8 @@ from src.config.feature_configs import (  # noqa: E402, F401
 class TemplateConfig:
     """基础模板配置 — 定义文档的核心外观。
 
-    只包含始终需要的基础排版参数：页面、字体、标题编号。
-    功能专属参数（表格/公式/参考文献/页眉/水印/输出等）由 SceneWorkspace 管理。
+    模板提供可复用的排版基线；场景只通过显式 template_overrides
+    或执行前 session overrides 覆盖模板字段。
     """
     name: str = ""
     description: str = ""

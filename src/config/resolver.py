@@ -20,7 +20,12 @@ from src.config.migration import (
     unflatten_dict,
 )
 from src.config.template import TemplateConfig
-from src.config.scene import SceneWorkspace
+from src.config.scene import (
+    SceneWorkspace,
+    coerce_exam_paper_config,
+    format_scope_for_application_boundary,
+    scene_application_boundary_for_runtime,
+)
 from src.config.resolved import (
     ResolvedConfig,
     ConfigValue,
@@ -60,6 +65,7 @@ def resolve_config(
     scene: SceneWorkspace,
     session_overrides: dict[str, Any] | None = None,
     entity_data: Mapping[str, str] | None = None,
+    field_aliases: Mapping[str, str] | None = None,
     entity_assets_dir: str | None = None,
     images: Sequence[ImageInsertionItem | Mapping[str, Any]] | None = None,
     replacements: Sequence[ReplacementRule | Mapping[str, Any]] | None = None,
@@ -93,6 +99,7 @@ def resolve_config(
         scene_overrides=scene_overrides,
         session_overrides=session_overrides,
     )
+    application_boundary = scene_application_boundary_for_runtime(scene)
 
     return ResolvedConfig(
         # From template (core appearance)
@@ -101,7 +108,8 @@ def resolve_config(
         heading_numbering=merged_template.heading_numbering,
         heading_model=merged_template.heading_model,
         section=merged_template.section,
-        # Feature-specific config: template base + scene feature overrides + session overrides
+        # Template visual baseline plus explicit overrides. Scene-owned policy fields
+        # below may still project into TemplateConfig-shaped runtime slots.
         table=merged_template.table,
         output=merged_template.output,
         toc=merged_template.toc,
@@ -114,14 +122,24 @@ def resolve_config(
         equation_numbering=merged_template.equation_numbering,
         # From scene (behavior)
         module_switches=normalize_module_switches(scene.module_switches),
-        format_scope=copy.deepcopy(scene.format_scope),
+        application_boundary=copy.deepcopy(application_boundary),
+        format_scope=format_scope_for_application_boundary(
+            application_boundary,
+            scene.format_scope,
+        ),
         strict_mode=scene.strict_mode,
         md_cleanup=copy.deepcopy(scene.md_cleanup),
         whitespace=copy.deepcopy(scene.whitespace),
         citation_link=copy.deepcopy(scene.citation_link),
         formula_convert=copy.deepcopy(scene.formula_convert),
         chem_typography=copy.deepcopy(scene.chem_typography),
+        input_source_profile=copy.deepcopy(scene.input_source_profile),
+        compliance_profile=copy.deepcopy(scene.compliance_profile),
+        default_delivery_preset_id=scene.default_delivery_preset_id,
+        delivery_presets=copy.deepcopy(scene.delivery_presets),
+        exam_paper=coerce_exam_paper_config(getattr(scene, "exam_paper", None)),
         entity_data=dict(entity_data or {}),
+        field_aliases=dict(field_aliases or {}),
         entity_assets_dir=entity_assets_dir or "",
         images=_normalize_image_items(images),
         replacements=_normalize_replacement_rules(replacements),
@@ -159,11 +177,6 @@ def _build_provenance(
 
 
 _SCENE_FEATURE_FIELDS = (
-    "table",
-    "header_footer",
-    "toc",
-    "caption",
-    "formula_table",
     "formula_style",
     "equation_numbering",
     "reference_style",
@@ -173,7 +186,7 @@ _SCENE_FEATURE_FIELDS = (
 
 
 def _extract_scene_feature_overrides(scene: SceneWorkspace) -> dict[str, Any]:
-    """Return scene feature-config values that differ from feature defaults."""
+    """Return scene-owned runtime policy values stored in TemplateConfig-shaped slots."""
     overrides: dict[str, Any] = {}
     for field_name in _SCENE_FEATURE_FIELDS:
         current = getattr(scene, field_name, None)

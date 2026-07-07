@@ -28,12 +28,17 @@ from src.config.template import (
     OutputConfig,
 )
 from src.config.scene import (
+    ExamPaperConfig,
     FormatScopeConfig,
+    SceneApplicationBoundaryConfig,
     MdCleanupOptions,
     WhitespaceOptions,
     CitationLinkOptions,
     FormulaConvertOptions,
     ChemTypographyOptions,
+    InputSourceProfile,
+    ComplianceProfile,
+    DeliveryPreset,
 )
 
 
@@ -95,6 +100,9 @@ class ResolvedConfig:
     output: OutputConfig = field(default_factory=OutputConfig)
 
     module_switches: dict[str, bool] = field(default_factory=dict)
+    application_boundary: SceneApplicationBoundaryConfig = field(
+        default_factory=SceneApplicationBoundaryConfig
+    )
     format_scope: FormatScopeConfig = field(default_factory=FormatScopeConfig)
     strict_mode: bool = True
 
@@ -103,8 +111,14 @@ class ResolvedConfig:
     citation_link: CitationLinkOptions = field(default_factory=CitationLinkOptions)
     formula_convert: FormulaConvertOptions = field(default_factory=FormulaConvertOptions)
     chem_typography: ChemTypographyOptions = field(default_factory=ChemTypographyOptions)
+    input_source_profile: InputSourceProfile = field(default_factory=InputSourceProfile)
+    compliance_profile: ComplianceProfile = field(default_factory=ComplianceProfile)
+    default_delivery_preset_id: str = "final"
+    delivery_presets: list[DeliveryPreset] = field(default_factory=list)
+    exam_paper: ExamPaperConfig | None = None
 
     entity_data: dict[str, str] = field(default_factory=dict)
+    field_aliases: dict[str, str] = field(default_factory=dict)
     entity_assets_dir: str = ""
     images: list[ImageInsertionItem] = field(default_factory=list)
     replacements: list[ReplacementRule] = field(default_factory=list)
