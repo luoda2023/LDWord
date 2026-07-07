@@ -21,6 +21,7 @@ def test_release_shell_files_exist():
         ROOT / "scripts" / "windows" / "check_public_release.bat",
         ROOT / "scripts" / "windows" / "clean_public_release.bat",
         ROOT / "scripts" / "check_public_release.py",
+        ROOT / "scripts" / "scene_matrix_release_gate_payload.py",
         ROOT / "scripts" / "export_scene_ambiguity_clarification_ui_audit.py",
         ROOT / "scripts" / "export_scene_ambiguous_boundary_audit.py",
         ROOT / "scripts" / "export_scene_business_capability_matrix_audit.py",
@@ -131,6 +132,23 @@ def test_scene_matrix_release_gate_is_wired_into_ci_workflow():
     assert "tests/test_scene_product_maturity_upgrade_audit.py" in workflow
     assert "tests/test_scene_coverage_manifest.py" in workflow
     assert "tests/test_scene_parameter_ownership.py" in workflow
+
+
+def test_scene_matrix_release_gate_cli_stays_thin_and_delegates_payload_builder():
+    script = (ROOT / "scripts" / "verify_scene_matrix_release_gate.py").read_text(
+        encoding="utf-8"
+    )
+    payload_module = (
+        ROOT / "scripts" / "scene_matrix_release_gate_payload.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from scripts.scene_matrix_release_gate_payload import" in script
+    assert "def build_scene_matrix_release_gate_payload" not in script
+    assert "from src.config." not in script
+    assert len(script.splitlines()) <= 350
+
+    assert "def build_scene_matrix_release_gate_payload" in payload_module
+    assert "from src.config." in payload_module
 
 
 def test_root_batch_wrappers_delegate_to_windows_scripts():

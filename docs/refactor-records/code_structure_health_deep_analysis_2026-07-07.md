@@ -4811,3 +4811,54 @@ python -m pytest -q tests\test_question_figure_repair_runtime.py tests\test_work
 - 部分 UI 和 scene/config 模块仍然偏大，后续可以继续按职责细拆。
 - ignored 本地调试产物仍存在于开发机，但它们不进入普通工作区状态，也未阻断 public release strict。
 - 测试总量较大，后续可继续优化分组运行时间和 CI 并行策略。
+
+### 10.76 后续优化第一刀: scene matrix release gate payload 模块化
+
+执行日期: 2026-07-08
+
+本轮承接第 10.75 节之后的后续优化建议，优先处理 `scripts/verify_scene_matrix_release_gate.py` 中超长的 `build_scene_matrix_release_gate_payload()`。处理目标不是改变 release gate 行为，而是把 CLI 入口和 payload 构建职责拆开，降低后续继续按 family/report 拆 builder 的风险。
+
+已完成改动:
+
+- 新增 `scripts/scene_matrix_release_gate_payload.py`
+  - 承接 release gate payload 构建、pytest lightweight cache、issue payload helper、request-cell hard gate helper、release governance export script evidence helper。
+- 收窄 `scripts/verify_scene_matrix_release_gate.py`
+  - 保留 CLI 参数、JSON/human 输出、`main()` 和 `_print_human()`。
+  - 继续 re-export `build_scene_matrix_release_gate_payload`，兼容现有测试和调用方。
+  - 增加 `RELEASE_GATE_PAYLOAD_CHECK_IDS`，让既有 source evidence 审计仍能在 CLI 入口看到 release gate 契约，而真实构建逻辑下沉到 payload 模块。
+- 更新 `tests/test_release_shell.py`
+  - 确认 payload 模块存在。
+  - 确认 CLI wrapper 不再直接导入 `src.config.*`。
+  - 确认 CLI wrapper 不再重新定义 payload builder，且保持在 350 行以内。
+
+规模变化:
+
+| 文件 | 调整后行数 | 说明 |
+| --- | ---: | --- |
+| `scripts/verify_scene_matrix_release_gate.py` | `318` | 从 2600+ 行 release gate 聚合脚本收窄为 CLI wrapper |
+| `scripts/scene_matrix_release_gate_payload.py` | `2397` | 新的 payload builder 边界，后续可继续按 report family 拆分 |
+
+验证命令:
+
+```powershell
+python -m compileall -q scripts\verify_scene_matrix_release_gate.py scripts\scene_matrix_release_gate_payload.py tests\test_release_shell.py
+python -m pytest -q tests\test_release_shell.py
+python -m pytest -q tests\test_scene_matrix_dashboard.py tests\test_scene_matrix_drilldown.py tests\test_scene_retained_gap_exit_criteria_audit.py
+python scripts\verify_scene_matrix_release_gate.py
+git -c core.quotepath=false diff --check
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| release shell pytest | `12 passed in 0.09s` |
+| scene matrix focused pytest | `16 passed in 127.95s` |
+| real scene matrix release gate | `Scene matrix release gate: passed`；全部 checks `passed (0 issues)`；`drilldowns=37/37`、`drilldown_rows=556/556`、`drilldown_sources=107/107 ready` |
+| `git diff --check` | 通过 |
+
+后续仍可继续优化:
+
+- `scene_matrix_release_gate_payload.py` 内部的 payload builder 仍然很长，下一刀可以按 `coverage/request-cell`、`boundary/release governance`、`material/delivery/fixed-layout`、`dashboard/drilldown` 四组拆 helper。
+- source evidence 契约目前通过 CLI 的 `RELEASE_GATE_PAYLOAD_CHECK_IDS` 明确保留，后续若审计模型支持多 source path，可把这些 marker 逐步迁到 payload 模块本体。
