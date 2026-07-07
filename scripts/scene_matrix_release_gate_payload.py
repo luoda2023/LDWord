@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import tempfile
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 
 
@@ -269,6 +269,15 @@ class _MatrixDrilldownReleaseGateSnapshot:
         }
 
 
+@dataclass(slots=True)
+class _ReleaseGateFoundation:
+    checks: dict[str, object]
+    request_cell_summary: object
+    request_cell_browser: object
+    completeness_report: object
+    task_lexicon_report: object
+
+
 def _build_release_governance_export_script_evidence(
     reports: tuple[tuple[str, object], ...],
 ) -> list[dict[str, object]]:
@@ -329,17 +338,7 @@ def _release_governance_export_script_evidence_counts(
     }
 
 
-def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, object]:
-    global _PYTEST_RELEASE_GATE_PAYLOAD_CACHE
-    if (
-        _pytest_release_gate_lightweight_enabled()
-        and _PYTEST_RELEASE_GATE_PAYLOAD_CACHE is not None
-    ):
-        return _release_gate_payload_for_output_dir(
-            _PYTEST_RELEASE_GATE_PAYLOAD_CACHE,
-            output_dir,
-        )
-
+def _build_release_gate_foundation(output_dir: Path) -> _ReleaseGateFoundation:
     checks = {
         "coverage_pack_completeness": _issue_check(audit_scene_pack_completeness()),
         "coverage_pack_matrix_alignment": _issue_check(
@@ -367,9 +366,8 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
     )
 
     request_cell_summary = build_scene_request_cell_fixture_summary()
-    hard_gate_issues = _hard_gate_issues(request_cell_summary)
     checks["scene_request_cell_release_threshold"] = _string_issue_check(
-        hard_gate_issues
+        _hard_gate_issues(request_cell_summary)
     )
     request_cell_browser = build_scene_request_cell_registry_browser()
     checks["scene_request_cell_registry_browser"] = _string_issue_check(
@@ -383,6 +381,32 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
     checks["high_frequency_task_lexicon_audit"] = _issue_check(
         audit_high_frequency_task_lexicon_report(task_lexicon_report)
     )
+    return _ReleaseGateFoundation(
+        checks=checks,
+        request_cell_summary=request_cell_summary,
+        request_cell_browser=request_cell_browser,
+        completeness_report=completeness_report,
+        task_lexicon_report=task_lexicon_report,
+    )
+
+
+def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, object]:
+    global _PYTEST_RELEASE_GATE_PAYLOAD_CACHE
+    if (
+        _pytest_release_gate_lightweight_enabled()
+        and _PYTEST_RELEASE_GATE_PAYLOAD_CACHE is not None
+    ):
+        return _release_gate_payload_for_output_dir(
+            _PYTEST_RELEASE_GATE_PAYLOAD_CACHE,
+            output_dir,
+        )
+
+    foundation = _build_release_gate_foundation(output_dir)
+    checks = foundation.checks
+    request_cell_summary = foundation.request_cell_summary
+    request_cell_browser = foundation.request_cell_browser
+    completeness_report = foundation.completeness_report
+    task_lexicon_report = foundation.task_lexicon_report
     ambiguous_boundary_report = build_scene_ambiguous_boundary_audit_report(
         project_root=ROOT
     )
