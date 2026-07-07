@@ -3968,3 +3968,794 @@ python -m pytest -q <scene-matrix-release-gate.yml 中列出的 229 个 scene �
 | `baa6276` | `Add scene matrix release gate runtime` | `scene-config-and-release-gate` / scene matrix runtime、export scripts、fixture builder、CI scene subset |
 
 该提交闭合了第 10.60 节记录的顺序约束: 分支 tip 现在同时具备 scene matrix workflow、release shell 存在性断言、release gate runtime 与 CI 清单中的 scene 回归测试。
+
+### 10.62 阶段 0 继续推进: docs boundaries 与审计记录迁移提交
+
+执行日期: 2026-07-07
+
+本轮转向 `docs-boundaries-and-audit-migration`，原因是资源配置边界与 heading/template UI 逻辑强耦合，而 docs 边界相对独立，可以先安全收口。
+
+边界内容:
+
+- 新增 `docs/DOCUMENTATION_BOUNDARIES.md`，定义 `docs/architecture/`、`docs/audits/`、`docs/refactor-records/`、`docs/visual_checks/`、`docs/migration_audit/`、`docs/visual_audit/` 的职责。
+- 将根层历史审计文档迁入 `docs/audits/`，Git 识别出 8 个 rename。
+- 纳入 `docs/audits/`、`docs/refactor-records/`、`docs/visual_audit/`、`docs/visual_checks/` 下的审计记录与视觉证据。
+- 纳入本文件 `docs/refactor-records/code_structure_health_deep_analysis_2026-07-07.md`，使用户要求的深度分析与执行步骤记录进入版本历史。
+- 对 30 个 Markdown 做机械空白清理: 去除行尾空白并将 EOF 收敛为单个换行。
+
+验证命令:
+
+```powershell
+@'
+from pathlib import Path
+bad = []
+for p in Path("docs").rglob("*.md"):
+    try:
+        p.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        bad.append((str(p), exc.start, exc.reason))
+print(len(bad))
+'@ | python -X utf8 -
+git diff --cached --check -- docs
+git diff --cached --name-only -- docs | rg -v '^docs/'
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| docs 状态项 | `668` |
+| Markdown UTF-8 | `642` 个 Markdown，`0` 个 decode error |
+| staged docs entries | `663` |
+| staged shortstat | `663 files changed, 141570 insertions(+), 47 deletions(-)` |
+| `git diff --cached --check -- docs` | 通过 |
+| staged 路径边界 | 全部位于 `docs/` 下 |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `b1a4d07` | `Move audit records into docs boundaries` | `docs-boundaries-and-audit-migration` |
+
+下一步建议回到资源/配置与 UI/runtime 边界拆分。资源桶不能简单整体提交，因为 `heading_numbering_schemes`、`exam_masters`、`templates` 瘦身和 `src/config/library.py` / heading 面板测试之间存在耦合；需要先选择更小的可验证闭环。
+
+### 10.63 阶段 0 继续推进: resource config + heading/exam runtime 提交
+
+执行日期: 2026-07-07
+
+本轮从第 10.62 节的判断继续，把资源配置边界改拆为“resource config + heading/exam runtime”。原因是模板库瘦身、场景 JSON、heading numbering scheme、考试母版和 heading 面板/适配器存在直接测试耦合，纯资源提交会让 clean checkout 上的 heading/exam 测试缺失运行时支撑。
+
+纳入边界:
+
+- 资源:
+  - `defaults/thesis.yaml`
+  - `scenes/*.json` 与新增 `scenes/exam.json`
+  - `samples/docx/*`
+  - `count_profiles/builtin.json`
+  - `heading_numbering_schemes/user.*.json`
+  - `exam_masters/builtin/default_exam_v10.docx`
+  - `exam_masters/builtin/default_exam_v20.docx`
+  - 删除 10 个 obsolete `templates/*.json`
+- 运行时:
+  - `src/config/heading_normalize.py`
+  - `src/config/heading_presets.py`
+  - `src/config/library.py`
+  - `src/config/migration.py`
+  - `src/modules/structure/heading_numbering.py`
+  - `src/modules/structure/heading_recognition.py`
+  - `src/modules/structure/toc.py`
+  - `src/shared/engine/toc_style_ops.py`
+  - `src/shared/engine/exam_paper_style.py`
+  - `src/ui/adapters/heading_numbering_adapter.py`
+  - `src/ui/heading_numbering_logic.py`
+  - `src/ui/panels/heading_numbering_panel.py`
+  - heading 面板直接依赖的 `src/shared/ui/design_system_card.py`、`src/shared/ui/styled_spin_box.py`、`src/shared/ui/summary_grid.py`
+- 测试:
+  - `tests/test_builtin_templates.py`
+  - `tests/test_config_feature_hosting.py`
+  - `tests/test_config_library_and_bridge.py`
+  - `tests/test_phase1_config.py`
+  - `tests/test_heading_*.py`
+  - `tests/test_exam_paper_style.py`
+  - `tests/test_template_heading_integration.py`
+  - `tests/test_toc_semantics.py`
+
+暂不纳入:
+
+- `docs/` 后续记录修改。
+- `src/ui/panels/workbench/*`、assets、大块 template/scene UI、pipeline/reporting/modules 运行时改动。
+
+验证命令:
+
+```powershell
+python -m compileall -q src\config\heading_normalize.py src\config\heading_presets.py src\config\library.py src\config\migration.py src\modules\structure\heading_numbering.py src\modules\structure\heading_recognition.py src\modules\structure\toc.py src\shared\engine\toc_style_ops.py src\shared\engine\exam_paper_style.py src\ui\adapters\heading_numbering_adapter.py src\ui\heading_numbering_logic.py src\ui\panels\heading_numbering_panel.py src\shared\ui\styled_spin_box.py src\shared\ui\design_system_card.py src\shared\ui\summary_grid.py
+python scripts\run_pytest_groups.py --groups heading,builtin,exam,config --timeout 300
+python -m pytest -q tests/test_phase1_config.py tests/test_template_heading_integration.py tests/test_toc_semantics.py
+git diff --cached --check
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| grouped pytest | `builtin 8 passed`、`config 19 passed`、`exam 26 passed`、`heading 68 passed` |
+| targeted pytest | `51 passed in 10.00s` |
+| DOCX zip check | `61` 个 DOCX 检查，`0` 个坏包 |
+| staged exclusion check | 未混入 docs/workbench/assets/pipeline 大桶 |
+| staged shortstat | `95 files changed, 8176 insertions(+), 2633 deletions(-)` |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `e3eff80` | `Add resource config and heading exam runtime` | `resource-config-baseline` + `count-heading-exam-resources` + heading/exam runtime 支撑 |
+
+该提交把资源配置类债务基本收口；剩余主要集中在 shared engine/UI、assets panel/material services、workbench execution runtime、template/scene UI polish、pipeline/modules/reporting runtime。
+### 10.64 阶段 0 继续推进: shared UI style contract 提交
+
+执行日期: 2026-07-07
+
+本轮从第 10.63 节继续，把剩余 UI 债务中可以脱离页面本体独立验证的一组先收口为 `shared-ui-style-contracts`。拆分时特别检查了 `tests/test_style_source_visual_audit.py`、`tests/test_design_system_refactor.py` 与 `tests/test_ui_layout_hardening.py` 的 import 链：这些测试会实例化 `ScenePanel`、`TemplatePanel` 或 `WorkbenchPanel`，因此保留到 template/scene/workbench 页面边界，避免 shared UI 提交被页面层污染。
+
+纳入边界:
+
+- `src/shared/ui/` 的基础布局、导航、证据、详情控制、段落样式编辑、style source/receipt/policy/preview 等可复用组件。
+- style 配置与投影:
+  - `src/config/style_variant_semantics.py`
+  - `src/config/style_difference_projection.py`
+  - `src/config/style_field_descriptors.py`
+  - `src/config/style_source_report_summary.py`
+- 页面无关投影适配器:
+  - `src/ui/panels/style_difference_projection.py`
+  - `src/ui/panels/style_source_projection.py`
+  - `src/ui/panels/style_object_projection_builders.py`
+  - `src/ui/panels/scene_style_override_service.py`
+  - `src/ui/panels/scene_summary_projection.py`
+  - `src/ui/panels/template_summary_projection.py`
+- 只覆盖该层的测试:
+  - `button`、`combo`、`indent`、`option`、`summary`、`evidence`、`library`、`navigation`、`paragraph`、`small`
+  - `tests/test_style_difference_projection.py`
+  - `tests/test_style_field_descriptors.py`
+  - `tests/test_style_variant_semantics.py`
+  - `tests/test_ui_exports.py`
+
+暂不纳入:
+
+- `scripts/export_style_source_visual_audit.py` 与 `tests/test_style_source_visual_audit.py`，原因是视觉审计脚本会创建 `ScenePanel` 与 `WorkbenchPanel`，依赖后续页面层改动。
+- `tests/test_design_system_refactor.py`、`tests/test_ui_layout_hardening.py`、`tests/test_windows_text_rendering_policy.py`，原因是它们同时约束 workbench/template/scene 页面或 `main.py` 启动流程。
+- `src/ui/panels/workbench/*`、`src/ui/panels/template_*`、`src/ui/panels/scene_panel.py` 等页面本体文件。
+
+验证命令:
+
+```powershell
+python -m compileall -q src\shared\ui src\config\style_variant_semantics.py src\config\style_difference_projection.py src\config\style_field_descriptors.py src\config\style_source_report_summary.py src\ui\panels\style_difference_projection.py src\ui\panels\style_source_projection.py src\ui\panels\style_object_projection_builders.py src\ui\panels\scene_style_override_service.py src\ui\panels\scene_summary_projection.py src\ui\panels\template_summary_projection.py
+python scripts\run_pytest_groups.py --groups button,combo,indent,option,summary,evidence,library,navigation,paragraph,small --timeout 300 --continue-on-fail
+$env:QT_QPA_PLATFORM = 'offscreen'
+$env:PYTHONUTF8 = '1'
+$env:PYTHONPATH = (Get-Location).Path
+python -m pytest -q tests\test_style_difference_projection.py tests\test_style_field_descriptors.py tests\test_style_variant_semantics.py tests\test_ui_exports.py
+git diff --cached --check
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| grouped pytest | `button 5 passed`、`combo 23 passed`、`evidence 2 passed`、`indent 9 passed`、`library 1 passed`、`navigation 1 passed`、`option 5 passed`、`paragraph 3 passed`、`small 50 passed`、`summary 17 passed` |
+| targeted pytest | `17 passed in 0.61s` |
+| `git diff --cached --check` | 通过 |
+| staged shortstat | `74 files changed, 16694 insertions(+), 96 deletions(-)` |
+| staged 排除检查 | 未纳入 workbench/template/scene 页面本体、视觉审计脚本或页面级 layout 测试 |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `9282c2b` | `Add shared UI style contract components` | `shared-ui-style-contracts` |
+
+剩余主要集中在 shared engine runtime、assets panel/material services、workbench execution runtime、template/scene UI polish、pipeline/modules/reporting runtime，以及最后的记录归档与总体验证。
+### 10.65 阶段 0 继续推进: content visibility + header/footer preset primitives 提交
+
+执行日期: 2026-07-07
+
+本轮从 runtime 桶里继续拆小边界。初始候选是 `src/shared/engine` + `src/reporting`，但 import 检查显示多数测试会穿过 `Pipeline`、`report_writer`、`src/modules/*` 甚至 workbench execution runtime；因此先只提交两个不依赖页面和 pipeline 的基础原语。
+
+纳入边界:
+
+- `src/shared/engine/content_visibility.py`
+  - 扫描 `{{#visibility:...}}` / `{{/visibility:...}}` 与 `{{#content:...}}` marker。
+  - 汇总缺失规则、未使用文档 selector、孤立结束 marker、错位结束 marker、嵌套 block 与未闭合 block。
+  - 为 delivery preset 生成移除块预览、样本文本和前后上下文。
+- `src/config/header_footer_presets.py`
+  - 内置页眉页脚方案目录。
+  - 用户方案保存、覆盖、删除、重名检测与配置匹配。
+- 测试:
+  - `tests/test_content_visibility_engine.py`
+  - `tests/test_header_footer_presets.py`
+
+暂不纳入:
+
+- `src/pipeline/runner.py` 中 content visibility 的执行集成。
+- `src/pipeline/*`、`src/modules/*`、`src/report_writer.py` 与 workbench execution runtime。
+- 依赖上述集成的 `tests/test_output_runtime_semantics.py`、`tests/test_count_engine_semantics.py`、`tests/test_exam_question_schema_runtime.py`、`tests/test_fixed_layout_text_runtime.py` 等 runtime 测试。
+
+验证命令:
+
+```powershell
+python -m compileall -q src\shared\engine\content_visibility.py src\config\header_footer_presets.py
+python -m pytest -q tests\test_content_visibility_engine.py tests\test_header_footer_presets.py
+git diff --cached --check
+git diff --cached --name-only | rg "^(src/ui/|src/pipeline/|src/modules/|src/report_writer.py|src/ui/panels/workbench|docs/)"
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| focused pytest | `5 passed in 0.31s` |
+| `git diff --cached --check` | 通过 |
+| staged exclusion check | 未命中，说明没有混入 UI/pipeline/modules/report_writer/docs |
+| staged shortstat | `4 files changed, 918 insertions(+)` |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `5722b81` | `Add content visibility and header preset primitives` | `content-visibility-and-header-preset-primitives` |
+
+下一步仍应保持小边界策略：优先把 pure engine/config 服务收掉；一旦测试需要 `Pipeline`/`report_writer`/workbench runtime，再把它们作为单独 runtime 集成边界处理。
+### 10.66 阶段 0 继续推进: display adapters + architecture boundary guard 提交
+
+执行日期: 2026-07-07
+
+本轮继续处理不依赖 widget 生命周期的 UI adapter 与架构守门测试。`field_display_names` 只负责把技术字段路径转换为用户可读标签和诊断上下文；`content_visibility_display` 只负责把 content visibility selector 与扫描问题转换为展示文本。它们不会创建页面组件，也不会触发 pipeline。
+
+纳入边界:
+
+- `src/ui/adapters/field_display_names.py`
+  - scene/template/style/material/output 字段路径的人类可读名称。
+  - style layout item、control contract key 与诊断摘要。
+  - 嵌入文本中的字段 key 替换。
+- `src/ui/adapters/content_visibility_display.py`
+  - content visibility selector label、tooltip 与列表格式化。
+  - scan issue message 的 UI 展示适配。
+- `tests/test_field_display_names.py`
+- `tests/test_architecture_boundaries.py`
+  - 检查 `src/config`、`src/modules`、`src/pipeline`、`src/reporting`、`src/services`、`src/shared/engine` 不反向 import `src.ui`。
+
+暂不纳入:
+
+- 引用这些 adapter 的 `ScenePanel`、`TemplatePanel`、Workbench、assets panel 页面。
+- `tests/test_ui_copy_guardrails.py`，因为它会实例化 scene/template/workbench 页面并属于页面 copy guardrail 边界。
+
+验证命令:
+
+```powershell
+python -m compileall -q src\ui\adapters\field_display_names.py src\ui\adapters\content_visibility_display.py
+python -m pytest -q tests\test_field_display_names.py tests\test_architecture_boundaries.py
+git diff --cached --check
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| focused pytest | `5 passed in 0.89s` |
+| `git diff --cached --check` | 通过 |
+| staged shortstat | `4 files changed, 637 insertions(+)` |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `e19c7cc` | `Add display adapters and architecture boundary guard` | `display-adapters-and-architecture-guard` |
+
+该提交给后续页面和 workbench issue navigation 提供了可读字段名称基础，同时把“非 UI 层不得依赖 UI 层”的规则固化为测试。
+### 10.67 阶段 0 继续推进: material asset services + assets panel 提交
+
+执行日期: 2026-07-07
+
+本轮处理 assets/material 桶。先运行 `assets` 与 `material` 分组确认当前工作树全绿，再拆出不依赖 workbench runner 的边界。`tests/test_material_execution_context.py` 与 `tests/test_material_field_consistency.py` 会进入 WorkbenchProductionRunner、pipeline、report writer 等 runtime 集成路径，因此没有纳入本提交。
+
+纳入边界:
+
+- `src/services/material_assets/`
+  - question figure 公共服务、question library metadata/history/master-version 服务。
+  - repair audit 与 Word DOCX recovery helper。
+  - 保持 services 层不依赖 UI。
+- `src/ui/panels/assets_panel.py`
+- `src/ui/panels/assets/`
+  - assets panel helper/presenter 拆分。
+  - question figure、question library、archive、batch output、preview table、material repair navigation、section summary/theme/responsive presenters。
+  - enterprise boundary registry 与 specs。
+- `src/ui/bridge.py`
+  - MaterialExecutionContext / MaterialBatchSelection 状态和 repair target 信号。
+  - `NavigationIntent` 与 `navigation_intent_value`。
+- `src/ui/panel_registry.py`
+  - assets panel 延迟创建入口与展示名调整。
+- 测试:
+  - `assets` 分组 8 个测试文件。
+  - `tests/test_material_asset_services.py`
+  - `tests/test_material_schema_registry.py`
+
+暂不纳入:
+
+- `tests/test_material_execution_context.py`
+- `tests/test_material_field_consistency.py`
+- `src/ui/panels/workbench/*`
+- `src/pipeline/*`
+- `src/modules/*`
+- `src/report_writer.py`
+- `src/ui/main_window.py`
+
+验证命令:
+
+```powershell
+python -m compileall -q src\services src\ui\panels\assets src\ui\panels\assets_panel.py src\ui\bridge.py src\ui\panel_registry.py
+python scripts\run_pytest_groups.py --groups assets --timeout 300 --continue-on-fail
+python -m pytest -q tests\test_material_asset_services.py tests\test_material_schema_registry.py tests\test_architecture_boundaries.py
+git diff --cached --check
+git diff --cached --name-only | rg "^(src/ui/panels/workbench|src/pipeline/|src/modules/|src/report_writer.py|src/ui/main_window.py|tests/test_material_execution_context.py|tests/test_material_field_consistency.py|docs/)"
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| assets group | `90 passed in 1.96s` |
+| material service/schema + architecture | `33 passed in 1.16s` |
+| `git diff --cached --check` | 首次发现 `src/ui/panels/assets_panel.py` EOF 多空行；移除后通过 |
+| staged exclusion check | 未命中，说明未混入 workbench/pipeline/modules/report_writer/main_window/material execution integration/docs |
+| staged shortstat | `60 files changed, 14876 insertions(+), 2 deletions(-)` |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `e76c0f0` | `Add material asset services and assets panel` | `material-asset-services-and-assets-panel` |
+
+该提交完成了资料包面板和 material asset 服务层的主要结构化收口。后续 material execution、manifest/package 写出、WorkbenchProductionRunner 与 batch runner 仍应作为 runtime 集成边界处理。
+### 10.68 阶段 0 继续推进: scene contract guard tests 提交
+
+执行日期: 2026-07-07
+
+本轮从剩余 scene 测试里筛出可以独立提交的 guard tests。筛选结果显示，`test_scene_family_application.py`、`test_scene_family_registry.py` 会依赖 workbench `scene_presets`；`test_scene_journey_runtime.py` 会穿过 pipeline/report_writer；`test_scene_overview_projection.py` 依赖未提交的 scene overview projection 与 workbench execution flow projection；`test_scene_repair_routing.py` 依赖 workbench adapter 和 scene presets。因此本轮只提交纯 config/contract guard。
+
+纳入边界:
+
+- `tests/test_control_contract_registry.py`
+  - 覆盖 style controls、scene output/material/plugin controls、disabled rules、row height 归属与 evidence location。
+- `tests/test_scene_natural_request_router.py`
+  - 覆盖自然语言场景请求路由、歧义处理、导入/专业边界和未匹配请求策略。
+
+暂不纳入:
+
+- `tests/test_scene_family_application.py`
+- `tests/test_scene_family_registry.py`
+- `tests/test_scene_journey_runtime.py`
+- `tests/test_scene_overview_projection.py`
+- `tests/test_scene_repair_routing.py`
+
+验证命令:
+
+```powershell
+python -m compileall -q src\config\control_contract_registry.py src\config\scene_natural_request_router.py
+python -m pytest -q tests\test_control_contract_registry.py tests\test_scene_natural_request_router.py
+git diff --cached --check
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| focused pytest | `12 passed in 0.18s` |
+| `git diff --cached --check` | 通过 |
+| staged shortstat | `2 files changed, 368 insertions(+)` |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `280dde3` | `Add scene contract guard tests` | `scene-contract-guard-tests` |
+
+该提交补上 scene contract 与自然语言请求路由的纯配置层守门；其余 scene tests 留给 scene/workbench/runtime 集成边界。
+### 10.69 阶段 0 继续推进: workbench presentation adapters 提交
+
+执行日期: 2026-07-07
+
+本轮从 workbench 桶里拆出不创建大面板的 presentation adapter/state 边界。初始检查发现 `tests/test_workbench_execution_center.py` 依赖 `execution_runtime._batch_issue_items_for_result`，而该 helper 尚在 runtime 集成改动里；因此本轮不纳入 ExecutionCenter、RecentRunPanel、QuickExecutionDetail 或 execution runtime。
+
+纳入边界:
+
+- `src/ui/adapters/workbench_execution_adapter.py`
+  - readiness/progress/result/recent-run projection。
+  - material readiness issue、object preflight issue、coverage/sample/control-contract/parameter-ownership issue projection。
+  - artifact 与 issue queue summary 的展示适配。
+- `src/ui/adapters/workbench_artifact_items.py`
+- `src/ui/adapters/workbench_issue_navigation.py`
+- `src/ui/panels/workbench/execution_flow_projection.py`
+- `src/ui/panels/workbench/state.py`
+- `src/ui/panels/workbench/quick_execution_presenter.py`
+- 测试:
+  - `tests/test_workbench_issue_navigation.py`
+  - `tests/test_quick_execution_presenter.py`
+
+暂不纳入:
+
+- `src/ui/panels/workbench/execution_center.py`
+- `src/ui/panels/workbench/recent_run_panel.py`
+- `src/ui/panels/workbench/quick_execution_detail.py`
+- `src/ui/panels/workbench/execution_runtime.py`
+- `tests/test_workbench_execution_center.py`
+- `tests/test_recent_run_panel.py`
+- `tests/test_quick_execution_detail_architecture.py`
+
+验证命令:
+
+```powershell
+python -m compileall -q src\ui\adapters\workbench_execution_adapter.py src\ui\adapters\workbench_artifact_items.py src\ui\adapters\workbench_issue_navigation.py src\ui\panels\workbench\execution_flow_projection.py src\ui\panels\workbench\state.py src\ui\panels\workbench\quick_execution_presenter.py
+python -m pytest -q tests\test_workbench_issue_navigation.py tests\test_quick_execution_presenter.py
+git diff --cached --check
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| focused pytest | `18 passed in 0.93s` |
+| `git diff --cached --check` | 首次发现 `src/ui/adapters/workbench_artifact_items.py` EOF 多空行；移除后通过 |
+| staged exclusion check | 未纳入 ExecutionCenter、RecentRunPanel、QuickExecutionDetail、execution_runtime 或其页面测试 |
+| staged shortstat | `8 files changed, 5040 insertions(+), 9 deletions(-)` |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `3cf642a` | `Add workbench presentation adapters` | `workbench-presentation-adapters` |
+
+该提交为后续 workbench execution UI 和 runtime 集成提供了稳定的 state/projection 基础。
+### 10.70 阶段 0 继续推进: startup shell loading polish 提交
+
+执行日期: 2026-07-07
+
+本轮处理不依赖 pipeline/runtime 的 UI shell 改动。`tests/test_phase0_smoke.py` 会进入 pipeline，`tests/test_windows_text_rendering_policy.py` 会读取尚未提交的 workbench/scene/template 页面源码，因此本轮只纳入启动壳、主窗口加载策略、Qt API 补充导出、图标目录和手动组件预览测试的 import 修正。
+
+纳入边界:
+
+- `main.py`
+  - 接入 `StartupSplash`。
+  - 使用 `startup_status_changed` / `startup_ready` 信号协调主窗口显隐。
+- `src/ui/startup_splash.py`
+- `src/ui/main_window.py`
+  - startup ready 信号。
+  - assets panel 异步加载与后台预加载顺序。
+  - `NavigationIntent` 入口处理。
+- `src/qt_api.py`
+  - 补充 `QDesktopServices`、`QFileSystemWatcher`、`QInputDialog`、`QMessageBox`、`QUrl` 等统一导出。
+- `src/ui/icons/catalog.py`
+- `src/ui/title_bar.py`
+- `tests/test_all_components_preview_panel.py`
+  - 适配手动预览脚本迁移到 `scripts/manual/` 后的 import 与源码路径。
+
+暂不纳入:
+
+- `tests/test_phase0_smoke.py`
+- `tests/test_windows_text_rendering_policy.py`
+- pipeline/runtime 与页面级字体策略守门。
+
+验证命令:
+
+```powershell
+python -m compileall -q main.py src\qt_api.py src\ui\main_window.py src\ui\title_bar.py src\ui\icons\catalog.py src\ui\startup_splash.py
+python -m pytest -q tests\test_all_components_preview_panel.py
+git diff --cached --check
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| compileall | 通过 |
+| focused pytest | `4 passed in 0.34s` |
+| `git diff --cached --check` | 通过 |
+| staged shortstat | `7 files changed, 389 insertions(+), 16 deletions(-)` |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `a62ce30` | `Add startup shell loading polish` | `startup-shell-loading-polish` |
+
+该提交改善启动时首屏体验与 panel 延迟加载，未混入 pipeline 或页面级策略测试。
+
+### 10.71 阶段 0 继续推进: pipeline/reporting/workbench runtime 集成提交
+
+执行日期: 2026-07-07
+
+本轮把已经通过语义测试的 pipeline、reporting、shared engine 与 workbench runtime 边界合并为一个 runtime 集成提交。提交前额外检查了暂存路径，确认没有混入 docs、scene/template 页面、workbench 页面容器或 `src/ui/main_window.py`。
+
+纳入边界:
+
+- `src/shared/engine/`
+  - count、exam question schema、fixed layout、journal citation/rule source、material field consistency、object preflight、page/table/field refresh 等共享语义引擎。
+- `src/reporting/`
+  - academic confidence、front matter、journal citations、journal rule source 等报告输出 helper。
+- `src/pipeline/`
+  - context、result、runner、scheduler 的运行时协作接口。
+- `src/modules/`
+  - header/footer、paragraph style、entity/placeholder fill、image insertion、citation link、validation 等模块适配。
+- `src/report_writer.py`
+- `src/execution_diagnostics.py`
+- `src/ui/panels/workbench/`
+  - `execution_runtime.py`
+  - `execution_worker.py`
+  - `execution_controller.py`
+  - `execution_session_controller.py`
+  - `exam_question_assets.py`
+  - `material_artifacts.py`
+  - `material_preflight.py`
+  - `question_figure_repair_runtime.py`
+- 对应语义测试:
+  - `tests/test_citation_link_semantics.py`
+  - `tests/test_count_engine_semantics.py`
+  - `tests/test_exam_question_schema_runtime.py`
+  - `tests/test_execution_diagnostics_reporting.py`
+  - `tests/test_execution_worker.py`
+  - `tests/test_fixed_layout_text_runtime.py`
+  - `tests/test_header_footer_semantics.py`
+  - `tests/test_journal_citation_runtime.py`
+  - `tests/test_journal_rule_source_governance.py`
+  - `tests/test_material_execution_context.py`
+  - `tests/test_material_field_consistency.py`
+  - `tests/test_object_preflight_semantics.py`
+  - `tests/test_output_runtime_semantics.py`
+  - `tests/test_page_number_planner_semantics.py`
+  - `tests/test_phase0_smoke.py`
+  - `tests/test_question_figure_repair_runtime.py`
+  - `tests/test_table_format_semantics.py`
+
+暂不纳入:
+
+- `src/ui/panels/scene_panel.py`
+- `src/ui/panels/template_*`
+- `src/ui/panels/workbench/panel.py`
+- `src/ui/panels/workbench/panel_v2.py`
+- `src/ui/panels/workbench/quick_execution_detail.py`
+- `src/ui/panels/workbench/recent_run_panel.py`
+- `src/ui/panels/workbench/execution_center.py`
+- `src/ui/panels/workbench/config_management_detail.py`
+- `src/ui/panels/workbench/feature_detail_panes.py`
+- `src/ui/panels/workbench/scene_presets.py`
+- `src/ui/main_window.py`
+- scene/template/workbench 页面级 architecture 与 layout 测试。
+
+验证命令:
+
+```powershell
+git -c core.quotepath=false diff --cached --check
+git -c core.quotepath=false diff --cached --name-only | rg "^(src/ui/panels/(scene_panel|template_|workbench/(panel|panel_v2|quick_execution_detail|recent_run_panel|execution_center|config_management_detail|feature_detail_panes|scene_presets))|src/ui/main_window.py|docs/)"
+python scripts\run_pytest_groups.py --groups count,exam,fixed,journal,material,object,output,page,table,citation,execution,header --split-files --timeout 300 --continue-on-fail
+python -m pytest -q tests\test_question_figure_repair_runtime.py
+python -m compileall -q src\shared\engine src\reporting src\pipeline src\modules src\report_writer.py src\execution_diagnostics.py src\ui\panels\workbench\execution_runtime.py src\ui\panels\workbench\execution_worker.py src\ui\panels\workbench\execution_controller.py src\ui\panels\workbench\execution_session_controller.py src\ui\panels\workbench\material_artifacts.py src\ui\panels\workbench\material_preflight.py src\ui\panels\workbench\exam_question_assets.py src\ui\panels\workbench\question_figure_repair_runtime.py
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| `git diff --cached --check` | 首次发现 6 个 `src/reporting/` 新文件 EOF 多空行；移除后通过 |
+| staged exclusion check | 未命中 docs、scene/template 页面、workbench 页面容器或 `src/ui/main_window.py` |
+| pytest groups | 全部通过: citation `3`、count `6`、exam `26`、execution `51`、fixed `8`、header `16`、journal `7`、material `73`、object `11`、output `28`、page `11`、table `12` |
+| question figure pytest | `7 passed in 0.57s` |
+| compileall | 通过 |
+| staged shortstat | `61 files changed, 27517 insertions(+), 170 deletions(-)` |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `e7f1b77` | `Add pipeline reporting and workbench runtime integration` | `pipeline-reporting-workbench-runtime` |
+
+该提交把运行时语义、报告生成与 workbench execution runtime 收束到稳定边界，页面层 UI 改动仍保留在后续 workbench/scene/template 专项边界中处理。
+
+### 10.72 阶段 0 继续推进: workbench/scene repair navigation surfaces 提交
+
+执行日期: 2026-07-07
+
+本轮把 workbench 执行结果、issue 队列、修复入口与 scene 页面接收导航意图的交互边界合并提交。由于 workbench session 测试会真实实例化 `ScenePanel` 并验证返回条、高亮与卡片定位，本轮没有把 workbench 和 scene 强行拆开，以保证提交自身的测试语义自洽。
+
+纳入边界:
+
+- `src/ui/panels/workbench/`
+  - `panel_v2.py`
+  - `quick_execution_detail.py`
+  - `execution_center.py`
+  - `recent_run_panel.py`
+  - `panel.py`
+  - `detail_controller.py`
+  - `document_path_controller.py`
+  - `config_management_detail.py`
+  - `feature_detail_panes.py`
+  - `scene_presets.py`
+- `src/ui/panels/scene_panel.py`
+- scene 拆分 helper:
+  - `scene_delivery_helpers.py`
+  - `scene_material_requirement_block.py`
+  - `scene_overview_projection.py`
+  - `scene_scope_sections.py`
+  - `scene_scope_service.py`
+  - `scene_style_override_sections.py`
+  - `scene_style_rules_block.py`
+- workbench/scene 测试:
+  - `tests/test_workbench_execution_center.py`
+  - `tests/test_recent_run_panel.py`
+  - `tests/test_quick_execution_detail_architecture.py`
+  - `tests/test_workbench_execution_architecture.py`
+  - `tests/test_workbench_navigation_architecture.py`
+  - `tests/test_workbench_detail_architecture.py`
+  - `tests/test_workbench_execution_session_architecture.py`
+  - `tests/test_workbench_document_path_architecture.py`
+  - `tests/test_workbench_document_path_semantics.py`
+  - `tests/test_scene_panel_architecture.py`
+  - `tests/test_scene_family_application.py`
+  - `tests/test_scene_family_registry.py`
+  - `tests/test_scene_journey_runtime.py`
+  - `tests/test_scene_overview_projection.py`
+  - `tests/test_scene_repair_routing.py`
+
+暂不纳入:
+
+- `src/ui/panels/template_*`
+- `tests/test_template_*`
+- `src/cli_runner.py`
+- `scripts/export_style_source_visual_audit.py`
+- `tests/test_style_source_visual_audit.py`
+- MD 文档自身。
+
+验证命令:
+
+```powershell
+python -m pytest -q tests\test_workbench_execution_center.py tests\test_recent_run_panel.py tests\test_quick_execution_detail_architecture.py tests\test_workbench_execution_architecture.py tests\test_workbench_navigation_architecture.py tests\test_workbench_detail_architecture.py tests\test_workbench_execution_session_architecture.py tests\test_workbench_document_path_architecture.py tests\test_workbench_document_path_semantics.py
+python -m pytest -q tests\test_scene_panel_architecture.py tests\test_scene_family_application.py tests\test_scene_family_registry.py tests\test_scene_journey_runtime.py tests\test_scene_overview_projection.py tests\test_scene_repair_routing.py
+python -m compileall -q src\ui\panels\workbench src\ui\panels\scene_panel.py src\ui\panels\scene_delivery_helpers.py src\ui\panels\scene_material_requirement_block.py src\ui\panels\scene_overview_projection.py src\ui\panels\scene_scope_sections.py src\ui\panels\scene_scope_service.py src\ui\panels\scene_style_override_sections.py src\ui\panels\scene_style_rules_block.py
+git -c core.quotepath=false diff --cached --check
+git -c core.quotepath=false diff --cached --name-only | rg "^(docs/|src/cli_runner.py|src/ui/panels/template_|tests/test_template_|scripts/export_style_source_visual_audit.py|tests/test_style_source_visual_audit.py)"
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| workbench pytest | `200 passed in 21.64s` |
+| scene pytest | `121 passed in 33.72s` |
+| compileall | 通过 |
+| `git diff --cached --check` | 首次发现 `src/ui/panels/workbench/quick_execution_detail.py` EOF 多空行；移除后通过 |
+| staged exclusion check | 未命中 template、docs、cli runner、visual audit 脚本 |
+| staged shortstat | `33 files changed, 24345 insertions(+), 1993 deletions(-)` |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `5f04546` | `Add workbench scene repair navigation surfaces` | `workbench-scene-repair-navigation-surfaces` |
+
+该提交让 workbench issue 修复入口能够稳定路由到 scene/template/assets/feature-card 等目标，并让 scene 页面具备可测试的导航意图接收、高亮与返回 workbench 能力。template 页面族仍在后续专项边界中提交。
+
+### 10.73 阶段 0 继续推进: template panel layout and copy guardrails 提交
+
+执行日期: 2026-07-07
+
+本轮收束 template 页面族的结构拆分、布局稳定性、样式预览入口与 UI 文案守门。该边界只包含 template 页面、template 相关测试，以及设计系统/布局/Windows 文本策略/文案守门测试；`cli_runner.py` 与 visual audit 导出脚本仍留到下一轮。
+
+纳入边界:
+
+- `src/ui/panels/template_caption_detail.py`
+- `src/ui/panels/template_elements_detail.py`
+- `src/ui/panels/template_elements_header_footer.py`
+- `src/ui/panels/template_elements_page_plan.py`
+- `src/ui/panels/template_elements_toc.py`
+- `src/ui/panels/template_format.py`
+- `src/ui/panels/template_other_detail.py`
+- `src/ui/panels/template_page_detail.py`
+- `src/ui/panels/template_panel.py`
+- `src/ui/panels/template_reference_detail.py`
+- `src/ui/panels/template_style_detail.py`
+- `src/ui/panels/template_style_preview.py`
+- `src/ui/panels/template_table_detail.py`
+- template/design/layout/copy 测试:
+  - `tests/test_template_dirty_state.py`
+  - `tests/test_template_format_projection.py`
+  - `tests/test_template_page_detail.py`
+  - `tests/test_template_panel_architecture.py`
+  - `tests/test_template_panel_source_text.py`
+  - `tests/test_template_remaining_details.py`
+  - `tests/test_template_secondary_details.py`
+  - `tests/test_template_style_detail.py`
+  - `tests/test_template_style_preview.py`
+  - `tests/test_design_system_refactor.py`
+  - `tests/test_ui_layout_hardening.py`
+  - `tests/test_windows_text_rendering_policy.py`
+  - `tests/test_ui_copy_guardrails.py`
+
+暂不纳入:
+
+- `src/cli_runner.py`
+- `scripts/export_style_source_visual_audit.py`
+- `tests/test_style_source_visual_audit.py`
+- MD 文档自身。
+
+验证命令:
+
+```powershell
+python -m pytest -q tests\test_template_dirty_state.py tests\test_template_format_projection.py tests\test_template_page_detail.py tests\test_template_panel_architecture.py tests\test_template_panel_source_text.py tests\test_template_remaining_details.py tests\test_template_secondary_details.py tests\test_template_style_detail.py tests\test_template_style_preview.py tests\test_design_system_refactor.py tests\test_ui_layout_hardening.py tests\test_windows_text_rendering_policy.py tests\test_ui_copy_guardrails.py
+python -m compileall -q src\ui\panels\template_caption_detail.py src\ui\panels\template_elements_detail.py src\ui\panels\template_elements_header_footer.py src\ui\panels\template_elements_page_plan.py src\ui\panels\template_elements_toc.py src\ui\panels\template_format.py src\ui\panels\template_other_detail.py src\ui\panels\template_page_detail.py src\ui\panels\template_panel.py src\ui\panels\template_reference_detail.py src\ui\panels\template_style_detail.py src\ui\panels\template_table_detail.py src\ui\panels\template_style_preview.py
+git -c core.quotepath=false diff --cached --check
+git -c core.quotepath=false diff --cached --name-only | rg "^(docs/|src/cli_runner.py|scripts/export_style_source_visual_audit.py|tests/test_style_source_visual_audit.py)"
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| template/design/layout/copy pytest | `242 passed in 74.96s` |
+| compileall | 通过 |
+| `git diff --cached --check` | 通过 |
+| staged exclusion check | 未命中 docs、cli runner、visual audit 脚本 |
+| staged shortstat | `26 files changed, 9085 insertions(+), 3732 deletions(-)` |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `53d8b36` | `Add template panel layout and copy guardrails` | `template-panel-layout-copy-guardrails` |
+
+该提交把 template 页面族从大面板内聚改为可测试的局部 detail/preview 结构，并补齐页面脏状态、文案泄漏、布局硬化和 Windows 文本渲染策略守门。
+
+### 10.74 阶段 0 继续推进: style source report visual audit 提交
+
+执行日期: 2026-07-07
+
+本轮收束 style source 报告摘要与视觉审计导出边界。`cli_runner.py` 在 JSON/Markdown 报告输出时传入 style source summary；新增脚本使用 Qt offscreen 导出 scene overview 与 workbench quick execute 的 style source 行截图与指标，测试覆盖导出结果、截图文件与关键显示文案。
+
+纳入边界:
+
+- `src/cli_runner.py`
+  - 运行后报告写入 `style_source_summary`。
+- `scripts/export_style_source_visual_audit.py`
+  - 导出 scene/workbench style source 行全图、局部截图与 metrics JSON。
+- `tests/test_style_source_visual_audit.py`
+  - 覆盖导出入口、metrics entry、截图文件存在性与关键文案。
+
+验证命令:
+
+```powershell
+python -m pytest -q tests\test_style_source_visual_audit.py
+python -m compileall -q src\cli_runner.py scripts\export_style_source_visual_audit.py
+git -c core.quotepath=false diff --cached --check
+git -c core.quotepath=false diff --cached --name-only | rg "^docs/"
+```
+
+验证结果:
+
+| 检查项 | 结果 |
+| --- | --- |
+| visual audit pytest | `1 passed in 1.88s` |
+| compileall | 通过 |
+| `git diff --cached --check` | 通过 |
+| staged docs exclusion check | 未命中 docs |
+| staged shortstat | `3 files changed, 260 insertions(+)` |
+
+本轮提交已完成:
+
+| commit | message | 边界 |
+| --- | --- | --- |
+| `64bb446` | `Add style source report visual audit` | `style-source-report-visual-audit` |
+
+该提交补上 style source 的报告出口与可复现视觉审计入口，避免样式来源行只停留在页面测试里而缺少可人工复核的截图证据。
