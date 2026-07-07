@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from scripts import engineering_gate
+
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -7,20 +9,128 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_release_shell_files_exist():
     required_files = [
         ROOT / "README.md",
+        ROOT / ".github" / "workflows" / "engineering-gate.yml",
+        ROOT / ".github" / "workflows" / "scene-matrix-release-gate.yml",
         ROOT / "install_env.bat",
         ROOT / "package_release.bat",
         ROOT / "check_public_release.bat",
         ROOT / "clean_public_release.bat",
         ROOT / "scripts" / "windows" / "install_env.bat",
+        ROOT / "scripts" / "windows" / "engineering_gate.bat",
         ROOT / "scripts" / "windows" / "package_release.bat",
         ROOT / "scripts" / "windows" / "check_public_release.bat",
         ROOT / "scripts" / "windows" / "clean_public_release.bat",
         ROOT / "scripts" / "check_public_release.py",
+        ROOT / "scripts" / "export_scene_ambiguity_clarification_ui_audit.py",
+        ROOT / "scripts" / "export_scene_ambiguous_boundary_audit.py",
+        ROOT / "scripts" / "export_scene_business_capability_matrix_audit.py",
+        ROOT / "scripts" / "export_scene_boundary_readiness_reconciliation_audit.py",
+        ROOT / "scripts" / "export_scene_boundary_guarded_completion_audit.py",
+        ROOT / "scripts" / "export_scene_boundary_subject_release_continuity_audit.py",
+        ROOT / "scripts" / "export_scene_release_closure_ledger_audit.py",
+        ROOT
+        / "scripts"
+        / "export_scene_boundary_maturity_release_envelope_audit.py",
+        ROOT / "scripts" / "export_scene_retained_gap_exit_criteria_audit.py",
+        ROOT / "scripts" / "export_scene_release_residual_ratio_ledger_audit.py",
+        ROOT / "scripts" / "export_scene_release_residual_explanation_audit.py",
+        ROOT / "scripts" / "export_scene_release_acceptance_certificate_audit.py",
+        ROOT / "scripts" / "export_scene_boundary_subject_release_dossier_audit.py",
+        ROOT / "scripts" / "export_scene_control_consistency_audit.py",
+        ROOT / "scripts" / "export_scene_control_runtime_consistency_audit.py",
+        ROOT / "scripts" / "export_scene_count_profile_audit.py",
+        ROOT / "scripts" / "export_scene_delivery_preset_audit.py",
+        ROOT / "scripts" / "export_scene_delivery_preset_execution_audit.py",
+        ROOT / "scripts" / "export_scene_external_handoff_contract_audit.py",
+        ROOT / "scripts" / "export_scene_family_subscene_audit.py",
+        ROOT / "scripts" / "export_scene_family_fixture_depth_audit.py",
+        ROOT / "scripts" / "export_scene_formula_output_watermark_audit.py",
+        ROOT / "scripts" / "export_scene_high_frequency_completeness.py",
+        ROOT / "scripts" / "export_scene_high_frequency_task_lexicon_audit.py",
+        ROOT / "scripts" / "export_scene_import_handoff_audit.py",
+        ROOT / "scripts" / "export_scene_input_source_audit.py",
+        ROOT / "scripts" / "export_scene_non_subject_release_trace_attribution_audit.py",
+        ROOT / "scripts" / "export_scene_release_trace_partition_guard_audit.py",
+        ROOT / "scripts" / "export_scene_release_projection_surface_parity_audit.py",
+        ROOT / "scripts" / "export_scene_material_schema_audit.py",
+        ROOT / "scripts" / "export_scene_material_repair_flow_audit.py",
+        ROOT / "scripts" / "export_scene_fixed_layout_profile_audit.py",
+        ROOT / "scripts" / "export_scene_report_artifact_drilldown_audit.py",
+        ROOT / "scripts" / "export_scene_residual_warning_governance_audit.py",
+        ROOT / "scripts" / "export_scene_terminal_release_exception_audit.py",
+        ROOT / "scripts" / "export_scene_matrix_dashboard.py",
+        ROOT / "scripts" / "export_scene_matrix_drilldown.py",
+        ROOT / "scripts" / "export_scene_object_preflight_action_audit.py",
+        ROOT / "scripts" / "export_scene_plugin_boundary_confirmation_audit.py",
+        ROOT / "scripts" / "export_scene_product_maturity_upgrade_audit.py",
+        ROOT / "scripts" / "export_scene_request_cell_registry.py",
+        ROOT / "scripts" / "export_scene_user_journey_fixture_audit.py",
+        ROOT / "scripts" / "export_scene_word_risk_closure_audit.py",
         ROOT / "docs" / "OPEN_SOURCE_MIT_RELEASE_CHECKLIST.md",
     ]
 
     for path in required_files:
         assert path.exists(), f"Missing release-shell file: {path}"
+
+
+def test_scene_matrix_release_gate_is_wired_into_ci_workflow():
+    workflow = (
+        ROOT / ".github" / "workflows" / "scene-matrix-release-gate.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "Scene Matrix Release Gate" in workflow
+    assert "workflow_dispatch" in workflow
+    assert "python scripts/verify_scene_matrix_release_gate.py" in workflow
+    assert "tests/test_scene_ambiguity_clarification_ui_audit.py" in workflow
+    assert "tests/test_scene_ambiguous_boundary_audit.py" in workflow
+    assert "tests/test_scene_boundary_capability_matrix.py" in workflow
+    assert "tests/test_scene_boundary_readiness_reconciliation_audit.py" in workflow
+    assert "tests/test_scene_boundary_guarded_completion_audit.py" in workflow
+    assert "tests/test_scene_boundary_subject_release_continuity_audit.py" in workflow
+    assert "tests/test_scene_release_closure_ledger_audit.py" in workflow
+    assert (
+        "tests/test_scene_boundary_maturity_release_envelope_audit.py" in workflow
+    )
+    assert "tests/test_scene_retained_gap_exit_criteria_audit.py" in workflow
+    assert "tests/test_scene_release_residual_ratio_ledger_audit.py" in workflow
+    assert "tests/test_scene_release_residual_explanation_audit.py" in workflow
+    assert "tests/test_scene_release_acceptance_certificate_audit.py" in workflow
+    assert "tests/test_scene_boundary_subject_release_dossier_audit.py" in workflow
+    assert "tests/test_scene_business_capability_matrix_audit.py" in workflow
+    assert "tests/test_scene_control_consistency_audit.py" in workflow
+    assert "tests/test_scene_control_runtime_consistency_audit.py" in workflow
+    assert "tests/test_scene_count_profile_audit.py" in workflow
+    assert "tests/test_scene_delivery_preset_audit.py" in workflow
+    assert "tests/test_scene_delivery_preset_execution_audit.py" in workflow
+    assert "tests/test_scene_external_handoff_contract_audit.py" in workflow
+    assert "tests/test_scene_family_fixture_depth_audit.py" in workflow
+    assert "tests/test_scene_family_subscene_audit.py" in workflow
+    assert "tests/test_scene_formula_output_watermark_audit.py" in workflow
+    assert "tests/test_scene_word_risk_closure_audit.py" in workflow
+    assert "tests/test_scene_sample_fixture_regression.py" in workflow
+    assert "tests/test_scene_request_cell_registry_browser.py" in workflow
+    assert "tests/test_scene_user_journey_fixture_audit.py" in workflow
+    assert "tests/test_scene_high_frequency_completeness_audit.py" in workflow
+    assert "tests/test_scene_high_frequency_request_samples.py" in workflow
+    assert "tests/test_scene_high_frequency_task_lexicon_audit.py" in workflow
+    assert "tests/test_scene_import_handoff_audit.py" in workflow
+    assert "tests/test_scene_input_source_audit.py" in workflow
+    assert "tests/test_scene_non_subject_release_trace_attribution_audit.py" in workflow
+    assert "tests/test_scene_release_trace_partition_guard_audit.py" in workflow
+    assert "tests/test_scene_release_projection_surface_parity_audit.py" in workflow
+    assert "tests/test_scene_material_schema_audit.py" in workflow
+    assert "tests/test_scene_material_repair_flow_audit.py" in workflow
+    assert "tests/test_scene_fixed_layout_profile_audit.py" in workflow
+    assert "tests/test_scene_report_artifact_drilldown_audit.py" in workflow
+    assert "tests/test_scene_residual_warning_governance_audit.py" in workflow
+    assert "tests/test_scene_terminal_release_exception_audit.py" in workflow
+    assert "tests/test_scene_matrix_dashboard.py" in workflow
+    assert "tests/test_scene_matrix_drilldown.py" in workflow
+    assert "tests/test_scene_object_preflight_action_audit.py" in workflow
+    assert "tests/test_scene_plugin_boundary_confirmation_audit.py" in workflow
+    assert "tests/test_scene_product_maturity_upgrade_audit.py" in workflow
+    assert "tests/test_scene_coverage_manifest.py" in workflow
+    assert "tests/test_scene_parameter_ownership.py" in workflow
 
 
 def test_root_batch_wrappers_delegate_to_windows_scripts():
@@ -35,15 +145,44 @@ def test_root_batch_wrappers_delegate_to_windows_scripts():
     assert 'call "%~dp0scripts\\windows\\clean_public_release.bat" %*' in clean_wrapper
 
 
-def test_windows_install_script_bootstraps_env_from_requirements():
+def test_windows_install_script_bootstraps_env_from_pyproject_extras():
     script = (ROOT / "scripts" / "windows" / "install_env.bat").read_text(encoding="utf-8")
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
     assert 'py -3.14 --version' in script
     assert 'python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"' in script
-    assert '".venv\\Scripts\\python.exe" -m pip install -r requirements.txt' in script
-    assert "pyinstaller" in requirements.lower()
+    assert '".venv\\Scripts\\python.exe" -m pip install -e ".[dev,build]"' in script
+    assert "pyinstaller" not in requirements.lower()
+    assert "pyinstaller" in pyproject.lower()
     assert "Environment is ready" in script
+
+
+def test_windows_engineering_gate_script_delegates_to_python_gate():
+    script = (ROOT / "scripts" / "windows" / "engineering_gate.bat").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'cd /d "%~dp0..\\.."' in script
+    assert "python scripts\\engineering_gate.py %*" in script
+    assert "exit /b %ERRORLEVEL%" in script
+
+
+def test_engineering_gate_ci_installs_dev_dependencies_from_pyproject():
+    workflow = (ROOT / ".github" / "workflows" / "engineering-gate.yml").read_text(
+        encoding="utf-8"
+    )
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert "python scripts/engineering_gate.py" in workflow
+    assert 'python -m pip install -e ".[dev]"' in workflow
+    assert any(
+        command[1:3] == ("-m", "pytest")
+        for command, _summarize_success in engineering_gate.BASELINE_COMMANDS
+    )
+    assert "pytest" not in requirements.lower()
+    assert "pytest" in pyproject.lower()
 
 
 def test_windows_package_script_builds_pyside6_release_and_copies_notices():
@@ -80,6 +219,10 @@ def test_windows_clean_script_removes_local_release_artifacts():
     assert 'del /q "demo_crash.log"' in script
     assert 'del /q "alavette_form.log"' in script
     assert 'for %%F in (*.spec)' in script
+    assert "Failed to remove .venv" in script
+    assert "Failed to remove build" in script
+    assert "Failed to remove dist" in script
+    assert "Failed to remove generated spec" in script
 
 
 def test_public_release_checker_and_readme_document_mit_source_release():

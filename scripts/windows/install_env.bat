@@ -69,7 +69,7 @@ if errorlevel 1 (
 )
 
 echo [4/4] Install dependencies
-".venv\Scripts\python.exe" -m pip install -r requirements.txt
+".venv\Scripts\python.exe" -m pip install -e ".[dev,build]"
 if errorlevel 1 (
     echo [ERROR] Failed to install dependencies
     pause

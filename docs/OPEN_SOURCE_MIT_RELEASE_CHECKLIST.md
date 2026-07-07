@@ -64,5 +64,6 @@
 - [ ] `requirements.txt` 使用 `PySide6`，不再依赖 `PyQt5`
 - [ ] 若刚执行过安装 / 打包 / 预览，先运行 `.\clean_public_release.bat`
 - [ ] 运行 `.\check_public_release.bat --strict`
+- [ ] GitHub Actions 中 `Scene Matrix Release Gate` 已通过
 - [ ] 运行 `pytest tests -v`
 - [ ] 确认 `build/`、`dist/`、`.venv/` 等目录不会进入公开仓库

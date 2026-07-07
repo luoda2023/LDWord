@@ -14,6 +14,19 @@ venv/
 
 # Test output (generated products)
 tests/output/
+artifacts/
+/.pytest_tmp/
+/.codex_tmp*/
+/tmp_*/
+exam_masters/user/
+/exam_masters/*.docx
+exam_masters/builtin/*.docx
+!exam_masters/builtin/default_exam_v10.docx
+!exam_masters/builtin/default_exam_v20.docx
+exam_samples/
+/manifest.json
+/request_cell_report.md
+/*.docx
 *_new.docx
 *_对比稿.docx
 *_报告.json
@@ -27,6 +40,7 @@ alavette_form.log
 crash*.txt
 error*.txt
 diag*.txt
+debug_*.txt
 test_results.txt
 
 # Local UI/debug captures and scratch scripts
@@ -38,6 +52,8 @@ test_results.txt
 /test_config.txt
 /.ui_audit_screenshots/
 /tmp_preview_audit/
+/out*.txt
+/.tmp_*.txt
 /Untitled-*.txt
 *.bak
 
@@ -49,3 +65,4 @@ test_results.txt
 
 # Local git worktrees
 .worktrees/
+.claude/worktrees/

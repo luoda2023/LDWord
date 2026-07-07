@@ -1,0 +1,87 @@
+name: Scene Matrix Release Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  scene-matrix-release-gate:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install scene-matrix dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install python-docx lxml PyYAML pytest
+
+      - name: Run scene matrix release gate
+        run: python scripts/verify_scene_matrix_release_gate.py
+
+      - name: Run scene matrix regression tests
+        run: >
+          python -m pytest
+          tests/test_scene_coverage_manifest.py
+          tests/test_scene_ambiguity_clarification_ui_audit.py
+          tests/test_scene_ambiguous_boundary_audit.py
+          tests/test_scene_boundary_capability_matrix.py
+          tests/test_scene_boundary_readiness_reconciliation_audit.py
+          tests/test_scene_boundary_guarded_completion_audit.py
+          tests/test_scene_boundary_subject_release_continuity_audit.py
+          tests/test_scene_boundary_subject_release_dossier_audit.py
+          tests/test_scene_business_capability_matrix_audit.py
+          tests/test_scene_control_consistency_audit.py
+          tests/test_scene_control_runtime_consistency_audit.py
+          tests/test_scene_count_profile_audit.py
+          tests/test_scene_delivery_preset_audit.py
+          tests/test_scene_delivery_preset_execution_audit.py
+          tests/test_scene_external_handoff_contract_audit.py
+          tests/test_scene_family_fixture_depth_audit.py
+          tests/test_scene_family_subscene_audit.py
+          tests/test_scene_formula_output_watermark_audit.py
+          tests/test_scene_high_frequency_completeness_audit.py
+          tests/test_scene_high_frequency_request_samples.py
+          tests/test_scene_high_frequency_task_lexicon_audit.py
+          tests/test_scene_import_handoff_audit.py
+          tests/test_scene_input_source_audit.py
+          tests/test_scene_non_subject_release_trace_attribution_audit.py
+          tests/test_scene_release_trace_partition_guard_audit.py
+          tests/test_scene_release_projection_surface_parity_audit.py
+          tests/test_scene_release_closure_ledger_audit.py
+          tests/test_scene_boundary_maturity_release_envelope_audit.py
+          tests/test_scene_retained_gap_exit_criteria_audit.py
+          tests/test_scene_release_residual_ratio_ledger_audit.py
+          tests/test_scene_release_residual_explanation_audit.py
+          tests/test_scene_release_acceptance_certificate_audit.py
+          tests/test_scene_material_schema_audit.py
+          tests/test_scene_material_repair_flow_audit.py
+          tests/test_scene_fixed_layout_profile_audit.py
+          tests/test_scene_report_artifact_drilldown_audit.py
+          tests/test_scene_residual_warning_governance_audit.py
+          tests/test_scene_terminal_release_exception_audit.py
+          tests/test_scene_matrix_dashboard.py
+          tests/test_scene_matrix_drilldown.py
+          tests/test_scene_object_preflight_action_audit.py
+          tests/test_scene_pack_slot_audit.py
+          tests/test_scene_parameter_ownership.py
+          tests/test_scene_plugin_boundary_confirmation_audit.py
+          tests/test_scene_product_maturity_upgrade_audit.py
+          tests/test_scene_request_cell_registry_browser.py
+          tests/test_scene_rule_source_governance.py
+          tests/test_scene_sample_fixture_regression.py
+          tests/test_scene_user_journey_fixture_audit.py
+          tests/test_scene_word_risk_closure_audit.py
+          -q
