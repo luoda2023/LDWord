@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.config.loader import load_template, save_template
+from src.config.scene import SceneWorkspace
 from src.config.style_semantics import apply_style_special_indent
 from src.config.template import StyleConfig, TemplateConfig
 from src.qt_api import QApplication, Qt
@@ -53,6 +54,43 @@ def test_style_detail_syncs_widget_values_from_template():
     try:
         detail.set_template(template)
 
+        assert detail._style_surface.property("style_surface_owner_kind") == (
+            "template_body_style"
+        )
+        assert detail._style_surface.property("style_surface_active_label") == "正文排版"
+        assert detail._style_surface.property("style_surface_source_label") == (
+            "模板默认样式"
+        )
+        assert detail._style_surface.property("style_surface_editable") is True
+        assert detail._style_owner_status is None
+        assert detail._style_management_block.property("style_management_mode") == (
+            "template_baseline_edit"
+        )
+        assert detail._style_management_block.property(
+            "style_management_content_plan"
+        ) == "source|scope|editor"
+        assert detail._style_management_block.property(
+            "style_management_slot_plan"
+        ) == "source|scope|editor"
+        assert detail._style_management_block.property(
+            "style_management_has_rules"
+        ) is False
+        assert detail._style_management_block.property(
+            "style_management_has_policy"
+        ) is False
+        assert detail._style_management_block.property(
+            "style_management_has_policy_slot"
+        ) is False
+        assert detail._style_management_block.property(
+            "style_management_policy_control_ready"
+        ) is False
+        assert detail._style_management_block.property(
+            "style_management_has_preview"
+        ) is False
+        assert detail._style_management_block.property(
+            "style_management_has_legacy_widgets"
+        ) is False
+        assert not hasattr(detail, "_template_policy_deck")
         assert detail._font_cn.selected_font() == "黑体"
         assert detail._font_en.selected_font() == "Arial"
         assert detail._size_combo.current_pt() == 14
@@ -115,23 +153,109 @@ def test_style_detail_syncs_spacing_units_from_template():
         detail.close()
 
 
+def test_style_detail_keeps_scene_overrides_out_of_body_layout():
+    _app()
+    detail = StyleDetail()
+    template = TemplateConfig()
+    scene = SceneWorkspace(scene_id="custom", template_id="default")
+    scene.section_styles["references_body"] = StyleConfig(font_cn="黑体")
+
+    try:
+        detail.set_scene(scene)
+        detail.set_template(template)
+
+        assert not hasattr(detail, "_template_policy_deck")
+        assert detail._style_management_block.property(
+            "style_management_slot_plan"
+        ) == "source|scope|editor"
+        assert detail._style_management_block.property(
+            "style_management_has_policy"
+        ) is False
+        assert detail.focus_navigation_field("scene.section_styles.references_body") is False
+    finally:
+        detail.close()
+
+
 def test_style_detail_reuses_shared_controls():
     source = (ROOT / "src/ui/panels/template_style_detail.py").read_text(encoding="utf-8")
+    editing_section_source = (
+        ROOT / "src/shared/ui/style_editing_section.py"
+    ).read_text(encoding="utf-8")
+    management_source = (
+        ROOT / "src/shared/ui/style_management_block.py"
+    ).read_text(encoding="utf-8")
+    surface_source = (
+        ROOT / "src/shared/ui/paragraph_style_surface.py"
+    ).read_text(encoding="utf-8")
+    owner_state_source = (
+        ROOT / "src/shared/ui/style_owner_state.py"
+    ).read_text(encoding="utf-8")
+    style_object_builder_source = (
+        ROOT / "src/ui/panels/style_object_projection_builders.py"
+    ).read_text(encoding="utf-8")
+    editor_source = (
+        ROOT / "src/shared/ui/paragraph_style_editor.py"
+    ).read_text(encoding="utf-8")
     format_source = (ROOT / "src/ui/panels/template_format.py").read_text(encoding="utf-8")
 
-    assert "SummaryGrid(" in source
-    assert "Card(" in source
-    assert "FontCombo(" in source
-    assert "SizeCombo(" in source
-    assert "SpacingInput(" in source
-    assert "SpecialIndentInput(" in source
-    assert "IndentInput(" in source
-    assert "ToggleSwitch(" in source
-    assert "InspectorForm(" in source
-    assert ".add_grid(" in source
+    assert "StyleManagementBlock(" in source
+    assert "build_template_body_style_projection" in source
+    assert "scene_style_policy_key_from_field_id" not in source
+    assert "StylePolicyControlDeck(" not in source
+    assert "_template_policy_deck" not in source
+    assert "tpl_style_scene_policy" not in source
+    assert "template_body_scene_policy" not in source
+    assert "def _policy_key_from_navigation_field" not in source
+    assert "def _style_variant_key" not in source
+    assert "StyleObjectProjection" in style_object_builder_source
+    assert "apply_style_object_projection(" in source
+    assert "StyleEditingSection(" not in source
+    assert "DetailSummaryCard(" in management_source
+    assert "TemplateSummaryCard(" not in management_source
+    summary_card_source = (
+        ROOT / "src/shared/ui/template_summary_card.py"
+    ).read_text(encoding="utf-8")
+    assert "DetailSummaryHeader(" in summary_card_source
+    assert "TemplateSummaryHeader(" not in summary_card_source
+    assert "StyleEditingSection(" in management_source
+    assert "StyleOwnerStatusStrip(" in editing_section_source
+    assert "StyleControlSurface(" not in source
+    assert "StyleControlSurface(" in editing_section_source
+    assert "template_body_style_owner_state" not in source
+    assert "template_body_style_owner_state" in style_object_builder_source
+    assert "template_body_style_owner_state" in owner_state_source
+    assert "source_status" in owner_state_source
+    assert "scope_status" in owner_state_source
+    assert "edit_status" in owner_state_source
+    assert "ParagraphStyleEditor(" not in source
+    assert "StyleControlSurfaceState(" not in source
+    assert "widget_for_field(target)" in source
+    assert "NavigationHighlighter" in source
+    assert "当前执行问题定位" not in source
+    assert "_navigation_highlight_base_style" not in source
+    assert "mapping: dict[str, QWidget]" not in source
+    assert "_layout_widget_for_item" not in source
+    assert "_add_style_layout_grid" not in source
+    assert "FontCombo(" not in source
+    assert "SizeCombo(" not in source
+    assert "SpacingInput(" not in source
+    assert "SpecialIndentInput(" not in source
+    assert "IndentInput(" not in source
+    assert "ToggleSwitch(" not in source
+    assert "FontCombo(" in editor_source
+    assert "SizeCombo(" in editor_source
+    assert "SpacingInput(" in editor_source
+    assert "SpecialIndentInput(" in editor_source
+    assert "IndentInput(" in editor_source
+    assert "ToggleSwitch(" in editor_source
+    assert "ParagraphStyleEditor(" in surface_source
+    assert "Card(" in surface_source
+    assert "InspectorForm(" in surface_source
+    assert ".add_grid(" in surface_source
+    assert "style_field_layout_rows" in surface_source
     assert "TemplateSplitColumns(" not in source
     assert "TemplateFormGrid(" not in source
-    assert "template_form_row(" in source
+    assert "template_form_row(" in surface_source
     assert "_build_split_form_columns" not in source
     assert "_build_stacked_form_rows" not in source
     assert "_normalize_form_rows" not in source
@@ -253,6 +377,39 @@ def test_style_detail_sections_keep_left_right_groups_near_equal_width():
         assert abs(text_left_row.width() - text_right_row.width()) <= 16
         assert abs(alignment_left_row.width() - alignment_right_row.width()) <= 16
         assert abs(spacing_left_row.width() - spacing_right_row.width()) <= 16
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_style_detail_indent_and_spacing_pairs_stay_inline_when_narrow():
+    app = _app()
+    detail = StyleDetail()
+
+    try:
+        detail.set_template(TemplateConfig())
+        detail.resize(580, 900)
+        detail.show()
+        for _ in range(5):
+            app.processEvents()
+
+        left_row = detail._left_indent.parent()
+        right_row = detail._right_indent.parent()
+        before_row = detail._space_before.parent()
+        after_row = detail._space_after.parent()
+
+        def row_y(row) -> int:
+            return row.mapTo(detail, row.rect().topLeft()).y()
+
+        debug = (
+            f"detail={detail.width()} card={detail._alignment_indent_card.width()} "
+            f"left_width={left_row.width()} right_width={right_row.width()} "
+            f"left_hint={left_row.sizeHint().width()} right_hint={right_row.sizeHint().width()} "
+            f"before_width={before_row.width()} after_width={after_row.width()} "
+            f"before_hint={before_row.sizeHint().width()} after_hint={after_row.sizeHint().width()}"
+        )
+        assert row_y(left_row) == row_y(right_row), debug
+        assert row_y(before_row) == row_y(after_row), debug
     finally:
         detail.close()
         app.processEvents()

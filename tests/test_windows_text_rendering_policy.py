@@ -24,6 +24,18 @@ def test_gui_startup_prefers_windows_cjk_font_with_full_hinting():
     assert "PreferFullHinting" in source
 
 
+def test_gui_startup_wires_splash_to_main_window_readiness_signals():
+    source = (ROOT / "main.py").read_text(encoding="utf-8")
+
+    assert "from src.ui.startup_splash import StartupSplash" in source
+    assert "splash = StartupSplash()" in source
+    assert "splash.show()" in source
+    assert "win.startup_status_changed.connect(splash.set_status)" in source
+    assert "win.startup_ready.connect(_show_main_window)" in source
+    assert "QTimer.singleShot(80, _reveal_main_window)" in source
+    assert "splash.finish_and_close()" in source
+
+
 def test_quick_execution_drop_area_avoids_richtext_title_path():
     source = (ROOT / "src/ui/panels/workbench/quick_execution_drop_area.py").read_text(encoding="utf-8")
 

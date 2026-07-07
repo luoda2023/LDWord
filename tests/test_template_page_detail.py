@@ -10,10 +10,17 @@ from src.config.template import TemplateConfig
 from src.qt_api import QApplication, Qt
 from src.shared.ui import DashedSeparator, SummaryGrid
 from src.shared.ui.form_row import FormRow
+from src.shared.ui.theme import get_theme
 from src.shared.ui.toast import Toast
 from src.ui.bridge import PanelBridge
+from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
+from src.ui.panels.template_caption_detail import CaptionDetail
+from src.ui.panels.template_elements_detail import ElementsDetail
 from src.ui.panels.template_page_detail import PageSetupDetail
 from src.ui.panels.template_panel import TemplatePanel
+from src.ui.panels.template_reference_detail import ReferenceDetail
+from src.ui.panels.template_style_detail import StyleDetail
+from src.ui.panels.template_table_detail import TableCaptionDetail
 
 
 def _app():
@@ -43,29 +50,80 @@ def test_page_setup_detail_syncs_widget_values_from_template():
         assert detail._section_break_combo.currentData() == "nextPage"
         assert isinstance(detail._summary_grid, SummaryGrid)
         assert detail._summary_grid._tile_style == "module"
-        assert len(detail._summary_grid.items()) == 5
+        assert len(detail._summary_grid.items()) == 3
         summary_items = {item.key: item for item in detail._summary_grid.items()}
-        assert summary_items["paper"].icon_name == "layout"
-        assert summary_items["orientation"].icon_name == "ruler"
-        assert summary_items["section"].icon_name == "layers"
+        assert summary_items["paper_layout"].icon_name == "layout"
         assert summary_items["margin_gutter"].icon_name == "scan"
         assert summary_items["header_footer"].icon_name == "panel-top"
-        assert detail._summary_grid.value_for("paper") == "A3"
-        assert detail._summary_grid.value_for("orientation") == "横向"
-        assert detail._summary_grid.value_for("section") == "下一页分节"
-        assert summary_items["paper"].column_span == 2
-        assert summary_items["orientation"].column_span == 2
-        assert summary_items["section"].column_span == 2
-        assert summary_items["margin_gutter"].label == "页边距与装订线"
-        assert summary_items["margin_gutter"].column_span == 3
-        assert detail._summary_grid.value_for("margin_gutter") == "上 2.5 cm  下 3.8 cm"
-        assert detail._summary_grid.detail_for("margin_gutter") == "左 3.2 cm  右 3.2 cm  装订线 0.8 cm"
-        assert summary_items["header_footer"].label == "页眉与页脚"
-        assert summary_items["header_footer"].column_span == 3
-        assert detail._summary_grid.value_for("header_footer") == "页眉距离 1.6 cm"
-        assert detail._summary_grid.detail_for("header_footer") == "页脚距离 3 cm"
+        assert detail._summary_grid.value_for("paper_layout") == "A3 / 横向"
+        assert detail._summary_grid.detail_for("paper_layout") == "分节 下一页分节"
+        assert summary_items["paper_layout"].column_span == 4
+        assert summary_items["margin_gutter"].label == "页边距"
+        assert summary_items["margin_gutter"].column_span == 4
+        assert detail._summary_grid.value_for("margin_gutter") == "上下 2.5/3.8 cm"
+        assert detail._summary_grid.detail_for("margin_gutter") == "左右 3.2/3.2 cm / 装订 0.8 cm"
+        assert "装订线 0.8 cm" in summary_items["margin_gutter"].tooltip
+        assert summary_items["header_footer"].label == "页眉页脚"
+        assert summary_items["header_footer"].column_span == 4
+        assert detail._summary_grid.value_for("header_footer") == "页眉/页脚 1.6/3 cm"
+        assert detail._summary_grid.detail_for("header_footer") == "距离页面边缘"
         assert summary_items["margin_gutter"].detail_emphasis is True
         assert summary_items["header_footer"].detail_emphasis is True
+    finally:
+        detail.close()
+
+
+def test_page_setup_detail_summary_tiles_prefer_single_desktop_row():
+    app = _app()
+    detail = PageSetupDetail()
+
+    try:
+        detail.set_template(TemplateConfig())
+        detail.resize(1280, 900)
+        detail.show()
+        app.processEvents()
+
+        grid = detail._summary_grid
+        assert grid._render_columns == 12
+        assert grid._layout.itemAtPosition(0, 0).widget() is grid._tiles["paper_layout"]
+        assert grid._layout.itemAtPosition(0, 4).widget() is grid._tiles["margin_gutter"]
+        assert grid._layout.itemAtPosition(0, 8).widget() is grid._tiles["header_footer"]
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_page_setup_detail_focus_navigation_field_highlights_page_controls():
+    _app()
+    detail = PageSetupDetail()
+    try:
+        detail.set_template(TemplateConfig())
+
+        assert detail.focus_navigation_field("template.page_setup.margin.left_cm")
+        assert detail._page_inputs["left_cm"].property("navigation_field_highlight") is True
+        assert "左页边距" in detail._page_inputs["left_cm"].toolTip()
+        assert (
+            "template.page_setup.margin.left_cm"
+            not in detail._page_inputs["left_cm"].toolTip()
+        )
+        assert (
+            "template.page_setup.margin.left_cm"
+            == detail._page_inputs["left_cm"].property("navigation_field_raw_label")
+        )
+
+        assert detail.focus_navigation_field("template.page_setup.header_distance_cm")
+        assert (
+            detail._page_inputs["header_distance_cm"].property(
+                "navigation_field_highlight"
+            )
+            is True
+        )
+        assert detail.focus_navigation_field("template.section.section_break_type")
+        assert (
+            detail._section_break_combo.property("navigation_field_highlight")
+            is True
+        )
+        assert detail.focus_navigation_field("template.page_setup.nope") is False
     finally:
         detail.close()
 
@@ -84,7 +142,7 @@ def test_template_panel_page_setup_edit_updates_preview_and_dirty_state():
         assert panel._current_template.page_setup.margin.top_cm == 4.5
         assert "4.5" in panel._overview_detail._rows["page"]._value.text()
         assert "4.5" in panel._nav_cards["tpl_page"]._full_subtitle
-        assert panel._page_detail._summary_grid.value_for("margin_gutter") == "上 4.5 cm  下 3.8 cm"
+        assert panel._page_detail._summary_grid.value_for("margin_gutter") == "上下 4.5/3.8 cm"
         assert panel._page_detail._restore_entry_btn.isEnabled() is True
         assert panel._page_detail._save_btn.isEnabled() is True
         assert bridge.is_template_dirty() is True
@@ -98,7 +156,7 @@ def test_template_panel_page_setup_edit_updates_preview_and_dirty_state():
 def test_page_setup_detail_reuses_shared_spacing_input_control():
     source = (ROOT / "src/ui/panels/template_page_detail.py").read_text(encoding="utf-8")
 
-    assert "SummaryGrid(" in source
+    assert "TemplateSummaryCard(" in source
     assert "SpacingInput(" in source
     assert "InspectorForm(" in source
     assert ".add_grid(" in source
@@ -185,6 +243,103 @@ def test_summary_grid_is_exported_from_shared_ui_package():
 
     assert '"SummaryGrid": (".summary_grid", "SummaryGrid")' in source
     assert '"SummaryGridItem": (".summary_grid", "SummaryGridItem")' in source
+    assert '"TemplateSummaryCard": (".template_summary_card", "TemplateSummaryCard")' in source
+    assert '"apply_template_summary_action_button": (".template_summary_card", "apply_template_summary_action_button")' in source
+
+
+def test_template_summary_header_actions_share_compact_geometry():
+    app = _app()
+    bridge = PanelBridge()
+    details = [
+        PageSetupDetail(),
+        StyleDetail(),
+        TableCaptionDetail(),
+        HeadingNumberingPanel(bridge),
+    ]
+    template = TemplateConfig()
+
+    try:
+        for detail in details:
+            if hasattr(detail, "on_template_changed"):
+                detail.on_template_changed(template)
+            else:
+                detail.set_template(template)
+            if hasattr(detail, "set_save_enabled"):
+                detail.set_save_enabled(True)
+            detail.resize(1280, 720)
+            detail.show()
+            app.processEvents()
+
+            restore = getattr(detail, "_restore_entry_btn", None) or getattr(detail, "_restore_btn")
+            save = getattr(detail, "_save_btn")
+
+            assert detail._summary_card.header.height() == 48
+            assert detail._summary_card.height() == detail._summary_card._content_height_hint()
+            assert restore.sizeHint().height() == 34
+            assert save.sizeHint().height() == 34
+            assert restore.property("variant") == "ghost-primary"
+            assert save.property("variant") == "primary"
+    finally:
+        for detail in details:
+            detail.close()
+        app.processEvents()
+
+
+def test_template_parameter_details_use_shared_16px_card_stack_rhythm():
+    app = _app()
+    template = TemplateConfig()
+    details = [
+        PageSetupDetail(),
+        StyleDetail(),
+        TableCaptionDetail(),
+        ElementsDetail(),
+        ElementsDetail(scope="toc"),
+        CaptionDetail(),
+        ReferenceDetail(),
+    ]
+
+    try:
+        theme = get_theme()
+        expected_gap = theme.template_detail_section_gap
+
+        for detail in details:
+            detail.set_template(template)
+            detail.resize(1280, 900)
+            detail.show()
+            app.processEvents()
+
+            assert expected_gap == 16
+            assert detail.layout().spacing() == expected_gap
+
+            if hasattr(detail, "_style_management_block"):
+                block = detail._style_management_block
+                summary = block.card
+                next_widget = block.editing_section
+                assert block.layout().spacing() == expected_gap
+            else:
+                summary = detail._summary_card
+                next_widget = getattr(detail, "_editor_column", None)
+                if next_widget is None:
+                    if hasattr(detail, "_editor_card"):
+                        next_widget = detail._editor_card
+                    elif hasattr(detail, "_mode_card"):
+                        next_widget = detail._mode_card
+            assert next_widget is not None
+            assert next_widget.y() - (summary.y() + summary.height()) == expected_gap
+
+            editor_layout = getattr(detail, "_editor_layout", None)
+            if editor_layout is None and hasattr(detail, "_editor_column"):
+                editor_layout = detail._editor_column.layout()
+            if editor_layout is not None:
+                assert editor_layout.spacing() == expected_gap
+
+            style_container_layout = getattr(detail, "_style_container_layout", None)
+            if style_container_layout is not None:
+                assert style_container_layout.spacing() == expected_gap
+    finally:
+        for detail in details:
+            detail.close()
+        app.processEvents()
 
 
 def test_segmented_control_uses_equal_width_shared_track_styling():

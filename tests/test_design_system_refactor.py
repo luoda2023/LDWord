@@ -62,6 +62,15 @@ def test_master_detail_panels_use_shared_shell():
         assert "setFixedWidth(260)" not in source
 
 
+def test_master_detail_detail_scrollbar_matches_navigation_thumb_height():
+    shell_source = (ROOT / "src/shared/ui/master_detail_shell.py").read_text(encoding="utf-8")
+    rail_source = (ROOT / "src/shared/ui/dynamic_navigation_rail.py").read_text(encoding="utf-8")
+
+    assert "QScrollBar::handle:vertical" in shell_source
+    assert "min-height: 24px;" in shell_source
+    assert "min-height: 24px;" in rail_source
+
+
 def test_scene_panel_uses_template_form_baseline():
     source = (ROOT / "src/ui/panels/scene_panel.py").read_text(encoding="utf-8")
 
@@ -106,8 +115,8 @@ def test_quick_execution_and_theme_panel_share_flow_and_tokens():
     drop_source = (ROOT / "src/ui/panels/workbench/quick_execution_drop_area.py").read_text(encoding="utf-8")
     theme_source = (ROOT / "src/ui/panels/theme_panel.py").read_text(encoding="utf-8")
 
-    assert "from src.shared.ui.flow_layout import FlowLayout" in quick_source
     assert "from src.shared.ui.flow_layout import FlowLayout" in theme_source
+    assert "FlowLayout" not in quick_source
     assert "_FlowLayout =" not in quick_source
     assert "_FlowLayout =" not in theme_source
     assert "_FlowLayout(" not in quick_source
@@ -130,7 +139,11 @@ def test_quick_execution_and_theme_panel_share_flow_and_tokens():
 def test_quick_execution_plain_card_headers_use_design_system_card_slots():
     source = (ROOT / "src/ui/panels/workbench/quick_execution_detail.py").read_text(encoding="utf-8")
 
-    assert 'self._scene_card.set_header("场景与模板", icon_name="boxes")' in source
+    assert 'title="场景与模板"' in source
+    assert 'mode="execution_prereview"' in source
+    assert "source_slot=self._scene_template_selector_row" in source
+    assert "StyleSourceSlot(" not in source
+    assert "difference_slot=self._style_difference_slot" in source
     assert 'self._output_card.set_header("输出目录", icon_name="square-arrow-out-up-right")' in source
     assert 'self._execution_card.set_header("执行输出", icon_name="terminal")' in source
     assert "_scene_card_icon" not in source

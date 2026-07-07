@@ -5,13 +5,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.config.loader import load_template, save_template
-from src.config.style_variant_semantics import enable_variant_override
+from src.config.scene import SceneWorkspace
+from src.config.style_variant_semantics import is_variant_overridden
 from src.config.template import TemplateConfig
 from src.qt_api import QApplication
 from src.shared.ui.form_row import FormRow
-from src.shared.ui.toast import Toast
+from src.shared.ui.summary_grid import SummaryGrid
 from src.ui.bridge import PanelBridge
+from src.ui.panels.scene_panel import ScenePanel
 from src.ui.panels.template_panel import TemplatePanel
 from src.ui.panels.template_reference_detail import ReferenceDetail
 
@@ -27,8 +28,8 @@ def test_reference_and_caption_details_reuse_shared_controls():
     assert "FontCombo(" in reference_source
     assert "SpacingInput(" in reference_source
     assert "save_requested = Signal()" in reference_source
-    assert "apply_button_variant(self._restore_entry_btn, \"ghost-primary\")" in reference_source
-    assert "apply_button_variant(self._save_btn, \"primary\")" in reference_source
+    assert "apply_template_summary_action_button(self._restore_entry_btn, \"ghost-primary\")" in reference_source
+    assert "apply_template_summary_action_button(self._save_btn, \"primary\")" in reference_source
     assert "StyledComboBox(" in caption_source
     assert "ToggleSwitch(" in caption_source
 
@@ -36,7 +37,6 @@ def test_reference_and_caption_details_reuse_shared_controls():
 def test_reference_detail_style_sections_use_one_grid_baseline():
     app = _app()
     template = TemplateConfig()
-    enable_variant_override(template, "references_body")
     detail = ReferenceDetail()
 
     try:
@@ -45,100 +45,163 @@ def test_reference_detail_style_sections_use_one_grid_baseline():
         detail.show()
         app.processEvents()
 
-        text_rows = {
-            row.label_text: row
-            for row in detail._text_section.findChildren(FormRow)
-            if row.isVisible()
-        }
-        assert text_rows["字号"].widget.x() == text_rows["中文字体"].widget.x()
-        assert text_rows["字形"].widget.x() == text_rows["英文字体"].widget.x()
+        assert detail._source_card.isVisible()
+        assert detail._rules_card.isVisible()
+        assert not detail._style_card.isVisible()
+        assert "跟随正文" in detail._source_summary.text()
+        assert not hasattr(detail, "_desc")
+        assert not hasattr(detail, "_inherit_card")
+        assert not hasattr(detail, "_line_spacing_note")
+        assert not hasattr(detail, "_special_indent")
+        assert not hasattr(detail, "_left_indent")
+        assert not hasattr(detail, "_right_indent")
 
-        spacing_rows = {
+        detail._mode_combo.setCurrentIndex(1)
+        app.processEvents()
+
+        assert "references_body" in template.styles
+        assert detail._style_card.isVisible()
+        assert "独立设置" in detail._source_summary.text()
+        assert detail._style_grid._rows == [
+            (detail._font_cn_row, detail._size_row),
+            (detail._font_en_row, detail._emphasis_row),
+            (detail._alignment_row, detail._line_type_row),
+            (detail._line_value_row,),
+            (detail._space_before_row, detail._space_after_row),
+        ]
+        assert detail._rules_grid._rows == [
+            (detail._hanging_indent_row, detail._rules_space_after_row),
+        ]
+
+        detail._font_en.set_font_name("Arial")
+        detail._size_combo.set_pt(11)
+        detail._bold_switch.click()
+        detail._alignment_combo.setCurrentIndex(detail._alignment_combo.findData("left"))
+        detail._line_type_combo.setCurrentIndex(detail._line_type_combo.findData("multiple"))
+        detail._line_value.set_value(1.2, "pt")
+        detail._space_before.set_value(6.0, "pt")
+        detail._space_after.set_value(9.0, "pt")
+        app.processEvents()
+
+        style = template.styles["references_body"]
+        assert style.font_en == "Arial"
+        assert style.size_pt == 11
+        assert style.bold is True
+        assert style.alignment == "left"
+        assert style.line_spacing_type == "multiple"
+        assert style.line_spacing_pt == 1.2
+        assert style.space_before_pt == 6.0
+        assert style.space_after_pt == 9.0
+
+        style_rows = {
             row.label_text: row
-            for row in detail._spacing_section.findChildren(FormRow)
+            for row in detail._style_form.findChildren(FormRow)
             if row.isVisible()
         }
-        assert spacing_rows["段前"].widget.x() == spacing_rows["行距类型"].widget.x()
-        assert spacing_rows["段后"].widget.x() == spacing_rows["行距值"].widget.x()
+        assert style_rows["字号"].widget.x() == style_rows["中文字体"].widget.x()
+        assert style_rows["字形"].widget.x() == style_rows["英文字体"].widget.x()
+        assert style_rows["行距类型"].widget.x() == style_rows["对齐"].widget.x()
+        assert style_rows["段后"].widget.x() == style_rows["段前"].widget.x()
     finally:
         detail.close()
         app.processEvents()
 
 
-def test_template_panel_reference_detail_updates_preview_and_dirty_state():
+def test_reference_detail_promotes_legacy_typography_overrides():
     app = _app()
-    bridge = PanelBridge()
-    panel = TemplatePanel(bridge)
+    template = TemplateConfig()
+    template.reference_style.font_cn = "黑体"
+    template.reference_style.font_en = "Calibri"
+    template.reference_style.size_pt = 11
+    detail = ReferenceDetail()
 
     try:
-        panel._reference_detail._hanging_indent.set_value(1.2, "cm")
+        detail.set_template(template)
         app.processEvents()
 
-        assert panel._current_template.reference_style.hanging_indent_cm == 1.2
-        assert "1.2cm" in panel._overview_detail._rows["reference"]._value.text()
-        assert bridge.is_template_dirty() is True
+        assert is_variant_overridden(template, "references_body") is True
+        assert template.reference_style.font_cn is None
+        assert template.reference_style.font_en is None
+        assert template.reference_style.size_pt is None
+        assert template.styles["references_body"].font_cn == "黑体"
+        assert template.styles["references_body"].font_en == "Calibri"
+        assert template.styles["references_body"].size_pt == 11
+        assert detail._mode_combo.currentData() == "independent"
+        assert detail._font_cn.selected_font() == "黑体"
+        assert detail._font_en.selected_font() == "Calibri"
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_scene_panel_reference_detail_updates_preview_and_dirty_state():
+    app = _app()
+    bridge = PanelBridge()
+    scene = SceneWorkspace(scene_id="thesis", category="thesis", template_id="default")
+    bridge.set_current_scene(scene, config_id="thesis", emit_signal=False)
+    bridge.set_current_template(TemplateConfig(), config_id="default", emit_signal=False)
+    panel = ScenePanel(bridge)
+
+    try:
+        panel._show_detail("scn_reference")
+        panel._reference._hanging_indent.set_value(1.2, "cm")
+        app.processEvents()
+
+        assert scene.reference_style.hanging_indent_cm == 1.2
+        assert isinstance(panel._reference._summary_grid, SummaryGrid)
+        assert panel._reference._summary_grid._tile_style == "module"
+        assert len(panel._reference._summary_grid.items()) == 2
+        assert "1.2cm" in panel._reference._summary_grid.value_for("citation_rules")
+        assert "1.2cm" in panel._overview._setting_rows["reference_format"].summary_text()
+        assert bridge.is_scene_dirty() is True
     finally:
         panel.close()
         app.processEvents()
 
 
-def test_template_panel_reference_detail_restore_entry_snapshot_survives_bridge_echo():
+def test_scene_panel_reference_detail_restore_entry_snapshot_survives_bridge_echo():
     app = _app()
     bridge = PanelBridge()
-    panel = TemplatePanel(bridge)
-    original_indent = panel._current_template.reference_style.hanging_indent_cm
+    scene = SceneWorkspace(scene_id="thesis", category="thesis", template_id="default")
+    bridge.set_current_scene(scene, config_id="thesis", emit_signal=False)
+    bridge.set_current_template(TemplateConfig(), config_id="default", emit_signal=False)
+    panel = ScenePanel(bridge)
+    original_indent = scene.reference_style.hanging_indent_cm
 
     try:
-        panel._show_detail("tpl_reference")
-        panel._reference_detail._hanging_indent.set_value(original_indent + 0.4, "cm")
+        panel._show_detail("scn_reference")
+        panel._reference._hanging_indent.set_value(original_indent + 0.4, "cm")
         app.processEvents()
 
-        assert panel._reference_detail._restore_entry_btn.isEnabled() is True
+        assert panel._reference._restore_entry_btn.isEnabled() is True
 
-        panel._reference_detail._restore_entry_btn.click()
+        panel._reference._restore_entry_btn.click()
         app.processEvents()
 
-        assert panel._current_template.reference_style.hanging_indent_cm == original_indent
-        assert panel._reference_detail._restore_entry_btn.isEnabled() is False
+        assert scene.reference_style.hanging_indent_cm == original_indent
+        assert panel._reference._restore_entry_btn.isEnabled() is False
     finally:
         panel.close()
         app.processEvents()
 
 
-def test_template_panel_reference_save_overwrites_current_file_and_clears_dirty(tmp_path, monkeypatch):
+def test_scene_panel_reference_detail_uses_scene_dirty_state_instead_of_template_save():
     app = _app()
     bridge = PanelBridge()
-    panel = TemplatePanel(bridge)
-    monkeypatch.setattr(Toast, "show_success", staticmethod(lambda *args, **kwargs: None))
-    monkeypatch.setattr(Toast, "show_error", staticmethod(lambda *args, **kwargs: None))
+    scene = SceneWorkspace(scene_id="thesis", category="thesis", template_id="default")
+    bridge.set_current_scene(scene, config_id="thesis", emit_signal=False)
+    bridge.set_current_template(TemplateConfig(), config_id="default", emit_signal=False)
+    panel = ScenePanel(bridge)
 
     try:
-        target = tmp_path / "reference_template.json"
-        save_template(panel._current_template, target)
-        imported = load_template(target)
-        bridge.set_current_template(
-            imported,
-            config_id=target.stem,
-            path=str(target),
-            source="file",
-        )
-        panel._show_detail("tpl_reference")
+        panel._show_detail("scn_reference")
+        panel._reference._hanging_indent.set_value(1.6, "cm")
         app.processEvents()
 
-        panel._reference_detail._hanging_indent.set_value(1.6, "cm")
-        app.processEvents()
-
-        assert bridge.is_template_dirty() is True
-        assert panel._reference_detail._save_btn.isEnabled() is True
-
-        panel._reference_detail._save_btn.click()
-        app.processEvents()
-
-        reloaded = load_template(target)
-        assert reloaded.reference_style.hanging_indent_cm == 1.6
+        assert scene.reference_style.hanging_indent_cm == 1.6
+        assert bridge.is_scene_dirty() is True
         assert bridge.is_template_dirty() is False
-        assert panel._reference_detail._save_btn.isEnabled() is False
-        assert "reference_template.json" in panel._io_detail._status.text()
+        assert panel._reference._save_btn.isEnabled() is False
     finally:
         panel.close()
         app.processEvents()
@@ -150,12 +213,21 @@ def test_template_panel_caption_detail_updates_preview_and_dirty_state():
     panel = TemplatePanel(bridge)
 
     try:
-        panel._caption_detail._format_inserted_toggle.click()
+        detail = panel._caption_detail
+        detail._numbering_type_combo.setCurrentIndex(detail._numbering_type_combo.findData(True))
+        detail._auto_insert_combo.setCurrentIndex(detail._auto_insert_combo.findData(False))
         app.processEvents()
 
         assert panel._current_template.caption.format_inserted is True
-        assert "域编号" in panel._overview_detail._rows["caption"]._value.text()
-        assert "域编号" in panel._nav_cards["tpl_caption"]._full_subtitle
+        assert panel._current_template.caption.auto_insert is False
+        assert isinstance(panel._caption_detail._summary_grid, SummaryGrid)
+        assert panel._caption_detail._summary_grid._tile_style == "module"
+        assert len(panel._caption_detail._summary_grid.items()) == 3
+        assert "Word 可更新编号" in panel._caption_detail._summary_grid.detail_for("numbering_rules")
+        assert "缺失时不补齐" in panel._caption_detail._summary_grid.detail_for("numbering_rules")
+        assert "Word 可更新编号" in panel._overview_detail._rows["caption"]._value.text()
+        assert "Word 可更新编号" in panel._nav_cards["tpl_caption"]._full_subtitle
+        assert "域" not in panel._caption_detail._summary_grid.detail_for("numbering_rules")
         assert bridge.is_template_dirty() is True
     finally:
         panel.close()
@@ -175,6 +247,12 @@ def test_template_panel_caption_detail_updates_shared_caption_style():
         panel._caption_detail._alignment_combo.setCurrentIndex(
             panel._caption_detail._alignment_combo.findData("left")
         )
+        panel._caption_detail._line_type_combo.setCurrentIndex(
+            panel._caption_detail._line_type_combo.findData("multiple")
+        )
+        panel._caption_detail._line_value_input.set_value(1.25, "pt")
+        panel._caption_detail._space_before_input.set_value(6.0, "pt")
+        panel._caption_detail._space_after_input.set_value(9.0, "pt")
         app.processEvents()
 
         assert panel._current_template.styles["caption"].font_en == "Arial"
@@ -182,6 +260,10 @@ def test_template_panel_caption_detail_updates_shared_caption_style():
         assert panel._current_template.styles["caption"].bold is True
         assert panel._current_template.styles["caption"].italic is True
         assert panel._current_template.styles["caption"].alignment == "left"
+        assert panel._current_template.styles["caption"].line_spacing_type == "multiple"
+        assert panel._current_template.styles["caption"].line_spacing_pt == 1.25
+        assert panel._current_template.styles["caption"].space_before_pt == 6.0
+        assert panel._current_template.styles["caption"].space_after_pt == 9.0
         assert bridge.is_template_dirty() is True
     finally:
         panel.close()

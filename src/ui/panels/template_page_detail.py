@@ -17,16 +17,23 @@ from src.qt_api import (
     Qt,
     Signal,
 )
-from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.button_style import build_button_stylesheet
 from src.shared.ui.card import Card
 from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.inline_alert import InlineAlert
+from src.shared.ui.navigation_highlight import NavigationHighlighter
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
-from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
+from src.shared.ui.summary_grid import SummaryGridItem
 from src.shared.ui.template_form_layout import template_form_row
+from src.shared.ui.template_summary_card import (
+    TemplateSummaryCard,
+    apply_template_summary_action_button,
+)
 from src.shared.ui.themed_radio_button import ThemedRadioButton
 from src.shared.ui.theme import bind_theme, get_theme
+from src.ui.adapters.field_display_names import field_display_name
+from src.ui.panels.template_summary_projection import build_template_detail_summary_items
 
 
 _PAPER_OPTIONS: tuple[tuple[str, str], ...] = (
@@ -157,12 +164,13 @@ class PageSetupDetail(QWidget):
         self._header_titles: list[QLabel] = []
         self._desc_labels: list[QLabel] = []
         self._unit_labels: list[QLabel] = []
+        self._navigation_highlighter = NavigationHighlighter()
         self._is_syncing = False
         self._save_enabled = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(get_theme().template_detail_section_gap)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self._build_summary_card()
@@ -180,46 +188,29 @@ class PageSetupDetail(QWidget):
     # ------------------------------------------------------------------
 
     def _build_summary_card(self) -> None:
-        self._summary_card = Card(parent=self)
-        header = QWidget(self._summary_card)
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 6)
-        layout.setSpacing(6)
-
-        icon_label = QLabel(header)
-        icon_label.setFixedSize(18, 18)
-        self._header_icons.append(("ruler", icon_label))
-        layout.addWidget(icon_label)
-
-        title_label = QLabel("页面设置", header)
-        title_label.setObjectName("tpl_card_title")
-        self._header_titles.append(title_label)
-        layout.addWidget(title_label)
-        layout.addStretch(1)
+        self._summary_card = TemplateSummaryCard("页面设置", "ruler", parent=self)
+        header = self._summary_card.header
 
         self._restore_entry_btn = QPushButton("恢复", header)
         self._restore_entry_btn.setCursor(Qt.PointingHandCursor)
         self._restore_entry_btn.setIconSize(QSize(16, 16))
         self._restore_entry_btn.clicked.connect(self._on_restore_entry)
-        layout.addWidget(self._restore_entry_btn)
+        self._summary_card.add_action(self._restore_entry_btn)
 
         self._save_btn = QPushButton("保存", header)
         self._save_btn.setCursor(Qt.PointingHandCursor)
         self._save_btn.setIconSize(QSize(16, 16))
         self._save_btn.clicked.connect(self.save_requested.emit)
-        layout.addWidget(self._save_btn)
+        self._summary_card.add_action(self._save_btn)
 
-        self._summary_card.add_widget(header)
-
-        self._summary_grid = SummaryGrid(columns=6, tile_style="module", parent=self._summary_card)
-        self._summary_card.add_widget(self._summary_grid)
+        self._summary_grid = self._summary_card.summary_grid
 
     def _build_editor_column(self, parent: QWidget) -> None:
         self._editor_column = QWidget(parent)
         self._editor_column.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         layout = QVBoxLayout(self._editor_column)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(get_theme().template_detail_section_gap)
 
         self._validation_alert = InlineAlert("", variant="warning", parent=self._editor_column)
         self._validation_alert.hide()
@@ -239,7 +230,6 @@ class PageSetupDetail(QWidget):
             self._margin_card,
             "scan",
             "页边距与装订线",
-            "上/下决定版心高度，左/右与装订线共同决定版心宽度。",
         )
         self._build_margin_controls()
         layout.addWidget(self._margin_card)
@@ -249,7 +239,6 @@ class PageSetupDetail(QWidget):
             self._header_footer_card,
             "panel-top",
             "页眉与页脚",
-            "页眉、页脚距离建议小于对应边距，避免进入正文区域。",
         )
         self._build_header_footer_controls()
         layout.addWidget(self._header_footer_card)
@@ -432,6 +421,19 @@ class PageSetupDetail(QWidget):
         self._save_enabled = bool(enabled)
         self._refresh_action_state()
 
+    def focus_navigation_field(self, field_id: str) -> bool:
+        target = str(field_id or "").strip()
+        field_name = self._page_focus_field_id(target)
+        widget = self._page_focus_widget(field_name)
+        if widget is None:
+            return False
+        self._navigation_highlighter.highlight(
+            widget,
+            target,
+            display_label=field_display_name(target),
+        )
+        return True
+
     # ------------------------------------------------------------------
     # Internal sync
     # ------------------------------------------------------------------
@@ -509,67 +511,19 @@ class PageSetupDetail(QWidget):
     def _refresh_summary(self) -> None:
         template = self._current_template
         if template is None:
-            self._summary_grid.set_items([
+            self._summary_card.set_summary_items([
                 SummaryGridItem(
                     key="empty",
                     label="当前状态",
                     value="未选择模板。",
                     detail="选择模板后，这里会汇总纸张、边距、页眉页脚和装订线信息。",
-                    column_span=6,
+                    column_span=12,
                     icon_name="info",
                 ),
             ])
             return
 
-        page = template.page_setup
-        self._summary_grid.set_items([
-            SummaryGridItem(
-                key="paper",
-                label="纸张规格",
-                value=str(page.paper_size or "A4").upper(),
-                column_span=2,
-                icon_name="layout",
-            ),
-            SummaryGridItem(
-                key="orientation",
-                label="页面方向",
-                value=_orientation_label(page.orientation),
-                column_span=2,
-                icon_name="ruler",
-            ),
-            SummaryGridItem(
-                key="section",
-                label="分节方式",
-                value=_section_break_label(template.section.section_break_type),
-                column_span=2,
-                icon_name="layers",
-            ),
-            SummaryGridItem(
-                key="margin_gutter",
-                label="页边距与装订线",
-                value=(
-                    f"上 {_cm_text(page.margin.top_cm)}  "
-                    f"下 {_cm_text(page.margin.bottom_cm)}"
-                ),
-                detail=(
-                    f"左 {_cm_text(page.margin.left_cm)}  "
-                    f"右 {_cm_text(page.margin.right_cm)}  "
-                    f"装订线 {_cm_text(page.gutter_cm)}"
-                ),
-                detail_emphasis=True,
-                column_span=3,
-                icon_name="scan",
-            ),
-            SummaryGridItem(
-                key="header_footer",
-                label="页眉与页脚",
-                value=f"页眉距离 {_cm_text(page.header_distance_cm)}",
-                detail=f"页脚距离 {_cm_text(page.footer_distance_cm)}",
-                detail_emphasis=True,
-                column_span=3,
-                icon_name="panel-top",
-            ),
-        ])
+        self._summary_card.set_summary_items(build_template_detail_summary_items(template, "tpl_page"))
 
     def _refresh_validation_alert(self) -> None:
         variant, message = self._build_validation_message()
@@ -640,6 +594,9 @@ class PageSetupDetail(QWidget):
     def _apply_theme(self) -> None:
         theme = get_theme()
         self.setStyleSheet(build_button_stylesheet(theme))
+        gap = theme.template_detail_section_gap
+        self.layout().setSpacing(gap)
+        self._editor_column.layout().setSpacing(gap)
 
         title_ss = (
             f"font-size: {theme.font_size_lg}px; "
@@ -656,8 +613,8 @@ class PageSetupDetail(QWidget):
         for label in self._unit_labels:
             label.setStyleSheet(unit_ss)
 
-        apply_button_variant(self._restore_entry_btn, "ghost-primary")
-        apply_button_variant(self._save_btn, "primary")
+        apply_template_summary_action_button(self._restore_entry_btn, "ghost-primary")
+        apply_template_summary_action_button(self._save_btn, "primary")
 
         try:
             from src.ui.icons.catalog import get_icon
@@ -668,6 +625,64 @@ class PageSetupDetail(QWidget):
             pass
 
         self._refresh_view_state()
+
+    def _page_focus_field_id(self, field_id: str) -> str:
+        target = str(field_id or "").strip()
+        if target.startswith("template."):
+            target = target[len("template.") :]
+        aliases = {
+            "paper": "paper_size",
+            "paper_size": "paper_size",
+            "page.paper_size": "paper_size",
+            "page_setup.paper_size": "paper_size",
+            "orientation": "orientation",
+            "page.orientation": "orientation",
+            "page_setup.orientation": "orientation",
+            "section_break_type": "section_break_type",
+            "section.section_break_type": "section_break_type",
+            "page_setup.section_break_type": "section_break_type",
+            "top_cm": "top_cm",
+            "top_margin_cm": "top_cm",
+            "margin.top_cm": "top_cm",
+            "page.margin.top_cm": "top_cm",
+            "page_setup.margin.top_cm": "top_cm",
+            "bottom_cm": "bottom_cm",
+            "bottom_margin_cm": "bottom_cm",
+            "margin.bottom_cm": "bottom_cm",
+            "page.margin.bottom_cm": "bottom_cm",
+            "page_setup.margin.bottom_cm": "bottom_cm",
+            "left_cm": "left_cm",
+            "left_margin_cm": "left_cm",
+            "margin.left_cm": "left_cm",
+            "page.margin.left_cm": "left_cm",
+            "page_setup.margin.left_cm": "left_cm",
+            "right_cm": "right_cm",
+            "right_margin_cm": "right_cm",
+            "margin.right_cm": "right_cm",
+            "page.margin.right_cm": "right_cm",
+            "page_setup.margin.right_cm": "right_cm",
+            "gutter_cm": "gutter_cm",
+            "page.gutter_cm": "gutter_cm",
+            "page_setup.gutter_cm": "gutter_cm",
+            "header_distance_cm": "header_distance_cm",
+            "page.header_distance_cm": "header_distance_cm",
+            "page_setup.header_distance_cm": "header_distance_cm",
+            "footer_distance_cm": "footer_distance_cm",
+            "page.footer_distance_cm": "footer_distance_cm",
+            "page_setup.footer_distance_cm": "footer_distance_cm",
+        }
+        return aliases.get(target, "")
+
+    def _page_focus_widget(self, field_name: str) -> QWidget | None:
+        if field_name == "paper_size":
+            return self._paper_combo
+        if field_name == "orientation":
+            if self._orient_landscape_btn.isChecked():
+                return self._orient_landscape_btn
+            return self._orient_portrait_btn
+        if field_name == "section_break_type":
+            return self._section_break_combo
+        return self._page_inputs.get(field_name)
 
 
 __all__ = ["PageSetupDetail"]

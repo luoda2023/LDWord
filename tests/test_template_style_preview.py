@@ -10,8 +10,9 @@ from src.config.style_semantics import CM_TO_PT
 from src.config.template import PageNumberPhaseConfig, StyleConfig, TemplateConfig
 from src.qt_api import QApplication, QRectF, Qt
 from src.shared.ui.style_preview_utils import resolve_preview_indents_pt
+from src.ui.panels.template_format import build_template_page_presentation_envelope
 from src.ui.adapters.heading_numbering_adapter import HeadingNumberingAdapter
-from src.ui.panels.template_panel import (
+from src.ui.panels.template_style_preview import (
     TemplateStylePreview,
     _build_template_preview_paragraphs,
     _content_rect_from_page,
@@ -255,6 +256,25 @@ def test_template_style_preview_renders_without_crashing():
     finally:
         preview.close()
         app.processEvents()
+
+
+def test_template_style_preview_exposes_template_page_presentation_envelope():
+    _app()
+    cfg = create_builtin_template("thesis_gbt")
+    preview = TemplateStylePreview()
+    try:
+        preview.refresh(cfg)
+        envelope = build_template_page_presentation_envelope(cfg)
+
+        assert preview.presentation_envelope == envelope
+        assert preview.property("style_presentation_kind") == "template_page"
+        assert preview.property("style_presentation_title") == "样式预览"
+        assert preview.property("style_presentation_source_label") == "模板基线"
+        assert preview.property("style_presentation_summary") == envelope.summary
+        assert preview.property("style_presentation_action_label") == envelope.action_label
+        assert preview.toolTip() == envelope.tooltip_text()
+    finally:
+        preview.close()
 
 
 def test_template_style_preview_places_table_before_abstract():

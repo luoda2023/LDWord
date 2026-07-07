@@ -161,6 +161,36 @@ def test_config_management_detail_can_save_current_template_and_clear_dirty(tmp_
         app.processEvents()
 
 
+def test_config_management_template_save_as_updates_current_template_id(tmp_path):
+    app = _app()
+    bridge = PanelBridge()
+    panel = WorkbenchPanel(bridge)
+    try:
+        template = TemplateConfig(name="Custom Saved Template")
+        original_path = tmp_path / "default.json"
+        bridge.set_current_template(
+            template,
+            config_id="default",
+            path=str(original_path),
+            source="library",
+        )
+        bridge.mark_template_dirty()
+        app.processEvents()
+
+        target = tmp_path / "custom_saved.json"
+        saved = panel._config_management_detail.save_current_template_to_path(target)
+        app.processEvents()
+
+        assert saved == target
+        assert bridge.current_template_id() == "custom_saved"
+        assert panel._config_management_detail._template_export_section._template_id == "custom_saved"
+        assert panel._quick_execution_detail.current_template_id() == "custom_saved"
+        assert panel._quick_execution_detail.current_scene().template_id == "custom_saved"
+    finally:
+        panel.close()
+        app.processEvents()
+
+
 def test_config_management_detail_can_save_current_scene_and_clear_dirty(tmp_path):
     app = _app()
     bridge = PanelBridge()

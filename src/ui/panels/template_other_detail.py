@@ -73,6 +73,14 @@ class OtherDetail(QWidget):
         self._report_markdown_toggle = ToggleSwitch(self, checked=True)
         self._report_markdown_toggle.toggled_signal.connect(self._on_form_edited)
         rows.append(template_form_row("Markdown 报告", self._report_markdown_toggle, parent=self._card))
+
+        self._material_manifest_toggle = ToggleSwitch(self, checked=False)
+        self._material_manifest_toggle.toggled_signal.connect(self._on_form_edited)
+        rows.append(template_form_row("资料清单", self._material_manifest_toggle, parent=self._card))
+
+        self._material_package_toggle = ToggleSwitch(self, checked=False)
+        self._material_package_toggle.toggled_signal.connect(self._on_form_edited)
+        rows.append(template_form_row("资料包", self._material_package_toggle, parent=self._card))
         self._card.add_widget(TemplateFormStack(rows, parent=self._card))
 
     def _build_hint(self) -> None:
@@ -91,6 +99,8 @@ class OtherDetail(QWidget):
             self._compare_docx_toggle.setChecked(template.output.compare_docx)
             self._report_json_toggle.setChecked(template.output.report_json)
             self._report_markdown_toggle.setChecked(template.output.report_markdown)
+            self._material_manifest_toggle.setChecked(template.output.material_manifest)
+            self._material_package_toggle.setChecked(template.output.material_package)
         finally:
             self._is_syncing = False
 
@@ -104,6 +114,8 @@ class OtherDetail(QWidget):
         output.compare_docx = self._compare_docx_toggle.isChecked()
         output.report_json = self._report_json_toggle.isChecked()
         output.report_markdown = self._report_markdown_toggle.isChecked()
+        output.material_manifest = self._material_manifest_toggle.isChecked()
+        output.material_package = self._material_package_toggle.isChecked()
 
         self.template_edited.emit(self._current_template)
 

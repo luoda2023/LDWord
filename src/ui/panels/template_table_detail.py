@@ -24,23 +24,34 @@ from src.qt_api import (
     Qt,
     Signal,
 )
-from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.button_style import build_button_stylesheet
 from src.shared.ui.card import Card
 from src.shared.ui.font_combo import FontCombo
 from src.shared.ui.inspector_form import InspectorForm
+from src.shared.ui.layout_sync import (
+    refresh_layout_chain,
+    reserve_visible_height,
+    set_visible_if_changed,
+    updates_suspended,
+)
 from src.shared.ui.size_combo import SizeCombo
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
-from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
+from src.shared.ui.summary_grid import SummaryGridItem
 from src.shared.ui.table_style_gallery import ColorTableGallery
 from src.shared.ui.template_form_layout import (
     TemplateFormGrid,
     TemplateFormStack,
     template_form_row,
 )
+from src.shared.ui.template_summary_card import (
+    TemplateSummaryCard,
+    apply_template_summary_action_button,
+)
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 from src.shared.ui.typography_controls import build_emphasis_widget
+from src.ui.panels.template_summary_projection import build_template_detail_summary_items
 
 
 TABLE_STYLE_OPTIONS_UI: tuple[tuple[str, str], ...] = tuple(
@@ -101,7 +112,7 @@ class TableCaptionDetail(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(get_theme().template_detail_section_gap)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self._build_summary_card()
@@ -115,46 +126,29 @@ class TableCaptionDetail(QWidget):
         bind_theme(self, self._apply_theme)
 
     def _build_summary_card(self) -> None:
-        self._summary_card = Card(parent=self)
-        header = QWidget(self._summary_card)
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 6)
-        layout.setSpacing(6)
-
-        icon_label = QLabel(header)
-        icon_label.setFixedSize(18, 18)
-        self._header_icons.append(("table-2", icon_label))
-        layout.addWidget(icon_label)
-
-        title_label = QLabel("表格", header)
-        title_label.setObjectName("tpl_card_title")
-        self._header_titles.append(title_label)
-        layout.addWidget(title_label)
-        layout.addStretch(1)
+        self._summary_card = TemplateSummaryCard("表格", "table-2", parent=self)
+        header = self._summary_card.header
 
         self._restore_entry_btn = QPushButton("恢复", header)
         self._restore_entry_btn.setCursor(Qt.PointingHandCursor)
         self._restore_entry_btn.setIconSize(QSize(16, 16))
         self._restore_entry_btn.clicked.connect(self._on_restore_entry)
-        layout.addWidget(self._restore_entry_btn)
+        self._summary_card.add_action(self._restore_entry_btn)
 
         self._save_btn = QPushButton("保存", header)
         self._save_btn.setCursor(Qt.PointingHandCursor)
         self._save_btn.setIconSize(QSize(16, 16))
         self._save_btn.clicked.connect(self.save_requested.emit)
-        layout.addWidget(self._save_btn)
+        self._summary_card.add_action(self._save_btn)
 
-        self._summary_card.add_widget(header)
-
-        self._summary_grid = SummaryGrid(columns=6, tile_style="module", parent=self._summary_card)
-        self._summary_card.add_widget(self._summary_grid)
+        self._summary_grid = self._summary_card.summary_grid
 
     def _build_editor_column(self, parent: QWidget) -> None:
         self._editor_column = QWidget(parent)
         self._editor_column.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         layout = QVBoxLayout(self._editor_column)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(get_theme().template_detail_section_gap)
 
         self._border_layout_card = Card(parent=self._editor_column)
         self._add_card_header(
@@ -377,13 +371,24 @@ class TableCaptionDetail(QWidget):
     def _pair_row(self, *rows: QWidget) -> TemplateFormGrid:
         return TemplateFormGrid([rows], parent=self)
 
+    def _set_explicit_visible_if_changed(self, widget: QWidget, visible: bool) -> bool:
+        return set_visible_if_changed(widget, visible)
+
+    def _reserve_visible_height(self, widget: QWidget, height: int | None = None) -> None:
+        reserve_visible_height(widget, height)
+
+    def _refresh_layout_chain(self, start: QWidget | None = None) -> None:
+        refresh_layout_chain(start or self)
+
     def _sync_layout_dependent_state(self) -> None:
-        is_smart = str(self._layout_combo.currentData() or "smart") == "smart"
-        self._smart_levels_row.setVisible(is_smart)
-        border_mode = str(self._border_combo.currentData() or "three_line")
-        is_color_table = border_mode == "color_table"
-        self._color_gallery.setVisible(is_color_table)
-        self._sync_width_controls_state(border_mode)
+        with updates_suspended(self._border_layout_card, self._editor_column, self):
+            is_smart = str(self._layout_combo.currentData() or "smart") == "smart"
+            self._set_explicit_visible_if_changed(self._smart_levels_row, is_smart)
+            border_mode = str(self._border_combo.currentData() or "three_line")
+            is_color_table = border_mode == "color_table"
+            self._set_explicit_visible_if_changed(self._color_gallery, is_color_table)
+            self._sync_width_controls_state(border_mode)
+            self._refresh_layout_chain(self._border_layout_card)
 
     def _sync_width_controls_state(self, border_mode: str) -> None:
         color_variant_key = self._color_gallery.selected_variant() if border_mode == "color_table" else ""
@@ -391,10 +396,19 @@ class TableCaptionDetail(QWidget):
         uses_general_width = border_mode == "full_grid" or (border_mode == "color_table" and not is_color_rule)
         uses_three_line_widths = border_mode == "three_line" or (border_mode == "color_table" and is_color_rule)
 
-        self._border_width_row.setVisible(uses_general_width)
-        self._header_width_row.setVisible(uses_three_line_widths)
-        self._bottom_width_row.setVisible(uses_three_line_widths)
-        self._three_line_width_pair.setVisible(uses_three_line_widths)
+        self._set_explicit_visible_if_changed(self._border_width_row, uses_general_width)
+        if uses_three_line_widths:
+            self._set_explicit_visible_if_changed(self._header_width_row, True)
+            self._set_explicit_visible_if_changed(self._bottom_width_row, True)
+            self._reserve_visible_height(
+                self._three_line_width_pair,
+                max(self._header_width_row.minimumHeight(), self._bottom_width_row.minimumHeight()),
+            )
+            self._set_explicit_visible_if_changed(self._three_line_width_pair, True)
+        else:
+            self._set_explicit_visible_if_changed(self._three_line_width_pair, False)
+            self._set_explicit_visible_if_changed(self._header_width_row, False)
+            self._set_explicit_visible_if_changed(self._bottom_width_row, False)
 
         if border_mode == "color_table":
             variant = color_variant(color_variant_key)
@@ -417,8 +431,6 @@ class TableCaptionDetail(QWidget):
                 return
 
     def set_template(self, template: TemplateConfig | None) -> None:
-        if template is not None:
-            template.table.row_height_pt = None
         preserve_snapshot = template is self._current_template and self._snapshot is not None
         self._current_template = template
         if template is None:
@@ -470,68 +482,17 @@ class TableCaptionDetail(QWidget):
     def _refresh_summary(self) -> None:
         template = self._current_template
         if template is None:
-            self._summary_grid.set_items([
+            self._summary_card.set_summary_items([
                 SummaryGridItem(
                     key="empty",
                     label="当前状态",
                     value="未选择模板。",
-                    column_span=6,
+                    column_span=12,
                     icon_name="info",
                 )
             ])
             return
-        table = template.table
-        border_label = table_style_label(table.border_mode)
-        color_detail = ""
-        if str(table.border_mode or "") == "color_table":
-            color_detail = (
-                f"  {color_palette(getattr(table, 'color_table_accent', 'blue')).label}"
-                f" / {color_variant(getattr(table, 'color_table_variant', 'header_grid')).label}"
-            )
-        layout_label = dict(LAYOUT_OPTIONS).get(table.layout_mode, table.layout_mode or "智能布局")
-        spacing_label = dict(LINE_SPACING_OPTIONS).get(table.line_spacing_mode, table.line_spacing_mode or "单倍")
-        alignment_label = dict(ALIGNMENT_OPTIONS).get(table.cell_alignment, table.cell_alignment or "不调整")
-        size_text = f"{table.size_pt:g}磅" if table.size_pt else "默认字号"
-        width_value, width_detail = self._width_summary_text(table)
-        self._summary_grid.set_items(
-            [
-                SummaryGridItem(
-                    key="border",
-                    label="边框与布局",
-                    value=f"{border_label} / {layout_label}",
-                    detail=(
-                        f"智能层级 {table.smart_levels} 级  行距 {spacing_label}{color_detail}"
-                        if str(table.layout_mode or "smart") == "smart"
-                        else f"行距 {spacing_label}{color_detail}"
-                    ),
-                    column_span=3,
-                    icon_name="table-2",
-                ),
-                SummaryGridItem(
-                    key="width",
-                    label="线宽",
-                    value=width_value,
-                    detail=width_detail,
-                    column_span=3,
-                    icon_name="ruler",
-                ),
-                SummaryGridItem(
-                    key="type",
-                    label="字体与对齐",
-                    value=f"{table.font_cn or '-'} / {table.font_en or '-'}",
-                    detail=f"字号 {size_text}  字形 {self._emphasis_summary_text(table)}  单元格 {alignment_label}",
-                    column_span=3,
-                    icon_name="type-outline",
-                ),
-                SummaryGridItem(
-                    key="behavior",
-                    label="输出行为",
-                    value=self._behavior_summary_text(table),
-                    column_span=3,
-                    icon_name="settings",
-                ),
-            ]
-        )
+        self._summary_card.set_summary_items(build_template_detail_summary_items(template, "tpl_table"))
 
     def _behavior_summary_text(self, table) -> str:
         first_row_text = "首行加粗" if bool(getattr(table, "first_row_bold", False)) else "不首行加粗"
@@ -593,7 +554,6 @@ class TableCaptionDetail(QWidget):
         table.border_width_pt = self._border_width_input.value()
         table.three_line_header_width_pt = self._header_width_input.value()
         table.three_line_bottom_width_pt = self._bottom_width_input.value()
-        table.row_height_pt = None
         table.font_cn = self._font_cn_combo.selected_font() or None
         table.font_en = self._font_en_combo.selected_font() or None
         table.size_pt = self._size_combo.current_pt()
@@ -635,6 +595,9 @@ class TableCaptionDetail(QWidget):
     def _apply_theme(self) -> None:
         theme = get_theme()
         self.setStyleSheet(build_button_stylesheet(theme))
+        gap = theme.template_detail_section_gap
+        self.layout().setSpacing(gap)
+        self._editor_column.layout().setSpacing(gap)
         for widget in self.findChildren(QLabel, "tpl_card_title"):
             widget.setStyleSheet(
                 f"font-size: {theme.font_size_lg}px; "
@@ -643,8 +606,8 @@ class TableCaptionDetail(QWidget):
         for label in self._unit_labels:
             label.setStyleSheet(f"font-size: {theme.font_size_md}px; color: {theme.text_secondary};")
 
-        apply_button_variant(self._restore_entry_btn, "ghost-primary")
-        apply_button_variant(self._save_btn, "primary")
+        apply_template_summary_action_button(self._restore_entry_btn, "ghost-primary")
+        apply_template_summary_action_button(self._save_btn, "primary")
 
         try:
             from src.ui.icons.catalog import get_icon

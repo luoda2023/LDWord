@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 
-from src.config.template import PageNumberPhaseConfig, TemplateConfig
+from src.config.template import TemplateConfig
 from src.qt_api import (
     QHBoxLayout,
     QLabel,
@@ -18,17 +18,22 @@ from src.qt_api import (
 )
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
-from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
+from src.shared.ui.summary_grid import SummaryGridItem
+from src.shared.ui.template_summary_card import (
+    TemplateSummaryCard,
+    apply_template_summary_action_button,
+)
 from src.shared.ui.theme import bind_theme, get_theme
+from src.ui.panels.template_summary_projection import (
+    build_template_detail_summary,
+    build_template_detail_summary_items,
+    summary_grid_items,
+)
 from src.ui.panels.template_elements_header_footer import (
     HeaderFooterDetailSection,
-    default_page_number_phases,
-    default_suppress_header_footer_selectors,
     ensure_default_page_number_phases,
 )
 from src.ui.panels.template_elements_toc import (
-    TOC_INSERT_OPTIONS,
-    TOC_MODE_OPTIONS,
     TOC_STYLE_KEYS,
     TocDetailSection,
 )
@@ -52,25 +57,6 @@ class _ElementsSnapshot:
             },
         )
 
-def _option_label(options: tuple[tuple[str, str], ...], value, fallback: str = "") -> str:
-    return dict(options).get(value, fallback or str(value or ""))
-
-
-def _size_text(size_pt: float | None) -> str:
-    if size_pt in (None, ""):
-        return "默认字号"
-    return f"{float(size_pt):g} 磅"
-
-
-def _emphasis_text(config) -> str:
-    parts: list[str] = []
-    if bool(getattr(config, "bold", False)):
-        parts.append("加粗")
-    if bool(getattr(config, "italic", False)):
-        parts.append("斜体")
-    return "、".join(parts) if parts else "常规"
-
-
 class ElementsDetail(QWidget):
     """Editable header/footer + TOC pane backed by TemplateConfig."""
 
@@ -92,7 +78,7 @@ class ElementsDetail(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(get_theme().template_detail_section_gap)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self._build_summary_card()
@@ -112,47 +98,34 @@ class ElementsDetail(QWidget):
         return "页眉与目录"
 
     def _icon_name(self) -> str:
-        return "scroll-text" if self._scope == "toc" else "panel-top"
+        return "chart-no-axes-gantt" if self._scope == "toc" else "panel-top"
 
     def _build_summary_card(self) -> None:
-        self._summary_card = Card(parent=self)
-        header = QWidget(self._summary_card)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 6)
-        header_layout.setSpacing(6)
-
-        self._header_icon = QLabel(header)
-        self._header_icon.setFixedSize(18, 18)
-        self._header_icons.append((self._icon_name(), self._header_icon))
-        header_layout.addWidget(self._header_icon)
-
-        title = QLabel(self._title_text(), header)
-        title.setObjectName("tpl_card_title")
-        self._header_titles.append(title)
-        header_layout.addWidget(title)
-        header_layout.addStretch(1)
+        self._summary_card = TemplateSummaryCard(
+            self._title_text(),
+            self._icon_name(),
+            parent=self,
+        )
+        header = self._summary_card.header
 
         self._restore_entry_btn = QPushButton("恢复", header)
         self._restore_entry_btn.setIconSize(QSize(16, 16))
         self._restore_entry_btn.clicked.connect(self._on_restore_entry)
-        header_layout.addWidget(self._restore_entry_btn)
+        self._summary_card.add_action(self._restore_entry_btn)
 
         self._save_btn = QPushButton("保存", header)
         self._save_btn.setIconSize(QSize(16, 16))
         self._save_btn.clicked.connect(self.save_requested.emit)
-        header_layout.addWidget(self._save_btn)
+        self._summary_card.add_action(self._save_btn)
 
-        self._summary_card.add_widget(header)
-
-        self._summary_grid = SummaryGrid(columns=6, tile_style="module", parent=self._summary_card)
-        self._summary_card.add_widget(self._summary_grid)
+        self._summary_grid = self._summary_card.summary_grid
 
     def _build_form(self) -> None:
         self._editor_column = QWidget(self)
         self._editor_column.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self._editor_layout = QVBoxLayout(self._editor_column)
         self._editor_layout.setContentsMargins(0, 0, 0, 0)
-        self._editor_layout.setSpacing(8)
+        self._editor_layout.setSpacing(get_theme().template_detail_section_gap)
 
         self._header_footer_detail = (
             HeaderFooterDetailSection(self) if self._scope in {"all", "header_footer"} else None
@@ -197,188 +170,33 @@ class ElementsDetail(QWidget):
     def _refresh_summary(self) -> None:
         template = self._current_template
         if template is None:
-            self._summary_grid.set_items(
+            self._summary_card.set_summary_items(
                 [
                     SummaryGridItem(
                         key="empty",
                         label="当前状态",
                         value="未选择模板。",
-                        column_span=6,
+                        column_span=12,
                         icon_name="info",
                     )
                 ]
             )
             return
 
-        header_footer = template.header_footer
-        toc = template.toc
-        phases = default_page_number_phases(header_footer)
-
-        items: list[SummaryGridItem] = []
-        if self._scope in {"all", "header_footer"}:
-            items.extend(
-                [
-                    SummaryGridItem(
-                        key="header",
-                        label="页眉",
-                        value=self._header_summary_value(header_footer),
-                        detail=self._header_summary_detail(header_footer),
-                        column_span=3,
-                        icon_name="panel-top",
-                    ),
-                    SummaryGridItem(
-                        key="page_number",
-                        label="页脚内容",
-                        value=self._footer_summary_value(header_footer),
-                        detail=self._footer_summary_detail(header_footer, phases),
-                        column_span=3,
-                        icon_name="list-ordered",
-                    ),
-                ]
+        if self._scope == "header_footer":
+            self._summary_card.set_summary_items(
+                build_template_detail_summary_items(template, "tpl_header_footer")
             )
+            return
+        if self._scope == "toc":
+            self._summary_card.set_summary_items(build_template_detail_summary_items(template, "tpl_toc"))
+            return
 
-        if self._scope in {"all", "toc"} and self._toc_detail is not None:
-            title_style = self._toc_detail.effective_style("toc_title")
-            entry_style = self._toc_detail.effective_style("toc_level1")
-            items.extend(
-                [
-                    SummaryGridItem(
-                        key="toc",
-                        label="目录结构",
-                        value=self._toc_summary_value(toc),
-                        detail=self._toc_summary_detail(toc),
-                        column_span=3,
-                        icon_name="scroll-text",
-                    ),
-                    SummaryGridItem(
-                        key="toc_style",
-                        label="目录样式",
-                        value=(
-                            f"标题 {_size_text(title_style.size_pt)} / 条目 {_size_text(entry_style.size_pt)}"
-                            if toc.enabled
-                            else "目录关闭"
-                        ),
-                        detail=(
-                            f"{title_style.font_cn or '-'} / {entry_style.font_cn or '-'}"
-                            if toc.enabled
-                            else "样式暂不输出"
-                        ),
-                        column_span=3,
-                        icon_name="type-outline",
-                    ),
-                ]
-            )
-
-        self._summary_grid.set_items(items)
-
-    def _header_summary_value(self, header_footer) -> str:
-        mode = str(header_footer.header_mode or "styleref")
-        if mode == "none":
-            return "无页眉"
-        if mode == "fixed":
-            return "固定页眉"
-        return f"跟随 {header_footer.styleref_level} 级标题"
-
-    def _header_summary_detail(self, header_footer) -> str:
-        mode = str(header_footer.header_mode or "styleref")
-        if mode == "none":
-            return "不输出页眉线"
-        if mode == "fixed":
-            text = str(header_footer.header_text or "").strip() or "未填写固定文字"
-            return f"{text} / {'横线开启' if header_footer.header_border else '横线关闭'}"
-        return (
-            f"{header_footer.font_cn or '-'} / {header_footer.font_en or '-'} / "
-            f"{_size_text(header_footer.size_pt)} / {_emphasis_text(header_footer)}"
+        header_spec = build_template_detail_summary(template, "tpl_header_footer")
+        toc_spec = build_template_detail_summary(template, "tpl_toc")
+        self._summary_card.set_summary_items(
+            summary_grid_items(header_spec.tiles + toc_spec.tiles, span_override=3)
         )
-
-    def _footer_summary_value(self, header_footer) -> str:
-        mode = str(getattr(header_footer.footer, "content_mode", "page_number") or "page_number")
-        return {
-            "page_number": "仅页码",
-            "fixed": "固定文字",
-            "page_number_with_text": "页码 + 文字",
-            "none": "不显示页脚",
-        }.get(mode, mode)
-
-    def _footer_summary_detail(self, header_footer, phases: list[PageNumberPhaseConfig]) -> str:
-        mode = str(getattr(header_footer.footer, "content_mode", "page_number") or "page_number")
-        footer_text = str(getattr(header_footer, "footer_text", "") or "").strip()
-        alignment = {
-            "left": "左对齐",
-            "center": "居中",
-            "right": "右对齐",
-        }.get(str(getattr(header_footer, "footer_alignment", "center") or "center"), "居中")
-        parts: list[str] = []
-        if mode in {"page_number", "page_number_with_text"}:
-            parts.append(self._page_number_summary_detail(header_footer, phases))
-        elif mode == "fixed":
-            parts.append(footer_text or "未填写固定文字")
-        else:
-            return "不输出页脚"
-        if mode == "page_number_with_text":
-            parts.append(f"文字：{footer_text or '未填写'}")
-        parts.append(alignment)
-        return "；".join(part for part in parts if part)
-
-    def _page_number_summary_detail(self, header_footer, phases: list[PageNumberPhaseConfig]) -> str:
-        if not header_footer.page_number_enabled:
-            return "不输出页码"
-        valid_phases = [
-            phase
-            for phase in phases
-            if any(str(selector or "").strip() for selector in (getattr(phase, "selectors", []) or []))
-        ]
-        visible_phases = valid_phases[:2]
-        detail = "；".join(self._page_number_phase_result_brief(phase) for phase in visible_phases)
-        extra_count = max(0, len(valid_phases) - len(visible_phases))
-        if detail and extra_count:
-            detail = f"{detail}；另 {extra_count} 段"
-        suppress_selectors = default_suppress_header_footer_selectors(header_footer)
-        prefix = "分区排除" if suppress_selectors else ""
-        if detail:
-            return f"{prefix}；{detail}" if prefix else detail
-        return f"{prefix}；全文连续阿拉伯数字页码" if prefix else "全文连续阿拉伯数字页码"
-
-    def _page_number_phase_result_brief(self, phase: PageNumberPhaseConfig) -> str:
-        scope = self._page_number_phase_scope_text(list(getattr(phase, "selectors", []) or []))
-        if not bool(getattr(phase, "visible", True)):
-            return f"{scope}不显示页码"
-        fmt = {
-            "decimal": "阿拉伯数字",
-            "upperRoman": "大写罗马",
-            "lowerRoman": "小写罗马",
-        }.get(str(getattr(phase, "number_format", "decimal") or "decimal"), "阿拉伯数字")
-        if str(getattr(phase, "start_mode", "restart") or "restart") == "continue":
-            return f"{scope}{fmt}续号"
-        start_value = max(1, int(getattr(phase, "start_value", 1) or 1))
-        return f"{scope}{fmt}从 {start_value} 起"
-
-    def _page_number_phase_scope_text(self, selectors: list[str]) -> str:
-        labels = {
-            "all_numbered_content": "全文",
-            "front_matter": "前置部分",
-            "body": "正文",
-            "back_matter": "后置部分",
-            "toc": "目录",
-            "references": "参考文献",
-            "appendix": "附录",
-        }
-        parts = [labels.get(str(selector), str(selector)) for selector in selectors if str(selector or "").strip()]
-        if not parts:
-            return "未选择分区"
-        return "、".join(parts)
-
-    def _toc_summary_value(self, toc) -> str:
-        if not toc.enabled:
-            return "目录关闭"
-        mode_label = _option_label(TOC_MODE_OPTIONS, toc.mode, "Word 自动目录")
-        return f"{mode_label} / {int(toc.max_level or 3)} 级"
-
-    def _toc_summary_detail(self, toc) -> str:
-        if not toc.enabled:
-            return "不插入或更新目录"
-        insert_label = _option_label(TOC_INSERT_OPTIONS, str(toc.insert_position or "auto"), str(toc.insert_position or "auto"))
-        return f"插入位置 {insert_label}"
 
     def set_template(self, template: TemplateConfig | None) -> None:
         preserve_snapshot = template is self._current_template and self._snapshot is not None
@@ -419,6 +237,12 @@ class ElementsDetail(QWidget):
     def set_save_enabled(self, enabled: bool) -> None:
         self._save_enabled = bool(enabled)
         self._refresh_action_state()
+
+    def set_reformat_enabled(self, enabled: bool | None) -> None:
+        if self._scope == "header_footer":
+            if self._editor_column.isHidden():
+                self._editor_column.setVisible(True)
+            self._refresh_summary()
 
     def _on_structure_edited(self, *_args) -> None:
         if self._is_syncing or self._current_template is None:
@@ -496,6 +320,9 @@ class ElementsDetail(QWidget):
     def _apply_theme(self) -> None:
         theme = get_theme()
         self.setStyleSheet(build_button_stylesheet(theme))
+        gap = theme.template_detail_section_gap
+        self.layout().setSpacing(gap)
+        self._editor_layout.setSpacing(gap)
 
         title_ss = (
             f"font-size: {theme.font_size_lg}px; "
@@ -516,9 +343,11 @@ class ElementsDetail(QWidget):
 
         if self._header_footer_detail is not None:
             self._header_footer_detail.apply_theme()
+        if self._toc_detail is not None:
+            self._toc_detail.apply_theme()
 
-        apply_button_variant(self._restore_entry_btn, "ghost-primary")
-        apply_button_variant(self._save_btn, "primary")
+        apply_template_summary_action_button(self._restore_entry_btn, "ghost-primary")
+        apply_template_summary_action_button(self._save_btn, "primary")
         if hasattr(self, "_preset_continuous_btn"):
             apply_button_variant(self._preset_continuous_btn, "secondary")
             apply_button_variant(self._preset_split_restart_btn, "secondary")
