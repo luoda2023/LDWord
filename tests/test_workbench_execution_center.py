@@ -1491,6 +1491,31 @@ def test_workbench_execution_adapter_reexports_issue_models_from_model_module():
     assert "ISSUE_TERMINAL_STATUS_VALUES" in model_source
 
 
+def test_workbench_execution_adapter_reexports_issue_projection_from_projection_module():
+    adapter_source = (ROOT / "src/ui/adapters/workbench_execution_adapter.py").read_text(
+        encoding="utf-8"
+    )
+    projection_source = (
+        ROOT / "src/ui/adapters/workbench_issue_projection.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from src.ui.adapters.workbench_issue_projection import" in adapter_source
+    assert "COVERAGE_PACK_DISPLAY_LABELS =" not in adapter_source
+    assert "BOUNDARY_TEXT_DISPLAY_LABELS =" not in adapter_source
+    assert "COVERAGE_PACK_DISPLAY_LABELS =" in projection_source
+    assert "BOUNDARY_TEXT_DISPLAY_LABELS =" in projection_source
+    for function_name in (
+        "workbench_issue_action_visual",
+        "workbench_issue_evidence_lines",
+        "workbench_issue_evidence_actions",
+        "workbench_issue_evidence_body_text",
+        "workbench_issue_display_text",
+        "workbench_issue_source_note_label",
+    ):
+        assert f"def {function_name}(" not in adapter_source
+        assert f"def {function_name}(" in projection_source
+
+
 def test_execution_diagnostic_issue_items_infer_scene_field_targets():
     items = execution_diagnostic_issue_items(
         [
