@@ -611,7 +611,7 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
                 "plugin_manual_gate",
             ),
             _evidence(
-                "src/report_writer.py",
+                "src/reporting/material_sections.py",
                 "_clean_plugin_manual_gate",
                 "plugin_manual_gate",
             ),

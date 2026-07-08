@@ -139,6 +139,25 @@ def test_report_writer_keeps_exam_sections_in_dedicated_module():
         assert f"def {function_name}" in section_source
 
 
+def test_report_writer_keeps_material_sections_in_dedicated_module():
+    writer_source = (ROOT / "src/report_writer.py").read_text(encoding="utf-8")
+    section_source = (ROOT / "src/reporting/material_sections.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from src.reporting.material_sections import" in writer_source
+    for function_name in (
+        "_extract_material_field_consistency",
+        "_format_material_field_consistency_markdown",
+        "_extract_object_preflight",
+        "_format_object_preflight_markdown",
+        "_extract_coverage_boundaries",
+        "_format_coverage_boundaries_markdown",
+    ):
+        assert f"def {function_name}" not in writer_source
+        assert f"def {function_name}" in section_source
+
+
 def test_report_writer_emits_diagnostics_into_json_and_markdown(tmp_path):
     result = _build_result_with_diagnostics()
     report_json = tmp_path / "changes.json"
