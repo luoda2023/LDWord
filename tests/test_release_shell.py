@@ -126,6 +126,22 @@ def test_engineering_gate_ci_installs_dev_dependencies_from_pyproject():
     assert "pytest" in pyproject.lower()
 
 
+def test_ci_workflows_install_project_dev_dependency_profile():
+    workflow_dir = ROOT / ".github" / "workflows"
+    workflows = {
+        "engineering-gate.yml": (workflow_dir / "engineering-gate.yml").read_text(
+            encoding="utf-8"
+        ),
+        "scene-matrix-release-gate.yml": (
+            workflow_dir / "scene-matrix-release-gate.yml"
+        ).read_text(encoding="utf-8"),
+    }
+
+    for workflow_name, workflow in workflows.items():
+        assert 'python -m pip install -e ".[dev]"' in workflow, workflow_name
+        assert "python-docx lxml PyYAML pytest" not in workflow, workflow_name
+
+
 def test_windows_package_script_builds_pyside6_release_and_copies_notices():
     script = (ROOT / "scripts" / "windows" / "package_release.bat").read_text(encoding="utf-8")
 
