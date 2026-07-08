@@ -395,6 +395,13 @@ python scripts\verify_scene_matrix_release_gate.py
   - 已迁出 overview/rules/content/exam/cleanup/output 等导航 snapshot 纯投影。
   - 同步修复因 report section 拆分造成的 release source evidence 路径: fixed-layout、import handoff、control runtime、object preflight、plugin boundary 均指向新 reporting section 模块。
   - `scene_panel.py` 已降至 5742 行。
+- Workbench W3:
+  - 新增 `src/ui/adapters/workbench_boundary_issues.py`。
+  - 已迁出 `coverage_boundary_issue_items()`、`sample_fixture_issue_items()` 及其 coverage pack / sample fixture helper。
+  - `workbench_execution_adapter.py` 继续 import 并 re-export 原函数名，外部导入路径不变。
+  - 同步修复 control contract、control runtime、plugin boundary、repair routing 的 source evidence 路径，避免 release gate 继续在旧 adapter 查找 marker。
+  - `tests/test_workbench_execution_center.py` 已增加 boundary issue family 归属守门。
+  - `workbench_execution_adapter.py` 已降至 2387 行，距离中期目标 2200 行以下还差约 190 行。
 
 验证:
 
@@ -470,9 +477,28 @@ python scripts\check_public_release.py --strict
 
 python scripts\engineering_gate.py
 # Engineering gate passed; 1877 tests collected; smoke 10 passed.
+
+python -m py_compile src\ui\adapters\workbench_execution_adapter.py src\ui\adapters\workbench_boundary_issues.py tests\test_workbench_execution_center.py src\config\control_contract_registry.py src\config\scene_control_runtime_consistency_audit.py src\config\scene_plugin_boundary_confirmation_audit.py src\config\scene_repair_routing.py
+# passed
+
+python -m pytest -q tests\test_workbench_execution_center.py tests\test_quick_execution_detail_architecture.py tests\test_scene_repair_routing.py tests\test_workbench_issue_navigation.py
+# 142 passed
+
+python -m pytest -q tests\test_scene_control_runtime_consistency_audit.py tests\test_scene_plugin_boundary_confirmation_audit.py tests\test_control_contract_registry.py tests\test_scene_repair_routing.py
+# 19 passed
+
+python scripts\verify_scene_matrix_release_gate.py
+# Scene matrix release gate: passed
+
+python scripts\check_public_release.py --strict
+# [OK] No obvious public-release blockers were found.
+
+$env:TEMP\lark_formatter_gate_20260709_w3\Scripts\python.exe scripts\engineering_gate.py
+# Engineering gate passed; 1878 tests collected; smoke 10 passed.
 ```
 
 下一步:
 
-1. 继续 ScenePanel S2: 评估 selector / request-cell / sample fixture projection 是否能按相同方式拆出。
-2. 按推荐顺序进入 Workbench W3 或 report_writer R4: 继续拆无副作用 formatter / evidence projection，避免一次触碰执行副作用和 UI 生命周期。
+1. 继续 Workbench W4: 优先评估 material readiness / material asset issue family 是否能拆到 `workbench_material_issues.py`，目标让 adapter 低于 2200 行。
+2. 继续 ScenePanel S2: 评估 selector / request-cell / sample fixture projection 是否能按相同方式拆出。
+3. report_writer R4 作为低优先级尾刀: 当前已低于 2500 行，后续只拆明显无副作用 formatter / evidence projection。

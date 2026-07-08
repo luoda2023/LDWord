@@ -605,7 +605,7 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
                 "plugin_manual_gate_payload",
             ),
             _evidence(
-                "src/ui/adapters/workbench_execution_adapter.py",
+                "src/ui/adapters/workbench_boundary_issues.py",
                 "plugin_manual_gate_for_pack",
                 "repair_target_type",
                 "plugin_manual_gate",

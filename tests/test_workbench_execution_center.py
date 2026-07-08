@@ -1516,6 +1516,31 @@ def test_workbench_execution_adapter_reexports_issue_projection_from_projection_
         assert f"def {function_name}(" in projection_source
 
 
+def test_workbench_execution_adapter_reexports_boundary_issue_family_module():
+    adapter_source = (ROOT / "src/ui/adapters/workbench_execution_adapter.py").read_text(
+        encoding="utf-8"
+    )
+    boundary_source = (
+        ROOT / "src/ui/adapters/workbench_boundary_issues.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from src.ui.adapters.workbench_boundary_issues import" in adapter_source
+    for function_name in (
+        "coverage_boundary_issue_items",
+        "sample_fixture_issue_items",
+    ):
+        assert f"def {function_name}(" not in adapter_source
+        assert f"def {function_name}(" in boundary_source
+    for helper_name in (
+        "_coverage_packs_for_scene_context",
+        "_coverage_boundary_details",
+        "_sample_fixture_issue",
+        "_sample_fixture_issue_pack_id",
+    ):
+        assert f"def {helper_name}(" not in adapter_source
+        assert f"def {helper_name}(" in boundary_source
+
+
 def test_execution_diagnostic_issue_items_infer_scene_field_targets():
     items = execution_diagnostic_issue_items(
         [

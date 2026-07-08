@@ -143,7 +143,7 @@ N2_160_SOURCE_EVIDENCE: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "workbench_boundary_issue",
-        "src/ui/adapters/workbench_execution_adapter.py",
+        "src/ui/adapters/workbench_boundary_issues.py",
         ("coverage_boundary_issue_items", "风险域：", "确认状态："),
     ),
     (

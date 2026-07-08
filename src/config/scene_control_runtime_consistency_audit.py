@@ -946,7 +946,7 @@ N2_175_SCENE_CONTROL_RUNTIME_SPECS: tuple[SceneControlRuntimeSpec, ...] = (
             ),
             _evidence(
                 "plugin_gate.workbench",
-                "src/ui/adapters/workbench_execution_adapter.py",
+                "src/ui/adapters/workbench_boundary_issues.py",
                 "runtime_repair",
                 "plugin_manual_gate_for_pack",
                 "repair_target_type",

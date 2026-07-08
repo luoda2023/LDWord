@@ -157,6 +157,9 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
                 "src/ui/adapters/workbench_execution_adapter.py",
                 'category="parameter_ownership"',
                 'repair_target_type="parameter_ownership"',
+            ),
+            _evidence(
+                "src/ui/adapters/workbench_boundary_issues.py",
                 'category="sample_fixture"',
                 'repair_target_type="sample_fixture"',
             ),
@@ -360,7 +363,7 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
                 "plugin_manual_gate_payload",
             ),
             _evidence(
-                "src/ui/adapters/workbench_execution_adapter.py",
+                "src/ui/adapters/workbench_boundary_issues.py",
                 "plugin_manual_gate_for_pack",
                 '"plugin_manual_gate" if gate is not None else "coverage_boundary"',
             ),
