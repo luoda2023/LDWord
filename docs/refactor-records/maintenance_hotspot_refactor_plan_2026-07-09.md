@@ -389,6 +389,12 @@ python scripts\verify_scene_matrix_release_gate.py
   - `workbench_execution_adapter.py` 继续 import 并 re-export 原函数名，外部导入路径不变。
   - `tests/test_workbench_execution_center.py` 已增加 projection 归属守门。
   - `workbench_execution_adapter.py` 已降至 2585 行，短期目标 2600 行以下已达成。
+- ScenePanel S1.2:
+  - `src/ui/panels/scene_navigation_projection.py` 扩展为导航卡片 snapshot builder。
+  - `ScenePanel._navigation_card_snapshots()` 保持兼容入口，只负责传入 scene label、dirty、当前模板、delivery preset 和 exam paper config。
+  - 已迁出 overview/rules/content/exam/cleanup/output 等导航 snapshot 纯投影。
+  - 同步修复因 report section 拆分造成的 release source evidence 路径: fixed-layout、import handoff、control runtime、object preflight、plugin boundary 均指向新 reporting section 模块。
+  - `scene_panel.py` 已降至 5742 行。
 
 验证:
 
@@ -449,9 +455,24 @@ python scripts\check_public_release.py --strict
 
 python scripts\engineering_gate.py
 # Engineering gate passed; 1877 tests collected; smoke 10 passed.
+
+python -m pytest -q tests/test_scene_panel_architecture.py tests/test_scene_repair_routing.py tests/test_quick_execution_detail_architecture.py
+# 119 passed
+
+python -m pytest -q tests/test_scene_fixed_layout_profile_audit.py tests/test_execution_diagnostics_reporting.py tests/test_control_contract_registry.py
+# 40 passed
+
+python scripts\verify_scene_matrix_release_gate.py
+# Scene matrix release gate: passed
+
+python scripts\check_public_release.py --strict
+# [OK] No obvious public-release blockers were found.
+
+python scripts\engineering_gate.py
+# Engineering gate passed; 1877 tests collected; smoke 10 passed.
 ```
 
 下一步:
 
-1. 继续 ScenePanel S1.2: 评估 `_navigation_card_snapshots()` 及相关 snapshot 方法能否在不接触 Qt 生命周期的前提下迁到 projection builder。
+1. 继续 ScenePanel S2: 评估 selector / request-cell / sample fixture projection 是否能按相同方式拆出。
 2. 按推荐顺序进入 Workbench W3 或 report_writer R4: 继续拆无副作用 formatter / evidence projection，避免一次触碰执行副作用和 UI 生命周期。

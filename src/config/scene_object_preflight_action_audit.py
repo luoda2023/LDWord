@@ -63,7 +63,7 @@ SCENE_OBJECT_PREFLIGHT_ACTION_SOURCE_MARKERS: tuple[
     ),
     (
         "report_writer",
-        "src/report_writer.py",
+        "src/reporting/material_sections.py",
         (
             "_extract_object_preflight",
             "_format_object_preflight_markdown",

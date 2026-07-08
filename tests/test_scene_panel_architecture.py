@@ -156,6 +156,12 @@ def test_scene_panel_uses_shared_card_header_and_flow_scope_layout():
     assert "from src.ui.panels.scene_navigation_projection import" in source
     assert "SCENE_RULES_ALIAS_CARDS = frozenset" in scene_navigation_projection_source
     assert "NAV_OUTPUT_FIELDS = (" in scene_navigation_projection_source
+    assert "def build_scene_navigation_card_snapshots" in scene_navigation_projection_source
+    assert "def rules_navigation_snapshot" in scene_navigation_projection_source
+    assert "def content_navigation_snapshot" in scene_navigation_projection_source
+    assert "def _overview_navigation_snapshot" not in source
+    assert "def _rules_navigation_snapshot" not in source
+    assert "def _content_navigation_snapshot" not in source
     assert "def _normalise_scene_detail_card_id" not in source
     assert "self._style_rules = _StyleRulesDetail()" in source
     assert "self._rules = _SceneRulesDetail(" in source

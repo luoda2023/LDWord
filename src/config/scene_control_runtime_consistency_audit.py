@@ -954,7 +954,7 @@ N2_175_SCENE_CONTROL_RUNTIME_SPECS: tuple[SceneControlRuntimeSpec, ...] = (
             ),
             _evidence(
                 "plugin_gate.report",
-                "src/report_writer.py",
+                "src/reporting/material_sections.py",
                 "report",
                 "_clean_plugin_manual_gate",
                 "plugin_manual_gate",

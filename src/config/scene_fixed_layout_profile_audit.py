@@ -411,7 +411,7 @@ N2_178_FIXED_LAYOUT_PROFILE_SPECS: tuple[SceneFixedLayoutProfileSpec, ...] = (
             ),
             _evidence(
                 "report.exam_answer_sheet_fixed_layout",
-                "src/report_writer.py",
+                "src/reporting/exam_sections.py",
                 "report",
                 "fixed_layout_kind",
                 "fixed_layout_row_height_twips",

@@ -76,7 +76,7 @@ N2_163_SOURCE_EVIDENCE: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "report_writer_handoff_fields",
-        "src/report_writer.py",
+        "src/reporting/material_sections.py",
         ("Report fields:", "report_fields"),
     ),
 )

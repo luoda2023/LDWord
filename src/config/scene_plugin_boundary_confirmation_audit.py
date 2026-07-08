@@ -138,7 +138,7 @@ N2_160_SOURCE_EVIDENCE: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "report_writer_boundary",
-        "src/report_writer.py",
+        "src/reporting/material_sections.py",
         ("_format_coverage_boundaries_markdown", "Risk domains:", "Decision states:"),
     ),
     (

@@ -33,7 +33,6 @@ from src.config.feature_configs import (
     OutputConfig,
 )
 from src.config.delivery_preset_display import (
-    DELIVERY_PRESET_DISPLAY_LABELS,
     delivery_preset_display_name,
     delivery_preset_option_tooltip,
 )
@@ -119,7 +118,6 @@ from src.config.library import (
 from src.config.template import TemplateConfig
 from src.ui.panels.scene_summary_projection import (
     FAILURE_POLICY_LABELS,
-    FORMAT_DISPLAY_LABELS,
     LATEX_POLICY_LABELS,
     MARKDOWN_POLICY_LABELS,
     PRESERVATION_MODE_LABELS,
@@ -144,7 +142,6 @@ from src.ui.panels.scene_summary_projection import (
     scene_sample_fixture_specs_for_scene,
     scene_sample_fixture_library_status_text,
     scene_sample_fixture_library_status_tooltip,
-    scene_application_boundary_display_name,
 )
 from src.ui.panels.scene_card_definitions import (
     CARD_DEFINITIONS,
@@ -156,11 +153,8 @@ from src.ui.panels.scene_card_definitions import (
 )
 from src.ui.panels.scene_navigation_projection import (
     NAV_SCOPE_MODE_LABELS,
-    NAV_OUTPUT_FIELDS,
-    _nav_display_id,
-    _nav_format_summary,
-    _nav_join,
-    _nav_scope_subtitle,
+    build_scene_navigation_card_snapshots,
+    default_delivery_preset,
     _normalise_scene_detail_card_id,
 )
 from src.ui.panels.scene_delivery_helpers import (
@@ -5300,187 +5294,18 @@ class ScenePanel(BasePanel):
             )
 
     def _navigation_card_snapshots(self, scene: SceneWorkspace) -> dict[str, dict[str, str]]:
-        snapshots: dict[str, dict[str, str]] = {
-            "scn_overview": self._overview_navigation_snapshot(scene),
-            "scn_exam_paper": self._exam_paper_navigation_snapshot(scene),
-            "scn_rules": self._rules_navigation_snapshot(scene),
-            "scn_content": self._content_navigation_snapshot(scene),
-        }
-        return snapshots
-
-    def _overview_navigation_snapshot(self, scene: SceneWorkspace) -> dict[str, str]:
         scene_label = self._scene_display_label(scene)
         template_label = _template_label_with_id(_scene_current_template_id(scene)) or "未绑定模板"
         dirty = bool(self.bridge.is_scene_dirty()) if hasattr(self.bridge, "is_scene_dirty") else False
-        return {
-            "subtitle": f"{scene_label} · {template_label}",
-            "badge_text": "未保存" if dirty else "场景",
-            "badge_variant": "warning" if dirty else "success",
-        }
-
-    def _rules_navigation_snapshot(self, scene: SceneWorkspace) -> dict[str, str]:
-        boundary_mode = getattr(scene.application_boundary, "mode", "follow_template")
-        override_count = self._style_override_count(scene)
-        has_style_rules = bool(
-            _generic_style_variants_for_scene(
-                scene,
-                getattr(self, "_current_template", None),
-            )
+        return build_scene_navigation_card_snapshots(
+            scene,
+            scene_label=scene_label,
+            template_label=template_label,
+            scene_dirty=dirty,
+            current_template=getattr(self, "_current_template", None),
+            delivery_preset=default_delivery_preset(scene),
+            exam_paper_config=_ensure_exam_paper_config(scene),
         )
-        style_summary = (
-            f"{override_count} 个格式例外"
-            if override_count
-            else ("无格式例外" if has_style_rules else "")
-        )
-        return {
-            "subtitle": _nav_join(
-                (
-                    _nav_scope_subtitle(boundary_mode),
-                    style_summary,
-                    self._output_result_nav_summary(scene),
-                    "参考文献规则" if _scene_uses_reference_format(scene) else "",
-                )
-            ),
-            "badge_text": scene_application_boundary_display_name(scene),
-            "badge_variant": (
-                "warning" if boundary_mode == "confirm_before_apply" else "success"
-            ),
-        }
-
-    def _output_result_nav_summary(self, scene: SceneWorkspace) -> str:
-        output_count = sum(
-            1 for field_name in NAV_OUTPUT_FIELDS if bool(getattr(scene.output, field_name, False))
-        )
-        preset = self._default_delivery_preset(scene)
-        preset_label = str(
-            getattr(preset, "label", "")
-            or DELIVERY_PRESET_DISPLAY_LABELS.get(
-                str(getattr(preset, "preset_id", "") or "").strip(),
-                "",
-            )
-            or getattr(preset, "preset_id", "")
-            or "默认交付"
-        )
-        preset_label = _nav_display_id(preset_label, DELIVERY_PRESET_DISPLAY_LABELS)
-        return f"{preset_label} {output_count} 项产物" if output_count else "未配置产物"
-
-    def _style_override_count(self, scene: SceneWorkspace) -> int:
-        visible_keys = {
-            variant.key
-            for variant in _generic_style_variants_for_scene(
-                scene,
-                getattr(self, "_current_template", None),
-            )
-        }
-        return sum(
-            1
-            for key, value in scene.section_styles.items()
-            if key in visible_keys and value is not None
-        )
-
-    def _style_rules_navigation_snapshot(self, scene: SceneWorkspace) -> dict[str, str]:
-        override_count = self._style_override_count(scene)
-        if override_count:
-            return {
-                "subtitle": f"{override_count} 个格式例外 · 可恢复模板",
-                "badge_text": f"{override_count} 项",
-                "badge_variant": "info",
-            }
-        return {
-            "subtitle": "跟随模板 · 无格式例外",
-            "badge_text": "模板",
-            "badge_variant": "neutral",
-        }
-
-    def _reference_navigation_snapshot(self, scene: SceneWorkspace) -> dict[str, str]:
-        ref = scene.reference_style
-        mode = "独立条目样式" if scene.section_styles.get("references_body") is not None else "跟随正文"
-        return {
-            "subtitle": (
-                f"{mode} · 悬挂缩进 {ref.hanging_indent_cm:g}cm · "
-                f"段后 {ref.space_after_pt:g}{getattr(ref, 'space_after_unit', 'pt')}"
-            ),
-            "badge_text": "论文",
-            "badge_variant": "info",
-        }
-
-    def _exam_paper_navigation_snapshot(self, scene: SceneWorkspace) -> dict[str, str]:
-        config = _ensure_exam_paper_config(scene)
-        blank = exam_blank_style_label(config.blank_style_id, config)
-        return {
-            "subtitle": f"{blank} · 试卷母版",
-            "badge_text": "试卷",
-            "badge_variant": "info",
-        }
-
-    def _cleanup_navigation_snapshot(self, scene: SceneWorkspace) -> dict[str, str]:
-        profile = scene.compliance_profile
-        preflight = profile.object_preflight
-        checks = len(profile.enabled_checks or [])
-        scan_targets = len(preflight.scan_targets or [])
-        enabled = bool(preflight.enabled or checks)
-        return {
-            "subtitle": _nav_join(
-                (
-                    f"检查 {checks} 项",
-                    f"扫描目标 {scan_targets} 个",
-                    FAILURE_POLICY_LABELS.get(profile.failure_policy, profile.failure_policy),
-                )
-            ),
-            "badge_text": "已开启" if enabled else "未开启",
-            "badge_variant": "success" if enabled else "neutral",
-        }
-
-    def _content_navigation_snapshot(self, scene: SceneWorkspace) -> dict[str, str]:
-        profile = scene.input_source_profile
-        formats = _nav_format_summary(tuple(profile.accepted_formats or ()), FORMAT_DISPLAY_LABELS)
-        material_fields = len(profile.required_material_fields or [])
-        schema_count = len(_profile_material_schema_ids(profile))
-        configured = bool(
-            profile.require_material_package
-            or material_fields
-            or schema_count
-            or profile.material_schema_id
-        )
-        return {
-            "subtitle": _nav_join(
-                (
-                    formats,
-                    f"资料字段 {material_fields} 个",
-                    f"资料规则 {schema_count} 项",
-                )
-            ),
-            "badge_text": "已配置" if configured else "未开启",
-            "badge_variant": "success" if configured else "neutral",
-        }
-
-    def _output_navigation_snapshot(self, scene: SceneWorkspace) -> dict[str, str]:
-        output_count = sum(
-            1 for field_name in NAV_OUTPUT_FIELDS if bool(getattr(scene.output, field_name, False))
-        )
-        preset = self._default_delivery_preset(scene)
-        preset_label = str(
-            getattr(preset, "label", "")
-            or DELIVERY_PRESET_DISPLAY_LABELS.get(
-                str(getattr(preset, "preset_id", "") or "").strip(),
-                "",
-            )
-            or getattr(preset, "preset_id", "")
-            or "默认交付"
-        )
-        preset_label = _nav_display_id(preset_label, DELIVERY_PRESET_DISPLAY_LABELS)
-        return {
-            "subtitle": f"{preset_label} · {output_count} 项产物",
-            "badge_text": f"{output_count} 项",
-            "badge_variant": "success" if output_count else "warning",
-        }
-
-    def _default_delivery_preset(self, scene: SceneWorkspace):
-        target_id = str(getattr(scene, "default_delivery_preset_id", "") or "").strip()
-        for preset in scene.delivery_presets or []:
-            if str(getattr(preset, "preset_id", "") or "").strip() == target_id:
-                return preset
-        return (scene.delivery_presets or [None])[0]
 
     def handle_navigation_intent(self, intent) -> None:
         self._set_return_navigation_intent(intent)
