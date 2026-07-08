@@ -117,6 +117,9 @@ def test_scene_panel_uses_shared_card_header_and_flow_scope_layout():
     scene_navigation_projection_source = (
         ROOT / "src/ui/panels/scene_navigation_projection.py"
     ).read_text(encoding="utf-8")
+    scene_state_projection_source = (
+        ROOT / "src/ui/panels/scene_state_projection.py"
+    ).read_text(encoding="utf-8")
     style_policy_deck_source = (
         ROOT / "src/shared/ui/style_policy_control_deck.py"
     ).read_text(encoding="utf-8")
@@ -163,6 +166,25 @@ def test_scene_panel_uses_shared_card_header_and_flow_scope_layout():
     assert "def _rules_navigation_snapshot" not in source
     assert "def _content_navigation_snapshot" not in source
     assert "def _normalise_scene_detail_card_id" not in source
+    assert "from src.ui.panels.scene_state_projection import" in source
+    for helper_name in (
+        "safe_scene_file_stem",
+        "is_scene_selector_group",
+        "builtin_scene_id_set",
+        "scene_is_exam",
+        "generic_style_variants_for_scene",
+        "scene_should_show_content_card",
+    ):
+        assert f"def {helper_name}(" in scene_state_projection_source
+    for old_helper_name in (
+        "_safe_scene_file_stem",
+        "_is_scene_selector_group",
+        "_builtin_scene_id_set",
+        "_scene_is_exam",
+        "_generic_style_variants_for_scene",
+        "_scene_should_show_content_card",
+    ):
+        assert f"def {old_helper_name}(" not in source
     assert "self._style_rules = _StyleRulesDetail()" in source
     assert "self._rules = _SceneRulesDetail(" in source
     assert "self._style_rules_block = SceneStyleRulesBlock" in source

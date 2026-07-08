@@ -409,6 +409,12 @@ python scripts\verify_scene_matrix_release_gate.py
   - 同步修复 control contract、control runtime、material repair flow、parameter ownership、repair routing 的 source evidence 路径。
   - `tests/test_workbench_execution_center.py` 已增加 material issue family 归属守门。
   - `workbench_execution_adapter.py` 已降至 1966 行，中期目标 2200 行以下已达成。
+- ScenePanel S2:
+  - 新增 `src/ui/panels/scene_state_projection.py`。
+  - 已迁出 scene selector id 清洗、内置场景 id 集合、selector group 判定、exam/reference/content-card 判定和通用样式变体包装。
+  - `scene_panel.py` 继续通过 alias 使用原 helper 名称，不改变 UI 调用点和 widget 生命周期。
+  - `tests/test_scene_panel_architecture.py` 已增加 state projection 归属守门。
+  - `scene_panel.py` 已降至 5666 行。
 
 验证:
 
@@ -520,10 +526,28 @@ python scripts\check_public_release.py --strict
 
 $env:TEMP\lark_formatter_gate_20260709_w3\Scripts\python.exe scripts\engineering_gate.py
 # Engineering gate passed; 1879 tests collected; smoke 10 passed.
+
+python -m py_compile src\ui\panels\scene_panel.py src\ui\panels\scene_state_projection.py
+# passed
+
+python -m pytest -q tests\test_scene_panel_architecture.py tests\test_scene_repair_routing.py tests\test_quick_execution_detail_architecture.py
+# 119 passed
+
+python -m pytest -q tests\test_scene_overview_projection.py tests\test_scene_panel_architecture.py::test_scene_panel_uses_shared_card_header_and_flow_scope_layout
+# 11 passed
+
+python scripts\verify_scene_matrix_release_gate.py
+# Scene matrix release gate: passed
+
+python scripts\check_public_release.py --strict
+# [OK] No obvious public-release blockers were found.
+
+$env:TEMP\lark_formatter_gate_20260709_w3\Scripts\python.exe scripts\engineering_gate.py
+# Engineering gate passed; 1879 tests collected; smoke 10 passed.
 ```
 
 下一步:
 
-1. 继续 ScenePanel S2: 评估 selector / request-cell / sample fixture projection 是否能按相同方式拆出。
+1. ScenePanel 后续只继续拆不触碰 Qt 生命周期的状态投影: 可评估 exam delivery state helper 或 scene library file naming helper 是否适合移入 `scene_state_projection.py`。
 2. Workbench 后续只做尾部整理: adapter 已低于 2200 行，下一步可评估 object preflight / output preflight 是否值得拆到独立 issue family 模块。
 3. report_writer R4 作为低优先级尾刀: 当前已低于 2500 行，后续只拆明显无副作用 formatter / evidence projection。

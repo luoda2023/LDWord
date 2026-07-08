@@ -101,9 +101,6 @@ from src.ui.adapters.field_display_names import (
 )
 from src.ui.base_panel import BasePanel
 from src.ui.bridge import navigation_intent_value
-from src.ui.panels.workbench.scene_presets import (
-    SCENE_METAS,
-)
 from src.config.builtin_templates import create_builtin_template
 from src.config.library import (
     default_scene_entry,
@@ -157,6 +154,17 @@ from src.ui.panels.scene_navigation_projection import (
     default_delivery_preset,
     _normalise_scene_detail_card_id,
 )
+from src.ui.panels.scene_state_projection import (
+    SCENE_SELECTOR_BUILTIN_GROUP as _SCENE_SELECTOR_BUILTIN_GROUP,
+    SCENE_SELECTOR_MY_GROUP as _SCENE_SELECTOR_MY_GROUP,
+    builtin_scene_id_set as _builtin_scene_id_set,
+    generic_style_variants_for_scene as _generic_style_variants_for_scene,
+    is_scene_selector_group as _is_scene_selector_group,
+    safe_scene_file_stem as _safe_scene_file_stem,
+    scene_is_exam as _scene_is_exam,
+    scene_should_show_content_card as _scene_should_show_content_card,
+    scene_uses_reference_format as _scene_uses_reference_format,
+)
 from src.ui.panels.scene_delivery_helpers import (
     _DELIVERY_PRESET_TEMPLATE_MAP,
     _VISIBILITY_ACTION_OPTIONS,
@@ -188,8 +196,6 @@ from src.ui.panels.scene_material_requirement_block import (
 from src.ui.panels.scene_style_override_service import (
     restore_scene_section_style_to_template,
     scene_section_style_override_projection,
-    scene_style_variants_for_scene,
-    scene_uses_reference_format,
     set_scene_section_style_override,
 )
 from src.ui.panels.scene_scope_service import apply_scene_scope_zone_states
@@ -230,25 +236,6 @@ from src.shared.ui.base_dialog import BaseDialog
 def _open_local_path(path: Path) -> bool:
     return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve()))))
 
-
-def _safe_scene_file_stem(value: str) -> str:
-    forbidden = '<>:"/\\|?*'
-    cleaned = "".join(ch if ch not in forbidden else "_" for ch in str(value or "").strip())
-    cleaned = cleaned.strip(" ._")
-    return cleaned or "scene"
-
-
-_SCENE_SELECTOR_GROUP_PREFIX = "__scene_group__:"
-_SCENE_SELECTOR_MY_GROUP = f"{_SCENE_SELECTOR_GROUP_PREFIX}mine"
-_SCENE_SELECTOR_BUILTIN_GROUP = f"{_SCENE_SELECTOR_GROUP_PREFIX}builtin"
-
-
-def _is_scene_selector_group(value: object) -> bool:
-    return str(value or "").strip().startswith(_SCENE_SELECTOR_GROUP_PREFIX)
-
-
-def _builtin_scene_id_set() -> set[str]:
-    return {str(meta.scene_id or "").strip() for meta in SCENE_METAS}
 
 
 ALIGNMENT_OPTIONS: tuple[tuple[str, str], ...] = (
@@ -305,69 +292,6 @@ def _option_label(options: Sequence[tuple[str, str]], value: str, fallback: str 
         if option_value == target:
             return label
     return fallback or target
-
-
-def _scene_is_exam(scene: SceneWorkspace | None) -> bool:
-    if scene is None:
-        return False
-    parts = (
-        getattr(scene, "scene_id", ""),
-        getattr(scene, "category", ""),
-        getattr(scene, "category_label", ""),
-        getattr(scene, "name", ""),
-        getattr(scene, "description", ""),
-    )
-    text = " ".join(str(part or "").lower() for part in parts)
-    return any(
-        token in text
-        for token in (
-            "exam",
-            "exam paper",
-            "test paper",
-            "test_paper",
-            "question paper",
-            "question_paper",
-            "试卷",
-            "考试",
-            "测验",
-            "试题",
-        )
-    )
-
-
-def _scene_uses_reference_format(scene: SceneWorkspace | None) -> bool:
-    return scene_uses_reference_format(scene)
-
-
-def _generic_style_variants_for_scene(
-    scene: SceneWorkspace | None,
-    template: TemplateConfig | None = None,
-):
-    return scene_style_variants_for_scene(scene, template)
-
-
-def _scene_should_show_content_card(scene: SceneWorkspace | None) -> bool:
-    if scene is None or not _scene_is_exam(scene):
-        return True
-    return _scene_has_material_content_contract(scene)
-
-
-def _scene_has_material_content_contract(scene: SceneWorkspace | None) -> bool:
-    if scene is None:
-        return False
-    profile = getattr(scene, "input_source_profile", None)
-    switches = getattr(scene, "module_switches", {}) or {}
-    watermark = getattr(scene, "watermark", None)
-    return bool(
-        switches.get("content_fill", False)
-        or getattr(profile, "require_material_package", False)
-        or str(getattr(profile, "material_schema_id", "") or "").strip()
-        or any(str(item or "").strip() for item in getattr(profile, "material_schema_ids", ()) or ())
-        or any(str(item or "").strip() for item in getattr(profile, "required_material_fields", ()) or ())
-        or any(str(item or "").strip() for item in getattr(profile, "required_image_roles", ()) or ())
-        or bool(getattr(watermark, "enabled", False))
-        or str(getattr(watermark, "text", "") or "").strip()
-    )
 
 
 def _ensure_exam_paper_config(scene: SceneWorkspace) -> ExamPaperConfig:
