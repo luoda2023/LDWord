@@ -497,7 +497,7 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
                 "def _build_material_schema_validation_items",
             ),
             _evidence(
-                "src/ui/adapters/workbench_execution_adapter.py",
+                "src/ui/adapters/workbench_material_issues.py",
                 "material_schema_readiness_reasons",
                 "missing_material_schema_ids",
             ),

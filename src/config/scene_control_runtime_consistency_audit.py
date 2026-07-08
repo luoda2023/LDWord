@@ -794,7 +794,7 @@ N2_175_SCENE_CONTROL_RUNTIME_SPECS: tuple[SceneControlRuntimeSpec, ...] = (
             ),
             _evidence(
                 "schema.workbench_repair",
-                "src/ui/adapters/workbench_execution_adapter.py",
+                "src/ui/adapters/workbench_material_issues.py",
                 "runtime_repair",
                 "missing_material_schema_ids",
                 "repair_target_type=\"schema\"",

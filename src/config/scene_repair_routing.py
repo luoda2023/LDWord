@@ -238,11 +238,17 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
         action_contract="Open material fields, assets, schema selection, or profile-scoped material repair.",
         evidence=(
             _evidence(
-                "src/ui/adapters/workbench_execution_adapter.py",
+                "src/ui/adapters/workbench_material_issues.py",
                 'repair_target_type="field"',
                 'repair_target_type="asset"',
                 'repair_target_type="schema"',
                 'question_figure_item',
+            ),
+            _evidence(
+                "src/ui/adapters/workbench_execution_adapter.py",
+                "def batch_execution_issue_items",
+                'payload.get("repair_target_type")',
+                'payload.get("repair_target_key")',
             ),
             _evidence(
                 "src/ui/bridge.py",

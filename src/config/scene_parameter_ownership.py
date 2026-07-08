@@ -371,7 +371,7 @@ PARAMETER_CONSUMER_ANCHORS: dict[str, tuple[ParameterConsumerAnchor, ...]] = {
         ),
         _anchor(
             "material preflight",
-            "src/ui/adapters/workbench_execution_adapter.py",
+            "src/ui/adapters/workbench_material_issues.py",
             "material_schema_readiness_reasons",
             "MaterialReadinessIssueGroups",
         ),

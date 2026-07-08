@@ -368,7 +368,7 @@ N2_177_MATERIAL_REPAIR_FLOW_SPECS: tuple[SceneMaterialRepairFlowSpec, ...] = (
         (
             _evidence(
                 "runtime.workbench.material_groups",
-                "src/ui/adapters/workbench_execution_adapter.py",
+                "src/ui/adapters/workbench_material_issues.py",
                 "runtime",
                 "def material_readiness_issue_groups",
                 "evaluate_material_requirements(",
@@ -401,7 +401,7 @@ N2_177_MATERIAL_REPAIR_FLOW_SPECS: tuple[SceneMaterialRepairFlowSpec, ...] = (
         (
             _evidence(
                 "runtime.workbench.material_issue_items",
-                "src/ui/adapters/workbench_execution_adapter.py",
+                "src/ui/adapters/workbench_material_issues.py",
                 "runtime",
                 "def material_readiness_issue_items",
                 "material.fields.missing",
@@ -608,7 +608,7 @@ N2_177_MATERIAL_REPAIR_FLOW_SPECS: tuple[SceneMaterialRepairFlowSpec, ...] = (
             ),
             _evidence(
                 "runtime.workbench.schema_recommendation",
-                "src/ui/adapters/workbench_execution_adapter.py",
+                "src/ui/adapters/workbench_material_issues.py",
                 "runtime",
                 "recommendation_schema_id",
                 "recommendation_reasons",

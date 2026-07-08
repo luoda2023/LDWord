@@ -1541,6 +1541,34 @@ def test_workbench_execution_adapter_reexports_boundary_issue_family_module():
         assert f"def {helper_name}(" in boundary_source
 
 
+def test_workbench_execution_adapter_reexports_material_issue_family_module():
+    adapter_source = (ROOT / "src/ui/adapters/workbench_execution_adapter.py").read_text(
+        encoding="utf-8"
+    )
+    material_source = (
+        ROOT / "src/ui/adapters/workbench_material_issues.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from src.ui.adapters.workbench_material_issues import" in adapter_source
+    for function_name in (
+        "material_schema_readiness_reasons",
+        "material_readiness_reasons",
+        "material_readiness_issue_items",
+        "material_asset_comparison_issue_items",
+        "material_readiness_issue_groups",
+    ):
+        assert f"def {function_name}(" not in adapter_source
+        assert f"def {function_name}(" in material_source
+    for helper_name in (
+        "_missing_scene_material_schema_ids",
+        "_scene_material_schema_ids",
+        "_material_context_asset_roles",
+        "_material_source_notes",
+    ):
+        assert f"def {helper_name}(" not in adapter_source
+        assert f"def {helper_name}(" in material_source
+
+
 def test_execution_diagnostic_issue_items_infer_scene_field_targets():
     items = execution_diagnostic_issue_items(
         [
