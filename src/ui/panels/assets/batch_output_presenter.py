@@ -38,7 +38,7 @@ class BatchOutputPresenterMixin:
     def _setup_batch_profile_output_card(self) -> None:
         profile_list_card = Card(parent=self._section_contents["batch"])
         self._profile_list_card = profile_list_card
-        profile_list_card.set_header("澶氫唤鐢熸垚", icon_name="layers")
+        profile_list_card.set_header("多份生成", icon_name="layers")
         self._profile_list = QListWidget(profile_list_card)
         self._profile_list.setObjectName("assets_profile_list")
         self._profile_list.currentRowChanged.connect(self._on_profile_row_changed)
@@ -49,10 +49,10 @@ class BatchOutputPresenterMixin:
         profile_actions_layout = QHBoxLayout(profile_actions)
         profile_actions_layout.setContentsMargins(0, 0, 0, 0)
         profile_actions_layout.setSpacing(10)
-        self._add_profile_btn = QPushButton("鏂板涓€浠?", profile_actions)
-        self._copy_profile_btn = QPushButton("澶嶅埗褰撳墠", profile_actions)
-        self._import_batch_profiles_btn = QPushButton("鎵归噺瀵煎叆", profile_actions)
-        self._remove_profile_btn = QPushButton("绉婚櫎", profile_actions)
+        self._add_profile_btn = QPushButton("新增一份", profile_actions)
+        self._copy_profile_btn = QPushButton("复制当前", profile_actions)
+        self._import_batch_profiles_btn = QPushButton("批量导入", profile_actions)
+        self._remove_profile_btn = QPushButton("移除", profile_actions)
         self._add_profile_btn.clicked.connect(self._add_profile)
         self._copy_profile_btn.clicked.connect(self._copy_current_profile)
         self._import_batch_profiles_btn.clicked.connect(self._load_batch_profiles_dialog)
@@ -71,7 +71,7 @@ class BatchOutputPresenterMixin:
             lambda *_: self._on_batch_output_naming_changed()
         )
         batch_form = InspectorForm(parent=profile_list_card)
-        batch_form.add_field("淇濆瓨涓?", self._batch_output_naming_combo)
+        batch_form.add_field("保存为", self._batch_output_naming_combo)
         profile_list_card.add_widget(batch_form)
         self._batch_preview = QLabel(profile_list_card)
         self._batch_preview.setWordWrap(True)
@@ -117,7 +117,7 @@ class BatchOutputPresenterMixin:
     def _load_batch_profiles_dialog(self) -> None:
         file_path, _selected = QFileDialog.getOpenFileName(
             self,
-            "鎵归噺瀵煎叆澶氫唤璧勬枡",
+            "批量导入多份资料",
             "",
             "Material Tables (*.json *.csv *.xlsx *.xlsm);;All Files (*)",
         )

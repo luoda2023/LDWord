@@ -67,7 +67,7 @@ class AssetSlotStatusPresenterMixin:
         pixmap = _load_scaled_pixmap(path, QSize(56, 56))
         if pixmap is None:
             label.clear()
-            label.setText("鏈€?")
+            label.setText("未选")
             return
         label.setText("")
         label.setPixmap(pixmap)

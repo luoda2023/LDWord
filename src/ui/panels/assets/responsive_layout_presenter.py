@@ -50,9 +50,9 @@ class ResponsiveLayoutPresenterMixin:
         if not hasattr(self, "_fill_missing_btn"):
             return
         actions = (
-            (self._fill_missing_btn, "琛ラ綈璧勬枡"),
-            (self._apply_btn, "鐢熸垚鏂囨。"),
-            (self._batch_generate_btn, "鎵归噺鐢熸垚"),
+            (self._fill_missing_btn, "补齐资料"),
+            (self._apply_btn, "生成文档"),
+            (self._batch_generate_btn, "批量生成"),
         )
         for button, label in actions:
             button.setToolTip(label)
@@ -70,11 +70,11 @@ class ResponsiveLayoutPresenterMixin:
         if not hasattr(self, "_new_archive_btn"):
             return
         actions = (
-            (self._new_archive_btn, "鏂板缓璧勬枡鍖?"),
-            (self._duplicate_archive_btn, "鍒涘缓鍓湰"),
-            (self._rename_archive_btn, "閲嶅懡鍚嶈祫鏂欏寘"),
-            (self._open_archive_folder_btn, "鎵撳紑璧勬枡鍖呮枃浠跺す"),
-            (self._delete_archive_btn, "鍒犻櫎璧勬枡鍖?"),
+            (self._new_archive_btn, "新建资料包"),
+            (self._duplicate_archive_btn, "创建副本"),
+            (self._rename_archive_btn, "重命名资料包"),
+            (self._open_archive_folder_btn, "打开资料包文件夹"),
+            (self._delete_archive_btn, "删除资料包"),
         )
         for button, label in actions:
             button.setToolTip(label)

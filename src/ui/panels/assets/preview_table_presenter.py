@@ -71,15 +71,15 @@ class PreviewTablePresenterMixin:
     def _setup_placeholder_preview_card(self) -> None:
         preview_card = Card(parent=self._section_contents["preview"])
         self._preview_card = preview_card
-        preview_card.set_header("鐢熸垚棰勮", icon_name="eye")
+        preview_card.set_header("生成预览", icon_name="eye")
         self._preview_label = QLabel(preview_card)
         self._preview_label.setWordWrap(True)
         preview_actions = QWidget(preview_card)
         preview_actions_layout = QHBoxLayout(preview_actions)
         preview_actions_layout.setContentsMargins(0, 0, 0, 0)
         preview_actions_layout.setSpacing(10)
-        self._preview_filter_btn = QPushButton("鍙湅闂椤?", preview_actions)
-        self._preview_auto_match_btn = QPushButton("鑷姩鍖归厤", preview_actions)
+        self._preview_filter_btn = QPushButton("只看问题项", preview_actions)
+        self._preview_auto_match_btn = QPushButton("自动匹配", preview_actions)
         self._preview_auto_match_btn.clicked.connect(self._on_preview_auto_match)
         self._preview_filter_btn.clicked.connect(self._toggle_preview_filter)
         preview_actions_layout.addWidget(self._preview_auto_match_btn)
@@ -114,7 +114,7 @@ class PreviewTablePresenterMixin:
     def _toggle_preview_filter(self) -> None:
         self._preview_only_issues = not self._preview_only_issues
         self._preview_filter_btn.setText(
-            "鏄剧ず鍏ㄩ儴" if self._preview_only_issues else "鍙湅闂椤?"
+            "显示全部" if self._preview_only_issues else "只看问题项"
         )
         self._refresh_summary()
 
@@ -149,19 +149,19 @@ class PreviewTablePresenterMixin:
         if not tokens:
             source_path = self._placeholder_source_path()
             if source_path:
-                return "??????? {{...}} ????"
+                return "当前文档没有发现 {{...}} 占位符。"
             preview_pairs = [
                 f"{_field_label(key)} -> {value}"
                 for key, value in list(fields.items())[:4]
             ]
             if preview_pairs:
-                preview_text = "?".join(preview_pairs)
+                preview_text = "；".join(preview_pairs)
                 if len(fields) > 4:
-                    preview_text += f"?? {len(fields)} ???"
+                    preview_text += f"；等 {len(fields)} 项资料"
             else:
-                preview_text = "?????????????????????????????"
+                preview_text = "选择文档后，会预览模板字段如何填充。"
             if replacements:
-                preview_text += f"??? {len(replacements)} ??????"
+                preview_text += f"；另有 {len(replacements)} 条替换规则"
             return preview_text
 
         rows = preview_rows
@@ -170,9 +170,9 @@ class PreviewTablePresenterMixin:
         visible_rows = self._visible_placeholder_preview_rows(rows)
         lines = [str(row["summary"]) for row in visible_rows[:12]]
         if len(visible_rows) > 12:
-            lines.append(f"?? {len(visible_rows) - 12} ?????????")
+            lines.append(f"还有 {len(visible_rows) - 12} 项未显示")
         if self._preview_only_issues and not lines:
-            return "?????????????"
+            return "当前没有需要处理的问题项。"
         return "\n".join(lines)
 
     def _placeholder_source_path(self) -> str:
@@ -314,10 +314,10 @@ class PreviewTablePresenterMixin:
                             token=token,
                             placeholder=display_token,
                             value=alias_value,
-                            source=f"????{alias_label}",
-                            status="???",
+                            source=f"已记住：{alias_label}",
+                            status="已匹配",
                             issue=False,
-                            summary=f"{display_token} -> {alias_value}??????{alias_label}?",
+                            summary=f"{display_token} -> {alias_value}（已按{alias_label}匹配）",
                         )
                     )
                     continue
@@ -325,14 +325,14 @@ class PreviewTablePresenterMixin:
                     _preview_row(
                         token=token,
                         placeholder=display_token,
-                        value="???",
-                        source=f"????{alias_label}",
-                        status="???",
+                        value="待填写",
+                        source=f"已记住：{alias_label}",
+                        status="缺少",
                         issue=True,
-                        action="???",
+                        action="去填写",
                         action_type="field",
                         action_key=learned_alias_key,
-                        summary=f"{display_token} -> ???{alias_label}",
+                        summary=f"{display_token} -> 待填写{alias_label}",
                     )
                 )
                 continue
@@ -343,10 +343,10 @@ class PreviewTablePresenterMixin:
                         token=token,
                         placeholder=display_token,
                         value=fields[token],
-                        source=f"????{field_label}",
-                        status="???",
+                        source=f"资料字段：{field_label}",
+                        status="已匹配",
                         issue=False,
-                        summary=f"{display_token} -> {fields[token]}?{field_label}?",
+                        summary=f"{display_token} -> {fields[token]}（{field_label}）",
                     )
                 )
                 continue
@@ -356,10 +356,10 @@ class PreviewTablePresenterMixin:
                         token=token,
                         placeholder=display_token,
                         value=replacement_map[token],
-                        source="?????",
-                        status="???",
+                        source="替换规则",
+                        status="已匹配",
                         issue=False,
-                        summary=f"{display_token} -> {replacement_map[token]}???????",
+                        summary=f"{display_token} -> {replacement_map[token]}（替换规则）",
                     )
                 )
                 continue
@@ -369,14 +369,14 @@ class PreviewTablePresenterMixin:
                     _preview_row(
                         token=token,
                         placeholder=display_token,
-                        value="???",
-                        source=f"????{field_label}",
-                        status="???",
+                        value="待填写",
+                        source=f"资料字段：{field_label}",
+                        status="缺少",
                         issue=True,
-                        action="???",
+                        action="去填写",
                         action_type="field",
                         action_key=token,
-                        summary=f"{display_token} -> ???{field_label}",
+                        summary=f"{display_token} -> 待填写{field_label}",
                     )
                 )
                 continue
@@ -388,18 +388,18 @@ class PreviewTablePresenterMixin:
                     _preview_row(
                         token=token,
                         placeholder=display_token,
-                        value=alias_value or "???",
-                        source=f"????{alias_label}",
-                        status="???",
+                        value=alias_value or "待确认",
+                        source=f"可能是：{alias_label}",
+                        status="需确认",
                         issue=True,
-                        action="????" if alias_value else "???",
+                        action="记住映射" if alias_value else "去填写",
                         action_type="alias" if alias_value else "field",
                         action_key=token if alias_value else alias_key,
                         action_source=alias_key if alias_value else "",
                         summary=(
-                            f"{display_token} -> ???{alias_value}?{alias_label}?"
+                            f"{display_token} -> 可用{alias_value}（{alias_label}）"
                             if alias_value
-                            else f"{display_token} -> ???{alias_label}"
+                            else f"{display_token} -> 待填写{alias_label}"
                         ),
                     )
                 )
@@ -408,14 +408,14 @@ class PreviewTablePresenterMixin:
             asset = asset_by_role.get(role or "")
             if asset is not None:
                 role_label = _asset_role_label(role, self._asset_slot_specs)
-                value = f"{role_label}?{Path(asset.path).name}"
+                value = f"{role_label}：{Path(asset.path).name}"
                 rows.append(
                     _preview_row(
                         token=token,
                         placeholder=display_token,
                         value=value,
-                        source=f"????{role_label}",
-                        status="???",
+                        source=f"图片材料：{role_label}",
+                        status="已匹配",
                         issue=False,
                         summary=f"{display_token} -> {value}",
                     )
@@ -426,14 +426,14 @@ class PreviewTablePresenterMixin:
             if attachment is not None:
                 spec = self._attachment_role_spec(attachment_role)
                 role_label = spec.label if spec is not None else attachment_role
-                value = f"{role_label}?{Path(attachment.path).name}"
+                value = f"{role_label}：{Path(attachment.path).name}"
                 rows.append(
                     _preview_row(
                         token=token,
                         placeholder=display_token,
                         value=value,
-                        source=f"?????{role_label}",
-                        status="???",
+                        source=f"附件材料：{role_label}",
+                        status="已匹配",
                         issue=False,
                         summary=f"{display_token} -> {value}",
                     )
@@ -446,14 +446,14 @@ class PreviewTablePresenterMixin:
                     _preview_row(
                         token=token,
                         placeholder=display_token,
-                        value=f"??{role_label}",
-                        source=f"?????{role_label}",
-                        status="???",
+                        value=f"缺少{role_label}",
+                        source=f"附件材料：{role_label}",
+                        status="缺少",
                         issue=True,
-                        action="???",
+                        action="去选择",
                         action_type="asset",
                         action_key=attachment_role,
-                        summary=f"{display_token} -> ??{role_label}",
+                        summary=f"{display_token} -> 缺少{role_label}",
                     )
                 )
                 continue
@@ -463,14 +463,14 @@ class PreviewTablePresenterMixin:
                     _preview_row(
                         token=token,
                         placeholder=display_token,
-                        value=f"??{role_label}",
-                        source=f"????{role_label}",
-                        status="???",
+                        value=f"缺少{role_label}",
+                        source=f"图片材料：{role_label}",
+                        status="缺少",
                         issue=True,
-                        action="????",
+                        action="去选图",
                         action_type="asset",
                         action_key=role,
-                        summary=f"{display_token} -> ??{role_label}",
+                        summary=f"{display_token} -> 缺少{role_label}",
                     )
                 )
                 continue
@@ -478,14 +478,14 @@ class PreviewTablePresenterMixin:
                 _preview_row(
                     token=token,
                     placeholder=display_token,
-                    value="???",
-                    source="?",
-                    status="???",
+                    value="未匹配",
+                    source="未知",
+                    status="需处理",
                     issue=True,
-                    action="??????",
+                    action="加入更多资料",
                     action_type="custom",
                     action_key=token,
-                    summary=f"{display_token} -> ???",
+                    summary=f"{display_token} -> 未匹配",
                 )
             )
         return rows

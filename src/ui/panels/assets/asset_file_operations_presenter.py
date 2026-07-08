@@ -25,7 +25,7 @@ class AssetFileOperationsPresenterMixin:
     def _select_asset_file(self, role: str) -> None:
         file_path, _selected = QFileDialog.getOpenFileName(
             self,
-            "閫夋嫨鍥剧墖",
+            "选择图片",
             "",
             "Image Files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff);;All Files (*)",
         )
@@ -39,7 +39,7 @@ class AssetFileOperationsPresenterMixin:
         spec = self._attachment_role_spec(role)
         file_path, _selected = QFileDialog.getOpenFileName(
             self,
-            f"閫夋嫨{spec.label if spec is not None else '闄勪欢'}",
+            f"选择{spec.label if spec is not None else '附件'}",
             "",
             _attachment_file_filter(spec.accepted_types if spec is not None else ("image", "pdf")),
         )

@@ -30,7 +30,7 @@ class MaterialContextApplicationPresenterMixin:
     def _setup_generation_actions_card(self) -> None:
         generate_card = Card(parent=self._section_contents["generate"])
         self._generate_card = generate_card
-        generate_card.set_header("璧勬枡瀹屾暣搴?", icon_name="circle-check")
+        generate_card.set_header("资料完整度", icon_name="circle-check")
         self._generation_status_label = QLabel(generate_card)
         self._generation_status_label.setWordWrap(True)
         self._generation_detail_label = QLabel(generate_card)
@@ -43,9 +43,9 @@ class MaterialContextApplicationPresenterMixin:
         generate_actions_layout.setContentsMargins(0, 0, 0, 0)
         generate_actions_layout.setSpacing(10)
 
-        self._fill_missing_btn = QPushButton("琛ラ綈璧勬枡", generate_actions)
-        self._apply_btn = QPushButton("鐢熸垚鏂囨。", generate_actions)
-        self._batch_generate_btn = QPushButton("鎵归噺鐢熸垚", generate_actions)
+        self._fill_missing_btn = QPushButton("补齐资料", generate_actions)
+        self._apply_btn = QPushButton("生成文档", generate_actions)
+        self._batch_generate_btn = QPushButton("批量生成", generate_actions)
         self._fill_missing_btn.setProperty("assets_generate_action_icon", "circle-alert")
         self._apply_btn.setProperty("assets_generate_action_icon", "play")
         self._batch_generate_btn.setProperty("assets_generate_action_icon", "layers")
@@ -99,7 +99,7 @@ class MaterialContextApplicationPresenterMixin:
     def _load_mapping_dialog(self) -> None:
         file_path, _selected = QFileDialog.getOpenFileName(
             self,
-            "瀵煎叆璧勬枡琛?",
+            "导入资料表",
             "",
             "Mapping Files (*.json *.csv *.xlsx *.xlsm);;All Files (*)",
         )

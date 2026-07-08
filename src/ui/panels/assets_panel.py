@@ -369,7 +369,7 @@ class AssetsPanel(
 ):
     """Manage the current entity/profile payload used by quick fill execution."""
 
-    panel_title = "璧勬枡鍖?"
+    panel_title = "资料包"
     panel_icon = "package"
 
     def _setup_ui(self) -> None:
@@ -467,7 +467,7 @@ class AssetsPanel(
             parent=self,
         )
 
-        self._title = QLabel("璧勬枡鍖?", self._detail_shell)
+        self._title = QLabel("资料包", self._detail_shell)
         self._title.setVisible(False)
         self._summary = QLabel(self._detail_shell)
         self._summary.setWordWrap(True)
@@ -478,8 +478,8 @@ class AssetsPanel(
         return_layout = QHBoxLayout(self._return_bar)
         return_layout.setContentsMargins(10, 6, 10, 6)
         return_layout.setSpacing(8)
-        self._return_label = QLabel("浠庢墽琛岄棶棰樿繘鍏?", self._return_bar)
-        self._return_btn = QPushButton("杩斿洖鎵ц", self._return_bar)
+        self._return_label = QLabel("从执行问题进入", self._return_bar)
+        self._return_btn = QPushButton("返回执行", self._return_bar)
         self._return_btn.setCursor(Qt.PointingHandCursor)
         self._return_btn.clicked.connect(self._navigate_return_target)
         return_layout.addWidget(self._return_label, 1)

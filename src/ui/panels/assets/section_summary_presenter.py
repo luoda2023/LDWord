@@ -120,8 +120,8 @@ class SectionSummaryPresenterMixin:
         self._refresh_section_summary_cards(summary_state=summary_state)
 
     def _build_section_summary_state(self) -> SectionSummaryRefreshState:
-        archive_name = self._archive_name_edit.text().strip() or "鏈懡鍚嶈祫鏂欏寘"
-        profile_name = self._profile_name_edit.text().strip() or "杩欎竴浠?"
+        archive_name = self._archive_name_edit.text().strip() or "未命名资料包"
+        profile_name = self._profile_name_edit.text().strip() or "这一份"
         self._sync_archive_selector()
         state = self._current_preview_state()
         fields = state["fields"]
@@ -175,7 +175,7 @@ class SectionSummaryPresenterMixin:
     ) -> list[str]:
         missing_parts: list[str] = []
         if not fields:
-            missing_parts.append("鏂囧瓧璧勬枡")
+            missing_parts.append("文字资料")
         else:
             missing_parts.extend(_field_label(key) for key in state["missing_required_fields"])
         if missing_asset_roles:
@@ -212,7 +212,7 @@ class SectionSummaryPresenterMixin:
         if missing_parts:
             update("generate", summary_state.preparation_text, "needs input", "warning")
         else:
-            update("generate", f"Ready to generate ? {summary_state.generation_count} docs", "ready", "success")
+            update("generate", f"可以生成 · {summary_state.generation_count} 份", "ready", "success")
 
         if imported_count:
             update("io", f"Imported {imported_count} fields", "imported", "success")

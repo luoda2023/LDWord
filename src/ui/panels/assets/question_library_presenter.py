@@ -74,18 +74,18 @@ class QuestionFigureLibraryPresenterMixin:
         self._question_figure_library_source_edit.setObjectName(
             "question_figure_asset_library_source_edit"
         )
-        self._question_figure_library_source_edit.setPlaceholderText("搴撴潵婧?")
+        self._question_figure_library_source_edit.setPlaceholderText("库来源")
         self._question_figure_library_asset_id_edit = QLineEdit(library_editor_inputs)
         self._question_figure_library_asset_id_edit.setObjectName(
             "question_figure_asset_library_asset_id_edit"
         )
-        self._question_figure_library_asset_id_edit.setPlaceholderText("绱犳潗ID")
+        self._question_figure_library_asset_id_edit.setPlaceholderText("素材ID")
         self._question_figure_library_alt_text_edit = QLineEdit(library_editor_inputs)
         self._question_figure_library_alt_text_edit.setObjectName(
             "question_figure_asset_library_alt_text_edit"
         )
-        self._question_figure_library_alt_text_edit.setPlaceholderText("鍥剧墖璇存槑")
-        self._question_figure_library_save_btn = QPushButton("淇濆瓨", library_editor_inputs)
+        self._question_figure_library_alt_text_edit.setPlaceholderText("图片说明")
+        self._question_figure_library_save_btn = QPushButton("保存", library_editor_inputs)
         self._question_figure_library_save_btn.clicked.connect(
             self._save_question_figure_library_metadata
         )

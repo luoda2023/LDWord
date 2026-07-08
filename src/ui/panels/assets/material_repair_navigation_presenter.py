@@ -79,7 +79,7 @@ class MaterialRepairNavigationMixin:
         card_id = str(navigation_intent_value(intent, "return_card_id", "") or "").strip()
         if not panel_id:
             self._return_navigation_intent = None
-            self._return_label.setText("浠庢墽琛岄棶棰樿繘鍏?")
+            self._return_label.setText("从执行问题进入")
             self._return_bar.setVisible(False)
             return
         payload = navigation_intent_value(intent, "payload", {}) or {}

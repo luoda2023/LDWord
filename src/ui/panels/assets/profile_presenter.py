@@ -170,7 +170,7 @@ class ProfilePresenterMixin:
         copy_index = len(self._profiles) + 1
         copied = EntityProfile(
             profile_id=self._next_profile_id(),
-            profile_name=f"{_profile_label(source)} 鍓湰",
+            profile_name=f"{_profile_label(source)} 副本",
             fields=dict(source.fields),
             assets_dir=source.assets_dir,
             required_fields=list(source.required_fields),
@@ -210,7 +210,7 @@ class ProfilePresenterMixin:
         if not profile_id or profile_id in existing_ids:
             profile_id = self._next_profile_id(existing_ids)
         existing_ids.add(profile_id)
-        profile_name = str(profile.profile_name or "").strip() or profile.fields.get("company_name") or "杩欎竴浠?"
+        profile_name = str(profile.profile_name or "").strip() or profile.fields.get("company_name") or "这一份"
         fields = {str(key): str(value) for key, value in profile.fields.items() if str(key or "").strip()}
         required_fields = _normalize_required_field_keys(
             profile.required_fields,

@@ -49,10 +49,10 @@ class AssetRowsPresenterMixin:
         view_btn = QPushButton(row)
         open_btn = QPushButton(row)
         clear_btn = QPushButton(row)
-        self._configure_asset_icon_button(choose_btn, "folder-open", "閫夋嫨鍥剧墖")
-        self._configure_asset_icon_button(view_btn, "eye", "鏌ョ湅鍥剧墖")
-        self._configure_asset_icon_button(open_btn, "square-arrow-out-up-right", "鎵撳紑鍘熷浘")
-        self._configure_asset_icon_button(clear_btn, "trash-2", "娓呴櫎鍥剧墖")
+        self._configure_asset_icon_button(choose_btn, "folder-open", "选择图片")
+        self._configure_asset_icon_button(view_btn, "eye", "查看图片")
+        self._configure_asset_icon_button(open_btn, "square-arrow-out-up-right", "打开原图")
+        self._configure_asset_icon_button(clear_btn, "trash-2", "清除图片")
         choose_btn.clicked.connect(lambda *_args, slot_role=role: self._select_asset_file(slot_role))
         view_btn.clicked.connect(lambda *_args, slot_role=role: self._show_asset_slot_path(slot_role))
         open_btn.clicked.connect(lambda *_args, slot_role=role: self._open_asset_slot_path(slot_role))
@@ -68,7 +68,7 @@ class AssetRowsPresenterMixin:
         alt_text_input = None
         if _asset_slot_supports_alt_text(role):
             alt_text_input = QLineEdit(row)
-            alt_text_input.setPlaceholderText("鍥剧墖璇存槑")
+            alt_text_input.setPlaceholderText("图片说明")
             alt_text_input.textChanged.connect(lambda *_args: self._refresh_summary())
             text_layout.addWidget(alt_text_input)
 
@@ -118,7 +118,7 @@ class AssetRowsPresenterMixin:
         title.setObjectName("attachment_role_title")
         accepted = " / ".join(spec.accepted_types)
         status = QLabel(
-            f"蹇呴渶锛屾敮鎸?{accepted}" if spec.required else f"鍙€夛紝鏀寔 {accepted}",
+            f"必需，支持 {accepted}" if spec.required else f"可选，支持 {accepted}",
             text_widget,
         )
         status.setObjectName("attachment_role_status")
@@ -126,12 +126,12 @@ class AssetRowsPresenterMixin:
         text_layout.addWidget(title)
         text_layout.addWidget(status)
 
-        choose_btn = QPushButton("閫夋嫨", row)
-        open_btn = QPushButton("鎵撳紑", row)
-        clear_btn = QPushButton("娓呴櫎", row)
-        self._configure_asset_icon_button(choose_btn, "folder-open", f"閫夋嫨{spec.label}")
-        self._configure_asset_icon_button(open_btn, "external-link", f"鎵撳紑{spec.label}")
-        self._configure_asset_icon_button(clear_btn, "x", f"娓呴櫎{spec.label}")
+        choose_btn = QPushButton("选择", row)
+        open_btn = QPushButton("打开", row)
+        clear_btn = QPushButton("清除", row)
+        self._configure_asset_icon_button(choose_btn, "folder-open", f"选择{spec.label}")
+        self._configure_asset_icon_button(open_btn, "external-link", f"打开{spec.label}")
+        self._configure_asset_icon_button(clear_btn, "x", f"清除{spec.label}")
         choose_btn.clicked.connect(lambda *_args, role=spec.role: self._select_attachment_file(role))
         open_btn.clicked.connect(lambda *_args, role=spec.role: self._open_attachment_path(role))
         clear_btn.clicked.connect(lambda *_args, role=spec.role: self._clear_attachment_file(role))

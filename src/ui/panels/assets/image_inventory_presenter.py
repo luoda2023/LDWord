@@ -14,13 +14,13 @@ class ImageInventorySetupPresenterMixin:
     def _setup_image_inventory_card(self) -> None:
         image_card = Card(parent=self._section_contents["images"])
         self._image_card = image_card
-        image_card.set_header("鍥剧墖鏉愭枡", icon_name="image")
-        self._assets_picker = FolderPicker(placeholder="鏈€夋嫨鍥剧墖鐩綍", parent=image_card)
+        image_card.set_header("图片材料", icon_name="image")
+        self._assets_picker = FolderPicker(placeholder="未选择图片目录", parent=image_card)
         self._assets_picker.folder_changed.connect(lambda *_: self._refresh_summary())
         self._image_assets_status_label = QLabel(image_card)
         self._image_assets_status_label.setWordWrap(True)
         image_form = InspectorForm(parent=image_card)
-        image_form.add_field("鍥剧墖鐩綍", self._assets_picker)
+        image_form.add_field("图片目录", self._assets_picker)
         image_card.add_widget(image_form)
         self._asset_slots_container = QWidget(image_card)
         self._asset_slots_layout = QVBoxLayout(self._asset_slots_container)
@@ -33,7 +33,7 @@ class ImageInventorySetupPresenterMixin:
         self._setup_question_figure_library_issue_table(image_card)
         self._setup_question_figure_library_version_history_table(image_card)
         self._setup_question_figure_library_master_version_table(image_card)
-        self._attachment_inventory_label = QLabel("闄勪欢娓呭崟", image_card)
+        self._attachment_inventory_label = QLabel("附件清单", image_card)
         self._attachment_inventory_label.setObjectName("attachment_inventory_label")
         image_card.add_widget(self._attachment_inventory_label)
         self._attachment_roles_container = QWidget(image_card)
@@ -42,7 +42,7 @@ class ImageInventorySetupPresenterMixin:
         self._attachment_roles_layout.setSpacing(8)
         image_card.add_widget(self._attachment_roles_container)
         self._sync_attachment_role_rows()
-        self._image_preview_label = QLabel("閫夋嫨鍥剧墖鍚庡彲鏌ョ湅棰勮", image_card)
+        self._image_preview_label = QLabel("选择图片后可查看预览", image_card)
         self._image_preview_label.setObjectName("asset_preview_label")
         self._image_preview_label.setAlignment(Qt.AlignCenter)
         self._image_preview_label.setMinimumHeight(160)
@@ -57,7 +57,7 @@ class ImageInventorySetupPresenterMixin:
         self._configure_asset_icon_button(
             self._full_image_preview_btn,
             "square-arrow-out-up-right",
-            "鎵撳紑澶у浘棰勮",
+            "打开大图预览",
         )
         self._full_image_preview_btn.setEnabled(False)
         self._full_image_preview_btn.clicked.connect(self._open_current_image_preview_dialog)

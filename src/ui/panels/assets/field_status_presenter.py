@@ -51,7 +51,7 @@ class FieldStatusPresenterMixin:
                 if in_template:
                     template_missing_labels.append(_field_label(key))
                 if key in required_fields:
-                    status = "蹇呭～"
+                    status = "必填"
                     if in_template:
                         status += "，模板会用到"
                     status += "，生成前要补齐。"
@@ -127,8 +127,8 @@ class FieldStatusPresenterMixin:
             layout = QHBoxLayout(row)
             layout.setContentsMargins(10, 8, 10, 8)
             layout.setSpacing(10)
-            label = QLabel("妯℃澘閲屾湁 {{" + token + "}}", row)
-            button = QPushButton("鍔犲叆鏇村璧勬枡", row)
+            label = QLabel("模板里有 {{" + token + "}}", row)
+            button = QPushButton("加入更多资料", row)
             button.clicked.connect(
                 lambda *_args, field_key=token: self._add_unknown_placeholder_field(field_key)
             )

@@ -95,7 +95,7 @@ class QuestionFigureRepairActionsPresenterMixin:
     def _select_question_figure_item_file(self, row_index: int) -> None:
         file_path, _selected = QFileDialog.getOpenFileName(
             self,
-            "鏇挎崲棰樼洰鍥剧墖",
+            "替换题目图片",
             "",
             "Image Files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff);;All Files (*)",
         )
@@ -121,7 +121,7 @@ class QuestionFigureRepairActionsPresenterMixin:
         if not updated:
             if hasattr(self, "_image_assets_status_label"):
                 self._image_assets_status_label.setText(
-                    "褰撳墠棰樺浘涓嶆槸缁撴瀯鍖栭\ue57d鍥炬潯鐩\ue1c6紝鏆備笉鑳藉湪鏄庣粏琛ㄤ腑鏇挎崲銆?"
+                    "当前题图不是结构化题图条目，暂不能在明细表中替换。"
                 )
             return False
         self._asset_item_payloads = payloads

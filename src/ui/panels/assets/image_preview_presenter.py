@@ -85,7 +85,7 @@ class ImagePreviewPresenterMixin:
                         "display_name": display
                         or Path(reference).name,
                         "kind_label": str(option.get("kind_label", "") or "").strip()
-                        or "棰樺浘瀵规瘮",
+                        or "题图对比",
                     }
                 )
             if not normalized_options and compare_reference:
@@ -97,7 +97,7 @@ class ImagePreviewPresenterMixin:
                         "source": str(compare_source or "").strip(),
                         "display_name": compare_display_name
                         or Path(compare_reference).name,
-                        "kind_label": "缂╃暐鍥惧姣?",
+                        "kind_label": "缩略图对比",
                     }
                 )
         self._current_image_preview_compare_options = normalized_options
@@ -217,7 +217,7 @@ class ImagePreviewPresenterMixin:
                 getattr(self, "_current_image_preview_compare_display_name", "")
                 or ""
             ).strip(),
-            "kind_label": "缂╃暐鍥惧姣?",
+            "kind_label": "缩略图对比",
         }
 
     def _open_full_image_preview_compare(self) -> bool:
@@ -225,14 +225,14 @@ class ImagePreviewPresenterMixin:
         reference = str(option.get("reference", "") or "").strip()
         if not reference:
             if hasattr(self, "_image_assets_status_label"):
-                self._image_assets_status_label.setText("褰撳墠棰勮娌℃湁鍙姣旂殑缂╃暐鍥俱€?")
+                self._image_assets_status_label.setText("当前预览没有可对比的缩略图。")
             return False
         source = str(option.get("source", "") or "").strip()
         display_name = (
             str(option.get("display_name", "") or "").strip()
             or Path(reference).name
         )
-        kind_label = str(option.get("kind_label", "") or "").strip() or "棰樺浘瀵规瘮"
+        kind_label = str(option.get("kind_label", "") or "").strip() or "题图对比"
         compare_path = reference
         if not Path(compare_path).is_file():
             if hasattr(self, "_image_assets_status_label"):
@@ -353,7 +353,7 @@ class ImagePreviewPresenterMixin:
         reference = str(option.get("reference", "") or "").strip()
         if not reference:
             if hasattr(self, "_image_assets_status_label"):
-                self._image_assets_status_label.setText("璇峰厛閫夋嫨涓€涓姣斿璞°€?")
+                self._image_assets_status_label.setText("请先选择一个对比对象。")
             return False
         row = int(getattr(self, "_current_image_preview_question_figure_row", -1))
         if row < 0:
@@ -362,7 +362,7 @@ class ImagePreviewPresenterMixin:
         question_items = question_figure_items(self._current_asset_items())
         if row < 0 or row >= len(question_items):
             if hasattr(self, "_image_assets_status_label"):
-                self._image_assets_status_label.setText("褰撳墠澶у浘娌℃湁鍙爣娉ㄧ殑棰樺浘琛屻€?")
+                self._image_assets_status_label.setText("当前大图没有可标注的题图行。")
             return False
         target = question_items[row]
         payloads = _normalized_asset_item_payloads(self._asset_item_payloads)
@@ -370,7 +370,7 @@ class ImagePreviewPresenterMixin:
             str(option.get("display_name", "") or "").strip()
             or Path(reference).name
         )
-        kind_label = str(option.get("kind_label", "") or "").strip() or "棰樺浘瀵规瘮"
+        kind_label = str(option.get("kind_label", "") or "").strip() or "题图对比"
         marked_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         region = self._current_full_image_preview_region_payload(
             reference=reference,
@@ -413,7 +413,7 @@ class ImagePreviewPresenterMixin:
             break
         if not updated:
             if hasattr(self, "_image_assets_status_label"):
-                self._image_assets_status_label.setText("褰撳墠棰樺浘涓嶆槸缁撴瀯鍖栭鍥炬潯鐩紝鏆備笉鑳芥爣娉ㄣ€?")
+                self._image_assets_status_label.setText("当前题图不是结构化题图条目，暂不能标注。")
             return False
         self._asset_item_payloads = payloads
         self._persist_current_profile_editor()
@@ -424,7 +424,7 @@ class ImagePreviewPresenterMixin:
             table.selectRow(row)
         if hasattr(self, "_image_assets_status_label"):
             self._image_assets_status_label.setText(
-                f"宸叉爣璁板姣旈棶棰橈細{display_name}"
+                f"已标记对比问题：{display_name}"
             )
         return True
 
@@ -433,13 +433,13 @@ class ImagePreviewPresenterMixin:
         if not path or not Path(path).is_file():
             self._set_current_image_preview_path("")
             if hasattr(self, "_image_assets_status_label"):
-                self._image_assets_status_label.setText("褰撳墠娌℃湁鍙墦寮€鐨勫ぇ鍥鹃瑙堛€?")
+                self._image_assets_status_label.setText("当前没有可打开的大图预览。")
             return False
         pixmap = QPixmap(path)
         if pixmap.isNull():
             self._set_current_image_preview_path("")
             if hasattr(self, "_image_assets_status_label"):
-                self._image_assets_status_label.setText("褰撳墠棰勮鍥剧墖鏃犳硶鎵撳紑銆?")
+                self._image_assets_status_label.setText("当前预览图片无法打开。")
             return False
         display_name = (
             str(getattr(self, "_current_image_preview_display_name", "") or "").strip()
@@ -450,12 +450,12 @@ class ImagePreviewPresenterMixin:
             existing.close()
         dialog = QDialog(self)
         dialog.setObjectName("asset_full_image_preview_dialog")
-        dialog.setWindowTitle(f"澶у浘棰勮 - {display_name}")
+        dialog.setWindowTitle(f"大图预览 - {display_name}")
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
         meta_label = QLabel(
-            f"{display_name} 路 {pixmap.width()} 脳 {pixmap.height()} px",
+            f"{display_name} · {pixmap.width()} × {pixmap.height()} px",
             dialog,
         )
         meta_label.setObjectName("asset_full_image_preview_meta")
@@ -478,7 +478,7 @@ class ImagePreviewPresenterMixin:
         self._configure_full_image_preview_tool_button(
             zoom_out_btn,
             "minus",
-            "缂╁皬",
+            "缩小",
         )
         zoom_out_btn.clicked.connect(lambda *_args: self._zoom_full_image_preview(0.8))
         zoom_in_btn = QPushButton(toolbar)
@@ -486,7 +486,7 @@ class ImagePreviewPresenterMixin:
         self._configure_full_image_preview_tool_button(
             zoom_in_btn,
             "plus",
-            "鏀惧ぇ",
+            "放大",
         )
         zoom_in_btn.clicked.connect(lambda *_args: self._zoom_full_image_preview(1.25))
         zoom_reset_btn = QPushButton(toolbar)
@@ -494,7 +494,7 @@ class ImagePreviewPresenterMixin:
         self._configure_full_image_preview_tool_button(
             zoom_reset_btn,
             "square",
-            "鍘熷灏哄",
+            "原始尺寸",
         )
         zoom_reset_btn.clicked.connect(self._reset_full_image_preview_zoom)
         fit_btn = QPushButton(toolbar)
@@ -502,7 +502,7 @@ class ImagePreviewPresenterMixin:
         self._configure_full_image_preview_tool_button(
             fit_btn,
             "scan",
-            "閫傚簲绐楀彛",
+            "适应窗口",
         )
         fit_btn.clicked.connect(self._fit_full_image_preview_to_window)
         compare_options = list(
@@ -516,14 +516,14 @@ class ImagePreviewPresenterMixin:
             build_text_input_stylesheet(get_theme(), selector="QComboBox")
         )
         for option in compare_options:
-            compare_combo.addItem(str(option.get("label", "") or "棰樺浘瀵规瘮"))
+            compare_combo.addItem(str(option.get("label", "") or "题图对比"))
         compare_combo.setEnabled(bool(compare_options))
         compare_btn = QPushButton(toolbar)
         compare_btn.setObjectName("asset_full_image_preview_compare")
         self._configure_full_image_preview_tool_button(
             compare_btn,
             "copy",
-            "瀵规瘮缂╃暐鍥?",
+            "对比缩略图",
         )
         compare_btn.setEnabled(bool(compare_options))
         compare_btn.clicked.connect(self._open_full_image_preview_compare)
@@ -532,7 +532,7 @@ class ImagePreviewPresenterMixin:
         self._configure_full_image_preview_tool_button(
             mark_issue_btn,
             "circle-alert",
-            "鏍囪瀵规瘮闂",
+            "标记对比问题",
         )
         mark_issue_btn.setEnabled(bool(compare_options))
         mark_issue_btn.clicked.connect(
@@ -563,7 +563,7 @@ class ImagePreviewPresenterMixin:
         compare_layout = QVBoxLayout(compare_panel)
         compare_layout.setContentsMargins(0, 0, 0, 0)
         compare_layout.setSpacing(6)
-        compare_title = QLabel("瀵规瘮缂╃暐鍥?", compare_panel)
+        compare_title = QLabel("对比缩略图", compare_panel)
         compare_title.setObjectName("asset_full_image_preview_compare_title")
         compare_scroll = QScrollArea(compare_panel)
         compare_scroll.setObjectName("asset_full_image_preview_compare_scroll")

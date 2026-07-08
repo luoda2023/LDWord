@@ -17,18 +17,18 @@ class ProfileEditorPresenterMixin:
     def _setup_profile_editor_card(self) -> None:
         profile_card = Card(parent=self._section_contents["fields"])
         self._profile_card = profile_card
-        profile_card.set_header("鏂囧瓧璧勬枡", icon_name="type")
+        profile_card.set_header("文字资料", icon_name="type")
         self._profile_id_edit = QLineEdit(profile_card)
         self._profile_name_edit = QLineEdit(profile_card)
         self._profile_id_edit.setVisible(False)
-        self._profile_id_edit.setPlaceholderText("杩欎竴浠界紪鍙?")
-        self._profile_name_edit.setPlaceholderText("渚嬪锛氫富浣撳叕鍙?")
+        self._profile_id_edit.setPlaceholderText("这一份编号")
+        self._profile_name_edit.setPlaceholderText("例如：主体公司")
         self._profile_id_edit.textChanged.connect(lambda *_: self._refresh_summary())
         self._profile_name_edit.textChanged.connect(lambda *_: self._refresh_summary())
 
         profile_form = InspectorForm(parent=profile_card)
         field_rows = [
-            template_form_row("杩欎竴浠藉悕绉?", self._profile_name_edit, parent=profile_form),
+            template_form_row("这一份名称", self._profile_name_edit, parent=profile_form),
         ]
         for key, label, placeholder in COMMON_FIELD_DEFS:
             field_widget = QWidget(profile_card)
@@ -48,14 +48,14 @@ class ProfileEditorPresenterMixin:
             field_rows.append(template_form_row(label, field_widget, parent=profile_form))
 
         self._fields_edit = TextArea(
-            placeholder="鍏朵粬璧勬枡浠嶅彲鐢?key=value锛屼緥濡傦細\ncustom_field=鑷畾涔夊唴瀹?",
+            placeholder="其他资料仍可用 key=value，例如：\ncustom_field=自定义内容",
             min_height=120,
             max_height=220,
             parent=profile_card,
         )
         self._fields_edit.text_changed.connect(self._on_more_fields_changed)
         profile_form.add_grid(_chunk_form_rows(field_rows, columns=2))
-        profile_form.add_field("鏇村璧勬枡", self._fields_edit)
+        profile_form.add_field("更多资料", self._fields_edit)
         profile_card.add_widget(profile_form)
         self._fields_hint_label = QLabel(profile_card)
         self._fields_hint_label.setWordWrap(True)

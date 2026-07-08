@@ -16,7 +16,7 @@ class MaterialSettingsPresenterMixin:
     def _setup_material_settings_card(self) -> None:
         advanced_card = Card(parent=self._section_contents["advanced"])
         self._advanced_card = advanced_card
-        advanced_card.set_header("\u6942\u6a3c\u9a87\u7481\u5267\u7586", icon_name="settings")
+        advanced_card.set_header("高级设置", icon_name="settings")
         self._replacement_rules_edit = TextArea(
             placeholder="{{project_name}}=\u6d4b\u8bd5\u9879\u76ee\n\u65e7\u6587\u672c=\u65b0\u6587\u672c",
             min_height=80,
@@ -41,7 +41,7 @@ class MaterialSettingsPresenterMixin:
             )
         )
         self._required_fields_edit.setPlaceholderText(
-            "\u6e1a\u5b2a\ue6e7\u951b\u6c2c\u53d5\u9359\u7a3f\u6095\u7ec9\u822c\u20ac\u4f80\u300d\u9429\ue1bc\u6095\u7ec9?"
+            "公司名称、项目名称、联系人，也可用英文 key"
         )
         self._required_fields_edit.textChanged.connect(lambda *_: self._on_required_fields_changed())
 
@@ -51,7 +51,7 @@ class MaterialSettingsPresenterMixin:
             lambda *_: self._on_batch_output_template_changed()
         )
         self._batch_output_template_row = template_form_row(
-            "\u9477\ue044\u757e\u6d94\u590a\u61e1\u935a?",
+            "自定义目录名",
             self._batch_output_template_edit,
             parent=advanced_card,
         )
@@ -61,7 +61,7 @@ class MaterialSettingsPresenterMixin:
             [
                 [
                     template_form_row(
-                        "\u8e47\u546d\uff5e\u74a7\u52ec\u67a1",
+                        "必填资料",
                         self._required_fields_edit,
                         parent=advanced_form,
                     ),
@@ -69,8 +69,8 @@ class MaterialSettingsPresenterMixin:
                 ],
             ]
         )
-        advanced_form.add_field("\u9477\ue044\u757e\u6d94\u590b\u6d5b\u93b9?", self._replacement_rules_edit)
-        advanced_form.add_field("\u9365\u5267\u5896\u93c0\u5267\u7586", self._image_rules_edit)
+        advanced_form.add_field("替换规则", self._replacement_rules_edit)
+        advanced_form.add_field("图片放置规则", self._image_rules_edit)
         advanced_card.add_widget(advanced_form)
         self._section_layouts["advanced"].addWidget(advanced_card)
 
