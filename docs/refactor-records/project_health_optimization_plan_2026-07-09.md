@@ -247,10 +247,10 @@ P3:
 
 中期验收:
 
-- [ ] 当前大变更已按主题拆分。
-- [ ] CI 增加最小静态检查。
-- [ ] 至少完成一个大文件的小切片拆分。
-- [ ] 新增结构健康记录，记录拆分前后边界。
+- [x] 当前大变更已按主题拆分。
+- [x] CI 增加最小静态检查。
+- [x] 至少完成一个大文件的小切片拆分。
+- [x] 新增结构健康记录，记录拆分前后边界。
 
 长期验收:
 
@@ -489,17 +489,22 @@ python scripts\check_public_release.py --strict
 # [OK] No obvious public-release blockers were found.
 ```
 
-### 10.3 当前仍未完成事项
+### 10.3 当前剩余治理项
 
-仍需后续处理:
+已完成的拆分/隔离:
 
-- 当前大变更尚未实际拆成独立 Git 提交。
+- 当前大变更已拆成 6 个独立 Git 提交。
+- `docs/refactor-records/scene_matrix_release_governance_necessity_analysis_2026-07-08.md` 已隔离到 `artifacts/isolation/2026-07-09-docs/`，不进入主线文档。
+- 根目录生成 `.docx` 与报告已隔离到 `artifacts/isolation/2026-07-09-root-generated/`。
+
+仍需作为长期治理处理:
+
 - `tests/TEST-1/output*/` 等已跟踪历史生成物尚未做独立清理提交。
-- 超大分析文档 `docs/refactor-records/scene_matrix_release_governance_necessity_analysis_2026-07-08.md` 仍需决定提交、压缩或归档。
-- 大文件治理需要继续选择一个明确边界做后续切片。
+- 旧视觉截图与历史过程文档仍可继续瘦身。
+- 大文件治理需要持续推进后续切片。
 
 下一步建议:
 
-1. 先提交 P0 与最小静态门禁相关变更。
-2. 再按 9.2 的分组拆分场景矩阵治理变更。
-3. 最后单独处理 tracked 历史生成物与超大过程文档。
+1. 若要继续压缩仓库体积，单独处理 tracked 历史生成物。
+2. 若要继续降低架构风险，选择 `scene_panel.py`、`report_writer.py` 或 `workbench_execution_adapter.py` 做下一轮小切片。
+3. 每轮继续保持“独立提交 + 门禁验证”的节奏。
