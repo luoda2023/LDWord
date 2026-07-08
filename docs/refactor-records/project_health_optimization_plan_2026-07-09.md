@@ -393,10 +393,10 @@ P0 完成后，再进入 Phase 2 拆分当前工作区改动。这样能最快�
    - `tests/TEST-1/output*/`
    - 当前 `tests/TEST-1` 下存在大量已跟踪输出文件。
    - `docs/DOCUMENTATION_BOUNDARIES.md` 与 `.gitignore` 都倾向于把测试输出视为生成物。
-   - 建议:
-     - 先确认是否仍被真实测试读取。
-     - 若没有测试依赖，单独做一次删除提交。
-     - 若仍有价值，应移动到更明确的 `fixtures/golden/` 或 `samples/` 语义目录。
+   - 已执行:
+     - 已通过全文检索确认没有源码或测试依赖这些输出目录。
+     - 已保留输入样本 `tests/TEST-1/中图分类号.docx`。
+     - 已将历史输出文件作为独立清理提交删除。
 
 5. 已跟踪视觉截图
    - `artifacts/*.png`
@@ -423,7 +423,7 @@ P0 完成后，再进入 Phase 2 拆分当前工作区改动。这样能最快�
 3. 然后按 9.2 拆分未提交变更。
 4. 最后单独开一轮“历史生成物清理”提交，处理 `tests/TEST-1/output*/`、旧截图和超大过程文档。
 
-本轮建议不直接删除 tracked 文件；tracked 生成物应通过独立提交处理，方便回滚和审查。
+本轮已按独立提交口径处理 `tests/TEST-1/output*/` 这类 tracked 历史生成物；后续旧截图和超大过程文档仍应继续按独立提交治理。
 
 ## 10. 执行进展记录
 
@@ -493,18 +493,18 @@ python scripts\check_public_release.py --strict
 
 已完成的拆分/隔离:
 
-- 当前大变更已拆成 6 个独立 Git 提交。
+- 当前大变更已拆成多个独立 Git 提交，功能、文档、UI、资产文案、历史生成物清理边界已分开。
 - `docs/refactor-records/scene_matrix_release_governance_necessity_analysis_2026-07-08.md` 已隔离到 `artifacts/isolation/2026-07-09-docs/`，不进入主线文档。
 - 根目录生成 `.docx` 与报告已隔离到 `artifacts/isolation/2026-07-09-root-generated/`。
+- `tests/TEST-1/output*/` 等已跟踪历史生成物已确认无测试依赖，并作为独立清理提交删除。
 
 仍需作为长期治理处理:
 
-- `tests/TEST-1/output*/` 等已跟踪历史生成物尚未做独立清理提交。
 - 旧视觉截图与历史过程文档仍可继续瘦身。
 - 大文件治理需要持续推进后续切片。
 
 下一步建议:
 
-1. 若要继续压缩仓库体积，单独处理 tracked 历史生成物。
+1. 若要继续压缩仓库体积，单独处理旧视觉截图和历史过程文档。
 2. 若要继续降低架构风险，选择 `scene_panel.py`、`report_writer.py` 或 `workbench_execution_adapter.py` 做下一轮小切片。
 3. 每轮继续保持“独立提交 + 门禁验证”的节奏。
