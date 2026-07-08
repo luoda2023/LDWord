@@ -100,7 +100,7 @@ from src.shared.ui.template_form_layout import (
     compact_form_column_gap,
     template_form_row,
 )
-from src.shared.ui.theme import get_theme, bind_theme
+from src.shared.ui.theme import get_theme, bind_theme, theme_rgba
 from src.shared.ui.toggle_switch import ToggleSwitch
 from src.shared.ui.typography_controls import build_emphasis_widget
 from src.shared.ui.toast import Toast
@@ -2274,7 +2274,7 @@ class HeadingNumberingPanel(BasePanel):
             #hn_preview_meta[muted="true"] {{ color: {t.text_disabled}; }}
 
             #hn_result_strip {{
-                background: rgba(22, 119, 255, 0.03);
+                background: {theme_rgba(t.primary, 0.03)};
                 border: 1px solid {t.border_light};
                 border-radius: {t.radius_md}px;
             }}

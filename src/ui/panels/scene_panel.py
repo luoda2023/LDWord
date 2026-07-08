@@ -698,7 +698,7 @@ class _SimpleFormDetail(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(get_theme().template_detail_section_gap)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self._card = Card(parent=self)
@@ -724,6 +724,8 @@ class _SimpleFormDetail(QWidget):
 
     def _apply_theme(self) -> None:
         t = get_theme()
+        if self.layout() is not None:
+            self.layout().setSpacing(t.template_detail_section_gap)
         self._desc_label.setStyleSheet(f"font-size: {t.font_size_sm}px; color: {t.text_secondary};")
 
     def _add_form_stack(self, rows: list[QWidget]) -> None:
@@ -1214,20 +1216,25 @@ class _ExamPaperDetail(_SimpleFormDetail):
         style_label = safe_lines[0] if safe_lines else ""
         title = safe_lines[1] if len(safe_lines) > 1 else ""
         metadata = safe_lines[2] if len(safe_lines) > 2 else ""
-        note = safe_lines[3] if len(safe_lines) > 3 else ""
         footer = safe_lines[-1] if len(safe_lines) > 4 else ""
-        body_lines = safe_lines[4:-1] if len(safe_lines) > 5 else safe_lines[4:]
+        body_lines = safe_lines[3:-1] if len(safe_lines) > 4 else safe_lines[3:]
 
         body_html: list[str] = []
-        for raw, text in zip(lines[4:-1], body_lines):
+        raw_body_lines = lines[3:-1] if len(lines) > 4 else lines[3:]
+        for raw, text in zip(raw_body_lines, body_lines):
             raw_text = str(raw or "").strip()
             if not raw_text:
                 continue
             if raw_text == "答案速查":
                 body_html.append(
-                    f'<div style="margin-top:12px; padding-top:8px; '
-                    f'border-top:1px solid {t.divider}; font-weight:700; '
+                    f'<div align="center" style="margin-top:6px; '
+                    f'margin-bottom:8px; font-weight:700; '
                     f'color:{t.primary};">{text}</div>'
+                )
+            elif raw_text.startswith("注意事项"):
+                body_html.append(
+                    f'<div style="margin-top:8px; color:{t.text_secondary}; '
+                    f'font-size:{t.font_size_sm}px;">{text}</div>'
                 )
             elif re.match(r"^[一二三四五六七八九十]+、", raw_text):
                 body_html.append(
@@ -1257,8 +1264,6 @@ class _ExamPaperDetail(_SimpleFormDetail):
             f'<div style="font-size:{t.font_size_sm}px; color:{t.text_secondary}; '
             f'padding:7px 0; border-top:1px solid {t.divider}; '
             f'border-bottom:1px solid {t.divider};">{metadata}</div>'
-            f'<div style="font-size:{t.font_size_sm}px; color:{t.text_secondary}; '
-            f'margin-top:8px;">{note}</div>'
             f'<div style="font-size:{t.font_size_md}px; line-height:150%; '
             f'margin-top:12px;">{"".join(body_html)}</div>'
             f'<div align="right" style="font-size:{t.font_size_sm}px; '
@@ -1318,7 +1323,7 @@ class _ExamPaperDetail(_SimpleFormDetail):
         if hasattr(self, "_preview_canvas"):
             self._preview_canvas.setStyleSheet(
                 f"QFrame#scn_exam_master_preview_canvas {{"
-                f"background: {t.bg_window}; border: 1px solid {t.border_light};"
+                f"background: {t.bg_window}; border: none;"
                 f"border-radius: {t.radius_sm}px;"
                 f"}}"
             )

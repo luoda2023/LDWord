@@ -16,6 +16,7 @@ from src.shared.ui.evidence_widgets import EvidenceActionBar, EvidenceLineList
 from src.shared.ui.issue_detail_section import IssueDetailSection
 from src.shared.ui.style_difference_summary_slot import StyleDifferenceSummarySlot
 from src.shared.ui.style_management_block import StyleManagementBlock
+from src.shared.ui.theme import get_theme
 from src.shared.ui.themed_radio_button import ThemedRadioButton
 from src.ui.panels.workbench.state import ArtifactItemState, ExecutionResultState
 from src.ui.adapters.workbench_execution_adapter import (
@@ -63,6 +64,31 @@ def test_quick_execution_detail_uses_dedicated_drop_area_widget():
         assert detail.document_path() == ""
     finally:
         detail.close()
+
+
+def test_quick_execution_detail_card_spacing_uses_template_detail_gap():
+    app = _app()
+    detail = QuickExecutionDetail()
+    try:
+        detail.resize(960, 900)
+        detail.show()
+        app.processEvents()
+        app.processEvents()
+
+        expected_gap = get_theme().template_detail_section_gap
+        assert detail.layout().spacing() == expected_gap
+
+        widgets = [
+            detail._drop_area,
+            detail._scene_card,
+            detail._output_card,
+            detail._execution_card,
+        ]
+        for current, following in zip(widgets, widgets[1:]):
+            assert following.y() - (current.y() + current.height()) == expected_gap
+    finally:
+        detail.close()
+        app.processEvents()
 
 
 def test_quick_execution_detail_keeps_batch_generation_out_of_execute_area():
@@ -1471,9 +1497,9 @@ def test_quick_execution_detail_routes_asset_material_repair_action_to_asset_tar
         detail.set_material_context(
             MaterialExecutionContext(
                 entity_data={
-                    "company_name": "娴嬭瘯鍏徃",
-                    "project_name": "绀轰緥椤圭洰",
-                    "legal_person": "寮犱笁",
+                    "company_name": "测试公司",
+                    "project_name": "示例项目",
+                    "legal_person": "张三",
                 }
             )
         )

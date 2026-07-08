@@ -57,12 +57,12 @@ class Result(QWidget):
         layout.setAlignment(Qt.AlignCenter)
 
         icon_map = {
-            "success": ("✓", "#52C41A"),
-            "error":   ("✕", "#FF4D4F"),
-            "warning": ("⚠", "#FAAD14"),
-            "info":    ("ℹ", "#1677FF"),
+            "success": "✓",
+            "error": "✕",
+            "warning": "⚠",
+            "info": "ℹ",
         }
-        icon_char, icon_color = icon_map.get(self._status, icon_map["info"])
+        icon_char = icon_map.get(self._status, icon_map["info"])
 
         # 大图标
         self._icon_lbl = QLabel(icon_char)
@@ -115,6 +115,8 @@ class Result(QWidget):
             }}
             """
         )
+        for button in self._action_buttons:
+            self._style_action_button(button, bool(button.property("_result_primary")))
 
     # ── 公共 API ─────────────────────────────────────────────────────────────
 
@@ -130,9 +132,20 @@ class Result(QWidget):
         btn = QPushButton(text)
         btn.setCursor(Qt.PointingHandCursor)
         btn.setMinimumHeight(t.button_height_md)
+        btn.setProperty("_result_primary", bool(primary))
+        self._style_action_button(btn, primary)
 
+        if callback:
+            btn.clicked.connect(callback)
+
+        self._btn_row.addWidget(btn)
+        self._action_buttons.append(btn)
+        return btn
+
+    def _style_action_button(self, button: QPushButton, primary: bool) -> None:
+        t = get_theme()
         if primary:
-            btn.setStyleSheet(
+            button.setStyleSheet(
                 f"""
                 QPushButton {{
                     background:{t.primary}; color:{t.text_on_primary};
@@ -144,25 +157,18 @@ class Result(QWidget):
                 QPushButton:pressed {{ background:{t.primary_pressed}; }}
                 """
             )
-        else:
-            btn.setStyleSheet(
-                f"""
-                QPushButton {{
-                    background:{t.bg_card}; color:{t.text_primary};
-                    border:1px solid {t.border}; border-radius:{t.button_radius}px;
-                    padding:{t.button_padding_y}px {t.button_padding_x}px;
-                    font-size:{t.font_size_md}px;
-                }}
-                QPushButton:hover {{ background:{t.bg_hover}; border-color:{t.border_focus}; }}
-                """
-            )
-
-        if callback:
-            btn.clicked.connect(callback)
-
-        self._btn_row.addWidget(btn)
-        self._action_buttons.append(btn)
-        return btn
+            return
+        button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background:{t.bg_card}; color:{t.text_primary};
+                border:1px solid {t.border}; border-radius:{t.button_radius}px;
+                padding:{t.button_padding_y}px {t.button_padding_x}px;
+                font-size:{t.font_size_md}px;
+            }}
+            QPushButton:hover {{ background:{t.bg_hover}; border-color:{t.border_focus}; }}
+            """
+        )
 
     def set_status(self, status: str) -> None:
         self._status = status

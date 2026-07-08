@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.qt_api import QColor, QFrame, QPainter, QPainterPath, QRectF, Qt, QPen, QWidget
+from src.shared.ui.theme import get_theme
 
 
 class RoundedSurfaceFrame(QFrame):
@@ -14,7 +15,7 @@ class RoundedSurfaceFrame(QFrame):
         super().__init__(parent)
         self.setFrameShape(QFrame.NoFrame)
         self._radius = int(radius)
-        self._background = QColor("#ffffff")
+        self._background = QColor(get_theme().bg_card)
         self._border_color = QColor(Qt.transparent)
         self._border_width = 0.0
         self._border_style = Qt.SolidLine

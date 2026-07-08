@@ -11,11 +11,10 @@ from src.qt_api import (
     QVBoxLayout,
     QWidget,
     Signal,
-    QColor,
 )
 from src.shared.ui.button_style import apply_button_variant
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
-from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
 
 
 class QuickExecutionDropArea(RoundedSurfaceFrame):
@@ -167,14 +166,11 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         self.file_cleared.emit()
 
     def _apply_theme(self) -> None:
-        from src.ui.icons.catalog import get_icon
-
         theme = get_theme()
-        primary = QColor(theme.primary)
         border_inset = int(max(1, theme.border_width_md))
         self._layout.setContentsMargins(border_inset, border_inset, border_inset, border_inset)
 
-        hint_icon_bg = f"rgba({primary.red()}, {primary.green()}, {primary.blue()}, 0.06)"
+        hint_icon_bg = theme_rgba(theme.primary, 0.06)
         self._idle_icon.setStyleSheet(
             f"font-size: 16px; color: {theme.text_hint}; font-weight: bold; "
             f"background: {hint_icon_bg}; border-radius: 6px;"
@@ -224,17 +220,12 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
 
     def _refresh_style(self) -> None:
         theme = get_theme()
-        primary = QColor(theme.primary)
 
         if self._file_path:
-            file_bg = QColor(primary)
-            file_bg.setAlphaF(0.02)
-            surface_bg = file_bg.name(QColor.HexArgb)
+            surface_bg = theme_rgba(theme.primary, 0.02)
             border_color = theme.primary
         elif self._hovering:
-            hover_bg = QColor(primary)
-            hover_bg.setAlphaF(0.06)
-            surface_bg = hover_bg.name(QColor.HexArgb)
+            surface_bg = theme_rgba(theme.primary, 0.06)
             border_color = theme.primary
             self._hint_title.setText(self._build_title_text("松开以加载文件"))
             self._hint_label.setText("文件将被立即载入")

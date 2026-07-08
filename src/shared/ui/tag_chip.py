@@ -11,7 +11,7 @@ from src.qt_api import (
     Signal,
 )
 
-from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
 
 
 class TagChip(QWidget):
@@ -130,7 +130,7 @@ class TagChip(QWidget):
                     padding: 0;
                 }}
                 QPushButton:hover {{
-                    background: rgba(0, 0, 0, 0.1);
+                    background: {theme_rgba(fg, 0.12)};
                     border-radius: 7px;
                 }}
                 """

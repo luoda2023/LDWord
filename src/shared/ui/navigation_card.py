@@ -19,7 +19,7 @@ from src.qt_api import (
 
 from src.shared.ui.badge import Badge
 from src.shared.ui.card import Card
-from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
 
 
 class NavigationCard(Card):
@@ -153,7 +153,7 @@ class NavigationCard(Card):
         self.setStyleSheet("")
 
         if self._selected:
-            icon_bg = "rgba(255, 255, 255, 0.2)"
+            icon_bg = theme_rgba(t.text_on_primary, 0.20)
         else:
             icon_bg = t.bg_hover
         self._icon_container.setStyleSheet(
@@ -181,7 +181,7 @@ class NavigationCard(Card):
         )
 
         # --- Subtitle ---
-        sub_color = "rgba(255, 255, 255, 0.85)" if self._selected else t.text_secondary
+        sub_color = theme_rgba(t.text_on_primary, 0.85) if self._selected else t.text_secondary
         self._subtitle.setStyleSheet(
             f"""
             QLabel#nav_card_subtitle {{
@@ -208,7 +208,7 @@ class NavigationCard(Card):
         try:
             from src.ui.icons.catalog import get_icon
             # Selected → white icon; Normal → theme icon color
-            color = "#FFFFFF" if self._selected else get_theme().icon_primary
+            color = get_theme().text_on_primary if self._selected else get_theme().icon_primary
             icon = get_icon(self._icon_name, size=self._ICON_RENDER_SIZE, color=color)
             pixmap = icon.pixmap(self._ICON_RENDER_SIZE, self._ICON_RENDER_SIZE)
             self._icon_container.setPixmap(pixmap)

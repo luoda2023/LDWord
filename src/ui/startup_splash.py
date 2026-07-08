@@ -20,6 +20,7 @@ from src.qt_api import (
     QWidget,
     Qt,
 )
+from src.shared.ui.theme import get_theme
 
 
 class _Spinner(QWidget):
@@ -52,7 +53,7 @@ class _Spinner(QWidget):
         center_y = self.height() / 2
         radius = min(self.width(), self.height()) / 2 - 6
         dot_radius = 3.0
-        base = QColor("#1677FF")
+        base = QColor(get_theme().primary)
 
         for i in range(12):
             alpha = 45 + int(210 * (i + 1) / 12)
@@ -81,10 +82,16 @@ class StartupSplash(QWidget):
 
         surface = QFrame(self)
         surface.setObjectName("startup_surface")
+        t = get_theme()
+
         shadow = QGraphicsDropShadowEffect(surface)
         shadow.setBlurRadius(28)
         shadow.setOffset(0, 8)
-        shadow.setColor(QColor(15, 23, 42, 55))
+        shadow_color = QColor(t.text_primary)
+        if not shadow_color.isValid():
+            shadow_color = QColor(15, 23, 42)
+        shadow_color.setAlpha(55)
+        shadow.setColor(shadow_color)
         surface.setGraphicsEffect(shadow)
         root.addWidget(surface)
 
@@ -121,30 +128,30 @@ class StartupSplash(QWidget):
         layout.addWidget(hint)
 
         self.setStyleSheet(
-            """
-            QFrame#startup_surface {
-                background: #F8FAFC;
-                border: 1px solid #DDE5F5;
-                border-radius: 18px;
-            }
-            QLabel#startup_title {
-                color: #0F172A;
-                font-size: 22px;
-                font-weight: 700;
-            }
-            QLabel#startup_subtitle {
-                color: #475569;
-                font-size: 14px;
-            }
-            QLabel#startup_status {
-                color: #1E293B;
-                font-size: 13px;
+            f"""
+            QFrame#startup_surface {{
+                background: {t.bg_card};
+                border: 1px solid {t.border_light};
+                border-radius: {t.radius_lg + 4}px;
+            }}
+            QLabel#startup_title {{
+                color: {t.text_primary};
+                font-size: {t.font_size_xxl + 2}px;
+                font-weight: {t.font_weight_bold};
+            }}
+            QLabel#startup_subtitle {{
+                color: {t.text_secondary};
+                font-size: {t.font_size_md + 1}px;
+            }}
+            QLabel#startup_status {{
+                color: {t.text_primary};
+                font-size: {t.font_size_md}px;
                 min-width: 150px;
-            }
-            QLabel#startup_hint {
-                color: #94A3B8;
-                font-size: 12px;
-            }
+            }}
+            QLabel#startup_hint {{
+                color: {t.text_hint};
+                font-size: {t.font_size_sm}px;
+            }}
             """
         )
         self._center_on_screen()

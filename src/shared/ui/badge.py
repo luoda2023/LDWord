@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from src.qt_api import QLabel, QVBoxLayout, QWidget, Qt
 
-from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
 
 
 class Badge(QWidget):
@@ -26,18 +26,16 @@ class Badge(QWidget):
     def _apply_theme(self) -> None:
         t = get_theme()
         if self._on_primary:
-            # On blue/primary background: white text + white translucent bg
-            bg = "rgba(255,255,255,0.20)"
-            fg = "#FFFFFF"
+            bg = theme_rgba(t.text_on_primary, 0.20)
+            fg = t.text_on_primary
         else:
-            # Normal: translucent semantic bg + semantic text color
             variant_colors = {
-                "neutral": ("rgba(128,128,128,0.08)", t.text_hint),
-                "info": ("rgba(59,130,246,0.10)", t.primary),
-                "success": ("rgba(34,197,94,0.10)", t.success),
-                "warning": ("rgba(245,158,11,0.10)", t.warning),
-                "error": ("rgba(239,68,68,0.10)", t.error),
-                "danger": ("rgba(239,68,68,0.10)", t.error),
+                "neutral": (t.bg_hover, t.text_hint),
+                "info": (t.info_bg, t.info),
+                "success": (t.success_bg, t.success),
+                "warning": (t.warning_bg, t.warning),
+                "error": (t.error_bg, t.error),
+                "danger": (t.error_bg, t.error),
             }
             bg, fg = variant_colors.get(self._variant, variant_colors["neutral"])
         self._label.setStyleSheet(

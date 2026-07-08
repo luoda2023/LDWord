@@ -11,7 +11,7 @@ from src.qt_api import (
     Signal,
 )
 
-from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
 
 
 class InlineAlert(QWidget):
@@ -148,7 +148,7 @@ class InlineAlert(QWidget):
                     padding: 0;
                 }}
                 QPushButton:hover {{
-                    background: rgba(0, 0, 0, 0.1);
+                    background: {theme_rgba(t.text_primary, 0.10)};
                     border-radius: 10px;
                     color: {t.text_primary};
                 }}

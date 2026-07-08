@@ -54,7 +54,7 @@ from src.shared.ui.style_preview_utils import (
 )
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.template_form_layout import TemplateFormGrid, compact_form_column_gap, template_form_row
-from src.shared.ui.theme import get_theme
+from src.shared.ui.theme import get_theme, theme_rgba
 from src.shared.ui.toggle_switch import ToggleSwitch
 from src.shared.ui.typography_controls import build_emphasis_widget
 
@@ -817,7 +817,7 @@ class TocDetailSection:
                 background: transparent;
             }}
             #toc_result_strip {{
-                background: rgba(22, 119, 255, 0.03);
+                background: {theme_rgba(theme.primary, 0.03)};
                 border: 1px solid {theme.border_light};
                 border-radius: {theme.radius_md}px;
             }}

@@ -102,7 +102,7 @@ class _SpinCanvas(QWidget):
     def __init__(self, size: int, parent=None):
         super().__init__(parent)
         self._angle = 0.0
-        self._color = QColor("#1677FF")
+        self._color = QColor(get_theme().primary)
         self.setFixedSize(size, size)
 
     def paintEvent(self, event) -> None:

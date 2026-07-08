@@ -13,6 +13,7 @@ class LogStreamWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._lines: list[str] = []
+        self._entries: list[tuple[str, str]] = []
         self._error_count = 0
         self._is_expanded = False
 
@@ -66,17 +67,18 @@ class LogStreamWidget(QWidget):
         # Style the terminal view
         self._view.setStyleSheet(f"""
             QTextEdit {{
-                background-color: #1E1E2E;
-                color: #A6ACCD;
+                background-color: {t.bg_tooltip};
+                color: {t.text_on_tooltip};
                 font-family: Consolas, monospace;
                 border-radius: {t.radius_sm}px;
                 padding: 12px;
-                border: 1px solid #303040;
+                border: 1px solid {t.border};
             }}
         """)
 
         icon_name = "chevron-down" if self._is_expanded else "chevron-right"
         self._toggle_btn.setIcon(get_icon(icon_name, size=16, color=t.primary if self._is_expanded else t.text_secondary))
+        self._render_lines()
 
     def _on_toggle(self, checked: bool):
         self._is_expanded = checked
@@ -87,26 +89,13 @@ class LogStreamWidget(QWidget):
         raw_msg = str(message)
         line = f"[{level}] {raw_msg}"
         self._lines.append(line)
+        self._entries.append((str(level), raw_msg))
 
         if level.lower() in ("error", "critical", "fatal"):
             self._error_count += 1
             self._update_toggle_text()
 
-        # Colorize based on level
-        safe_msg = html.escape(raw_msg)
-        if level.lower() == "info":
-            color = "#A2B4C8" # light grey/blue
-        elif level.lower() == "warning":
-            color = "#FFCB6B" # yellow
-        elif level.lower() in ("error", "critical"):
-            color = "#F07178" # red
-        elif level.lower() == "success":
-            color = "#C3E88D" # green
-        else:
-            color = "#A6ACCD"
-
-        html_line = f'<span style="color: {color};">[{level.upper()}] {safe_msg}</span>'
-        self._view.append(html_line)
+        self._append_html_line(str(level), raw_msg)
 
     def _update_toggle_text(self):
         text = "收起日志详情" if self._is_expanded else "展开日志详情"
@@ -119,6 +108,37 @@ class LogStreamWidget(QWidget):
 
     def clear(self) -> None:
         self._lines.clear()
+        self._entries.clear()
         self._view.clear()
         self._error_count = 0
         self._update_toggle_text()
+
+    def _append_html_line(self, level: str, message: str) -> None:
+        safe_msg = html.escape(message)
+        color = self._level_color(level)
+        html_line = f'<span style="color: {color};">[{level.upper()}] {safe_msg}</span>'
+        self._view.append(html_line)
+
+    def _render_lines(self) -> None:
+        if not self._entries:
+            return
+        self._view.clear()
+        for level, message in self._entries:
+            self._append_html_line(level, message)
+        cursor = self._view.textCursor()
+        cursor.movePosition(cursor.End)
+        self._view.setTextCursor(cursor)
+
+    @staticmethod
+    def _level_color(level: str) -> str:
+        t = get_theme()
+        normalized = str(level or "").lower()
+        if normalized == "info":
+            return t.info
+        if normalized == "warning":
+            return t.warning
+        if normalized in {"error", "critical", "fatal"}:
+            return t.error
+        if normalized == "success":
+            return t.success
+        return t.text_on_tooltip

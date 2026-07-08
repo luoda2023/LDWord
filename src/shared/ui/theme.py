@@ -507,6 +507,33 @@ def _hex_luminance(h: str) -> float:
     return (0.299 * r + 0.587 * g + 0.114 * b) / 255
 
 
+def theme_rgba(color_value: str, alpha: float) -> str:
+    """Return a QSS rgba() color from a theme hex token.
+
+    ``alpha`` accepts either 0..1 floats or 0..255 integers. Non-hex values are
+    returned unchanged so callers can safely pass through transparent tokens.
+    """
+    normalized = str(color_value or "").strip()
+    if not normalized.startswith("#"):
+        return normalized
+    hex_value = normalized[1:]
+    if len(hex_value) == 3:
+        hex_value = "".join(ch * 2 for ch in hex_value)
+    if len(hex_value) != 6:
+        return normalized
+    try:
+        red = int(hex_value[0:2], 16)
+        green = int(hex_value[2:4], 16)
+        blue = int(hex_value[4:6], 16)
+    except ValueError:
+        return normalized
+    alpha_value = float(alpha)
+    if alpha_value > 1:
+        alpha_value = alpha_value / 255.0
+    alpha_value = max(0.0, min(1.0, alpha_value))
+    return f"rgba({red}, {green}, {blue}, {alpha_value:.3f})"
+
+
 # 字段名缓存
 _FIELD_NAMES = {f.name for f in AppTheme.__dataclass_fields__.values()}
 
@@ -533,9 +560,9 @@ DARK = AppTheme(
     text_on_primary="#FFFFFF", text_on_accent="#FFFFFF",
     text_link="#4096FF",
     window_close_hover_bg="#E81123", window_close_hover_text="#FFFFFF",
-    border="#2D3545", border_light="#21262D",
+    border="#3A4558", border_light="#303846",
     border_focus="#1677FF", border_error="#E07070",
-    divider="#21262D", overlay="rgba(0, 0, 0, 0.75)",
+    divider="#303846", overlay="rgba(0, 0, 0, 0.75)",
     success="#6EBC8A",        # 柔化绿
     success_bg="#14532D",
     warning="#D4A843",        # 柔化金

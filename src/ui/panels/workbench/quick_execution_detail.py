@@ -158,7 +158,7 @@ class QuickExecutionDetail(QWidget):
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(4)
+        self._layout.setSpacing(get_theme().template_detail_section_gap)
         self.setMinimumWidth(320)
         # Prevent vertical compression — scroll area must scroll, not squish
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -1920,6 +1920,8 @@ class QuickExecutionDetail(QWidget):
         t = get_theme()
         from src.shared.ui.input_style import build_text_input_stylesheet
         from src.shared.ui.sizing import apply_size_class
+
+        self._layout.setSpacing(t.template_detail_section_gap)
 
         btn_qss = build_button_stylesheet(t)
         self.setStyleSheet(btn_qss)
