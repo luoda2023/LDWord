@@ -16,6 +16,10 @@ from src.app_meta import APP_TEMP_DIR_NAME
 from src.shared.engine.field_builder import iter_field_instructions
 from src.shared.engine.ooxml_ops import qn
 
+_DISABLE_WORD_COM_REFRESH_ENV = "LARK_DISABLE_WORD_COM_REFRESH"
+_ENABLE_WORD_COM_IN_TESTS_ENV = "LARK_ENABLE_WORD_COM_IN_TESTS"
+_FALSEY_ENV_VALUES = {"", "0", "false", "no", "off"}
+
 _PS_REFRESH_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
 
@@ -157,6 +161,13 @@ finally:
 """
 
 
+def _env_flag(name: str) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return False
+    return value.strip().lower() not in _FALSEY_ENV_VALUES
+
+
 def _is_toc_instruction(instr: str) -> bool:
     normalized = " ".join((instr or "").upper().split())
     return normalized.startswith("TOC ")
@@ -211,6 +222,73 @@ def _atomic_copy_back(src_path: Path, target_path: Path) -> None:
         raise
 
 
+def _automation_word_process_ids() -> set[int] | None:
+    """Return hidden Word COM automation PIDs, excluding normal user Word windows."""
+    if os.name != "nt":
+        return set()
+
+    script = (
+        "$ErrorActionPreference = 'SilentlyContinue'; "
+        "Get-CimInstance Win32_Process -Filter \"Name='WINWORD.EXE'\" | "
+        "Where-Object { (($_.CommandLine + '') -match '(/Automation|-Embedding)') } | "
+        "ForEach-Object { $_.ProcessId }"
+    )
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+
+    pids: set[int] = set()
+    for raw in (proc.stdout or "").split():
+        try:
+            pid = int(raw.strip())
+        except ValueError:
+            continue
+        if pid > 0:
+            pids.add(pid)
+    return pids
+
+
+def _terminate_process_ids(process_ids: set[int]) -> None:
+    if os.name != "nt" or not process_ids:
+        return
+
+    ids = ",".join(str(pid) for pid in sorted(process_ids))
+    script = (
+        f"$ids = @({ids}); "
+        "foreach ($id in $ids) { "
+        "try { Stop-Process -Id $id -Force -ErrorAction Stop } catch {} "
+        "}"
+    )
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
+def _cleanup_new_automation_word_processes(before_ids: set[int] | None) -> None:
+    if before_ids is None:
+        return
+    current_ids = _automation_word_process_ids()
+    if current_ids is None:
+        return
+    _terminate_process_ids(current_ids - before_ids)
+
+
 def _refresh_via_pywin32(doc_path: Path, timeout_sec: int) -> tuple[bool, str]:
     if getattr(sys, "frozen", False):
         return False, "pywin32 refresh skipped in frozen executable."
@@ -221,6 +299,7 @@ def _refresh_via_pywin32(doc_path: Path, timeout_sec: int) -> tuple[bool, str]:
     env = os.environ.copy()
     env["DOCX_REFRESH_PATH"] = str(doc_path.resolve())
     cmd = [sys.executable, "-c", _PYWIN32_REFRESH_CHILD]
+    before_word_ids = _automation_word_process_ids()
     try:
         proc = subprocess.run(
             cmd,
@@ -234,6 +313,8 @@ def _refresh_via_pywin32(doc_path: Path, timeout_sec: int) -> tuple[bool, str]:
         return False, f"pywin32 refresh timed out after {timeout_sec}s."
     except Exception as exc:
         return False, f"pywin32 refresh failed to start: {exc}"
+    finally:
+        _cleanup_new_automation_word_processes(before_word_ids)
 
     if proc.returncode == 0:
         return True, (proc.stdout or "").strip() or "ok(pywin32)"
@@ -252,6 +333,7 @@ def _refresh_via_powershell(doc_path: Path, timeout_sec: int) -> tuple[bool, str
         "-Command",
         _PS_REFRESH_SCRIPT,
     ]
+    before_word_ids = _automation_word_process_ids()
     try:
         proc = subprocess.run(
             cmd,
@@ -265,6 +347,8 @@ def _refresh_via_powershell(doc_path: Path, timeout_sec: int) -> tuple[bool, str
         return False, f"Word field refresh timed out after {timeout_sec}s."
     except Exception as exc:
         return False, f"Word field refresh failed to start: {exc}"
+    finally:
+        _cleanup_new_automation_word_processes(before_word_ids)
 
     if proc.returncode == 0:
         return True, "ok(powershell)"
@@ -275,10 +359,12 @@ def _refresh_via_powershell(doc_path: Path, timeout_sec: int) -> tuple[bool, str
 
 def refresh_doc_fields_with_word(doc_path: str, timeout_sec: int = 30) -> tuple[bool, str]:
     """Best-effort in-place field refresh using local Microsoft Word on Windows."""
+    if _env_flag(_DISABLE_WORD_COM_REFRESH_ENV):
+        return False, "Word COM refresh disabled by LARK_DISABLE_WORD_COM_REFRESH."
     if os.name != "nt":
         return False, "Word COM refresh requires Windows."
-    if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get(
-        "LARK_ENABLE_WORD_COM_IN_TESTS"
+    if os.environ.get("PYTEST_CURRENT_TEST") and not _env_flag(
+        _ENABLE_WORD_COM_IN_TESTS_ENV
     ):
         return False, "Word COM refresh skipped under pytest."
 

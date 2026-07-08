@@ -1,10 +1,10 @@
 """
-chem_typography ? ???????
+chem_typography — 化学式排版模块
 
-??????
-- ?? scope ??????/??????????
-- ?? shared.engine.chem_marks ?? run ?????/?????
-- ?? tracker ???
+范围控制：
+- 按 scope 限制正文、标题、题注等段落
+- 调用 shared.engine.chem_marks 处理 run 级化学标记
+- 记录 tracker 变更
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ _BODY_LIKE_SECTIONS = {'body', 'errata', 'acknowledgment', 'appendix', 'resume'}
 
 
 class ChemTypographyModule(BaseModule):
-    """????????"""
+    """化学式排版模块。"""
 
     meta = ModuleMeta(
         name='chem_typography',
@@ -198,5 +198,5 @@ def _should_process_paragraph(
 
 
 def _apply_chem_typography(para: Paragraph, chem_cfg) -> tuple[int, int]:
-    """?????????????"""
+    """对段落应用化学式排版。"""
     return apply_chem_typography_to_paragraph(para, chem_cfg=chem_cfg)

@@ -340,6 +340,63 @@ def test_pipeline_requests_post_save_field_refresh_for_toc_output():
                 Path(out).unlink(missing_ok=True)
 
 
+def test_word_field_refresh_can_be_disabled_by_env(monkeypatch):
+    from src.shared.engine.field_refresh import refresh_doc_fields_with_word
+
+    monkeypatch.setenv("LARK_DISABLE_WORD_COM_REFRESH", "1")
+
+    ok, detail = refresh_doc_fields_with_word("__missing_output__.docx")
+
+    assert not ok
+    assert "disabled" in detail
+
+
+def test_word_refresh_cleanup_only_terminates_new_automation_processes(monkeypatch):
+    from src.shared.engine import field_refresh
+
+    killed: list[set[int]] = []
+    monkeypatch.setattr(field_refresh, "_automation_word_process_ids", lambda: {10, 20, 30})
+    monkeypatch.setattr(
+        field_refresh,
+        "_terminate_process_ids",
+        lambda process_ids: killed.append(set(process_ids)),
+    )
+
+    field_refresh._cleanup_new_automation_word_processes({10, 20})
+
+    assert killed == [{30}]
+
+
+def test_powershell_refresh_cleans_new_automation_word_on_timeout(monkeypatch, tmp_path):
+    from src.shared.engine import field_refresh
+
+    doc_path = tmp_path / "refresh.docx"
+    doc_path.write_bytes(b"stub")
+    snapshots = iter(({100}, {100, 101}))
+    killed: list[set[int]] = []
+
+    monkeypatch.setattr(field_refresh, "_automation_word_process_ids", lambda: next(snapshots))
+    monkeypatch.setattr(
+        field_refresh,
+        "_terminate_process_ids",
+        lambda process_ids: killed.append(set(process_ids)),
+    )
+
+    def _timeout_run(*args, **kwargs):
+        raise field_refresh.subprocess.TimeoutExpired(
+            cmd=args[0] if args else (),
+            timeout=kwargs.get("timeout"),
+        )
+
+    monkeypatch.setattr(field_refresh.subprocess, "run", _timeout_run)
+
+    ok, detail = field_refresh._refresh_via_powershell(doc_path, timeout_sec=1)
+
+    assert not ok
+    assert "timed out" in detail
+    assert killed == [{101}]
+
+
 def test_all_structure_meta():
     """验证 3 个模块的 ModuleMeta 完整性"""
     from src.modules.structure.heading_recognition import HeadingRecognitionModule

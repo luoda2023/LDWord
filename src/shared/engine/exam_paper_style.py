@@ -487,10 +487,25 @@ def exam_blank_style_preview_lines(
     answer_version: bool = False,
 ) -> list[str]:
     spec = resolve_exam_blank_style(config, style_id)
-    lines = [
+    header_lines = [
         f"{spec.label} / A4",
         "七年级语文期中测试样张",
         "科目：语文    年级：七年级    考试时间：90 分钟    满分：100 分",
+    ]
+    footer_line = "页脚：第 1 页 / 共 2 页"
+    if answer_version:
+        return header_lines + [
+            "答案速查",
+            "一、积累与运用",
+            "1. C",
+            "2. 示例答案略",
+            "二、阅读与表达",
+            "1. 助人与坚持学习",
+            "2. 按表达评分",
+            footer_line,
+        ]
+
+    return header_lines + [
         "注意事项：请在规定区域内作答，保持卷面整洁。",
         "一、积累与运用",
         "1. 下列词语中加点字读音完全正确的一项是（  ）。",
@@ -498,13 +513,8 @@ def exam_blank_style_preview_lines(
         "二、阅读与表达",
         "3. 阅读材料，概括文章围绕人物写了哪两件事。",
         "4. 请以“那个温暖的瞬间”为题写一段片段。",
+        footer_line,
     ]
-    if answer_version:
-        lines.extend(["答案速查", "1. C", "2. 示例答案略", "3. 助人与坚持学习", "4. 按表达评分"])
-    else:
-        lines.append("学生卷：答案与解析不显示")
-    lines.append("页脚：第 1 页 / 共 2 页")
-    return lines
 
 
 def write_exam_blank_style_sample_docx(

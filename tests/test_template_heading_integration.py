@@ -337,14 +337,14 @@ def test_heading_detail_style_edit_flows_into_final_document_pipeline(tmp_path):
 def test_default_builtin_template_applies_heading_style_in_pipeline(tmp_path):
     source = tmp_path / "default_heading_input.docx"
     doc = Document()
-    doc.add_heading("绀轰緥涓€绾ф爣棰?", level=1)
+    doc.add_heading("示例一级标题", level=1)
     doc.save(source)
 
     config = resolve_config(create_builtin_template("default"), SceneWorkspace())
     pipeline = Pipeline(modules=[ParagraphStyleModule()], config=config)
     result = pipeline.execute(str(source))
 
-    assert result.success, f"鎵ц澶辫触: {result.error}"
+    assert result.success, f"执行失败: {result.error}"
 
     out_doc = Document(result.output_paths["final"])
     para = out_doc.paragraphs[0]

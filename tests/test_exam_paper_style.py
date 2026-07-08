@@ -132,10 +132,15 @@ def test_exam_blank_style_preview_switches_student_and_answer_versions():
         exam_blank_style_preview_lines("default_exam", answer_version=True)
     )
 
-    assert "学生卷：答案与解析不显示" in student_lines
+    assert "学生卷：答案与解析不显示" not in student_lines
     assert "答案速查" not in student_lines
+    assert "下列词语中加点字读音" in student_lines
     assert "答案速查" in answer_lines
     assert "1. C" in answer_lines
+    assert "2. 按表达评分" in answer_lines
+    assert "注意事项" not in answer_lines
+    assert "下列词语中加点字读音" not in answer_lines
+    assert "阅读材料，概括文章" not in answer_lines
 
 
 def test_exam_ai_prompts_separate_content_and_master_responsibilities():
