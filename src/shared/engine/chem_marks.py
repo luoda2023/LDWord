@@ -12,6 +12,7 @@ import re
 import unicodedata
 from copy import deepcopy
 
+from docx.document import Document
 from docx.oxml import OxmlElement
 from lxml import etree
 

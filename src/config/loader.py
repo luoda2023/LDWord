@@ -10,12 +10,17 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.config.dataclass_utils import dict_to_dataclass
 from src.config.migration import (
     normalize_scene_payload,
     normalize_template_payload,
 )
+
+if TYPE_CHECKING:
+    from src.config.scene import SceneWorkspace
+    from src.config.template import TemplateConfig
 
 
 def load_template(path: str | Path) -> "TemplateConfig":

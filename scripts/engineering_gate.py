@@ -16,6 +16,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 BASELINE_COMMANDS: tuple[tuple[tuple[str, ...], bool], ...] = (
+    (
+        (
+            sys.executable,
+            "-m",
+            "ruff",
+            "check",
+            "--select",
+            "E9,F63,F7,F82",
+            "main.py",
+            "scripts",
+            "src",
+            "tests",
+        ),
+        True,
+    ),
     ((sys.executable, "-m", "compileall", "-q", "src", "main.py"), False),
     ((sys.executable, "-m", "pytest", "--collect-only", "-q", "tests"), True),
     (

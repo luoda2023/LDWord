@@ -88,6 +88,9 @@ from src.config.library import (
 )
 from src.config.material_context import MaterialExecutionContext
 from src.config.scene import SceneWorkspace
+from src.ui.panels.style_object_projection_builders import (
+    build_execution_prereview_style_projection,
+)
 from .scene_presets import (
     LEGACY_FEATURE_GROUP_MAP,
     SCENE_META_MAP,
