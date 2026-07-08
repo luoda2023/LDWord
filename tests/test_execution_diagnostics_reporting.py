@@ -122,6 +122,23 @@ def test_report_writer_keeps_document_family_sections_in_dedicated_module():
         assert f"def {function_name}" in section_source
 
 
+def test_report_writer_keeps_exam_sections_in_dedicated_module():
+    writer_source = (ROOT / "src/report_writer.py").read_text(encoding="utf-8")
+    section_source = (ROOT / "src/reporting/exam_sections.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from src.reporting.exam_sections import" in writer_source
+    for function_name in (
+        "_extract_exam_question_schema",
+        "_extract_exam_delivery_runtime",
+        "_format_exam_question_schema_markdown",
+        "_format_exam_delivery_runtime_markdown",
+    ):
+        assert f"def {function_name}" not in writer_source
+        assert f"def {function_name}" in section_source
+
+
 def test_report_writer_emits_diagnostics_into_json_and_markdown(tmp_path):
     result = _build_result_with_diagnostics()
     report_json = tmp_path / "changes.json"
@@ -1057,6 +1074,71 @@ def test_report_writer_emits_exam_question_schema_evidence(tmp_path):
     assert report_data["exam_question_schema"]["error_count"] == 1
     assert "## 试卷题源结构校验" in markdown
     assert "missing_answer" in markdown
+
+
+def test_report_writer_emits_exam_delivery_runtime_evidence(tmp_path):
+    context = PipelineContext(
+        exam_delivery_runtime={
+            "schema_id": "exam_items_v1",
+            "family_id": "exam_teaching",
+            "status": "ok",
+            "source_key": "entity_data.exam_items",
+            "markdown_preview_path": "preview/exam.md",
+            "markdown_preview_excerpt": "一、选择题",
+            "version_count": 1,
+            "rendered_versions": [
+                {
+                    "preset_id": "student",
+                    "label": "学生版",
+                    "docx_path": "dist/exam_student.docx",
+                    "hidden_selectors": ["answers", "analysis"],
+                    "visible_question_count": 2,
+                    "visible_answer_count": 0,
+                    "visible_analysis_count": 0,
+                    "fixed_layout_kind": "answer_sheet",
+                    "fixed_layout_row_count": 4,
+                    "fixed_layout_column_count": 2,
+                    "fixed_layout_row_height_twips": 720,
+                    "question_asset_count": 1,
+                    "rendered_question_asset_count": 1,
+                    "question_asset_alt_text_count": 1,
+                    "rendered_question_asset_alt_text_count": 1,
+                }
+            ],
+        }
+    )
+    result = PipelineResult(success=True, context=context)
+    report_json = tmp_path / "exam_delivery.json"
+    report_md = tmp_path / "exam_delivery.md"
+
+    write_json_report(
+        result,
+        input_path=tmp_path / "exam.docx",
+        output_path=None,
+        report_path=report_json,
+        elapsed=0.5,
+        modules_enabled=0,
+        modules_total=0,
+    )
+    write_markdown_report(
+        result,
+        input_path=tmp_path / "exam.docx",
+        report_path=report_md,
+        elapsed=0.5,
+        modules_enabled=0,
+        modules_total=0,
+    )
+
+    report_data = json.loads(report_json.read_text(encoding="utf-8"))
+    markdown = report_md.read_text(encoding="utf-8")
+    rendered_version = report_data["exam_delivery_runtime"]["rendered_versions"][0]
+
+    assert rendered_version["preset_id"] == "student"
+    assert rendered_version["fixed_layout_row_height_twips"] == 720
+    assert "## 试卷多版本运行时渲染" in markdown
+    assert "student: `dist/exam_student.docx`" in markdown
+    assert "assets=1/1" in markdown
+    assert "Preview excerpt: 一、选择题" in markdown
 
 
 def test_report_writer_emits_contract_delivery_legal_boundary_evidence(tmp_path):

@@ -372,6 +372,11 @@ python scripts\verify_scene_matrix_release_gate.py
   - `report_writer.py` 继续 import 原函数名，`write_json_report` / `write_markdown_report` 输出入口不变。
   - `tests/test_execution_diagnostics_reporting.py` 已增加 section 归属守门。
   - `report_writer.py` 已降至 2917 行，短期目标 3000 行以下已达成。
+- report_writer R2:
+  - 新增 `src/reporting/exam_sections.py`。
+  - 已迁出 `exam_question_schema` 和 `exam_delivery_runtime` 两组 extractor/formatter 及清洗 helper。
+  - 新增 exam section 归属守门，并补齐 `exam_delivery_runtime` JSON/Markdown 输出回归测试。
+  - `report_writer.py` 已降至 2629 行，距离中期目标 2500 行以下还差约 130 行。
 
 验证:
 
@@ -399,9 +404,21 @@ python scripts\check_public_release.py --strict
 
 python scripts\engineering_gate.py
 # Engineering gate passed; 1873 tests collected; smoke 10 passed.
+
+python -m pytest -q tests/test_execution_diagnostics_reporting.py tests/test_count_engine_semantics.py tests/test_output_runtime_semantics.py
+# 63 passed
+
+python -m pytest -q tests/test_release_shell.py tests/test_execution_diagnostics_reporting.py tests/test_count_engine_semantics.py tests/test_output_runtime_semantics.py
+# 74 passed
+
+python scripts\check_public_release.py --strict
+# [OK] No obvious public-release blockers were found.
+
+python scripts\engineering_gate.py
+# Engineering gate passed; 1875 tests collected; smoke 10 passed.
 ```
 
 下一步:
 
 1. 继续 ScenePanel S1.2: 评估 `_navigation_card_snapshots()` 及相关 snapshot 方法能否在不接触 Qt 生命周期的前提下迁到 projection builder。
-2. 按推荐顺序进入 report_writer R2 或 Workbench W2: 继续拆无副作用 formatter / evidence projection，避免一次触碰执行副作用和 UI 生命周期。
+2. 按推荐顺序进入 report_writer R3 或 Workbench W2: 继续拆无副作用 formatter / evidence projection，避免一次触碰执行副作用和 UI 生命周期。
