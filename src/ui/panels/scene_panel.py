@@ -154,6 +154,15 @@ from src.ui.panels.scene_card_definitions import (
     INPUT_MATERIAL_CARDS,
     NAV_SECTION_CARD_GROUPS,
 )
+from src.ui.panels.scene_navigation_projection import (
+    NAV_SCOPE_MODE_LABELS,
+    NAV_OUTPUT_FIELDS,
+    _nav_display_id,
+    _nav_format_summary,
+    _nav_join,
+    _nav_scope_subtitle,
+    _normalise_scene_detail_card_id,
+)
 from src.ui.panels.scene_delivery_helpers import (
     _DELIVERY_PRESET_TEMPLATE_MAP,
     _VISIBILITY_ACTION_OPTIONS,
@@ -235,48 +244,9 @@ def _safe_scene_file_stem(value: str) -> str:
     return cleaned or "scene"
 
 
-_SCENE_RULES_ALIAS_CARDS = frozenset(
-    (
-        "scn_scope",
-        "scn_style_rules",
-        "scn_reference",
-        "scn_output",
-    )
-)
-
-
-def _normalise_scene_detail_card_id(card_id: str) -> str:
-    normalized = str(card_id or "").strip()
-    return "scn_rules" if normalized in _SCENE_RULES_ALIAS_CARDS else normalized
-
 _SCENE_SELECTOR_GROUP_PREFIX = "__scene_group__:"
 _SCENE_SELECTOR_MY_GROUP = f"{_SCENE_SELECTOR_GROUP_PREFIX}mine"
 _SCENE_SELECTOR_BUILTIN_GROUP = f"{_SCENE_SELECTOR_GROUP_PREFIX}builtin"
-
-_NAV_SCOPE_MODE_LABELS = {
-    "follow_template": "按模板默认",
-    "body_only": "只处理正文",
-    "full_document": "处理全文",
-    "confirm_before_apply": "每次执行前选择",
-}
-
-_NAV_OUTPUT_FIELDS = (
-    "final_docx",
-    "compare_docx",
-    "report_json",
-    "report_markdown",
-    "material_manifest",
-    "material_package",
-)
-
-
-def _nav_display_id(value: object, mapping: dict[str, str] | None = None) -> str:
-    normalized = str(value or "").strip()
-    if not normalized:
-        return ""
-    if mapping and normalized in mapping:
-        return mapping[normalized]
-    return normalized.replace("_", " ")
 
 
 def _is_scene_selector_group(value: object) -> bool:
@@ -285,24 +255,6 @@ def _is_scene_selector_group(value: object) -> bool:
 
 def _builtin_scene_id_set() -> set[str]:
     return {str(meta.scene_id or "").strip() for meta in SCENE_METAS}
-
-
-def _nav_join(parts: Sequence[str]) -> str:
-    return " · ".join(part for part in parts if str(part or "").strip())
-
-
-def _nav_scope_subtitle(mode: str) -> str:
-    return _NAV_SCOPE_MODE_LABELS.get(mode, mode or "按模板默认")
-
-
-def _nav_format_summary(values: Sequence[object]) -> str:
-    labels = [_nav_display_id(value, FORMAT_DISPLAY_LABELS) for value in values]
-    labels = [label for label in labels if label]
-    if not labels:
-        return "Word 文档"
-    if len(labels) <= 2:
-        return "、".join(labels)
-    return "、".join(labels[:2]) + f"等 {len(labels)} 种输入"
 
 
 ALIGNMENT_OPTIONS: tuple[tuple[str, str], ...] = (
@@ -2726,7 +2678,7 @@ class _ScopeDetail(QWidget):
         mode: str,
     ) -> None:
         normalized = str(mode or "").strip() or "follow_template"
-        if normalized not in _NAV_SCOPE_MODE_LABELS:
+        if normalized not in NAV_SCOPE_MODE_LABELS:
             normalized = "follow_template"
         scene.application_boundary.mode = normalized
         scene.application_boundary.confirm_before_apply = (
@@ -5397,7 +5349,7 @@ class ScenePanel(BasePanel):
 
     def _output_result_nav_summary(self, scene: SceneWorkspace) -> str:
         output_count = sum(
-            1 for field_name in _NAV_OUTPUT_FIELDS if bool(getattr(scene.output, field_name, False))
+            1 for field_name in NAV_OUTPUT_FIELDS if bool(getattr(scene.output, field_name, False))
         )
         preset = self._default_delivery_preset(scene)
         preset_label = str(
@@ -5481,7 +5433,7 @@ class ScenePanel(BasePanel):
 
     def _content_navigation_snapshot(self, scene: SceneWorkspace) -> dict[str, str]:
         profile = scene.input_source_profile
-        formats = _nav_format_summary(tuple(profile.accepted_formats or ()))
+        formats = _nav_format_summary(tuple(profile.accepted_formats or ()), FORMAT_DISPLAY_LABELS)
         material_fields = len(profile.required_material_fields or [])
         schema_count = len(_profile_material_schema_ids(profile))
         configured = bool(
@@ -5504,7 +5456,7 @@ class ScenePanel(BasePanel):
 
     def _output_navigation_snapshot(self, scene: SceneWorkspace) -> dict[str, str]:
         output_count = sum(
-            1 for field_name in _NAV_OUTPUT_FIELDS if bool(getattr(scene.output, field_name, False))
+            1 for field_name in NAV_OUTPUT_FIELDS if bool(getattr(scene.output, field_name, False))
         )
         preset = self._default_delivery_preset(scene)
         preset_label = str(

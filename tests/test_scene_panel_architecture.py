@@ -114,6 +114,9 @@ def test_scene_panel_uses_shared_card_header_and_flow_scope_layout():
     scene_card_definitions_source = (
         ROOT / "src/ui/panels/scene_card_definitions.py"
     ).read_text(encoding="utf-8")
+    scene_navigation_projection_source = (
+        ROOT / "src/ui/panels/scene_navigation_projection.py"
+    ).read_text(encoding="utf-8")
     style_policy_deck_source = (
         ROOT / "src/shared/ui/style_policy_control_deck.py"
     ).read_text(encoding="utf-8")
@@ -150,6 +153,10 @@ def test_scene_panel_uses_shared_card_header_and_flow_scope_layout():
     assert '"核对依据"' not in source
     assert "from src.ui.panels.scene_card_definitions import" in source
     assert '"scn_rules": ("场景规则", "sliders-horizontal")' in scene_card_definitions_source
+    assert "from src.ui.panels.scene_navigation_projection import" in source
+    assert "SCENE_RULES_ALIAS_CARDS = frozenset" in scene_navigation_projection_source
+    assert "NAV_OUTPUT_FIELDS = (" in scene_navigation_projection_source
+    assert "def _normalise_scene_detail_card_id" not in source
     assert "self._style_rules = _StyleRulesDetail()" in source
     assert "self._rules = _SceneRulesDetail(" in source
     assert "self._style_rules_block = SceneStyleRulesBlock" in source

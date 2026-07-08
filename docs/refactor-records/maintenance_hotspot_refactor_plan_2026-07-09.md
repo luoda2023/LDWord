@@ -346,3 +346,36 @@ python scripts\verify_scene_matrix_release_gate.py
 - `workbench_execution_adapter.py` 降到 2200 行以下。
 - `report_writer.py` 降到 2500 行以下。
 - 大测试文件按新模块边界拆出 2-3 个聚焦测试文件。
+
+## 11. 执行进展
+
+### 2026-07-09 本轮推进
+
+已完成:
+
+- CI workflow dependency profile 防回归测试:
+  - `tests/test_release_shell.py` 已检查 `engineering-gate.yml` 和 `scene-matrix-release-gate.yml` 均使用 `python -m pip install -e ".[dev]"`。
+  - 测试同时防止 scene matrix workflow 退回 `python-docx lxml PyYAML pytest` 这类手写依赖组合。
+- ScenePanel S1 首片:
+  - 新增 `src/ui/panels/scene_navigation_projection.py`。
+  - 已迁出 `_normalise_scene_detail_card_id`、导航别名、scope mode label、输出字段集合、导航 subtitle 拼接和输入格式摘要纯函数。
+  - `scene_panel.py` 继续 import 原函数名，调用点不变。
+  - `tests/test_scene_panel_architecture.py` 已改为检查职责归属在新模块。
+
+验证:
+
+```powershell
+python -m pytest -q tests/test_release_shell.py tests/test_scene_panel_architecture.py tests/test_workbench_issue_navigation.py
+# 93 passed
+
+python scripts\check_public_release.py --strict
+# [OK] No obvious public-release blockers were found.
+
+python scripts\engineering_gate.py
+# Engineering gate passed; 1871 tests collected; smoke 10 passed.
+```
+
+下一步:
+
+1. 继续 ScenePanel S1.2: 评估 `_navigation_card_snapshots()` 及相关 snapshot 方法能否在不接触 Qt 生命周期的前提下迁到 projection builder。
+2. 或按推荐顺序进入 Workbench W1: 先抽 `WorkbenchIssueItem` 等 dataclass/model 到 `workbench_issue_models.py`。
