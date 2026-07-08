@@ -111,6 +111,9 @@ def test_scene_panel_uses_shared_card_header_and_flow_scope_layout():
     style_rule_deck_source = (
         ROOT / "src/shared/ui/style_rule_control_deck.py"
     ).read_text(encoding="utf-8")
+    scene_card_definitions_source = (
+        ROOT / "src/ui/panels/scene_card_definitions.py"
+    ).read_text(encoding="utf-8")
     style_policy_deck_source = (
         ROOT / "src/shared/ui/style_policy_control_deck.py"
     ).read_text(encoding="utf-8")
@@ -145,7 +148,8 @@ def test_scene_panel_uses_shared_card_header_and_flow_scope_layout():
     assert {"mountain-snow", "sliders-horizontal"} <= registered_icons
     assert '"scn_evidence"' not in source
     assert '"核对依据"' not in source
-    assert '"scn_rules":       ("场景规则",    "sliders-horizontal")' in source
+    assert "from src.ui.panels.scene_card_definitions import" in source
+    assert '"scn_rules": ("场景规则", "sliders-horizontal")' in scene_card_definitions_source
     assert "self._style_rules = _StyleRulesDetail()" in source
     assert "self._rules = _SceneRulesDetail(" in source
     assert "self._style_rules_block = SceneStyleRulesBlock" in source
@@ -218,7 +222,7 @@ def test_scene_panel_uses_shared_card_header_and_flow_scope_layout():
     assert "RISK_BOUNDARY_CARDS" not in source
     assert 'add_section_header("功能参数")' not in source
     assert '"功能开关"' not in source
-    assert 'INPUT_MATERIAL_CARDS = ("scn_content",)' in source
+    assert 'INPUT_MATERIAL_CARDS = ("scn_content",)' in scene_card_definitions_source
     assert '"content_fill":  "scn_content"' not in source
     assert "TemplateStylePreview" not in source
     assert "_template_preview_context_for_scene" in source

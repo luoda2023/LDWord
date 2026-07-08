@@ -146,6 +146,14 @@ from src.ui.panels.scene_summary_projection import (
     scene_sample_fixture_library_status_tooltip,
     scene_application_boundary_display_name,
 )
+from src.ui.panels.scene_card_definitions import (
+    CARD_DEFINITIONS,
+    CARD_ORDER,
+    FIXED_CARDS,
+    FORMAT_TEMPLATE_CARDS,
+    INPUT_MATERIAL_CARDS,
+    NAV_SECTION_CARD_GROUPS,
+)
 from src.ui.panels.scene_delivery_helpers import (
     _DELIVERY_PRESET_TEMPLATE_MAP,
     _VISIBILITY_ACTION_OPTIONS,
@@ -226,44 +234,6 @@ def _safe_scene_file_stem(value: str) -> str:
     cleaned = cleaned.strip(" ._")
     return cleaned or "scene"
 
-
-# ═══════════════════════════════════════════════════════════════════════
-#  Card definitions
-# ═══════════════════════════════════════════════════════════════════════
-
-CARD_DEFINITIONS: dict[str, tuple[str, str]] = {
-    # Fixed Layer 1: Identity
-    "scn_overview":    ("场景概览",    "mountain-snow"),
-    # Scenario-specific assembly pages
-    "scn_exam_paper":  ("试卷装配",    "file-text"),
-    # Fixed Layer 2: Scenario rules
-    "scn_rules":       ("场景规则",    "sliders-horizontal"),
-    "scn_cleanup":     ("风险检查",    "scan"),
-    "scn_content":     ("资料包与填充", "pen-tool"),
-    "scn_output":      ("生成结果",    "folder-output"),
-}
-
-CARD_ORDER = (
-    "scn_overview",
-    "scn_exam_paper",
-    "scn_rules",
-    "scn_content",
-)
-
-FIXED_CARDS = (
-    "scn_overview",
-    "scn_exam_paper",
-    "scn_rules",
-)
-FORMAT_TEMPLATE_CARDS = (
-    "scn_exam_paper",
-    "scn_rules",
-)
-INPUT_MATERIAL_CARDS = ("scn_content",)
-NAV_SECTION_CARD_GROUPS = (
-    ("format_template", FORMAT_TEMPLATE_CARDS),
-    ("input_material", INPUT_MATERIAL_CARDS),
-)
 
 _SCENE_RULES_ALIAS_CARDS = frozenset(
     (
