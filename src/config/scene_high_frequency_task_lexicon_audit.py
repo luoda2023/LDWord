@@ -696,6 +696,20 @@ class HighFrequencyTaskLexiconAuditReport:
             "request_sample_count": self.request_sample_count,
             "request_cell_count": self.request_cell_count,
             "missing_source_evidence_count": self.missing_source_evidence_count,
+            "counts": {
+                "task_count": self.task_count,
+                "phrase_count": self.phrase_count,
+                "issue_count": self.issue_count,
+                "negative_task_count": self.negative_task_count,
+                "ambiguous_task_count": self.ambiguous_task_count,
+                "manual_boundary_task_count": self.manual_boundary_task_count,
+                "handoff_task_count": self.handoff_task_count,
+                "request_sample_count": self.request_sample_count,
+                "request_cell_count": self.request_cell_count,
+                "missing_source_evidence_count": (
+                    self.missing_source_evidence_count
+                ),
+            },
             "landing_layer_counts": [
                 {"landing_layer": layer, "count": count}
                 for layer, count in self.landing_layer_counts

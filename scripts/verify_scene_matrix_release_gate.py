@@ -14,6 +14,11 @@ if str(ROOT) not in sys.path:
 from scripts.scene_matrix_release_gate_payload import (  # noqa: E402
     build_scene_matrix_release_gate_payload,
 )
+from src.config.scene_release_governance_registry import (  # noqa: E402
+    SCENE_RELEASE_GOVERNANCE_DASHBOARD_GATE_CHECK_IDS,
+    SCENE_RELEASE_GOVERNANCE_EARLY_GATE_CHECK_IDS,
+    SCENE_RELEASE_GOVERNANCE_EXPORT_SCRIPT_EVIDENCE_SOURCE_ID,
+)
 
 
 RELEASE_GATE_PAYLOAD_CHECK_IDS: tuple[str, ...] = (
@@ -45,6 +50,23 @@ RELEASE_GATE_PAYLOAD_CHECK_IDS: tuple[str, ...] = (
     "scene_boundary_capability_matrix",
     "scene_plugin_boundary_confirmation_audit",
     "scene_external_handoff_contract_audit",
+    *SCENE_RELEASE_GOVERNANCE_EARLY_GATE_CHECK_IDS,
+    "scene_material_schema_audit",
+    "scene_material_repair_flow_audit",
+    "scene_fixed_layout_profile_audit",
+    "scene_report_artifact_drilldown_audit",
+    "scene_delivery_preset_audit",
+    "scene_delivery_preset_execution_audit",
+    "scene_formula_output_watermark_audit",
+    "scene_product_maturity_upgrade_audit",
+    "scene_matrix_dashboard",
+    *SCENE_RELEASE_GOVERNANCE_DASHBOARD_GATE_CHECK_IDS,
+    SCENE_RELEASE_GOVERNANCE_EXPORT_SCRIPT_EVIDENCE_SOURCE_ID,
+    "scene_matrix_drilldown",
+)
+
+
+RELEASE_GATE_RELEASE_GOVERNANCE_SOURCE_MARKER_IDS: tuple[str, ...] = (
     "scene_boundary_guarded_completion_audit",
     "scene_residual_warning_governance_audit",
     "scene_boundary_readiness_reconciliation_audit",
@@ -59,19 +81,100 @@ RELEASE_GATE_PAYLOAD_CHECK_IDS: tuple[str, ...] = (
     "scene_retained_gap_exit_criteria_audit",
     "scene_release_residual_ratio_ledger_audit",
     "scene_release_acceptance_certificate_audit",
-    "scene_material_schema_audit",
-    "scene_material_repair_flow_audit",
-    "scene_fixed_layout_profile_audit",
-    "scene_report_artifact_drilldown_audit",
-    "scene_delivery_preset_audit",
-    "scene_delivery_preset_execution_audit",
-    "scene_formula_output_watermark_audit",
-    "scene_product_maturity_upgrade_audit",
-    "scene_matrix_dashboard",
     "scene_release_residual_explanation_audit",
-    "scene_release_governance_export_script_evidence",
-    "scene_matrix_drilldown",
 )
+
+
+RELEASE_GATE_HUMAN_SUMMARY_PARTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("{coverage_pack_count} packs", ("coverage_pack_count",)),
+    ("high_frequency_coverage={high_frequency_completeness_ready_pack_count}/{high_frequency_completeness_pack_count}", ("high_frequency_completeness_ready_pack_count", "high_frequency_completeness_pack_count")),
+    ("{sample_fixture_count} sample fixtures", ("sample_fixture_count",)),
+    ("{high_frequency_request_sample_count} request samples", ("high_frequency_request_sample_count",)),
+    ("{request_cell_count} request cells", ("request_cell_count",)),
+    ("family_proxy={request_cell_family_proxy_count}", ("request_cell_family_proxy_count",)),
+    ("product_readiness_subjects={product_readiness_subject_count}", ("product_readiness_subject_count",)),
+    ("task_lexicon={high_frequency_task_lexicon_task_count}", ("high_frequency_task_lexicon_task_count",)),
+    ("ambiguous_boundaries={scene_ambiguous_boundary_count}", ("scene_ambiguous_boundary_count",)),
+    ("ambiguity_clarifications={scene_ambiguity_clarification_ready_count}/{scene_ambiguity_clarification_count}", ("scene_ambiguity_clarification_ready_count", "scene_ambiguity_clarification_count")),
+    ("import_handoffs={scene_import_handoff_count}", ("scene_import_handoff_count",)),
+    ("input_sources={scene_input_source_ready_input_pack_count}/{scene_input_source_input_pack_count}", ("scene_input_source_ready_input_pack_count", "scene_input_source_input_pack_count")),
+    ("family_subscenes={scene_family_subscene_family_count}", ("scene_family_subscene_family_count",)),
+    ("family_fixture_p1={scene_family_fixture_depth_p1_ready_count}/{scene_family_fixture_depth_p1_family_count}", ("scene_family_fixture_depth_p1_ready_count", "scene_family_fixture_depth_p1_family_count")),
+    ("control_runtime={scene_control_runtime_ready_control_count}/{scene_control_runtime_control_count}", ("scene_control_runtime_ready_control_count", "scene_control_runtime_control_count")),
+    ("count_profiles={scene_count_profile_ready_family_count}/{scene_count_profile_family_count} ready", ("scene_count_profile_ready_family_count", "scene_count_profile_family_count")),
+    ("count_profile_accounted={scene_count_profile_accounted_family_count}/{scene_count_profile_family_count}", ("scene_count_profile_accounted_family_count", "scene_count_profile_family_count")),
+    ("word_risk_surfaces={scene_word_risk_surface_count}", ("scene_word_risk_surface_count",)),
+    ("object_preflight_actions={scene_object_preflight_action_ready_target_count}/{scene_object_preflight_action_target_count}", ("scene_object_preflight_action_ready_target_count", "scene_object_preflight_action_target_count")),
+    ("user_journeys={scene_user_journey_ready_pack_count}/{scene_user_journey_pack_count} packs/{scene_user_journey_path_count} paths", ("scene_user_journey_ready_pack_count", "scene_user_journey_pack_count", "scene_user_journey_path_count")),
+    ("business_capabilities={scene_business_capability_matrix_ready_count}/{scene_business_capability_matrix_count} ({scene_business_capability_matrix_missing_journey_group_count} gaps)", ("scene_business_capability_matrix_ready_count", "scene_business_capability_matrix_count", "scene_business_capability_matrix_missing_journey_group_count")),
+    ("boundary_capabilities={scene_boundary_capability_ready_count}/{scene_boundary_capability_count}", ("scene_boundary_capability_ready_count", "scene_boundary_capability_count")),
+    ("boundary_risks={scene_boundary_capability_risk_domain_count}", ("scene_boundary_capability_risk_domain_count",)),
+    ("boundary_receipts={scene_boundary_capability_external_receipt_count}", ("scene_boundary_capability_external_receipt_count",)),
+    ("plugin_boundary_gates={scene_plugin_boundary_gate_count}", ("scene_plugin_boundary_gate_count",)),
+    ("external_handoffs={scene_external_handoff_contract_ready_count}/{scene_external_handoff_contract_count}", ("scene_external_handoff_contract_ready_count", "scene_external_handoff_contract_count")),
+    ("boundary_guarded={scene_boundary_guarded_completion_ready_count}/{scene_boundary_guarded_completion_subject_count}", ("scene_boundary_guarded_completion_ready_count", "scene_boundary_guarded_completion_subject_count")),
+    ("managed_warnings={scene_residual_warning_governance_managed_count}/{scene_residual_warning_governance_warning_count} (unmanaged={scene_residual_warning_governance_unmanaged_warning_count})", ("scene_residual_warning_governance_managed_count", "scene_residual_warning_governance_warning_count", "scene_residual_warning_governance_unmanaged_warning_count")),
+    ("input_warnings={input_source_warning_managed_count}/{scene_input_source_warning_count} managed", ("input_source_warning_managed_count", "scene_input_source_warning_count")),
+    ("count_profile_warnings={count_profile_warning_managed_count}/{scene_count_profile_warning_count} managed", ("count_profile_warning_managed_count", "scene_count_profile_warning_count")),
+    ("plugin_manual_warnings={plugin_manual_warning_managed_count}/{scene_residual_warning_governance_plugin_manual_warning_count} managed", ("plugin_manual_warning_managed_count", "scene_residual_warning_governance_plugin_manual_warning_count")),
+    ("reference_profile_warnings={reference_profile_warning_managed_count}/{scene_residual_warning_governance_reference_profile_warning_count} managed", ("reference_profile_warning_managed_count", "scene_residual_warning_governance_reference_profile_warning_count")),
+    ("visio_fixture={visio_fixture_closed_verified_count}/{scene_residual_warning_governance_visio_fixture_closed_count} closed", ("visio_fixture_closed_verified_count", "scene_residual_warning_governance_visio_fixture_closed_count")),
+    ("dashboard_warning_projection={dashboard_warning_projection_governed_count}/{scene_matrix_dashboard_warning_count} governed", ("dashboard_warning_projection_governed_count", "scene_matrix_dashboard_warning_count")),
+    ("readiness_reconciled={scene_boundary_readiness_reconciliation_reconciled_count}/{scene_boundary_readiness_reconciliation_count}", ("scene_boundary_readiness_reconciliation_reconciled_count", "scene_boundary_readiness_reconciliation_count")),
+    ("release_exceptions={scene_terminal_release_exception_governed_count}/{scene_terminal_release_exception_count} (traces={scene_terminal_release_exception_trace_count})", ("scene_terminal_release_exception_governed_count", "scene_terminal_release_exception_count", "scene_terminal_release_exception_trace_count")),
+    ("static_closed_not_green={static_closed_not_green_governed_count}/{static_closed_but_not_green_count} governed", ("static_closed_not_green_governed_count", "static_closed_but_not_green_count")),
+    ("boundary_subject_dossiers={scene_boundary_subject_release_dossier_ready_count}/{scene_boundary_subject_release_dossier_subject_count} (traces={scene_boundary_subject_release_dossier_subject_trace_count})", ("scene_boundary_subject_release_dossier_ready_count", "scene_boundary_subject_release_dossier_subject_count", "scene_boundary_subject_release_dossier_subject_trace_count")),
+    ("non_subject_traces={scene_non_subject_release_trace_attribution_ready_count}/{scene_non_subject_release_trace_attribution_count}", ("scene_non_subject_release_trace_attribution_ready_count", "scene_non_subject_release_trace_attribution_count")),
+    ("trace_partition={scene_release_trace_partition_guard_partitioned_trace_count}/{scene_release_trace_partition_guard_terminal_trace_count}", ("scene_release_trace_partition_guard_partitioned_trace_count", "scene_release_trace_partition_guard_terminal_trace_count")),
+    ("release_projection={scene_release_projection_surface_parity_ready_count}/{scene_release_projection_surface_parity_count}", ("scene_release_projection_surface_parity_ready_count", "scene_release_projection_surface_parity_count")),
+    ("subject_continuity={scene_boundary_subject_release_continuity_ready_count}/{scene_boundary_subject_release_continuity_subject_count}", ("scene_boundary_subject_release_continuity_ready_count", "scene_boundary_subject_release_continuity_subject_count")),
+    ("release_ledger={scene_release_closure_ledger_ready_count}/{scene_release_closure_ledger_stage_count}", ("scene_release_closure_ledger_ready_count", "scene_release_closure_ledger_stage_count")),
+    ("boundary_envelopes={scene_boundary_maturity_release_envelope_ready_count}/{scene_boundary_maturity_release_envelope_count}", ("scene_boundary_maturity_release_envelope_ready_count", "scene_boundary_maturity_release_envelope_count")),
+    ("maturity_l5_enveloped={scene_boundary_maturity_release_envelope_l5_blocker_enveloped_count}/{scene_product_maturity_upgrade_l5_blocked_subject_count}", ("scene_boundary_maturity_release_envelope_l5_blocker_enveloped_count", "scene_product_maturity_upgrade_l5_blocked_subject_count")),
+    ("maturity_l5_alignment={scene_release_residual_ratio_ledger_maturity_l5_blocker_alignment_count}/{scene_release_residual_ratio_ledger_maturity_l5_blocker_release_envelope_count}", ("scene_release_residual_ratio_ledger_maturity_l5_blocker_alignment_count", "scene_release_residual_ratio_ledger_maturity_l5_blocker_release_envelope_count")),
+    ("maturity_l5_receipts={scene_release_residual_ratio_ledger_maturity_l5_blocker_receipt_alignment_count}/{scene_release_residual_ratio_ledger_maturity_l5_blocker_receipt_alignment_link_count}", ("scene_release_residual_ratio_ledger_maturity_l5_blocker_receipt_alignment_count", "scene_release_residual_ratio_ledger_maturity_l5_blocker_receipt_alignment_link_count")),
+    ("boundary_scope_alignment={scene_release_residual_ratio_ledger_boundary_scope_alignment_count}/{scene_release_residual_ratio_ledger_boundary_scope_link_count}", ("scene_release_residual_ratio_ledger_boundary_scope_alignment_count", "scene_release_residual_ratio_ledger_boundary_scope_link_count")),
+    ("retained_gaps={retained_gap_enveloped_count}/{scene_product_maturity_upgrade_gap_count} enveloped", ("retained_gap_enveloped_count", "scene_product_maturity_upgrade_gap_count")),
+    ("retained_gap_exit_criteria={scene_retained_gap_exit_criteria_release_allowed_count}/{scene_retained_gap_exit_criteria_count} release-allowed", ("scene_retained_gap_exit_criteria_release_allowed_count", "scene_retained_gap_exit_criteria_count")),
+    ("retained_gap_receipts={scene_retained_gap_external_receipt_alignment_count}/{scene_retained_gap_exit_criteria_count} aligned", ("scene_retained_gap_external_receipt_alignment_count", "scene_retained_gap_exit_criteria_count")),
+    ("gap_domains={gap_domain_classified_count}/{scene_product_maturity_upgrade_gap_domain_count} classified", ("gap_domain_classified_count", "scene_product_maturity_upgrade_gap_domain_count")),
+    ("residual_ratios={scene_release_residual_ratio_ledger_published_count}/{scene_release_residual_ratio_ledger_count}", ("scene_release_residual_ratio_ledger_published_count", "scene_release_residual_ratio_ledger_count")),
+    ("residual_ratio_exit_criteria={scene_release_residual_ratio_ledger_exit_criteria_link_count}/{scene_release_residual_ratio_ledger_release_envelope_link_count}", ("scene_release_residual_ratio_ledger_exit_criteria_link_count", "scene_release_residual_ratio_ledger_release_envelope_link_count")),
+    ("residual_ratio_receipts={scene_release_residual_ratio_ledger_receipt_alignment_link_count}/{scene_release_residual_ratio_ledger_exit_criteria_link_count}", ("scene_release_residual_ratio_ledger_receipt_alignment_link_count", "scene_release_residual_ratio_ledger_exit_criteria_link_count")),
+    ("count_delivery_alignment={scene_release_residual_ratio_ledger_count_delivery_boundary_alignment_count}/{scene_release_residual_ratio_ledger_count_delivery_boundary_link_count}", ("scene_release_residual_ratio_ledger_count_delivery_boundary_alignment_count", "scene_release_residual_ratio_ledger_count_delivery_boundary_link_count")),
+    ("count_delivery_receipts={scene_release_residual_ratio_ledger_count_delivery_receipt_alignment_count}/{scene_release_residual_ratio_ledger_count_delivery_receipt_alignment_link_count}", ("scene_release_residual_ratio_ledger_count_delivery_receipt_alignment_count", "scene_release_residual_ratio_ledger_count_delivery_receipt_alignment_link_count")),
+    ("residual_explanations={scene_release_residual_explanation_covered_count}/{scene_release_residual_explanation_count} covered", ("scene_release_residual_explanation_covered_count", "scene_release_residual_explanation_count")),
+    ("acceptance_certificate={scene_release_acceptance_certificate_ready_count}/{scene_release_acceptance_certificate_count}", ("scene_release_acceptance_certificate_ready_count", "scene_release_acceptance_certificate_count")),
+    ("acceptance_receipts={scene_release_acceptance_certificate_ready_receipt_count}/{scene_release_acceptance_certificate_receipt_count}", ("scene_release_acceptance_certificate_ready_receipt_count", "scene_release_acceptance_certificate_receipt_count")),
+    ("requirement_dimensions={scene_release_acceptance_certificate_ready_requirement_dimension_count}/{scene_release_acceptance_certificate_requirement_dimension_count}", ("scene_release_acceptance_certificate_ready_requirement_dimension_count", "scene_release_acceptance_certificate_requirement_dimension_count")),
+    ("acceptance_evidence={scene_release_acceptance_certificate_ready_source_evidence_count}/{scene_release_acceptance_certificate_source_evidence_count}", ("scene_release_acceptance_certificate_ready_source_evidence_count", "scene_release_acceptance_certificate_source_evidence_count")),
+    ("release_export_scripts={scene_release_governance_export_script_ready_count}/{scene_release_governance_export_script_report_count} ready", ("scene_release_governance_export_script_ready_count", "scene_release_governance_export_script_report_count")),
+    ("material_schema_families={scene_material_schema_ready_material_family_count}/{scene_material_schema_material_family_count}", ("scene_material_schema_ready_material_family_count", "scene_material_schema_material_family_count")),
+    ("material_repair_flows={scene_material_repair_flow_ready_count}/{scene_material_repair_flow_count}", ("scene_material_repair_flow_ready_count", "scene_material_repair_flow_count")),
+    ("fixed_layout_profile={scene_fixed_layout_profile_ready_channel_count}/{scene_fixed_layout_profile_channel_count}", ("scene_fixed_layout_profile_ready_channel_count", "scene_fixed_layout_profile_channel_count")),
+    ("report_artifact_drilldown={scene_report_artifact_drilldown_ready_channel_count}/{scene_report_artifact_drilldown_channel_count}", ("scene_report_artifact_drilldown_ready_channel_count", "scene_report_artifact_drilldown_channel_count")),
+    ("delivery_families={scene_delivery_preset_ready_family_count}/{scene_delivery_preset_family_count} ready", ("scene_delivery_preset_ready_family_count", "scene_delivery_preset_family_count")),
+    ("delivery_family_accounted={scene_delivery_preset_accounted_family_count}/{scene_delivery_preset_family_count}", ("scene_delivery_preset_accounted_family_count", "scene_delivery_preset_family_count")),
+    ("delivery_pack_accounted={scene_delivery_preset_accounted_delivery_pack_count}/{scene_delivery_preset_delivery_pack_count}", ("scene_delivery_preset_accounted_delivery_pack_count", "scene_delivery_preset_delivery_pack_count")),
+    ("delivery_execution={scene_delivery_execution_ready_channel_count}/{scene_delivery_execution_channel_count}", ("scene_delivery_execution_ready_channel_count", "scene_delivery_execution_channel_count")),
+    ("formula_output_watermark={scene_formula_output_watermark_ready_capability_count}/{scene_formula_output_watermark_capability_count}", ("scene_formula_output_watermark_ready_capability_count", "scene_formula_output_watermark_capability_count")),
+    ("fow_family_accounted={scene_formula_output_watermark_accounted_family_count}/{scene_formula_output_watermark_family_count}", ("scene_formula_output_watermark_accounted_family_count", "scene_formula_output_watermark_family_count")),
+    ("maturity_l5_blocked={scene_product_maturity_upgrade_l5_blocked_subject_count}/{scene_product_maturity_upgrade_subject_count}", ("scene_product_maturity_upgrade_l5_blocked_subject_count", "scene_product_maturity_upgrade_subject_count")),
+    ("dashboard_packs={scene_matrix_dashboard_pack_count}", ("scene_matrix_dashboard_pack_count",)),
+    ("drilldowns={scene_matrix_drilldown_ready_count}/{scene_matrix_drilldown_item_count}", ("scene_matrix_drilldown_ready_count", "scene_matrix_drilldown_item_count")),
+    ("drilldown_rows={scene_matrix_drilldown_visible_row_count}/{scene_matrix_drilldown_row_count}", ("scene_matrix_drilldown_visible_row_count", "scene_matrix_drilldown_row_count")),
+    ("drilldown_sources={scene_matrix_drilldown_ready_source_evidence_count}/{scene_matrix_drilldown_source_evidence_count} ready", ("scene_matrix_drilldown_ready_source_evidence_count", "scene_matrix_drilldown_source_evidence_count")),
+)
+
+
+def _format_summary_part(
+    counts: dict[str, object],
+    template: str,
+    count_ids: tuple[str, ...],
+) -> str:
+    return template.format(
+        **{count_id: counts[count_id] for count_id in count_ids}
+    )
 
 
 def _print_human(payload: dict[str, object]) -> None:
@@ -88,211 +191,11 @@ def _print_human(payload: dict[str, object]) -> None:
                 text = str(issue)
             print(f"  - {text}")
     counts = payload["counts"]
-    print(
-        "[OK] "
-        f"{counts['coverage_pack_count']} packs, "
-        f"high_frequency_coverage="
-        f"{counts['high_frequency_completeness_ready_pack_count']}/"
-        f"{counts['high_frequency_completeness_pack_count']}, "
-        f"{counts['sample_fixture_count']} sample fixtures, "
-        f"{counts['high_frequency_request_sample_count']} request samples, "
-        f"{counts['request_cell_count']} request cells, "
-        f"family_proxy={counts['request_cell_family_proxy_count']}, "
-        f"product_readiness_subjects={counts['product_readiness_subject_count']}, "
-        f"task_lexicon={counts['high_frequency_task_lexicon_task_count']}, "
-        f"ambiguous_boundaries={counts['scene_ambiguous_boundary_count']}, "
-        f"ambiguity_clarifications="
-        f"{counts['scene_ambiguity_clarification_ready_count']}/"
-        f"{counts['scene_ambiguity_clarification_count']}, "
-        f"import_handoffs={counts['scene_import_handoff_count']}, "
-        f"input_sources={counts['scene_input_source_ready_input_pack_count']}/"
-        f"{counts['scene_input_source_input_pack_count']}, "
-        f"family_subscenes={counts['scene_family_subscene_family_count']}, "
-        f"family_fixture_p1={counts['scene_family_fixture_depth_p1_ready_count']}/"
-        f"{counts['scene_family_fixture_depth_p1_family_count']}, "
-        f"control_runtime={counts['scene_control_runtime_ready_control_count']}/"
-        f"{counts['scene_control_runtime_control_count']}, "
-        f"count_profiles={counts['scene_count_profile_ready_family_count']}/"
-        f"{counts['scene_count_profile_family_count']} ready, "
-        f"count_profile_accounted="
-        f"{counts['scene_count_profile_accounted_family_count']}/"
-        f"{counts['scene_count_profile_family_count']}, "
-        f"word_risk_surfaces={counts['scene_word_risk_surface_count']}, "
-        f"object_preflight_actions="
-        f"{counts['scene_object_preflight_action_ready_target_count']}/"
-        f"{counts['scene_object_preflight_action_target_count']}, "
-        f"user_journeys={counts['scene_user_journey_ready_pack_count']}/"
-        f"{counts['scene_user_journey_pack_count']} packs/"
-        f"{counts['scene_user_journey_path_count']} paths, "
-        f"business_capabilities="
-        f"{counts['scene_business_capability_matrix_ready_count']}/"
-        f"{counts['scene_business_capability_matrix_count']} "
-        f"({counts['scene_business_capability_matrix_missing_journey_group_count']} gaps), "
-        f"boundary_capabilities="
-        f"{counts['scene_boundary_capability_ready_count']}/"
-        f"{counts['scene_boundary_capability_count']}, "
-        f"boundary_risks="
-        f"{counts['scene_boundary_capability_risk_domain_count']}, "
-        f"boundary_receipts="
-        f"{counts['scene_boundary_capability_external_receipt_count']}, "
-        f"plugin_boundary_gates={counts['scene_plugin_boundary_gate_count']}, "
-        f"external_handoffs={counts['scene_external_handoff_contract_ready_count']}/"
-        f"{counts['scene_external_handoff_contract_count']}, "
-        f"boundary_guarded="
-        f"{counts['scene_boundary_guarded_completion_ready_count']}/"
-        f"{counts['scene_boundary_guarded_completion_subject_count']}, "
-        f"managed_warnings="
-        f"{counts['scene_residual_warning_governance_managed_count']}/"
-        f"{counts['scene_residual_warning_governance_warning_count']} "
-        f"(unmanaged={counts['scene_residual_warning_governance_unmanaged_warning_count']}), "
-        f"input_warnings="
-        f"{counts['input_source_warning_managed_count']}/"
-        f"{counts['scene_input_source_warning_count']} managed, "
-        f"count_profile_warnings="
-        f"{counts['count_profile_warning_managed_count']}/"
-        f"{counts['scene_count_profile_warning_count']} managed, "
-        f"plugin_manual_warnings="
-        f"{counts['plugin_manual_warning_managed_count']}/"
-        f"{counts['scene_residual_warning_governance_plugin_manual_warning_count']} managed, "
-        f"reference_profile_warnings="
-        f"{counts['reference_profile_warning_managed_count']}/"
-        f"{counts['scene_residual_warning_governance_reference_profile_warning_count']} managed, "
-        f"visio_fixture="
-        f"{counts['visio_fixture_closed_verified_count']}/"
-        f"{counts['scene_residual_warning_governance_visio_fixture_closed_count']} closed, "
-        f"dashboard_warning_projection="
-        f"{counts['dashboard_warning_projection_governed_count']}/"
-        f"{counts['scene_matrix_dashboard_warning_count']} governed, "
-        f"readiness_reconciled="
-        f"{counts['scene_boundary_readiness_reconciliation_reconciled_count']}/"
-        f"{counts['scene_boundary_readiness_reconciliation_count']}, "
-        f"release_exceptions="
-        f"{counts['scene_terminal_release_exception_governed_count']}/"
-        f"{counts['scene_terminal_release_exception_count']} "
-        f"(traces={counts['scene_terminal_release_exception_trace_count']}), "
-        f"static_closed_not_green="
-        f"{counts['static_closed_not_green_governed_count']}/"
-        f"{counts['static_closed_but_not_green_count']} governed, "
-        f"boundary_subject_dossiers="
-        f"{counts['scene_boundary_subject_release_dossier_ready_count']}/"
-        f"{counts['scene_boundary_subject_release_dossier_subject_count']} "
-        f"(traces={counts['scene_boundary_subject_release_dossier_subject_trace_count']}), "
-        f"non_subject_traces="
-        f"{counts['scene_non_subject_release_trace_attribution_ready_count']}/"
-        f"{counts['scene_non_subject_release_trace_attribution_count']}, "
-        f"trace_partition="
-        f"{counts['scene_release_trace_partition_guard_partitioned_trace_count']}/"
-        f"{counts['scene_release_trace_partition_guard_terminal_trace_count']}, "
-        f"release_projection="
-        f"{counts['scene_release_projection_surface_parity_ready_count']}/"
-        f"{counts['scene_release_projection_surface_parity_count']}, "
-        f"subject_continuity="
-        f"{counts['scene_boundary_subject_release_continuity_ready_count']}/"
-        f"{counts['scene_boundary_subject_release_continuity_subject_count']}, "
-        f"release_ledger="
-        f"{counts['scene_release_closure_ledger_ready_count']}/"
-        f"{counts['scene_release_closure_ledger_stage_count']}, "
-        f"boundary_envelopes="
-        f"{counts['scene_boundary_maturity_release_envelope_ready_count']}/"
-        f"{counts['scene_boundary_maturity_release_envelope_count']}, "
-        f"maturity_l5_enveloped="
-        f"{counts['scene_boundary_maturity_release_envelope_l5_blocker_enveloped_count']}/"
-        f"{counts['scene_product_maturity_upgrade_l5_blocked_subject_count']}, "
-        f"maturity_l5_alignment="
-        f"{counts['scene_release_residual_ratio_ledger_maturity_l5_blocker_alignment_count']}/"
-        f"{counts['scene_release_residual_ratio_ledger_maturity_l5_blocker_release_envelope_count']}, "
-        f"maturity_l5_receipts="
-        f"{counts['scene_release_residual_ratio_ledger_maturity_l5_blocker_receipt_alignment_count']}/"
-        f"{counts['scene_release_residual_ratio_ledger_maturity_l5_blocker_receipt_alignment_link_count']}, "
-        f"boundary_scope_alignment="
-        f"{counts['scene_release_residual_ratio_ledger_boundary_scope_alignment_count']}/"
-        f"{counts['scene_release_residual_ratio_ledger_boundary_scope_link_count']}, "
-        f"retained_gaps="
-        f"{counts['retained_gap_enveloped_count']}/"
-        f"{counts['scene_product_maturity_upgrade_gap_count']} enveloped, "
-        f"retained_gap_exit_criteria="
-        f"{counts['scene_retained_gap_exit_criteria_release_allowed_count']}/"
-        f"{counts['scene_retained_gap_exit_criteria_count']} release-allowed, "
-        f"retained_gap_receipts="
-        f"{counts['scene_retained_gap_external_receipt_alignment_count']}/"
-        f"{counts['scene_retained_gap_exit_criteria_count']} aligned, "
-        f"gap_domains="
-        f"{counts['gap_domain_classified_count']}/"
-        f"{counts['scene_product_maturity_upgrade_gap_domain_count']} classified, "
-        f"residual_ratios="
-        f"{counts['scene_release_residual_ratio_ledger_published_count']}/"
-        f"{counts['scene_release_residual_ratio_ledger_count']}, "
-        f"residual_ratio_exit_criteria="
-        f"{counts['scene_release_residual_ratio_ledger_exit_criteria_link_count']}/"
-        f"{counts['scene_release_residual_ratio_ledger_release_envelope_link_count']}, "
-        f"residual_ratio_receipts="
-        f"{counts['scene_release_residual_ratio_ledger_receipt_alignment_link_count']}/"
-        f"{counts['scene_release_residual_ratio_ledger_exit_criteria_link_count']}, "
-        f"count_delivery_alignment="
-        f"{counts['scene_release_residual_ratio_ledger_count_delivery_boundary_alignment_count']}/"
-        f"{counts['scene_release_residual_ratio_ledger_count_delivery_boundary_link_count']}, "
-        f"count_delivery_receipts="
-        f"{counts['scene_release_residual_ratio_ledger_count_delivery_receipt_alignment_count']}/"
-        f"{counts['scene_release_residual_ratio_ledger_count_delivery_receipt_alignment_link_count']}, "
-        f"residual_explanations="
-        f"{counts['scene_release_residual_explanation_covered_count']}/"
-        f"{counts['scene_release_residual_explanation_count']} covered, "
-        f"acceptance_certificate="
-        f"{counts['scene_release_acceptance_certificate_ready_count']}/"
-        f"{counts['scene_release_acceptance_certificate_count']}, "
-        f"acceptance_receipts="
-        f"{counts['scene_release_acceptance_certificate_ready_receipt_count']}/"
-        f"{counts['scene_release_acceptance_certificate_receipt_count']}, "
-        f"requirement_dimensions="
-        f"{counts['scene_release_acceptance_certificate_ready_requirement_dimension_count']}/"
-        f"{counts['scene_release_acceptance_certificate_requirement_dimension_count']}, "
-        f"acceptance_evidence="
-        f"{counts['scene_release_acceptance_certificate_ready_source_evidence_count']}/"
-        f"{counts['scene_release_acceptance_certificate_source_evidence_count']}, "
-        f"release_export_scripts="
-        f"{counts['scene_release_governance_export_script_ready_count']}/"
-        f"{counts['scene_release_governance_export_script_report_count']} ready, "
-        f"material_schema_families="
-        f"{counts['scene_material_schema_ready_material_family_count']}/"
-        f"{counts['scene_material_schema_material_family_count']}, "
-        f"material_repair_flows="
-        f"{counts['scene_material_repair_flow_ready_count']}/"
-        f"{counts['scene_material_repair_flow_count']}, "
-        f"fixed_layout_profile="
-        f"{counts['scene_fixed_layout_profile_ready_channel_count']}/"
-        f"{counts['scene_fixed_layout_profile_channel_count']}, "
-        f"report_artifact_drilldown="
-        f"{counts['scene_report_artifact_drilldown_ready_channel_count']}/"
-        f"{counts['scene_report_artifact_drilldown_channel_count']}, "
-        f"delivery_families={counts['scene_delivery_preset_ready_family_count']}/"
-        f"{counts['scene_delivery_preset_family_count']} ready, "
-        f"delivery_family_accounted="
-        f"{counts['scene_delivery_preset_accounted_family_count']}/"
-        f"{counts['scene_delivery_preset_family_count']}, "
-        f"delivery_pack_accounted="
-        f"{counts['scene_delivery_preset_accounted_delivery_pack_count']}/"
-        f"{counts['scene_delivery_preset_delivery_pack_count']}, "
-        f"delivery_execution="
-        f"{counts['scene_delivery_execution_ready_channel_count']}/"
-        f"{counts['scene_delivery_execution_channel_count']}, "
-        f"formula_output_watermark="
-        f"{counts['scene_formula_output_watermark_ready_capability_count']}/"
-        f"{counts['scene_formula_output_watermark_capability_count']}, "
-        f"fow_family_accounted="
-        f"{counts['scene_formula_output_watermark_accounted_family_count']}/"
-        f"{counts['scene_formula_output_watermark_family_count']}, "
-        f"maturity_l5_blocked="
-        f"{counts['scene_product_maturity_upgrade_l5_blocked_subject_count']}/"
-        f"{counts['scene_product_maturity_upgrade_subject_count']}, "
-        f"dashboard_packs={counts['scene_matrix_dashboard_pack_count']}, "
-        f"drilldowns={counts['scene_matrix_drilldown_ready_count']}/"
-        f"{counts['scene_matrix_drilldown_item_count']}, "
-        f"drilldown_rows={counts['scene_matrix_drilldown_visible_row_count']}/"
-        f"{counts['scene_matrix_drilldown_row_count']}, "
-        f"drilldown_sources="
-        f"{counts['scene_matrix_drilldown_ready_source_evidence_count']}/"
-        f"{counts['scene_matrix_drilldown_source_evidence_count']} ready"
+    summary_parts = tuple(
+        _format_summary_part(counts, template, count_ids)
+        for template, count_ids in RELEASE_GATE_HUMAN_SUMMARY_PARTS
     )
+    print("[OK] " + ", ".join(summary_parts))
 
 
 def main(argv: list[str] | None = None) -> int:

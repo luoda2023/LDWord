@@ -24,6 +24,10 @@ from src.config.scene_boundary_subject_release_dossier_audit import (
 from src.config.scene_product_maturity_upgrade_audit import (
     build_scene_product_maturity_upgrade_audit_report,
 )
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 from src.config.scene_terminal_release_exception_audit import (
     build_scene_terminal_release_exception_audit_report,
 )
@@ -115,13 +119,13 @@ SCENE_BOUNDARY_SUBJECT_RELEASE_CONTINUITY_SOURCE_MARKERS: tuple[
         "export_script",
         "scripts/export_scene_boundary_subject_release_continuity_audit.py",
         (
-            "build_scene_boundary_subject_release_continuity_audit_report",
+            "run_registered_scene_audit_export",
+            SCENE_BOUNDARY_SUBJECT_RELEASE_CONTINUITY_AUDIT_SOURCE_ID,
             "Subjects ready",
             "row.subject_key",
             "row.readiness_row_ids",
             "row.terminal_trace_ids",
             "row.evidence_ids",
-            "json",
             "markdown",
         ),
     ),
@@ -484,25 +488,18 @@ def _issue_ids(
 def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneBoundarySubjectReleaseContinuitySourceEvidence, ...]:
-    root = Path(project_root) if project_root is not None else Path.cwd()
-    evidence: list[SceneBoundarySubjectReleaseContinuitySourceEvidence] = []
-    for source_id, source_path, markers in (
-        SCENE_BOUNDARY_SUBJECT_RELEASE_CONTINUITY_SOURCE_MARKERS
-    ):
-        path = Path(source_path)
-        if not path.is_absolute():
-            path = root / source_path
-        text = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneBoundarySubjectReleaseContinuitySourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneBoundarySubjectReleaseContinuitySourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            project_root,
+            SCENE_BOUNDARY_SUBJECT_RELEASE_CONTINUITY_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -512,9 +509,9 @@ def _source_evidence_issues(
         SceneBoundarySubjectReleaseContinuityIssue(
             evidence.source_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence

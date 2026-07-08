@@ -35,6 +35,8 @@ jobs:
         run: >
           python -m pytest
           tests/test_scene_coverage_manifest.py
+          tests/test_scene_audit_exporter.py
+          tests/test_scene_matrix_release_workflow.py
           tests/test_scene_ambiguity_clarification_ui_audit.py
           tests/test_scene_ambiguous_boundary_audit.py
           tests/test_scene_boundary_capability_matrix.py
@@ -72,8 +74,16 @@ jobs:
           tests/test_scene_report_artifact_drilldown_audit.py
           tests/test_scene_residual_warning_governance_audit.py
           tests/test_scene_terminal_release_exception_audit.py
-          tests/test_scene_matrix_dashboard.py
-          tests/test_scene_matrix_drilldown.py
+          tests/test_scene_matrix_dashboard_aggregate.py
+          tests/test_scene_matrix_dashboard_export.py
+          tests/test_scene_matrix_dashboard_release_gate_payload.py
+          tests/test_scene_matrix_dashboard_release_governance_registry.py
+          tests/test_scene_matrix_dashboard_summary.py
+          tests/test_scene_matrix_drilldown_audit.py
+          tests/test_scene_matrix_drilldown_behavior.py
+          tests/test_scene_matrix_drilldown_frontend_sources.py
+          tests/test_scene_matrix_drilldown_release_governance_registry.py
+          tests/test_scene_matrix_drilldown_source_markers.py
           tests/test_scene_object_preflight_action_audit.py
           tests/test_scene_pack_slot_audit.py
           tests/test_scene_parameter_ownership.py

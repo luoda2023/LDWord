@@ -2,7 +2,57 @@
 
 from __future__ import annotations
 
+from src.config.scene_release_governance_registry import (
+    scene_release_governance_drilldown_source_marker_entries,
+)
+
 SCENE_MATRIX_DRILLDOWN_SOURCE_ID = "scene_matrix_drilldown"
+SCENE_MATRIX_DRILLDOWN_RUNTIME_SOURCE_PATH = "src/config/scene_matrix_drilldown.py"
+SCENE_MATRIX_DRILLDOWN_AUDIT_DOCS_PATH = "docs/audits"
+SCENE_MATRIX_DRILLDOWN_CONFIG_SOURCE_PATH = "src/config"
+SCENE_MATRIX_DRILLDOWN_RELEASE_ITEMS_SOURCE_PATH = (
+    "src/config/scene_matrix_drilldown_release_items.py"
+)
+SCENE_MATRIX_DRILLDOWN_EXPORT_SCRIPT_SOURCE_PATH = (
+    "scripts/export_scene_matrix_drilldown.py"
+)
+SCENE_MATRIX_DRILLDOWN_SUMMARY_PROJECTION_SOURCE_PATH = (
+    "src/ui/panels/scene_summary_projection.py"
+)
+SCENE_MATRIX_DRILLDOWN_TEST_SOURCE_PATH = (
+    "tests/test_scene_matrix_drilldown_frontend_sources.py"
+)
+
+
+def _drilldown_runtime_source_marker_entry(
+    source_id: str,
+    *markers: str,
+) -> tuple[str, str, tuple[str, ...]]:
+    return (source_id, SCENE_MATRIX_DRILLDOWN_RUNTIME_SOURCE_PATH, markers)
+
+
+def _drilldown_audit_doc_source_marker_entry(
+    source_id: str,
+    doc_filename: str,
+    *markers: str,
+) -> tuple[str, str, tuple[str, ...]]:
+    return (
+        source_id,
+        f"{SCENE_MATRIX_DRILLDOWN_AUDIT_DOCS_PATH}/{doc_filename}",
+        markers,
+    )
+
+
+def _scene_config_source_marker_entry(
+    source_id: str,
+    *markers: str,
+) -> tuple[str, str, tuple[str, ...]]:
+    return (
+        source_id,
+        f"{SCENE_MATRIX_DRILLDOWN_CONFIG_SOURCE_PATH}/{source_id}.py",
+        markers,
+    )
+
 
 REQUIRED_SCENE_MATRIX_DRILLDOWN_IDS: tuple[str, ...] = (
     "matrix_dashboard",
@@ -45,166 +95,35 @@ REQUIRED_SCENE_MATRIX_DRILLDOWN_IDS: tuple[str, ...] = (
 )
 
 SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    (
+    _scene_config_source_marker_entry(
         "scene_matrix_dashboard",
-        "src/config/scene_matrix_dashboard.py",
-        ("build_scene_matrix_dashboard", "SCENE_MATRIX_DASHBOARD_LENSES"),
+        "build_scene_matrix_dashboard",
+        "SCENE_MATRIX_DASHBOARD_LENSES",
     ),
     (
         "scene_request_cell_registry_browser",
         "src/config/scene_request_cell_fixture_registry.py",
         ("build_scene_request_cell_registry_browser", "SceneRequestCellBrowserItem"),
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_ambiguity_clarification_ui_audit",
-        "src/config/scene_ambiguity_clarification_ui_audit.py",
-        (
-            "build_scene_ambiguity_clarification_ui_audit_report",
-            "SceneAmbiguityClarificationRow",
-        ),
+        "build_scene_ambiguity_clarification_ui_audit_report",
+        "SceneAmbiguityClarificationRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_user_journey_fixture_audit",
-        "src/config/scene_user_journey_fixture_audit.py",
-        (
-            "build_scene_user_journey_fixture_audit_report",
-            "SceneUserJourneyPathRow",
-        ),
+        "build_scene_user_journey_fixture_audit_report",
+        "SceneUserJourneyPathRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_external_handoff_contract_audit",
-        "src/config/scene_external_handoff_contract_audit.py",
-        (
-            "build_scene_external_handoff_contract_audit_report",
-            "SceneExternalHandoffContractRow",
-        ),
+        "build_scene_external_handoff_contract_audit_report",
+        "SceneExternalHandoffContractRow",
     ),
-    (
-        "scene_boundary_guarded_completion_audit",
-        "src/config/scene_boundary_guarded_completion_audit.py",
-        (
-            "build_scene_boundary_guarded_completion_audit_report",
-            "SceneBoundaryGuardedCompletionRow",
-        ),
-    ),
-    (
-        "scene_residual_warning_governance_audit",
-        "src/config/scene_residual_warning_governance_audit.py",
-        (
-            "build_scene_residual_warning_governance_audit_report",
-            "SceneResidualWarningGovernanceRow",
-        ),
-    ),
-    (
-        "scene_boundary_readiness_reconciliation_audit",
-        "src/config/scene_boundary_readiness_reconciliation_audit.py",
-        (
-            "build_scene_boundary_readiness_reconciliation_audit_report",
-            "SceneBoundaryReadinessReconciliationRow",
-        ),
-    ),
-    (
-        "scene_terminal_release_exception_audit",
-        "src/config/scene_terminal_release_exception_audit.py",
-        (
-            "build_scene_terminal_release_exception_audit_report",
-            "SceneTerminalReleaseExceptionRow",
-        ),
-    ),
-    (
-        "scene_boundary_subject_release_dossier_audit",
-        "src/config/scene_boundary_subject_release_dossier_audit.py",
-        (
-            "build_scene_boundary_subject_release_dossier_audit_report",
-            "SceneBoundarySubjectReleaseDossierRow",
-        ),
-    ),
-    (
-        "scene_non_subject_release_trace_attribution_audit",
-        "src/config/scene_non_subject_release_trace_attribution_audit.py",
-        (
-            "build_scene_non_subject_release_trace_attribution_audit_report",
-            "SceneNonSubjectReleaseTraceAttributionRow",
-        ),
-    ),
-    (
-        "scene_release_trace_partition_guard_audit",
-        "src/config/scene_release_trace_partition_guard_audit.py",
-        (
-            "build_scene_release_trace_partition_guard_audit_report",
-            "SceneReleaseTracePartitionGuardRow",
-        ),
-    ),
-    (
-        "scene_release_projection_surface_parity_audit",
-        "src/config/scene_release_projection_surface_parity_audit.py",
-        (
-            "build_scene_release_projection_surface_parity_audit_report",
-            "SceneReleaseProjectionSurfaceParityRow",
-        ),
-    ),
-    (
-        "scene_boundary_subject_release_continuity_audit",
-        "src/config/scene_boundary_subject_release_continuity_audit.py",
-        (
-            "build_scene_boundary_subject_release_continuity_audit_report",
-            "SceneBoundarySubjectReleaseContinuityRow",
-        ),
-    ),
-    (
-        "scene_release_closure_ledger_audit",
-        "src/config/scene_release_closure_ledger_audit.py",
-        (
-            "build_scene_release_closure_ledger_audit_report",
-            "SceneReleaseClosureLedgerStageRow",
-        ),
-    ),
-    (
-        "scene_boundary_maturity_release_envelope_audit",
-        "src/config/scene_boundary_maturity_release_envelope_audit.py",
-        (
-            "build_scene_boundary_maturity_release_envelope_audit_report",
-            "SceneBoundaryMaturityReleaseEnvelopeRow",
-        ),
-    ),
-    (
-        "scene_retained_gap_exit_criteria_audit",
-        "src/config/scene_retained_gap_exit_criteria_audit.py",
-        (
-            "build_scene_retained_gap_exit_criteria_audit_report",
-            "SceneRetainedGapExitCriteriaRow",
-        ),
-    ),
-    (
-        "scene_release_residual_ratio_ledger_audit",
-        "src/config/scene_release_residual_ratio_ledger_audit.py",
-        (
-            "build_scene_release_residual_ratio_ledger_audit_report",
-            "SceneReleaseResidualRatioLedgerRow",
-        ),
-    ),
-    (
-        "scene_release_residual_explanation_audit",
-        "src/config/scene_release_residual_explanation_audit.py",
-        (
-            "build_scene_release_residual_explanation_audit_report",
-            "SceneReleaseResidualExplanationRow",
-        ),
-    ),
-    (
-        "scene_release_acceptance_certificate_audit",
-        "src/config/scene_release_acceptance_certificate_audit.py",
-        (
-            "build_scene_release_acceptance_certificate_audit_report",
-            "SceneReleaseAcceptanceCertificateRow",
-            "release_residual_ratio_receipts",
-            "retained_gap_external_receipts",
-            "acceptance_evidence=15/15",
-        ),
-    ),
+    *scene_release_governance_drilldown_source_marker_entries(),
     (
         "scene_matrix_drilldown_acceptance_receipt_projection",
-        "src/config/scene_matrix_drilldown_release_items.py",
+        SCENE_MATRIX_DRILLDOWN_RELEASE_ITEMS_SOURCE_PATH,
         (
             "_release_acceptance_certificate_item",
             "acceptance_receipt_trace",
@@ -214,7 +133,7 @@ SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], .
     ),
     (
         "scene_matrix_drilldown_residual_receipt_projection",
-        "src/config/scene_matrix_drilldown_release_items.py",
+        SCENE_MATRIX_DRILLDOWN_RELEASE_ITEMS_SOURCE_PATH,
         (
             "_release_residual_receipt_detail",
             "receipt_alignments=",
@@ -224,7 +143,7 @@ SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], .
     ),
     (
         "scene_matrix_drilldown_export_receipt_projection",
-        "scripts/export_scene_matrix_drilldown.py",
+        SCENE_MATRIX_DRILLDOWN_EXPORT_SCRIPT_SOURCE_PATH,
         (
             "_report_markdown",
             "json.dumps(report.to_payload()",
@@ -234,7 +153,7 @@ SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], .
     ),
     (
         "scene_matrix_drilldown_export_source_summary_projection",
-        "scripts/export_scene_matrix_drilldown.py",
+        SCENE_MATRIX_DRILLDOWN_EXPORT_SCRIPT_SOURCE_PATH,
         (
             "Source evidence:",
             "ready_source_evidence_count",
@@ -243,7 +162,7 @@ SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], .
     ),
     (
         "scene_matrix_drilldown_export_json_source_summary_projection",
-        "scripts/export_scene_matrix_drilldown.py",
+        SCENE_MATRIX_DRILLDOWN_EXPORT_SCRIPT_SOURCE_PATH,
         (
             "json.dumps(report.to_payload()",
             "ensure_ascii=False",
@@ -252,7 +171,7 @@ SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], .
     ),
     (
         "scene_matrix_drilldown_source_evidence_payload_consistency_tests",
-        "tests/test_scene_matrix_drilldown.py",
+        SCENE_MATRIX_DRILLDOWN_TEST_SOURCE_PATH,
         (
             'len(payload["source_evidence"])',
             'payload["counts"]["source_evidence_count"]',
@@ -261,268 +180,193 @@ SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], .
     ),
     (
         "scene_matrix_drilldown_source_evidence_unique_id_tests",
-        "tests/test_scene_matrix_drilldown.py",
+        SCENE_MATRIX_DRILLDOWN_TEST_SOURCE_PATH,
         (
             "report_source_ids",
             "payload_source_ids",
             "set(report_source_ids)",
         ),
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_item_row_identity_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "duplicate_drilldown_id",
-            "duplicate_row_id",
-            "seen_row_ids",
-        ),
+        "duplicate_drilldown_id",
+        "duplicate_row_id",
+        "seen_row_ids",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_item_source_evidence_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "missing_item_source_evidence",
-            "evidence_source_ids",
-            "item_source_ids",
-        ),
+        "missing_item_source_evidence",
+        "evidence_source_ids",
+        "item_source_ids",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_row_source_evidence_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "missing_row_source_evidence",
-            "row_source_mismatch",
-            "row_source_ids",
-        ),
+        "missing_row_source_evidence",
+        "row_source_mismatch",
+        "row_source_ids",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_row_pack_family_registry_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "unknown_row_pack_id",
-            "unknown_row_family_id",
-            "coverage_pack_ids",
-            "planned_family_ids",
-        ),
+        "unknown_row_pack_id",
+        "unknown_row_family_id",
+        "coverage_pack_ids",
+        "planned_family_ids",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_row_request_fixture_registry_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "unknown_row_request_cell_id",
-            "unknown_row_fixture_id",
-            "request_cell_ids",
-            "sample_fixture_ids",
-        ),
+        "unknown_row_request_cell_id",
+        "unknown_row_fixture_id",
+        "request_cell_ids",
+        "sample_fixture_ids",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_row_count_delivery_registry_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "unknown_row_count_profile_id",
-            "unknown_row_delivery_reference_id",
-            "count_profile_ids",
-            "delivery_reference_ids",
-        ),
+        "unknown_row_count_profile_id",
+        "unknown_row_delivery_reference_id",
+        "count_profile_ids",
+        "delivery_reference_ids",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_row_material_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "unknown_row_material_reference_id",
-            "material_reference_ids",
-            "material_schema_ids",
-            "row.material_schema_ids",
-        ),
+        "unknown_row_material_reference_id",
+        "material_reference_ids",
+        "material_schema_ids",
+        "row.material_schema_ids",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_row_input_object_word_registry_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "unknown_row_input_source_id",
-            "unknown_row_render_source_id",
-            "unknown_row_object_preflight_target_id",
-            "unknown_row_word_risk_surface_id",
-        ),
+        "unknown_row_input_source_id",
+        "unknown_row_render_source_id",
+        "unknown_row_object_preflight_target_id",
+        "unknown_row_word_risk_surface_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_row_plugin_risk_maturity_registry_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "unknown_row_plugin_gate_id",
-            "unknown_row_risk_domain_id",
-            "unknown_row_maturity_gap_reference_id",
-            "plugin_gate_reference_ids",
-            "maturity_gap_reference_ids",
-        ),
+        "unknown_row_plugin_gate_id",
+        "unknown_row_risk_domain_id",
+        "unknown_row_maturity_gap_reference_id",
+        "plugin_gate_reference_ids",
+        "maturity_gap_reference_ids",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_action_capability_projection_profile_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILES",
-            "SceneMatrixDrilldownProjectionProfile",
-            "missing_action_behavior_projection_profile",
-            "missing_capability_projection_profile",
-        ),
+        "SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILES",
+        "SceneMatrixDrilldownProjectionProfile",
+        "missing_action_behavior_projection_profile",
+        "missing_capability_projection_profile",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_test_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "unknown_projection_test_reference_id",
-            "_projection_test_reference_ids",
-            "action_behavior_ids",
-            "capability_ids",
-        ),
+        "unknown_projection_test_reference_id",
+        "_projection_test_reference_ids",
+        "action_behavior_ids",
+        "capability_ids",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_source_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_source_reference_map",
-            "_projection_source_reference_ids",
-            "missing_projection_source_reference_id",
-            "unknown_projection_source_reference_id",
-        ),
+        "_projection_source_reference_map",
+        "_projection_source_reference_ids",
+        "missing_projection_source_reference_id",
+        "unknown_projection_source_reference_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_surface_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_surface_reference_map",
-            "projection_surface_reference_map",
-            "missing_projection_surface_reference_id",
-            "surface_reference_id",
-        ),
+        "_projection_surface_reference_map",
+        "projection_surface_reference_map",
+        "missing_projection_surface_reference_id",
+        "surface_reference_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_path_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_path_reference_map",
-            "projection_path_reference_map",
-            "missing_projection_path_reference_id",
-            "missing_projection_path_file",
-            "path_reference_id",
-        ),
+        "_projection_path_reference_map",
+        "projection_path_reference_map",
+        "missing_projection_path_reference_id",
+        "missing_projection_path_file",
+        "path_reference_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_evidence_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_evidence_reference_map",
-            "projection_evidence_reference_map",
-            "missing_projection_evidence_reference_id",
-            "evidence_reference_id",
-        ),
+        "_projection_evidence_reference_map",
+        "projection_evidence_reference_map",
+        "missing_projection_evidence_reference_id",
+        "evidence_reference_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_release_marker_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_release_marker_reference_map",
-            "projection_release_marker_reference_map",
-            "missing_projection_release_marker_reference_id",
-            "marker_reference_id",
-        ),
+        "_projection_release_marker_reference_map",
+        "projection_release_marker_reference_map",
+        "missing_projection_release_marker_reference_id",
+        "marker_reference_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_release_link_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_release_link_reference_map",
-            "projection_release_link_reference_map",
-            "missing_projection_release_link_reference_id",
-            "link_reference_id",
-        ),
+        "_projection_release_link_reference_map",
+        "projection_release_link_reference_map",
+        "missing_projection_release_link_reference_id",
+        "link_reference_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_retained_gap_exit_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_retained_gap_exit_reference_map",
-            "projection_retained_gap_exit_reference_map",
-            "missing_projection_retained_gap_exit_",
-            "retained_gap_exit_reference_id",
-        ),
+        "_projection_retained_gap_exit_reference_map",
+        "projection_retained_gap_exit_reference_map",
+        "missing_projection_retained_gap_exit_",
+        "retained_gap_exit_reference_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_control_runtime_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_control_runtime_reference_map",
-            "projection_control_runtime_reference_map",
-            "missing_projection_control_runtime_",
-            "control_runtime_reference_id",
-        ),
+        "_projection_control_runtime_reference_map",
+        "projection_control_runtime_reference_map",
+        "missing_projection_control_runtime_",
+        "control_runtime_reference_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_release_metric_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_release_metric_reference_map",
-            "projection_release_metric_reference_map",
-            "missing_projection_release_metric_reference_id",
-            "release_metric_reference_id",
-        ),
+        "_projection_release_metric_reference_map",
+        "projection_release_metric_reference_map",
+        "missing_projection_release_metric_reference_id",
+        "release_metric_reference_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_external_handoff_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_external_handoff_contract_reference_map",
-            "projection_external_handoff_contract_reference_map",
-            "missing_projection_external_handoff_",
-            "unknown_projection_external_handoff_",
-            "handoff_contract_reference_id",
-        ),
+        "_projection_external_handoff_contract_reference_map",
+        "projection_external_handoff_contract_reference_map",
+        "missing_projection_external_handoff_",
+        "unknown_projection_external_handoff_",
+        "handoff_contract_reference_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_report_delivery_marker_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_report_delivery_marker_reference_map",
-            "projection_report_delivery_marker_reference_map",
-            "missing_projection_report_delivery_",
-            "report_delivery_marker_id",
-        ),
+        "_projection_report_delivery_marker_reference_map",
+        "projection_report_delivery_marker_reference_map",
+        "missing_projection_report_delivery_",
+        "report_delivery_marker_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_requirement_dimension_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_requirement_dimension_reference_map",
-            "missing_projection_requirement_dimension_reference_id",
-            "projection_requirement_dimension_reference_map",
-            "dimension_id",
-        ),
+        "_projection_requirement_dimension_reference_map",
+        "missing_projection_requirement_dimension_reference_id",
+        "projection_requirement_dimension_reference_map",
+        "dimension_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_target_plugin_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_target_plugin_reference_ids",
-            "_projection_target_plugin_reference_map",
-            "projection_target_plugin_reference_map",
-            "missing_projection_target_plugin_reference_id",
-            "unknown_projection_target_plugin_reference_id",
-            "target_plugin_id",
-        ),
+        "_target_plugin_reference_ids",
+        "_projection_target_plugin_reference_map",
+        "projection_target_plugin_reference_map",
+        "missing_projection_target_plugin_reference_id",
+        "unknown_projection_target_plugin_reference_id",
+        "target_plugin_id",
     ),
-    (
+    _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_formula_output_watermark_reference_audit",
-        "src/config/scene_matrix_drilldown.py",
-        (
-            "_projection_formula_output_watermark_reference_map",
-            "projection_formula_output_watermark_reference_map",
-            "missing_projection_formula_output_",
-            "formula_output_watermark_reference_id",
-        ),
+        "_projection_formula_output_watermark_reference_map",
+        "projection_formula_output_watermark_reference_map",
+        "missing_projection_formula_output_",
+        "formula_output_watermark_reference_id",
     ),
     (
         "scene_matrix_drilldown_source_summary_projection",
-        "src/ui/panels/scene_summary_projection.py",
+        SCENE_MATRIX_DRILLDOWN_SUMMARY_PROJECTION_SOURCE_PATH,
         (
             "build_scene_matrix_drilldown_summary_items",
             "scene_matrix_drilldown_sources",
@@ -531,7 +375,7 @@ SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], .
     ),
     (
         "scene_matrix_drilldown_source_summary_readiness_projection",
-        "src/ui/panels/scene_summary_projection.py",
+        SCENE_MATRIX_DRILLDOWN_SUMMARY_PROJECTION_SOURCE_PATH,
         (
             "ready_source_evidence_count",
             "source_evidence_count",
@@ -547,474 +391,365 @@ SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], .
             "drilldown_sources=",
         ),
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_402_acceptance_drilldown_trace_plan",
-        "docs/audits/scene_release_acceptance_drilldown_trace_N2_402_2026-06-25.md",
-        (
-            "N2.402",
-            "acceptance_receipt_trace",
-            "release_residual_ratio_receipts",
-            "retained_gap_external_receipts",
-        ),
+        "scene_release_acceptance_drilldown_trace_N2_402_2026-06-25.md",
+        "N2.402",
+        "acceptance_receipt_trace",
+        "release_residual_ratio_receipts",
+        "retained_gap_external_receipts",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_407_residual_receipt_drilldown_plan",
-        "docs/audits/scene_release_residual_receipt_drilldown_trace_N2_407_2026-06-25.md",
-        (
-            "N2.407",
-            "receipt_alignments=2/2",
-            "maturity_l5_receipts=6/6",
-        ),
+        "scene_release_residual_receipt_drilldown_trace_N2_407_2026-06-25.md",
+        "N2.407",
+        "receipt_alignments=2/2",
+        "maturity_l5_receipts=6/6",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_408_residual_receipt_export_plan",
-        "docs/audits/scene_release_residual_receipt_export_trace_N2_408_2026-06-25.md",
-        (
-            "N2.408",
-            "item.detail",
-            "row.detail",
-            "maturity_l5_receipts=6/6",
-        ),
+        "scene_release_residual_receipt_export_trace_N2_408_2026-06-25.md",
+        "N2.408",
+        "item.detail",
+        "row.detail",
+        "maturity_l5_receipts=6/6",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_409_residual_receipt_source_summary_plan",
-        "docs/audits/scene_release_residual_receipt_source_summary_trace_N2_409_2026-06-25.md",
-        (
-            "N2.409",
-            "scene_matrix_drilldown_export_receipt_projection",
-            "n2_408_residual_receipt_export_plan",
-        ),
+        "scene_release_residual_receipt_source_summary_trace_N2_409_2026-06-25.md",
+        "N2.409",
+        "scene_matrix_drilldown_export_receipt_projection",
+        "n2_408_residual_receipt_export_plan",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_410_drilldown_source_evidence_release_summary_plan",
-        "docs/audits/scene_matrix_drilldown_source_evidence_release_summary_trace_N2_410_2026-06-25.md",
-        (
-            "N2.410",
-            "Release Gate terminal summary",
-            "source evidence readiness",
-        ),
+        "scene_matrix_drilldown_source_evidence_release_summary_trace_N2_410_2026-06-25.md",
+        "N2.410",
+        "Release Gate terminal summary",
+        "source evidence readiness",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_411_drilldown_source_summary_ready_total_plan",
-        "docs/audits/scene_matrix_drilldown_source_summary_ready_total_trace_N2_411_2026-06-25.md",
-        (
-            "N2.411",
-            "Summary card",
-            "ready/total",
-        ),
+        "scene_matrix_drilldown_source_summary_ready_total_trace_N2_411_2026-06-25.md",
+        "N2.411",
+        "Summary card",
+        "ready/total",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_412_drilldown_export_source_summary_plan",
-        "docs/audits/scene_matrix_drilldown_export_source_summary_trace_N2_412_2026-06-25.md",
-        (
-            "N2.412",
-            "Markdown export",
-            "source evidence readiness",
-        ),
+        "scene_matrix_drilldown_export_source_summary_trace_N2_412_2026-06-25.md",
+        "N2.412",
+        "Markdown export",
+        "source evidence readiness",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_413_drilldown_json_export_source_summary_plan",
-        "docs/audits/scene_matrix_drilldown_json_export_source_summary_trace_N2_413_2026-06-25.md",
-        (
-            "N2.413",
-            "JSON export",
-            "source evidence readiness",
-        ),
+        "scene_matrix_drilldown_json_export_source_summary_trace_N2_413_2026-06-25.md",
+        "N2.413",
+        "JSON export",
+        "source evidence readiness",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_414_drilldown_source_evidence_payload_consistency_plan",
-        "docs/audits/scene_matrix_drilldown_source_evidence_payload_consistency_trace_N2_414_2026-06-25.md",
-        (
-            "N2.414",
-            "payload list length",
-            "55/55",
-            "0 missing",
-        ),
+        "scene_matrix_drilldown_source_evidence_payload_consistency_trace_N2_414_2026-06-25.md",
+        "N2.414",
+        "payload list length",
+        "55/55",
+        "0 missing",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_415_drilldown_source_evidence_unique_id_plan",
-        "docs/audits/scene_matrix_drilldown_source_evidence_unique_id_trace_N2_415_2026-06-25.md",
-        (
-            "N2.415",
-            "unique source_id",
-            "57/57",
-        ),
+        "scene_matrix_drilldown_source_evidence_unique_id_trace_N2_415_2026-06-25.md",
+        "N2.415",
+        "unique source_id",
+        "57/57",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_416_drilldown_item_row_unique_id_plan",
-        "docs/audits/scene_matrix_drilldown_item_row_unique_id_trace_N2_416_2026-06-25.md",
-        (
-            "N2.416",
-            "unique drilldown_id",
-            "unique row_id",
-            "59/59",
-        ),
+        "scene_matrix_drilldown_item_row_unique_id_trace_N2_416_2026-06-25.md",
+        "N2.416",
+        "unique drilldown_id",
+        "unique row_id",
+        "59/59",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_417_drilldown_item_source_evidence_trace_plan",
-        "docs/audits/scene_matrix_drilldown_item_source_evidence_trace_N2_417_2026-06-25.md",
-        (
-            "N2.417",
-            "item.source_id",
-            "source evidence",
-            "61/61",
-        ),
+        "scene_matrix_drilldown_item_source_evidence_trace_N2_417_2026-06-25.md",
+        "N2.417",
+        "item.source_id",
+        "source evidence",
+        "61/61",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_418_drilldown_row_source_evidence_trace_plan",
-        "docs/audits/scene_matrix_drilldown_row_source_evidence_trace_N2_418_2026-06-25.md",
-        (
-            "N2.418",
-            "row.source_id",
-            "row_source_mismatch",
-            "63/63",
-        ),
+        "scene_matrix_drilldown_row_source_evidence_trace_N2_418_2026-06-25.md",
+        "N2.418",
+        "row.source_id",
+        "row_source_mismatch",
+        "63/63",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_419_drilldown_row_pack_family_registry_trace_plan",
-        "docs/audits/scene_matrix_drilldown_row_pack_family_registry_trace_N2_419_2026-06-25.md",
-        (
-            "N2.419",
-            "pack_ids",
-            "family_ids",
-            "65/65",
-        ),
+        "scene_matrix_drilldown_row_pack_family_registry_trace_N2_419_2026-06-25.md",
+        "N2.419",
+        "pack_ids",
+        "family_ids",
+        "65/65",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_420_drilldown_row_request_fixture_registry_trace_plan",
-        "docs/audits/scene_matrix_drilldown_row_request_fixture_registry_trace_N2_420_2026-06-25.md",
-        (
-            "N2.420",
-            "request_cell_ids",
-            "fixture_ids",
-            "67/67",
-        ),
+        "scene_matrix_drilldown_row_request_fixture_registry_trace_N2_420_2026-06-25.md",
+        "N2.420",
+        "request_cell_ids",
+        "fixture_ids",
+        "67/67",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_421_drilldown_row_count_delivery_registry_trace_plan",
-        "docs/audits/scene_matrix_drilldown_row_count_delivery_registry_trace_N2_421_2026-06-25.md",
-        (
-            "N2.421",
-            "count_profile_ids",
-            "delivery_preset_ids",
-            "69/69",
-        ),
+        "scene_matrix_drilldown_row_count_delivery_registry_trace_N2_421_2026-06-25.md",
+        "N2.421",
+        "count_profile_ids",
+        "delivery_preset_ids",
+        "69/69",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_422_drilldown_row_material_reference_trace_plan",
-        "docs/audits/scene_matrix_drilldown_row_material_reference_trace_N2_422_2026-06-25.md",
-        (
-            "N2.422",
-            "material_schema_ids",
-            "material_reference_ids",
-            "71/71",
-        ),
+        "scene_matrix_drilldown_row_material_reference_trace_N2_422_2026-06-25.md",
+        "N2.422",
+        "material_schema_ids",
+        "material_reference_ids",
+        "71/71",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_423_drilldown_row_input_object_word_registry_trace_plan",
-        "docs/audits/scene_matrix_drilldown_row_input_object_word_registry_trace_N2_423_2026-06-25.md",
-        (
-            "N2.423",
-            "input_source_ids",
-            "object_preflight_target_ids",
-            "word_risk_surface_ids",
-            "73/73",
-        ),
+        "scene_matrix_drilldown_row_input_object_word_registry_trace_N2_423_2026-06-25.md",
+        "N2.423",
+        "input_source_ids",
+        "object_preflight_target_ids",
+        "word_risk_surface_ids",
+        "73/73",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_424_drilldown_row_plugin_risk_maturity_registry_trace_plan",
-        "docs/audits/scene_matrix_drilldown_row_plugin_risk_maturity_registry_trace_N2_424_2026-06-25.md",
-        (
-            "N2.424",
-            "plugin_gate_ids",
-            "risk_domain_ids",
-            "maturity_gap_domain_ids",
-            "75/75",
-        ),
+        "scene_matrix_drilldown_row_plugin_risk_maturity_registry_trace_N2_424_2026-06-25.md",
+        "N2.424",
+        "plugin_gate_ids",
+        "risk_domain_ids",
+        "maturity_gap_domain_ids",
+        "75/75",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_425_drilldown_action_capability_projection_profile_trace_plan",
-        "docs/audits/scene_matrix_drilldown_action_capability_projection_profile_trace_N2_425_2026-06-25.md",
-        (
-            "N2.425",
-            "action_behavior_ids",
-            "capability_ids",
-            "77/77",
-        ),
+        "scene_matrix_drilldown_action_capability_projection_profile_trace_N2_425_2026-06-25.md",
+        "N2.425",
+        "action_behavior_ids",
+        "capability_ids",
+        "77/77",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_426_drilldown_projection_test_reference_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_test_reference_trace_N2_426_2026-06-25.md",
-        (
-            "N2.426",
-            "test_ids",
-            "action_behavior_ids",
-            "79/79",
-        ),
+        "scene_matrix_drilldown_projection_test_reference_trace_N2_426_2026-06-25.md",
+        "N2.426",
+        "test_ids",
+        "action_behavior_ids",
+        "79/79",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_427_drilldown_projection_source_reference_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_source_reference_trace_N2_427_2026-06-25.md",
-        (
-            "N2.427",
-            "source_ids",
-            "missing_projection_source_reference_id",
-            "81/81",
-        ),
+        "scene_matrix_drilldown_projection_source_reference_trace_N2_427_2026-06-25.md",
+        "N2.427",
+        "source_ids",
+        "missing_projection_source_reference_id",
+        "81/81",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_428_drilldown_projection_surface_reference_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_surface_reference_trace_N2_428_2026-06-26.md",
-        (
-            "N2.428",
-            "runtime_surface_ids",
-            "missing_projection_surface_reference_id",
-            "83/83",
-        ),
+        "scene_matrix_drilldown_projection_surface_reference_trace_N2_428_2026-06-26.md",
+        "N2.428",
+        "runtime_surface_ids",
+        "missing_projection_surface_reference_id",
+        "83/83",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_429_drilldown_projection_path_reference_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_path_reference_trace_N2_429_2026-06-26.md",
-        (
-            "N2.429",
-            "export_script_path",
-            "missing_projection_path_reference_id",
-            "85/85",
-        ),
+        "scene_matrix_drilldown_projection_path_reference_trace_N2_429_2026-06-26.md",
+        "N2.429",
+        "export_script_path",
+        "missing_projection_path_reference_id",
+        "85/85",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_430_drilldown_projection_evidence_reference_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_evidence_reference_trace_N2_430_2026-06-26.md",
-        (
-            "N2.430",
-            "evidence_ids",
-            "missing_projection_evidence_reference_id",
-            "87/87",
-        ),
+        "scene_matrix_drilldown_projection_evidence_reference_trace_N2_430_2026-06-26.md",
+        "N2.430",
+        "evidence_ids",
+        "missing_projection_evidence_reference_id",
+        "87/87",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_431_drilldown_projection_release_marker_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_release_marker_trace_N2_431_2026-06-26.md",
-        (
-            "N2.431",
-            "release_gate_check_id",
-            "missing_projection_release_marker_reference_id",
-            "89/89",
-        ),
+        "scene_matrix_drilldown_projection_release_marker_trace_N2_431_2026-06-26.md",
+        "N2.431",
+        "release_gate_check_id",
+        "missing_projection_release_marker_reference_id",
+        "89/89",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_432_drilldown_projection_release_link_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_release_link_trace_N2_432_2026-06-26.md",
-        (
-            "N2.432",
-            "upstream_stage_ids",
-            "missing_projection_release_link_reference_id",
-            "91/91",
-        ),
+        "scene_matrix_drilldown_projection_release_link_trace_N2_432_2026-06-26.md",
+        "N2.432",
+        "upstream_stage_ids",
+        "missing_projection_release_link_reference_id",
+        "91/91",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_433_drilldown_projection_retained_gap_exit_reference_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_retained_gap_exit_reference_trace_N2_433_2026-06-26.md",
-        (
-            "N2.433",
-            "external_handoff_contract_id",
-            "missing_projection_retained_gap_exit_reference_id",
-            "93/93",
-        ),
+        "scene_matrix_drilldown_projection_retained_gap_exit_reference_trace_N2_433_2026-06-26.md",
+        "N2.433",
+        "external_handoff_contract_id",
+        "missing_projection_retained_gap_exit_reference_id",
+        "93/93",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_434_drilldown_projection_control_runtime_reference_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_control_runtime_reference_trace_N2_434_2026-06-26.md",
-        (
-            "N2.434",
-            "template_surface_ids",
-            "missing_projection_control_runtime_reference_id",
-            "95/95",
-        ),
+        "scene_matrix_drilldown_projection_control_runtime_reference_trace_N2_434_2026-06-26.md",
+        "N2.434",
+        "template_surface_ids",
+        "missing_projection_control_runtime_reference_id",
+        "95/95",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_435_drilldown_projection_release_metric_reference_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_release_metric_reference_trace_N2_435_2026-06-26.md",
-        (
-            "N2.435",
-            "receipt_alignments=",
-            "missing_projection_release_metric_reference_id",
-            "97/97",
-        ),
+        "scene_matrix_drilldown_projection_release_metric_reference_trace_N2_435_2026-06-26.md",
+        "N2.435",
+        "receipt_alignments=",
+        "missing_projection_release_metric_reference_id",
+        "97/97",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_436_drilldown_projection_external_handoff_reference_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_external_handoff_reference_trace_N2_436_2026-06-26.md",
-        (
-            "N2.436",
-            "external_handoff_contract_ids",
-            "missing_projection_external_handoff_contract_reference_id",
-            "99/99",
-        ),
+        "scene_matrix_drilldown_projection_external_handoff_reference_trace_N2_436_2026-06-26.md",
+        "N2.436",
+        "external_handoff_contract_ids",
+        "missing_projection_external_handoff_contract_reference_id",
+        "99/99",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_437_drilldown_projection_report_delivery_marker_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_report_delivery_marker_trace_N2_437_2026-06-26.md",
-        (
-            "N2.437",
-            "artifact_kind_ids",
-            "missing_projection_report_delivery_marker_reference_id",
-            "101/101",
-        ),
+        "scene_matrix_drilldown_projection_report_delivery_marker_trace_N2_437_2026-06-26.md",
+        "N2.437",
+        "artifact_kind_ids",
+        "missing_projection_report_delivery_marker_reference_id",
+        "101/101",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_438_drilldown_projection_requirement_dimension_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_requirement_dimension_trace_N2_438_2026-06-26.md",
-        (
-            "N2.438",
-            "requirement_dimension_ids",
-            "missing_projection_requirement_dimension_reference_id",
-            "103/103",
-        ),
+        "scene_matrix_drilldown_projection_requirement_dimension_trace_N2_438_2026-06-26.md",
+        "N2.438",
+        "requirement_dimension_ids",
+        "missing_projection_requirement_dimension_reference_id",
+        "103/103",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_439_drilldown_projection_target_plugin_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_target_plugin_trace_N2_439_2026-06-26.md",
-        (
-            "N2.439",
-            "target_plugin_ids",
-            "missing_projection_target_plugin_reference_id",
-            "105/105",
-        ),
+        "scene_matrix_drilldown_projection_target_plugin_trace_N2_439_2026-06-26.md",
+        "N2.439",
+        "target_plugin_ids",
+        "missing_projection_target_plugin_reference_id",
+        "105/105",
     ),
-    (
+    _drilldown_audit_doc_source_marker_entry(
         "n2_440_drilldown_projection_formula_output_watermark_trace_plan",
-        "docs/audits/scene_matrix_drilldown_projection_formula_output_watermark_trace_N2_440_2026-06-26.md",
-        (
-            "N2.440",
-            "parameter_paths",
-            "missing_projection_formula_output_watermark_reference_id",
-            "107/107",
-        ),
+        "scene_matrix_drilldown_projection_formula_output_watermark_trace_N2_440_2026-06-26.md",
+        "N2.440",
+        "parameter_paths",
+        "missing_projection_formula_output_watermark_reference_id",
+        "107/107",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_business_capability_matrix_audit",
-        "src/config/scene_business_capability_matrix_audit.py",
-        (
-            "build_scene_business_capability_matrix_audit_report",
-            "SceneBusinessCapabilityRow",
-        ),
+        "build_scene_business_capability_matrix_audit_report",
+        "SceneBusinessCapabilityRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_control_runtime_consistency_audit",
-        "src/config/scene_control_runtime_consistency_audit.py",
-        (
-            "build_scene_control_runtime_consistency_audit_report",
-            "SceneControlRuntimeRow",
-        ),
+        "build_scene_control_runtime_consistency_audit_report",
+        "SceneControlRuntimeRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_plugin_boundary_confirmation_audit",
-        "src/config/scene_plugin_boundary_confirmation_audit.py",
-        (
-            "build_scene_plugin_boundary_confirmation_audit_report",
-            "ScenePluginBoundaryConfirmationRow",
-        ),
+        "build_scene_plugin_boundary_confirmation_audit_report",
+        "ScenePluginBoundaryConfirmationRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_word_risk_closure_audit",
-        "src/config/scene_word_risk_closure_audit.py",
-        ("build_scene_word_risk_closure_audit_report", "SceneWordRiskClosureRow"),
+        "build_scene_word_risk_closure_audit_report",
+        "SceneWordRiskClosureRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_import_handoff_audit",
-        "src/config/scene_import_handoff_audit.py",
-        ("build_scene_import_handoff_audit_report", "SceneImportHandoffRow"),
+        "build_scene_import_handoff_audit_report",
+        "SceneImportHandoffRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_input_source_audit",
-        "src/config/scene_input_source_audit.py",
-        ("build_scene_input_source_audit_report", "SceneInputSourceFamilyRow"),
+        "build_scene_input_source_audit_report",
+        "SceneInputSourceFamilyRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_object_preflight_action_audit",
-        "src/config/scene_object_preflight_action_audit.py",
-        (
-            "build_scene_object_preflight_action_audit_report",
-            "SceneObjectPreflightTargetRow",
-        ),
+        "build_scene_object_preflight_action_audit_report",
+        "SceneObjectPreflightTargetRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_family_fixture_depth_audit",
-        "src/config/scene_family_fixture_depth_audit.py",
-        (
-            "build_scene_family_fixture_depth_audit_report",
-            "SceneFamilyFixtureDepthRow",
-        ),
+        "build_scene_family_fixture_depth_audit_report",
+        "SceneFamilyFixtureDepthRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_count_profile_audit",
-        "src/config/scene_count_profile_audit.py",
-        ("build_scene_count_profile_audit_report", "SceneCountProfileFamilyRow"),
+        "build_scene_count_profile_audit_report",
+        "SceneCountProfileFamilyRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_material_schema_audit",
-        "src/config/scene_material_schema_audit.py",
-        (
-            "build_scene_material_schema_audit_report",
-            "SceneMaterialSchemaFamilyRow",
-        ),
+        "build_scene_material_schema_audit_report",
+        "SceneMaterialSchemaFamilyRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_material_repair_flow_audit",
-        "src/config/scene_material_repair_flow_audit.py",
-        (
-            "build_scene_material_repair_flow_audit_report",
-            "SceneMaterialRepairFlowRow",
-        ),
+        "build_scene_material_repair_flow_audit_report",
+        "SceneMaterialRepairFlowRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_fixed_layout_profile_audit",
-        "src/config/scene_fixed_layout_profile_audit.py",
-        (
-            "build_scene_fixed_layout_profile_audit_report",
-            "SceneFixedLayoutProfileRow",
-        ),
+        "build_scene_fixed_layout_profile_audit_report",
+        "SceneFixedLayoutProfileRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_report_artifact_drilldown_audit",
-        "src/config/scene_report_artifact_drilldown_audit.py",
-        (
-            "build_scene_report_artifact_drilldown_audit_report",
-            "SceneReportArtifactDrilldownRow",
-        ),
+        "build_scene_report_artifact_drilldown_audit_report",
+        "SceneReportArtifactDrilldownRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_delivery_preset_audit",
-        "src/config/scene_delivery_preset_audit.py",
-        (
-            "build_scene_delivery_preset_audit_report",
-            "SceneDeliveryPresetFamilyRow",
-        ),
+        "build_scene_delivery_preset_audit_report",
+        "SceneDeliveryPresetFamilyRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_delivery_preset_execution_audit",
-        "src/config/scene_delivery_preset_execution_audit.py",
-        (
-            "build_scene_delivery_preset_execution_audit_report",
-            "SceneDeliveryPresetExecutionRow",
-        ),
+        "build_scene_delivery_preset_execution_audit_report",
+        "SceneDeliveryPresetExecutionRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_formula_output_watermark_audit",
-        "src/config/scene_formula_output_watermark_audit.py",
-        (
-            "build_scene_formula_output_watermark_audit_report",
-            "SceneFormulaOutputWatermarkFamilyRow",
-        ),
+        "build_scene_formula_output_watermark_audit_report",
+        "SceneFormulaOutputWatermarkFamilyRow",
     ),
-    (
+    _scene_config_source_marker_entry(
         "scene_product_maturity_upgrade_audit",
-        "src/config/scene_product_maturity_upgrade_audit.py",
-        (
-            "build_scene_product_maturity_upgrade_audit_report",
-            "SceneProductMaturityUpgradeRow",
-        ),
+        "build_scene_product_maturity_upgrade_audit_report",
+        "SceneProductMaturityUpgradeRow",
     ),
 )
 

@@ -93,6 +93,20 @@ def test_scene_control_runtime_consistency_locks_n2_175_runtime_groups():
     assert payload["source_evidence_count"] == sum(
         len(spec.evidence) for spec in N2_175_SCENE_CONTROL_RUNTIME_SPECS
     )
+    assert payload["counts"]["runtime_control_count"] == report.runtime_control_count
+    assert (
+        payload["counts"]["ready_runtime_control_count"]
+        == report.ready_runtime_control_count
+    )
+    assert (
+        payload["counts"]["control_contract_link_count"]
+        == report.control_contract_link_count
+    )
+    assert payload["counts"]["issue_count"] == report.issue_count
+    assert (
+        payload["counts"]["missing_source_evidence_count"]
+        == report.missing_source_evidence_count
+    )
     assert all(item["status"] == "ready" for item in payload["source_evidence"])
 
 

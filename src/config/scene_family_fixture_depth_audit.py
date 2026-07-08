@@ -24,6 +24,10 @@ from src.config.scene_sample_fixture_registry import (
     SCENE_SAMPLE_FIXTURE_MAP,
     SceneSampleFixtureSpec,
 )
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 
 
 N2_164_REQUIRED_PRIORITIES: tuple[str, ...] = ("P1", "P1_CANDIDATE")
@@ -432,21 +436,18 @@ def _fixture_strategy(
 def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneFamilyFixtureDepthSourceEvidence, ...]:
-    root = Path(project_root) if project_root is not None else Path.cwd()
-    evidence: list[SceneFamilyFixtureDepthSourceEvidence] = []
-    for evidence_id, source_path, markers in N2_164_SOURCE_EVIDENCE:
-        path = root / source_path
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneFamilyFixtureDepthSourceEvidence(
-                evidence_id=evidence_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneFamilyFixtureDepthSourceEvidence(
+            evidence_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            project_root,
+            N2_164_SOURCE_EVIDENCE,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -456,9 +457,9 @@ def _source_evidence_issues(
         SceneFamilyFixtureDepthIssue(
             evidence.evidence_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence

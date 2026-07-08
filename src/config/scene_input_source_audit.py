@@ -29,6 +29,7 @@ from src.config.scene_family_registry import (
     PlannedSceneFamily,
     list_planned_scene_families,
 )
+from src.config.scene_source_evidence import scan_scene_source_markers
 
 
 SCENE_INPUT_SOURCE_AUDIT_SOURCE_ID = "scene_input_source_audit"
@@ -1064,21 +1065,23 @@ def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneInputSourceSourceEvidence, ...]:
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
-    evidence: list[SceneInputSourceSourceEvidence] = []
-    for source_id, source_path, markers in SCENE_INPUT_SOURCE_SOURCE_MARKERS:
-        path = root / source_path
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneInputSourceSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-                status="ready" if path.exists() and not missing else "missing",
-            )
+    return tuple(
+        SceneInputSourceSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
+            status=(
+                "ready"
+                if result.source_exists and not result.missing_markers
+                else "missing"
+            ),
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            root,
+            SCENE_INPUT_SOURCE_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_label(source_id: str) -> str:

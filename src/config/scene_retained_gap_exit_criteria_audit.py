@@ -23,6 +23,10 @@ from src.config.scene_boundary_maturity_release_envelope_audit import (
 from src.config.scene_external_handoff_contract_audit import (
     build_scene_external_handoff_contract_audit_report,
 )
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 
 
 SCENE_RETAINED_GAP_EXIT_CRITERIA_AUDIT_SOURCE_ID = (
@@ -256,14 +260,14 @@ SCENE_RETAINED_GAP_EXIT_CRITERIA_SOURCE_MARKERS: tuple[
         "export_script",
         "scripts/export_scene_retained_gap_exit_criteria_audit.py",
         (
-            "build_scene_retained_gap_exit_criteria_audit_report",
+            "run_registered_scene_audit_export",
+            SCENE_RETAINED_GAP_EXIT_CRITERIA_AUDIT_SOURCE_ID,
             "Release allowed",
             "row.criteria_id",
             "row.exit_signal_ids",
             "row.external_receipt_ids",
             "row.boundary_capability_ids",
             "row.prohibited_core_claim_ids",
-            "json",
             "markdown",
         ),
     ),
@@ -644,28 +648,18 @@ def _row_issues(
 def _source_evidence(
     root: Path,
 ) -> tuple[SceneRetainedGapExitCriteriaSourceEvidence, ...]:
-    evidence: list[SceneRetainedGapExitCriteriaSourceEvidence] = []
-    for source_id, source_path, markers in (
-        SCENE_RETAINED_GAP_EXIT_CRITERIA_SOURCE_MARKERS
-    ):
-        text = _source_text(root, source_path)
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneRetainedGapExitCriteriaSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneRetainedGapExitCriteriaSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
-
-
-def _source_text(root: Path, source_path: str) -> str:
-    path = Path(source_path)
-    if not path.is_absolute():
-        path = root / source_path
-    return path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
+        for result in scan_scene_source_markers(
+            root,
+            SCENE_RETAINED_GAP_EXIT_CRITERIA_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -675,9 +669,9 @@ def _source_evidence_issues(
         SceneRetainedGapExitCriteriaIssue(
             evidence.source_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence

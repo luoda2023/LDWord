@@ -27,6 +27,10 @@ from src.config.scene_product_maturity_upgrade_audit import (
     build_scene_product_maturity_upgrade_audit_report,
 )
 from src.config.scene_product_readiness import static_closed_but_not_green_specs
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 
 
 SCENE_BOUNDARY_READINESS_RECONCILIATION_AUDIT_SOURCE_ID = (
@@ -302,14 +306,15 @@ SCENE_BOUNDARY_READINESS_RECONCILIATION_SOURCE_MARKERS: tuple[
         "export_script",
         "scripts/export_scene_boundary_readiness_reconciliation_audit.py",
         (
-            "build_scene_boundary_readiness_reconciliation_audit_report",
+            "run_registered_scene_audit_export",
+            SCENE_BOUNDARY_READINESS_RECONCILIATION_AUDIT_SOURCE_ID,
             "Reconciled rows",
             "row.source_id",
             "row.metric_id",
             "row.observed_status",
             "row.reconciliation_mode",
             "row.evidence_ids",
-            "json",
+            "_builder_kwargs",
             "markdown",
         ),
     ),
@@ -735,25 +740,18 @@ def _actual_non_full_keys(reports: dict[str, object]) -> tuple[tuple[str, str, s
 def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneBoundaryReadinessReconciliationSourceEvidence, ...]:
-    root = Path(project_root) if project_root is not None else Path.cwd()
-    evidence: list[SceneBoundaryReadinessReconciliationSourceEvidence] = []
-    for source_id, source_path, markers in (
-        SCENE_BOUNDARY_READINESS_RECONCILIATION_SOURCE_MARKERS
-    ):
-        path = Path(source_path)
-        if not path.is_absolute():
-            path = root / source_path
-        text = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneBoundaryReadinessReconciliationSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneBoundaryReadinessReconciliationSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            project_root,
+            SCENE_BOUNDARY_READINESS_RECONCILIATION_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -763,9 +761,9 @@ def _source_evidence_issues(
         SceneBoundaryReadinessReconciliationIssue(
             evidence.source_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence

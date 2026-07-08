@@ -1,4 +1,4 @@
-﻿"""Product maturity upgrade audit for the high-level scene matrix.
+"""Product maturity upgrade audit for the high-level scene matrix.
 
 N2.169 keeps product readiness from stopping at a color label.  The audit
 turns each pack/family readiness row into an upgrade path: current level,
@@ -23,6 +23,7 @@ from src.config.scene_product_readiness import (
     audit_scene_product_readiness,
     list_scene_product_readiness_specs,
 )
+from src.config.scene_source_evidence import scan_scene_source_markers
 
 
 SCENE_PRODUCT_MATURITY_UPGRADE_AUDIT_SOURCE_ID = (
@@ -756,21 +757,23 @@ def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneProductMaturityUpgradeSourceEvidence, ...]:
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
-    evidence: list[SceneProductMaturityUpgradeSourceEvidence] = []
-    for source_id, source_path, markers in SCENE_PRODUCT_MATURITY_UPGRADE_SOURCE_MARKERS:
-        path = root / source_path
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneProductMaturityUpgradeSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-                status="ready" if path.exists() and not missing else "missing",
-            )
+    return tuple(
+        SceneProductMaturityUpgradeSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
+            status=(
+                "ready"
+                if result.source_exists and not result.missing_markers
+                else "missing"
+            ),
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            root,
+            SCENE_PRODUCT_MATURITY_UPGRADE_SOURCE_MARKERS,
+        )
+    )
 
 
 def _unique_values(values) -> tuple[str, ...]:

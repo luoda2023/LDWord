@@ -9,6 +9,7 @@ from src.qt_api import QApplication, QPoint, Qt
 from src.ui.icons.catalog import get_icon_names
 from src.shared.ui.form_row import FormRow
 from src.shared.ui.style_owner_state import scene_section_style_owner_state
+from src.shared.ui.theme import get_theme
 from src.shared.ui.themed_radio_button import ThemedRadioButton
 from src.config import library as config_library
 from src.config.scene import SceneWorkspace
@@ -2927,9 +2928,23 @@ def test_scene_exam_paper_detail_updates_config_and_answer_delivery(tmp_path, mo
     bridge.set_current_template(create_builtin_template("default"), config_id="default", emit_signal=False)
     panel = ScenePanel(bridge)
     try:
+        panel.resize(1330, 1120)
+        panel.show()
+        app.processEvents()
+        panel._nav_rail.select_card("scn_exam_paper")
+        app.processEvents()
         app.processEvents()
 
         detail = panel._exam_paper
+        expected_gap = get_theme().template_detail_section_gap
+        assert detail.layout().spacing() == expected_gap
+        assert detail._preview_card.y() - (
+            detail._master_card.y() + detail._master_card.height()
+        ) == expected_gap
+        assert detail._prompt_card.y() - (
+            detail._preview_card.y() + detail._preview_card.height()
+        ) == expected_gap
+
         assert detail._card.isHidden()
         assert detail._detail_summary.isHidden()
         assert detail._master_card.isHidden() is False
@@ -2951,7 +2966,8 @@ def test_scene_exam_paper_detail_updates_config_and_answer_delivery(tmp_path, mo
         assert detail._preview_card.isHidden() is False
         assert detail._preview_card._title_label.text() == "母版预览"
         assert detail._preview_mode_control.current_data() == "student"
-        assert "学生卷：答案与解析不显示" in detail._preview_page.text()
+        assert "学生卷：答案与解析不显示" not in detail._preview_page.text()
+        assert "下列词语中加点字读音" in detail._preview_page.text()
         assert "答案速查" not in detail._preview_page.text()
         assert detail._prompt_card.isHidden() is False
         assert detail._prompt_card._title_label.text() == "AI 提示词"
@@ -2973,6 +2989,8 @@ def test_scene_exam_paper_detail_updates_config_and_answer_delivery(tmp_path, mo
         app.processEvents()
         assert detail._preview_mode_control.current_data() == "answer"
         assert "答案速查" in detail._preview_page.text()
+        assert "注意事项" not in detail._preview_page.text()
+        assert "下列词语中加点字读音" not in detail._preview_page.text()
         assert bridge.current_scene().exam_paper.answer_policy == "student_plus_answer"
 
         opened_paths = []

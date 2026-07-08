@@ -16,6 +16,7 @@ from src.config.scene_coverage_manifest import (
     SceneCoveragePack,
     list_scene_coverage_packs,
 )
+from src.config.scene_source_evidence import scan_scene_source_markers
 
 
 SCENE_REPORT_ARTIFACT_DRILLDOWN_AUDIT_ID = (
@@ -884,28 +885,32 @@ def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneReportArtifactDrilldownEvidence, ...]:
     root = Path(project_root) if project_root is not None else Path(__file__).resolve().parents[2]
-    evidence: list[SceneReportArtifactDrilldownEvidence] = []
-    for spec in specs:
-        for item in spec.evidence:
-            source_path = root / item.source_path
-            source_text = ""
-            if source_path.exists() and source_path.is_file():
-                try:
-                    source_text = source_path.read_text(encoding="utf-8", errors="ignore")
-                except OSError:
-                    source_text = ""
-            missing = tuple(marker for marker in item.markers if marker not in source_text)
-            evidence.append(
-                SceneReportArtifactDrilldownEvidence(
-                    drilldown_channel_id=spec.drilldown_channel_id,
-                    evidence_id=item.evidence_id,
-                    source_path=item.source_path,
-                    markers=item.markers,
-                    missing_markers=missing,
-                    evidence_layer=item.evidence_layer,
-                )
-            )
-    return tuple(evidence)
+    evidence_specs = tuple(
+        (spec.drilldown_channel_id, item)
+        for spec in specs
+        for item in spec.evidence
+    )
+    marker_results = scan_scene_source_markers(
+        root,
+        tuple(
+            (item.evidence_id, item.source_path, item.markers)
+            for _, item in evidence_specs
+        ),
+    )
+    return tuple(
+        SceneReportArtifactDrilldownEvidence(
+            drilldown_channel_id=drilldown_channel_id,
+            evidence_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
+            evidence_layer=item.evidence_layer,
+        )
+        for (drilldown_channel_id, item), result in zip(
+            evidence_specs,
+            marker_results,
+        )
+    )
 
 
 def _evidence_by_channel(

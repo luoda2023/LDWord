@@ -28,6 +28,7 @@ from src.config.scene_parameter_ownership import (
     scene_parameter_ownership_specs,
 )
 from src.config.scene_coverage_manifest import coverage_packs_for_family
+from src.config.scene_source_evidence import scan_scene_source_markers
 
 
 SCENE_FORMULA_OUTPUT_WATERMARK_AUDIT_SOURCE_ID = (
@@ -716,21 +717,23 @@ def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneFormulaOutputWatermarkSourceEvidence, ...]:
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
-    evidence: list[SceneFormulaOutputWatermarkSourceEvidence] = []
-    for source_id, source_path, markers in SCENE_FORMULA_OUTPUT_WATERMARK_SOURCE_MARKERS:
-        path = root / source_path
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneFormulaOutputWatermarkSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-                status="ready" if path.exists() and not missing else "missing",
-            )
+    return tuple(
+        SceneFormulaOutputWatermarkSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
+            status=(
+                "ready"
+                if result.source_exists and not result.missing_markers
+                else "missing"
+            ),
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            root,
+            SCENE_FORMULA_OUTPUT_WATERMARK_SOURCE_MARKERS,
+        )
+    )
 
 
 def _unique_values(values: Iterable[object]) -> tuple[str, ...]:

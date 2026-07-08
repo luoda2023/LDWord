@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import tempfile
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from pathlib import Path
 
 
@@ -61,65 +61,18 @@ from src.config.scene_boundary_capability_matrix import (  # noqa: E402
     audit_scene_boundary_capability_report,
     build_scene_boundary_capability_audit_report,
 )
-from src.config.scene_boundary_guarded_completion_audit import (  # noqa: E402
-    audit_scene_boundary_guarded_completion_report,
-    build_scene_boundary_guarded_completion_audit_report,
-)
-from src.config.scene_residual_warning_governance_audit import (  # noqa: E402
-    audit_scene_residual_warning_governance_report,
-    build_scene_residual_warning_governance_audit_report,
-)
-from src.config.scene_boundary_readiness_reconciliation_audit import (  # noqa: E402
-    audit_scene_boundary_readiness_reconciliation_report,
-    build_scene_boundary_readiness_reconciliation_audit_report,
-)
-from src.config.scene_terminal_release_exception_audit import (  # noqa: E402
-    audit_scene_terminal_release_exception_report,
-    build_scene_terminal_release_exception_audit_report,
-)
-from src.config.scene_boundary_subject_release_dossier_audit import (  # noqa: E402
-    audit_scene_boundary_subject_release_dossier_report,
-    build_scene_boundary_subject_release_dossier_audit_report,
-)
-from src.config.scene_non_subject_release_trace_attribution_audit import (  # noqa: E402
-    audit_scene_non_subject_release_trace_attribution_report,
-    build_scene_non_subject_release_trace_attribution_audit_report,
-)
-from src.config.scene_release_trace_partition_guard_audit import (  # noqa: E402
-    audit_scene_release_trace_partition_guard_report,
-    build_scene_release_trace_partition_guard_audit_report,
-)
-from src.config.scene_release_projection_surface_parity_audit import (  # noqa: E402
-    audit_scene_release_projection_surface_parity_report,
-    build_scene_release_projection_surface_parity_audit_report,
-)
-from src.config.scene_boundary_subject_release_continuity_audit import (  # noqa: E402
-    audit_scene_boundary_subject_release_continuity_report,
-    build_scene_boundary_subject_release_continuity_audit_report,
-)
-from src.config.scene_release_closure_ledger_audit import (  # noqa: E402
-    audit_scene_release_closure_ledger_report,
-    build_scene_release_closure_ledger_audit_report,
-)
-from src.config.scene_boundary_maturity_release_envelope_audit import (  # noqa: E402
-    audit_scene_boundary_maturity_release_envelope_report,
-    build_scene_boundary_maturity_release_envelope_audit_report,
-)
-from src.config.scene_retained_gap_exit_criteria_audit import (  # noqa: E402
-    audit_scene_retained_gap_exit_criteria_report,
-    build_scene_retained_gap_exit_criteria_audit_report,
-)
-from src.config.scene_release_residual_ratio_ledger_audit import (  # noqa: E402
-    audit_scene_release_residual_ratio_ledger_report,
-    build_scene_release_residual_ratio_ledger_audit_report,
-)
-from src.config.scene_release_residual_explanation_audit import (  # noqa: E402
-    audit_scene_release_residual_explanation_report,
-    build_scene_release_residual_explanation_audit_report,
-)
-from src.config.scene_release_acceptance_certificate_audit import (  # noqa: E402
-    audit_scene_release_acceptance_certificate_report,
-    build_scene_release_acceptance_certificate_audit_report,
+from src.config.scene_release_governance_registry import (  # noqa: E402
+    SCENE_RELEASE_GOVERNANCE_DASHBOARD_GATE_CHECK_IDS,
+    SCENE_RELEASE_GOVERNANCE_EARLY_GATE_CHECK_IDS,
+    SCENE_RELEASE_GOVERNANCE_EXPORT_SCRIPT_EVIDENCE_SOURCE_ID,
+    SCENE_RELEASE_GOVERNANCE_SUMMARY_COUNT_SPECS,
+    build_scene_release_governance_report,
+    resolve_scene_release_governance_functions,
+    scene_release_governance_count_entries,
+    scene_release_governance_detail_count_entries,
+    scene_release_governance_payload_entries,
+    scene_release_governance_report_pairs,
+    scene_release_governance_report_spec,
 )
 from src.config.scene_external_handoff_contract_audit import (  # noqa: E402
     audit_scene_external_handoff_contract_report,
@@ -220,6 +173,27 @@ from src.config.scene_sample_fixture_registry import (  # noqa: E402
 
 _PYTEST_RELEASE_GATE_PAYLOAD_CACHE: dict[str, object] | None = None
 
+SCENE_MATRIX_DASHBOARD_RELEASE_GATE_PAYLOAD_FIELD_COUNTS: tuple[
+    tuple[str, str],
+    ...,
+] = (
+    ("scene_matrix_dashboard_pack_count", "pack_count"),
+    ("scene_matrix_dashboard_visible_count", "visible_count"),
+    ("scene_matrix_dashboard_issue_count", "issue_count"),
+    ("scene_matrix_dashboard_warning_count", "warning_count"),
+)
+
+SCENE_MATRIX_DRILLDOWN_RELEASE_GATE_COUNT_IDS: tuple[str, ...] = (
+    "item_count",
+    "ready_count",
+    "row_count",
+    "visible_row_count",
+    "issue_count",
+    "source_evidence_count",
+    "ready_source_evidence_count",
+    "missing_source_evidence_count",
+)
+
 
 def _pytest_release_gate_lightweight_enabled() -> bool:
     return bool(os.environ.get("PYTEST_CURRENT_TEST")) and not bool(
@@ -234,6 +208,40 @@ def _release_gate_payload_for_output_dir(
     cloned = copy.deepcopy(payload)
     cloned["fixture_library_output_dir"] = str(output_dir)
     return cloned
+
+
+def _prefixed_payload_count_entries(
+    payload: dict[str, object],
+    *,
+    prefix: str,
+    count_ids: tuple[str, ...],
+) -> dict[str, int]:
+    counts = payload["counts"]
+    if not isinstance(counts, dict):
+        raise TypeError(f"{prefix} payload counts must be a mapping.")
+    return {
+        f"{prefix}_{count_id}": int(counts[count_id])
+        for count_id in count_ids
+    }
+
+
+def _scene_matrix_dashboard_release_gate_counts(
+    payload: dict[str, object],
+) -> dict[str, int]:
+    counts = {
+        release_gate_count_id: int(payload[payload_field_id])
+        for (
+            release_gate_count_id,
+            payload_field_id,
+        ) in SCENE_MATRIX_DASHBOARD_RELEASE_GATE_PAYLOAD_FIELD_COUNTS
+    }
+    counts.update(
+        {
+            "scene_matrix_dashboard_lens_count": len(payload["lenses"]),
+            "scene_matrix_dashboard_source_count": len(payload["source_ids"]),
+        }
+    )
+    return counts
 
 
 class _MatrixDrilldownReleaseGateSnapshot:
@@ -400,6 +408,12 @@ def _release_governance_export_script_evidence_counts(
     }
 
 
+def _release_governance_issue_check(report_id: str, report: object) -> dict[str, object]:
+    spec = scene_release_governance_report_spec(report_id)
+    _builder, auditor = resolve_scene_release_governance_functions(spec)
+    return _issue_check(auditor(report))
+
+
 def _build_release_governance_export_evidence_gate(
     *,
     checks: dict[str, object],
@@ -420,68 +434,7 @@ def _build_release_governance_export_evidence_gate(
     release_acceptance_certificate_report: object,
 ) -> _ReleaseGovernanceExportEvidenceGate:
     evidence = _build_release_governance_export_script_evidence(
-        (
-            (
-                "scene_boundary_guarded_completion_audit",
-                boundary_guarded_completion_report,
-            ),
-            (
-                "scene_residual_warning_governance_audit",
-                residual_warning_governance_report,
-            ),
-            (
-                "scene_boundary_readiness_reconciliation_audit",
-                boundary_readiness_reconciliation_report,
-            ),
-            (
-                "scene_terminal_release_exception_audit",
-                terminal_release_exception_report,
-            ),
-            (
-                "scene_boundary_subject_release_dossier_audit",
-                boundary_subject_release_dossier_report,
-            ),
-            (
-                "scene_non_subject_release_trace_attribution_audit",
-                non_subject_release_trace_attribution_report,
-            ),
-            (
-                "scene_release_trace_partition_guard_audit",
-                release_trace_partition_guard_report,
-            ),
-            (
-                "scene_release_projection_surface_parity_audit",
-                release_projection_surface_parity_report,
-            ),
-            (
-                "scene_boundary_subject_release_continuity_audit",
-                boundary_subject_release_continuity_report,
-            ),
-            (
-                "scene_boundary_maturity_release_envelope_audit",
-                boundary_maturity_release_envelope_report,
-            ),
-            (
-                "scene_retained_gap_exit_criteria_audit",
-                retained_gap_exit_criteria_report,
-            ),
-            (
-                "scene_release_residual_ratio_ledger_audit",
-                release_residual_ratio_ledger_report,
-            ),
-            (
-                "scene_release_residual_explanation_audit",
-                release_residual_explanation_report,
-            ),
-            (
-                "scene_release_closure_ledger_audit",
-                release_closure_ledger_report,
-            ),
-            (
-                "scene_release_acceptance_certificate_audit",
-                release_acceptance_certificate_report,
-            ),
-        )
+        scene_release_governance_report_pairs(locals())
     )
     checks["scene_release_governance_export_script_evidence"] = (
         _string_issue_check(
@@ -678,158 +631,25 @@ def _build_release_gate_governance_reports(
     checks: dict[str, object],
     external_handoff_contract_report: object,
 ) -> _ReleaseGateGovernanceReports:
-    boundary_guarded_completion_report = (
-        build_scene_boundary_guarded_completion_audit_report(project_root=ROOT)
-    )
-    checks["scene_boundary_guarded_completion_audit"] = _issue_check(
-        audit_scene_boundary_guarded_completion_report(
-            boundary_guarded_completion_report
-        )
-    )
-    residual_warning_governance_report = (
-        build_scene_residual_warning_governance_audit_report(project_root=ROOT)
-    )
-    checks["scene_residual_warning_governance_audit"] = _issue_check(
-        audit_scene_residual_warning_governance_report(
-            residual_warning_governance_report
-        )
-    )
-    boundary_readiness_reconciliation_report = (
-        build_scene_boundary_readiness_reconciliation_audit_report(project_root=ROOT)
-    )
-    checks["scene_boundary_readiness_reconciliation_audit"] = _issue_check(
-        audit_scene_boundary_readiness_reconciliation_report(
-            boundary_readiness_reconciliation_report
-        )
-    )
-    terminal_release_exception_report = (
-        build_scene_terminal_release_exception_audit_report(project_root=ROOT)
-    )
-    checks["scene_terminal_release_exception_audit"] = _issue_check(
-        audit_scene_terminal_release_exception_report(
-            terminal_release_exception_report
-        )
-    )
-    boundary_subject_release_dossier_report = (
-        build_scene_boundary_subject_release_dossier_audit_report(project_root=ROOT)
-    )
-    checks["scene_boundary_subject_release_dossier_audit"] = _issue_check(
-        audit_scene_boundary_subject_release_dossier_report(
-            boundary_subject_release_dossier_report
-        )
-    )
-    non_subject_release_trace_attribution_report = (
-        build_scene_non_subject_release_trace_attribution_audit_report(
-            project_root=ROOT
-        )
-    )
-    checks["scene_non_subject_release_trace_attribution_audit"] = _issue_check(
-        audit_scene_non_subject_release_trace_attribution_report(
-            non_subject_release_trace_attribution_report
-        )
-    )
-    release_trace_partition_guard_report = (
-        build_scene_release_trace_partition_guard_audit_report(project_root=ROOT)
-    )
-    checks["scene_release_trace_partition_guard_audit"] = _issue_check(
-        audit_scene_release_trace_partition_guard_report(
-            release_trace_partition_guard_report
-        )
-    )
-    release_projection_surface_parity_report = (
-        build_scene_release_projection_surface_parity_audit_report(
-            project_root=ROOT
-        )
-    )
-    checks["scene_release_projection_surface_parity_audit"] = _issue_check(
-        audit_scene_release_projection_surface_parity_report(
-            release_projection_surface_parity_report
-        )
-    )
-    boundary_subject_release_continuity_report = (
-        build_scene_boundary_subject_release_continuity_audit_report(
-            project_root=ROOT
-        )
-    )
-    checks["scene_boundary_subject_release_continuity_audit"] = _issue_check(
-        audit_scene_boundary_subject_release_continuity_report(
-            boundary_subject_release_continuity_report
-        )
-    )
-    release_closure_ledger_report = build_scene_release_closure_ledger_audit_report(
-        project_root=ROOT
-    )
-    checks["scene_release_closure_ledger_audit"] = _issue_check(
-        audit_scene_release_closure_ledger_report(release_closure_ledger_report)
-    )
-    boundary_maturity_release_envelope_report = (
-        build_scene_boundary_maturity_release_envelope_audit_report(
-            project_root=ROOT
-        )
-    )
-    checks["scene_boundary_maturity_release_envelope_audit"] = _issue_check(
-        audit_scene_boundary_maturity_release_envelope_report(
-            boundary_maturity_release_envelope_report
-        )
-    )
-    retained_gap_exit_criteria_report = (
-        build_scene_retained_gap_exit_criteria_audit_report(
+    reports_by_attribute: dict[str, object] = {
+        "external_handoff_contract_report": external_handoff_contract_report,
+    }
+    for report_id in SCENE_RELEASE_GOVERNANCE_EARLY_GATE_CHECK_IDS:
+        spec = scene_release_governance_report_spec(report_id)
+        report = build_scene_release_governance_report(
+            report_id,
             project_root=ROOT,
-            boundary_maturity_release_envelope_report=(
-                boundary_maturity_release_envelope_report
-            ),
-            external_handoff_contract_report=external_handoff_contract_report,
-            boundary_guarded_completion_report=boundary_guarded_completion_report,
+            dependencies=reports_by_attribute,
+            require_dependencies=bool(spec.builder_dependency_names),
         )
-    )
-    checks["scene_retained_gap_exit_criteria_audit"] = _issue_check(
-        audit_scene_retained_gap_exit_criteria_report(
-            retained_gap_exit_criteria_report
-        )
-    )
-    release_residual_ratio_ledger_report = (
-        build_scene_release_residual_ratio_ledger_audit_report(project_root=ROOT)
-    )
-    checks["scene_release_residual_ratio_ledger_audit"] = _issue_check(
-        audit_scene_release_residual_ratio_ledger_report(
-            release_residual_ratio_ledger_report
-        )
-    )
-    release_acceptance_certificate_report = (
-        build_scene_release_acceptance_certificate_audit_report(project_root=ROOT)
-    )
-    checks["scene_release_acceptance_certificate_audit"] = _issue_check(
-        audit_scene_release_acceptance_certificate_report(
-            release_acceptance_certificate_report
-        )
-    )
+        reports_by_attribute[spec.report_attribute] = report
+        checks[report_id] = _release_governance_issue_check(report_id, report)
+
     return _ReleaseGateGovernanceReports(
-        boundary_guarded_completion_report=boundary_guarded_completion_report,
-        residual_warning_governance_report=residual_warning_governance_report,
-        boundary_readiness_reconciliation_report=(
-            boundary_readiness_reconciliation_report
-        ),
-        terminal_release_exception_report=terminal_release_exception_report,
-        boundary_subject_release_dossier_report=(
-            boundary_subject_release_dossier_report
-        ),
-        non_subject_release_trace_attribution_report=(
-            non_subject_release_trace_attribution_report
-        ),
-        release_trace_partition_guard_report=release_trace_partition_guard_report,
-        release_projection_surface_parity_report=(
-            release_projection_surface_parity_report
-        ),
-        boundary_subject_release_continuity_report=(
-            boundary_subject_release_continuity_report
-        ),
-        release_closure_ledger_report=release_closure_ledger_report,
-        boundary_maturity_release_envelope_report=(
-            boundary_maturity_release_envelope_report
-        ),
-        retained_gap_exit_criteria_report=retained_gap_exit_criteria_report,
-        release_residual_ratio_ledger_report=release_residual_ratio_ledger_report,
-        release_acceptance_certificate_report=release_acceptance_certificate_report,
+        **{
+            field.name: reports_by_attribute[field.name]
+            for field in fields(_ReleaseGateGovernanceReports)
+        }
     )
 
 
@@ -921,29 +741,36 @@ def _build_release_gate_dashboard_residual_reports(
     checks["scene_matrix_dashboard"] = _issue_check(
         audit_scene_matrix_dashboard(matrix_dashboard)
     )
-    release_residual_explanation_report = (
-        build_scene_release_residual_explanation_audit_report(
+    reports_by_attribute: dict[str, object] = {
+        "input_source_report": input_source_report,
+        "count_profile_report": count_profile_report,
+        "residual_warning_governance_report": residual_warning_governance_report,
+        "terminal_release_exception_report": terminal_release_exception_report,
+        "boundary_maturity_release_envelope_report": (
+            boundary_maturity_release_envelope_report
+        ),
+        "release_residual_ratio_ledger_report": (
+            release_residual_ratio_ledger_report
+        ),
+        "maturity_upgrade_report": maturity_upgrade_report,
+        "matrix_dashboard": matrix_dashboard,
+    }
+    for report_id in SCENE_RELEASE_GOVERNANCE_DASHBOARD_GATE_CHECK_IDS:
+        spec = scene_release_governance_report_spec(report_id)
+        report = build_scene_release_governance_report(
+            report_id,
             project_root=ROOT,
-            input_source_report=input_source_report,
-            count_profile_report=count_profile_report,
-            residual_warning_governance_report=residual_warning_governance_report,
-            terminal_release_exception_report=terminal_release_exception_report,
-            boundary_maturity_release_envelope_report=(
-                boundary_maturity_release_envelope_report
-            ),
-            release_residual_ratio_ledger_report=release_residual_ratio_ledger_report,
-            maturity_upgrade_report=maturity_upgrade_report,
-            matrix_dashboard=matrix_dashboard,
+            dependencies=reports_by_attribute,
+            require_dependencies=bool(spec.builder_dependency_names),
         )
-    )
-    checks["scene_release_residual_explanation_audit"] = _issue_check(
-        audit_scene_release_residual_explanation_report(
-            release_residual_explanation_report
-        )
-    )
+        reports_by_attribute[spec.report_attribute] = report
+        checks[report_id] = _release_governance_issue_check(report_id, report)
+
     return _ReleaseGateDashboardResidualReports(
-        matrix_dashboard=matrix_dashboard,
-        release_residual_explanation_report=release_residual_explanation_report,
+        **{
+            field.name: reports_by_attribute[field.name]
+            for field in fields(_ReleaseGateDashboardResidualReports)
+        }
     )
 
 
@@ -1113,6 +940,26 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
         if check["status"] != "passed"
     }
     user_journey_counts = user_journey_fixture_report.to_payload()["counts"]
+    release_governance_payload_entries = scene_release_governance_payload_entries(
+        locals()
+    )
+    release_governance_summary_counts = scene_release_governance_count_entries(
+        locals(),
+        SCENE_RELEASE_GOVERNANCE_SUMMARY_COUNT_SPECS,
+    )
+    release_governance_detail_counts = (
+        scene_release_governance_detail_count_entries(locals())
+    )
+    matrix_dashboard_payload = matrix_dashboard.to_payload()
+    matrix_drilldown_payload = matrix_drilldown.to_payload()
+    matrix_dashboard_counts = _scene_matrix_dashboard_release_gate_counts(
+        matrix_dashboard_payload
+    )
+    matrix_drilldown_counts = _prefixed_payload_count_entries(
+        matrix_drilldown_payload,
+        prefix="scene_matrix_drilldown",
+        count_ids=SCENE_MATRIX_DRILLDOWN_RELEASE_GATE_COUNT_IDS,
+    )
     payload = {
         "status": "passed" if not failed else "failed",
         "checks": checks,
@@ -1139,30 +986,7 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
             "static_closed_but_not_green_count": len(
                 static_closed_but_not_green_specs()
             ),
-            "static_closed_not_green_governed_count": (
-                terminal_release_exception_report.static_closed_boundary_count
-            ),
-            "dashboard_warning_projection_governed_count": (
-                terminal_release_exception_report.warning_projection_count
-            ),
-            "input_source_warning_managed_count": (
-                residual_warning_governance_report.input_source_managed_warning_count
-            ),
-            "count_profile_warning_managed_count": (
-                residual_warning_governance_report.count_profile_managed_warning_count
-            ),
-            "plugin_manual_warning_managed_count": (
-                residual_warning_governance_report.plugin_manual_managed_warning_count
-            ),
-            "reference_profile_warning_managed_count": (
-                residual_warning_governance_report.reference_profile_managed_warning_count
-            ),
-            "visio_fixture_closed_verified_count": (
-                residual_warning_governance_report.visio_fixture_closed_count
-            ),
-            "retained_gap_enveloped_count": (
-                boundary_maturity_release_envelope_report.retained_gap_count
-            ),
+            **release_governance_summary_counts,
             "gap_domain_classified_count": maturity_upgrade_report.gap_domain_count,
             "high_frequency_completeness_pack_count": (
                 completeness_report.pack_count
@@ -1649,561 +1473,7 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
             "scene_external_handoff_contract_missing_source_evidence_count": (
                 external_handoff_contract_report.missing_source_evidence_count
             ),
-            "scene_boundary_guarded_completion_subject_count": (
-                boundary_guarded_completion_report.subject_count
-            ),
-            "scene_boundary_guarded_completion_ready_count": (
-                boundary_guarded_completion_report.ready_subject_count
-            ),
-            "scene_boundary_guarded_completion_pack_count": (
-                boundary_guarded_completion_report.pack_subject_count
-            ),
-            "scene_boundary_guarded_completion_family_count": (
-                boundary_guarded_completion_report.family_subject_count
-            ),
-            "scene_boundary_guarded_completion_retained_gap_count": (
-                boundary_guarded_completion_report.retained_gap_count
-            ),
-            "scene_boundary_guarded_completion_external_contract_count": (
-                boundary_guarded_completion_report.external_contract_count
-            ),
-            "scene_boundary_guarded_completion_boundary_capability_count": (
-                boundary_guarded_completion_report.boundary_capability_count
-            ),
-            "scene_boundary_guarded_completion_plugin_gate_count": (
-                boundary_guarded_completion_report.plugin_gate_count
-            ),
-            "scene_boundary_guarded_completion_target_plugin_count": (
-                boundary_guarded_completion_report.target_plugin_count
-            ),
-            "scene_boundary_guarded_completion_risk_domain_count": (
-                boundary_guarded_completion_report.risk_domain_count
-            ),
-            "scene_boundary_guarded_completion_excluded_core_claim_count": (
-                boundary_guarded_completion_report.excluded_core_claim_count
-            ),
-            "scene_boundary_guarded_completion_issue_count": (
-                boundary_guarded_completion_report.issue_count
-            ),
-            "scene_boundary_guarded_completion_missing_source_evidence_count": (
-                boundary_guarded_completion_report.missing_source_evidence_count
-            ),
-            "scene_residual_warning_governance_warning_count": (
-                residual_warning_governance_report.warning_count
-            ),
-            "scene_residual_warning_governance_managed_count": (
-                residual_warning_governance_report.managed_warning_count
-            ),
-            "scene_residual_warning_governance_input_source_warning_count": (
-                residual_warning_governance_report.input_source_warning_count
-            ),
-            "scene_residual_warning_governance_count_profile_warning_count": (
-                residual_warning_governance_report.count_profile_warning_count
-            ),
-            "scene_residual_warning_governance_dashboard_projection_warning_count": (
-                residual_warning_governance_report.dashboard_projection_warning_count
-            ),
-            "scene_residual_warning_governance_plugin_manual_warning_count": (
-                residual_warning_governance_report.plugin_manual_warning_count
-            ),
-            "scene_residual_warning_governance_reference_profile_warning_count": (
-                residual_warning_governance_report.reference_profile_warning_count
-            ),
-            "scene_residual_warning_governance_object_preflight_warning_count": (
-                residual_warning_governance_report.object_preflight_warning_count
-            ),
-            "scene_residual_warning_governance_visio_fixture_closed_count": (
-                residual_warning_governance_report.visio_fixture_closed_count
-            ),
-            "scene_residual_warning_governance_unmanaged_warning_count": (
-                residual_warning_governance_report.unmanaged_warning_count
-            ),
-            "scene_residual_warning_governance_issue_count": (
-                residual_warning_governance_report.issue_count
-            ),
-            "scene_residual_warning_governance_missing_source_evidence_count": (
-                residual_warning_governance_report.missing_source_evidence_count
-            ),
-            "scene_boundary_readiness_reconciliation_count": (
-                boundary_readiness_reconciliation_report.row_count
-            ),
-            "scene_boundary_readiness_reconciliation_reconciled_count": (
-                boundary_readiness_reconciliation_report.reconciled_count
-            ),
-            "scene_boundary_readiness_reconciliation_unreconciled_count": (
-                boundary_readiness_reconciliation_report.unreconciled_count
-            ),
-            "scene_boundary_readiness_reconciliation_readiness_delta_count": (
-                boundary_readiness_reconciliation_report.readiness_delta_count
-            ),
-            "scene_boundary_readiness_reconciliation_not_applicable_count": (
-                boundary_readiness_reconciliation_report.not_applicable_count
-            ),
-            "scene_boundary_readiness_reconciliation_static_closed_boundary_count": (
-                boundary_readiness_reconciliation_report.static_closed_boundary_count
-            ),
-            "scene_boundary_readiness_reconciliation_maturity_boundary_guarded_count": (
-                boundary_readiness_reconciliation_report.maturity_boundary_guarded_count
-            ),
-            "scene_boundary_readiness_reconciliation_boundary_subject_count": (
-                boundary_readiness_reconciliation_report.boundary_subject_count
-            ),
-            "scene_boundary_readiness_reconciliation_issue_count": (
-                boundary_readiness_reconciliation_report.issue_count
-            ),
-            "scene_boundary_readiness_reconciliation_missing_source_evidence_count": (
-                boundary_readiness_reconciliation_report.missing_source_evidence_count
-            ),
-            "scene_terminal_release_exception_count": (
-                terminal_release_exception_report.exception_count
-            ),
-            "scene_terminal_release_exception_governed_count": (
-                terminal_release_exception_report.governed_exception_count
-            ),
-            "scene_terminal_release_exception_ungoverned_count": (
-                terminal_release_exception_report.ungoverned_exception_count
-            ),
-            "scene_terminal_release_exception_managed_warning_count": (
-                terminal_release_exception_report.managed_warning_count
-            ),
-            "scene_terminal_release_exception_warning_projection_count": (
-                terminal_release_exception_report.warning_projection_count
-            ),
-            "scene_terminal_release_exception_readiness_reconciliation_count": (
-                terminal_release_exception_report.readiness_reconciliation_count
-            ),
-            "scene_terminal_release_exception_boundary_guarded_maturity_count": (
-                terminal_release_exception_report.boundary_guarded_maturity_count
-            ),
-            "scene_terminal_release_exception_static_closed_boundary_count": (
-                terminal_release_exception_report.static_closed_boundary_count
-            ),
-            "scene_terminal_release_exception_trace_count": (
-                terminal_release_exception_report.exception_trace_count
-            ),
-            "scene_terminal_release_exception_unique_source_trace_count": (
-                terminal_release_exception_report.unique_source_trace_count
-            ),
-            "scene_terminal_release_exception_linked_boundary_subject_count": (
-                terminal_release_exception_report.linked_boundary_subject_count
-            ),
-            "scene_terminal_release_exception_issue_count": (
-                terminal_release_exception_report.issue_count
-            ),
-            "scene_terminal_release_exception_missing_source_evidence_count": (
-                terminal_release_exception_report.missing_source_evidence_count
-            ),
-            "scene_boundary_subject_release_dossier_subject_count": (
-                boundary_subject_release_dossier_report.subject_count
-            ),
-            "scene_boundary_subject_release_dossier_ready_count": (
-                boundary_subject_release_dossier_report.ready_subject_count
-            ),
-            "scene_boundary_subject_release_dossier_pack_subject_count": (
-                boundary_subject_release_dossier_report.pack_subject_count
-            ),
-            "scene_boundary_subject_release_dossier_family_subject_count": (
-                boundary_subject_release_dossier_report.family_subject_count
-            ),
-            "scene_boundary_subject_release_dossier_subject_trace_count": (
-                boundary_subject_release_dossier_report.subject_trace_count
-            ),
-            "scene_boundary_subject_release_dossier_unique_source_trace_count": (
-                boundary_subject_release_dossier_report.unique_source_trace_count
-            ),
-            "scene_boundary_subject_release_dossier_readiness_reconciliation_row_count": (
-                boundary_subject_release_dossier_report.readiness_reconciliation_row_count
-            ),
-            "scene_boundary_subject_release_dossier_terminal_exception_count": (
-                boundary_subject_release_dossier_report.terminal_exception_count
-            ),
-            "scene_boundary_subject_release_dossier_issue_count": (
-                boundary_subject_release_dossier_report.issue_count
-            ),
-            "scene_boundary_subject_release_dossier_missing_source_evidence_count": (
-                boundary_subject_release_dossier_report.missing_source_evidence_count
-            ),
-            "scene_non_subject_release_trace_attribution_count": (
-                non_subject_release_trace_attribution_report.trace_count
-            ),
-            "scene_non_subject_release_trace_attribution_ready_count": (
-                non_subject_release_trace_attribution_report.attributed_trace_count
-            ),
-            "scene_non_subject_release_trace_attribution_unattributed_count": (
-                non_subject_release_trace_attribution_report.unattributed_trace_count
-            ),
-            "scene_non_subject_release_trace_attribution_dashboard_projection_count": (
-                non_subject_release_trace_attribution_report.dashboard_projection_trace_count
-            ),
-            "scene_non_subject_release_trace_attribution_registry_only_profile_count": (
-                non_subject_release_trace_attribution_report.registry_only_profile_trace_count
-            ),
-            "scene_non_subject_release_trace_attribution_plugin_manual_pack_count": (
-                non_subject_release_trace_attribution_report.plugin_manual_pack_trace_count
-            ),
-            "scene_non_subject_release_trace_attribution_generic_not_applicable_count": (
-                non_subject_release_trace_attribution_report.generic_not_applicable_trace_count
-            ),
-            "scene_non_subject_release_trace_attribution_issue_count": (
-                non_subject_release_trace_attribution_report.issue_count
-            ),
-            "scene_non_subject_release_trace_attribution_missing_source_evidence_count": (
-                non_subject_release_trace_attribution_report.missing_source_evidence_count
-            ),
-            "scene_release_trace_partition_guard_partition_count": (
-                release_trace_partition_guard_report.partition_count
-            ),
-            "scene_release_trace_partition_guard_ready_count": (
-                release_trace_partition_guard_report.ready_partition_count
-            ),
-            "scene_release_trace_partition_guard_terminal_trace_count": (
-                release_trace_partition_guard_report.terminal_trace_count
-            ),
-            "scene_release_trace_partition_guard_subject_trace_count": (
-                release_trace_partition_guard_report.subject_trace_count
-            ),
-            "scene_release_trace_partition_guard_non_subject_trace_count": (
-                release_trace_partition_guard_report.non_subject_trace_count
-            ),
-            "scene_release_trace_partition_guard_partitioned_trace_count": (
-                release_trace_partition_guard_report.partitioned_trace_count
-            ),
-            "scene_release_trace_partition_guard_missing_trace_count": (
-                release_trace_partition_guard_report.missing_trace_count
-            ),
-            "scene_release_trace_partition_guard_overlap_trace_count": (
-                release_trace_partition_guard_report.overlap_trace_count
-            ),
-            "scene_release_trace_partition_guard_extra_trace_count": (
-                release_trace_partition_guard_report.extra_trace_count
-            ),
-            "scene_release_trace_partition_guard_issue_count": (
-                release_trace_partition_guard_report.issue_count
-            ),
-            "scene_release_trace_partition_guard_missing_source_evidence_count": (
-                release_trace_partition_guard_report.missing_source_evidence_count
-            ),
-            "scene_release_projection_surface_parity_count": (
-                release_projection_surface_parity_report.projection_count
-            ),
-            "scene_release_projection_surface_parity_ready_count": (
-                release_projection_surface_parity_report.ready_projection_count
-            ),
-            "scene_release_projection_surface_parity_release_gate_check_count": (
-                release_projection_surface_parity_report.release_gate_check_count
-            ),
-            "scene_release_projection_surface_parity_dashboard_source_count": (
-                release_projection_surface_parity_report.dashboard_source_count
-            ),
-            "scene_release_projection_surface_parity_dashboard_card_count": (
-                release_projection_surface_parity_report.dashboard_card_count
-            ),
-            "scene_release_projection_surface_parity_drilldown_item_count": (
-                release_projection_surface_parity_report.drilldown_item_count
-            ),
-            "scene_release_projection_surface_parity_summary_projection_count": (
-                release_projection_surface_parity_report.summary_projection_count
-            ),
-            "scene_release_projection_surface_parity_export_script_count": (
-                release_projection_surface_parity_report.export_script_count
-            ),
-            "scene_release_projection_surface_parity_workflow_test_count": (
-                release_projection_surface_parity_report.workflow_test_count
-            ),
-            "scene_release_projection_surface_parity_closure_doc_count": (
-                release_projection_surface_parity_report.closure_doc_count
-            ),
-            "scene_release_projection_surface_parity_issue_count": (
-                release_projection_surface_parity_report.issue_count
-            ),
-            "scene_release_projection_surface_parity_missing_source_evidence_count": (
-                release_projection_surface_parity_report.missing_source_evidence_count
-            ),
-            "scene_boundary_subject_release_continuity_subject_count": (
-                boundary_subject_release_continuity_report.subject_count
-            ),
-            "scene_boundary_subject_release_continuity_ready_count": (
-                boundary_subject_release_continuity_report.ready_subject_count
-            ),
-            "scene_boundary_subject_release_continuity_maturity_subject_count": (
-                boundary_subject_release_continuity_report.maturity_subject_count
-            ),
-            "scene_boundary_subject_release_continuity_guarded_completion_subject_count": (
-                boundary_subject_release_continuity_report.guarded_completion_subject_count
-            ),
-            "scene_boundary_subject_release_continuity_readiness_reconciliation_subject_count": (
-                boundary_subject_release_continuity_report.readiness_reconciliation_subject_count
-            ),
-            "scene_boundary_subject_release_continuity_terminal_release_subject_count": (
-                boundary_subject_release_continuity_report.terminal_release_subject_count
-            ),
-            "scene_boundary_subject_release_continuity_dossier_count": (
-                boundary_subject_release_continuity_report.subject_dossier_count
-            ),
-            "scene_boundary_subject_release_continuity_readiness_row_count": (
-                boundary_subject_release_continuity_report.readiness_row_count
-            ),
-            "scene_boundary_subject_release_continuity_terminal_trace_count": (
-                boundary_subject_release_continuity_report.terminal_trace_count
-            ),
-            "scene_boundary_subject_release_continuity_dossier_trace_count": (
-                boundary_subject_release_continuity_report.dossier_trace_count
-            ),
-            "scene_boundary_subject_release_continuity_mismatch_count": (
-                boundary_subject_release_continuity_report.mismatch_count
-            ),
-            "scene_boundary_subject_release_continuity_issue_count": (
-                boundary_subject_release_continuity_report.issue_count
-            ),
-            "scene_boundary_subject_release_continuity_missing_source_evidence_count": (
-                boundary_subject_release_continuity_report.missing_source_evidence_count
-            ),
-            "scene_release_closure_ledger_stage_count": (
-                release_closure_ledger_report.stage_count
-            ),
-            "scene_release_closure_ledger_ready_count": (
-                release_closure_ledger_report.ready_stage_count
-            ),
-            "scene_release_closure_ledger_stage_order_count": (
-                release_closure_ledger_report.stage_order_count
-            ),
-            "scene_release_closure_ledger_upstream_dependency_count": (
-                release_closure_ledger_report.upstream_dependency_count
-            ),
-            "scene_release_closure_ledger_upstream_dependency_ready_count": (
-                release_closure_ledger_report.upstream_dependency_ready_count
-            ),
-            "scene_release_closure_ledger_release_gate_check_count": (
-                release_closure_ledger_report.release_gate_check_count
-            ),
-            "scene_release_closure_ledger_dashboard_source_count": (
-                release_closure_ledger_report.dashboard_source_count
-            ),
-            "scene_release_closure_ledger_dashboard_card_count": (
-                release_closure_ledger_report.dashboard_card_count
-            ),
-            "scene_release_closure_ledger_drilldown_item_count": (
-                release_closure_ledger_report.drilldown_item_count
-            ),
-            "scene_release_closure_ledger_summary_projection_count": (
-                release_closure_ledger_report.summary_projection_count
-            ),
-            "scene_release_closure_ledger_export_script_count": (
-                release_closure_ledger_report.export_script_count
-            ),
-            "scene_release_closure_ledger_workflow_test_count": (
-                release_closure_ledger_report.workflow_test_count
-            ),
-            "scene_release_closure_ledger_closure_doc_count": (
-                release_closure_ledger_report.closure_doc_count
-            ),
-            "scene_release_closure_ledger_issue_count": (
-                release_closure_ledger_report.issue_count
-            ),
-            "scene_release_closure_ledger_missing_source_evidence_count": (
-                release_closure_ledger_report.missing_source_evidence_count
-            ),
-            "scene_boundary_maturity_release_envelope_count": (
-                boundary_maturity_release_envelope_report.envelope_count
-            ),
-            "scene_boundary_maturity_release_envelope_ready_count": (
-                boundary_maturity_release_envelope_report.ready_envelope_count
-            ),
-            "scene_boundary_maturity_release_envelope_l5_blocker_enveloped_count": (
-                boundary_maturity_release_envelope_report.l5_blocker_enveloped_count
-            ),
-            "scene_boundary_maturity_release_envelope_maturity_boundary_count": (
-                boundary_maturity_release_envelope_report.maturity_boundary_count
-            ),
-            "scene_boundary_maturity_release_envelope_external_handoff_count": (
-                boundary_maturity_release_envelope_report.external_handoff_count
-            ),
-            "scene_boundary_maturity_release_envelope_guarded_completion_count": (
-                boundary_maturity_release_envelope_report.guarded_completion_count
-            ),
-            "scene_boundary_maturity_release_envelope_readiness_reconciliation_count": (
-                boundary_maturity_release_envelope_report.readiness_reconciliation_count
-            ),
-            "scene_boundary_maturity_release_envelope_terminal_trace_count": (
-                boundary_maturity_release_envelope_report.terminal_trace_count
-            ),
-            "scene_boundary_maturity_release_envelope_release_dossier_count": (
-                boundary_maturity_release_envelope_report.release_dossier_count
-            ),
-            "scene_boundary_maturity_release_envelope_subject_continuity_count": (
-                boundary_maturity_release_envelope_report.subject_continuity_count
-            ),
-            "scene_boundary_maturity_release_envelope_retained_gap_count": (
-                boundary_maturity_release_envelope_report.retained_gap_count
-            ),
-            "scene_boundary_maturity_release_envelope_issue_count": (
-                boundary_maturity_release_envelope_report.issue_count
-            ),
-            "scene_boundary_maturity_release_envelope_missing_source_evidence_count": (
-                boundary_maturity_release_envelope_report.missing_source_evidence_count
-            ),
-            "scene_retained_gap_exit_criteria_count": (
-                retained_gap_exit_criteria_report.criteria_count
-            ),
-            "scene_retained_gap_exit_criteria_release_allowed_count": (
-                retained_gap_exit_criteria_report.release_allowed_count
-            ),
-            "scene_retained_gap_exit_criteria_envelope_link_count": (
-                retained_gap_exit_criteria_report.envelope_link_count
-            ),
-            "scene_retained_gap_exit_criteria_handoff_link_count": (
-                retained_gap_exit_criteria_report.handoff_link_count
-            ),
-            "scene_retained_gap_exit_criteria_guarded_completion_link_count": (
-                retained_gap_exit_criteria_report.guarded_completion_link_count
-            ),
-            "scene_retained_gap_exit_criteria_boundary_capability_link_count": (
-                retained_gap_exit_criteria_report.boundary_capability_link_count
-            ),
-            "scene_retained_gap_exit_criteria_exit_signal_count": (
-                retained_gap_exit_criteria_report.exit_signal_count
-            ),
-            "scene_retained_gap_external_receipt_target_count": (
-                retained_gap_exit_criteria_report.external_receipt_target_count
-            ),
-            "scene_retained_gap_external_receipt_alignment_count": (
-                retained_gap_exit_criteria_report.external_receipt_alignment_count
-            ),
-            "scene_retained_gap_exit_criteria_prohibited_core_claim_count": (
-                retained_gap_exit_criteria_report.prohibited_core_claim_count
-            ),
-            "scene_retained_gap_exit_criteria_issue_count": (
-                retained_gap_exit_criteria_report.issue_count
-            ),
-            "scene_retained_gap_exit_criteria_missing_source_evidence_count": (
-                retained_gap_exit_criteria_report.missing_source_evidence_count
-            ),
-            "scene_release_residual_ratio_ledger_count": (
-                release_residual_ratio_ledger_report.ratio_count
-            ),
-            "scene_release_residual_ratio_ledger_published_count": (
-                release_residual_ratio_ledger_report.published_ratio_count
-            ),
-            "scene_release_residual_ratio_ledger_non_full_count": (
-                release_residual_ratio_ledger_report.non_full_ratio_count
-            ),
-            "scene_release_residual_ratio_ledger_readiness_reconciliation_link_count": (
-                release_residual_ratio_ledger_report.readiness_reconciliation_link_count
-            ),
-            "scene_release_residual_ratio_ledger_terminal_exception_link_count": (
-                release_residual_ratio_ledger_report.terminal_exception_link_count
-            ),
-            "scene_release_residual_ratio_ledger_release_envelope_link_count": (
-                release_residual_ratio_ledger_report.release_envelope_link_count
-            ),
-            "scene_release_residual_ratio_ledger_exit_criteria_link_count": (
-                release_residual_ratio_ledger_report.retained_gap_exit_criteria_link_count
-            ),
-            "scene_release_residual_ratio_ledger_receipt_alignment_link_count": (
-                release_residual_ratio_ledger_report.retained_gap_receipt_alignment_link_count
-            ),
-            "scene_release_residual_ratio_ledger_count_delivery_boundary_alignment_count": (
-                release_residual_ratio_ledger_report.count_delivery_boundary_alignment_count
-            ),
-            "scene_release_residual_ratio_ledger_count_delivery_boundary_link_count": (
-                release_residual_ratio_ledger_report.count_delivery_boundary_link_count
-            ),
-            "scene_release_residual_ratio_ledger_count_delivery_receipt_alignment_count": (
-                release_residual_ratio_ledger_report.count_delivery_receipt_alignment_count
-            ),
-            "scene_release_residual_ratio_ledger_count_delivery_receipt_alignment_link_count": (
-                release_residual_ratio_ledger_report.count_delivery_receipt_alignment_link_count
-            ),
-            "scene_release_residual_ratio_ledger_maturity_l5_blocker_alignment_count": (
-                release_residual_ratio_ledger_report.maturity_l5_blocker_alignment_count
-            ),
-            "scene_release_residual_ratio_ledger_maturity_l5_blocker_release_envelope_count": (
-                release_residual_ratio_ledger_report.maturity_l5_blocker_release_envelope_count
-            ),
-            "scene_release_residual_ratio_ledger_maturity_l5_blocker_receipt_alignment_count": (
-                release_residual_ratio_ledger_report.maturity_l5_blocker_receipt_alignment_count
-            ),
-            "scene_release_residual_ratio_ledger_maturity_l5_blocker_receipt_alignment_link_count": (
-                release_residual_ratio_ledger_report.maturity_l5_blocker_receipt_alignment_link_count
-            ),
-            "scene_release_residual_ratio_ledger_boundary_scope_alignment_count": (
-                release_residual_ratio_ledger_report.boundary_scope_alignment_count
-            ),
-            "scene_release_residual_ratio_ledger_boundary_scope_link_count": (
-                release_residual_ratio_ledger_report.boundary_scope_link_count
-            ),
-            "scene_release_residual_ratio_ledger_issue_count": (
-                release_residual_ratio_ledger_report.issue_count
-            ),
-            "scene_release_residual_ratio_ledger_missing_source_evidence_count": (
-                release_residual_ratio_ledger_report.missing_source_evidence_count
-            ),
-            "scene_release_residual_explanation_count": (
-                release_residual_explanation_report.row_count
-            ),
-            "scene_release_residual_explanation_covered_count": (
-                release_residual_explanation_report.covered_count
-            ),
-            "scene_release_residual_explanation_mismatch_count": (
-                release_residual_explanation_report.mismatch_count
-            ),
-            "scene_release_residual_explanation_missing_summary_marker_count": (
-                release_residual_explanation_report.missing_summary_marker_count
-            ),
-            "scene_release_residual_explanation_issue_count": (
-                release_residual_explanation_report.issue_count
-            ),
-            "scene_release_residual_explanation_missing_source_evidence_count": (
-                release_residual_explanation_report.missing_source_evidence_count
-            ),
-            "scene_release_governance_export_script_report_count": (
-                release_governance_export_script_counts["report_count"]
-            ),
-            "scene_release_governance_export_script_ready_count": (
-                release_governance_export_script_counts["ready_count"]
-            ),
-            "scene_release_governance_export_script_missing_count": (
-                release_governance_export_script_counts["missing_count"]
-            ),
-            "scene_release_governance_export_script_unready_count": (
-                release_governance_export_script_counts["unready_count"]
-            ),
-            "scene_release_acceptance_certificate_count": (
-                release_acceptance_certificate_report.certificate_count
-            ),
-            "scene_release_acceptance_certificate_ready_count": (
-                release_acceptance_certificate_report.ready_certificate_count
-            ),
-            "scene_release_acceptance_certificate_receipt_count": (
-                release_acceptance_certificate_report.receipt_certificate_count
-            ),
-            "scene_release_acceptance_certificate_ready_receipt_count": (
-                release_acceptance_certificate_report.ready_receipt_certificate_count
-            ),
-            "scene_release_acceptance_certificate_component_report_count": (
-                release_acceptance_certificate_report.component_report_count
-            ),
-            "scene_release_acceptance_certificate_requirement_dimension_count": (
-                release_acceptance_certificate_report.requirement_dimension_count
-            ),
-            "scene_release_acceptance_certificate_ready_requirement_dimension_count": (
-                release_acceptance_certificate_report.ready_requirement_dimension_count
-            ),
-            "scene_release_acceptance_certificate_expected_count_match_count": (
-                release_acceptance_certificate_report.expected_count_match_count
-            ),
-            "scene_release_acceptance_certificate_source_evidence_count": (
-                release_acceptance_certificate_report.source_evidence_count
-            ),
-            "scene_release_acceptance_certificate_ready_source_evidence_count": (
-                release_acceptance_certificate_report.ready_source_evidence_count
-            ),
-            "scene_release_acceptance_certificate_issue_count": (
-                release_acceptance_certificate_report.issue_count
-            ),
-            "scene_release_acceptance_certificate_missing_source_evidence_count": (
-                release_acceptance_certificate_report.missing_source_evidence_count
-            ),
+            **release_governance_detail_counts,
             "scene_material_schema_family_count": (
                 material_schema_report.family_count
             ),
@@ -2531,48 +1801,8 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
             "scene_product_maturity_upgrade_missing_source_evidence_count": (
                 maturity_upgrade_report.missing_source_evidence_count
             ),
-            "scene_matrix_dashboard_pack_count": (
-                matrix_dashboard.pack_count
-            ),
-            "scene_matrix_dashboard_visible_count": (
-                matrix_dashboard.visible_count
-            ),
-            "scene_matrix_dashboard_issue_count": (
-                matrix_dashboard.issue_count
-            ),
-            "scene_matrix_dashboard_warning_count": (
-                matrix_dashboard.warning_count
-            ),
-            "scene_matrix_dashboard_lens_count": len(
-                matrix_dashboard.lenses
-            ),
-            "scene_matrix_dashboard_source_count": len(
-                matrix_dashboard.source_ids
-            ),
-            "scene_matrix_drilldown_item_count": (
-                matrix_drilldown.item_count
-            ),
-            "scene_matrix_drilldown_ready_count": (
-                matrix_drilldown.ready_count
-            ),
-            "scene_matrix_drilldown_row_count": (
-                matrix_drilldown.row_count
-            ),
-            "scene_matrix_drilldown_visible_row_count": (
-                matrix_drilldown.visible_row_count
-            ),
-            "scene_matrix_drilldown_issue_count": (
-                matrix_drilldown.issue_count
-            ),
-            "scene_matrix_drilldown_source_evidence_count": (
-                matrix_drilldown.source_evidence_count
-            ),
-            "scene_matrix_drilldown_ready_source_evidence_count": (
-                matrix_drilldown.ready_source_evidence_count
-            ),
-            "scene_matrix_drilldown_missing_source_evidence_count": (
-                matrix_drilldown.missing_source_evidence_count
-            ),
+            **matrix_dashboard_counts,
+            **matrix_drilldown_counts,
         },
         "request_cell_summary": request_cell_summary.to_payload(),
         "request_cell_registry_browser": request_cell_browser.to_payload(),
@@ -2610,53 +1840,9 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
         "scene_external_handoff_contract_audit": (
             external_handoff_contract_report.to_payload()
         ),
-        "scene_boundary_guarded_completion_audit": (
-            boundary_guarded_completion_report.to_payload()
-        ),
-        "scene_residual_warning_governance_audit": (
-            residual_warning_governance_report.to_payload()
-        ),
-        "scene_boundary_readiness_reconciliation_audit": (
-            boundary_readiness_reconciliation_report.to_payload()
-        ),
-        "scene_terminal_release_exception_audit": (
-            terminal_release_exception_report.to_payload()
-        ),
-        "scene_boundary_subject_release_dossier_audit": (
-            boundary_subject_release_dossier_report.to_payload()
-        ),
-        "scene_non_subject_release_trace_attribution_audit": (
-            non_subject_release_trace_attribution_report.to_payload()
-        ),
-        "scene_release_trace_partition_guard_audit": (
-            release_trace_partition_guard_report.to_payload()
-        ),
-        "scene_release_projection_surface_parity_audit": (
-            release_projection_surface_parity_report.to_payload()
-        ),
-        "scene_boundary_subject_release_continuity_audit": (
-            boundary_subject_release_continuity_report.to_payload()
-        ),
-        "scene_release_closure_ledger_audit": (
-            release_closure_ledger_report.to_payload()
-        ),
-        "scene_boundary_maturity_release_envelope_audit": (
-            boundary_maturity_release_envelope_report.to_payload()
-        ),
-        "scene_retained_gap_exit_criteria_audit": (
-            retained_gap_exit_criteria_report.to_payload()
-        ),
-        "scene_release_residual_ratio_ledger_audit": (
-            release_residual_ratio_ledger_report.to_payload()
-        ),
-        "scene_release_residual_explanation_audit": (
-            release_residual_explanation_report.to_payload()
-        ),
+        **release_governance_payload_entries,
         "scene_release_governance_export_script_evidence": (
             release_governance_export_script_evidence
-        ),
-        "scene_release_acceptance_certificate_audit": (
-            release_acceptance_certificate_report.to_payload()
         ),
         "scene_material_schema_audit": material_schema_report.to_payload(),
         "scene_material_repair_flow_audit": (
@@ -2678,8 +1864,8 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
         "scene_product_maturity_upgrade_audit": (
             maturity_upgrade_report.to_payload()
         ),
-        "scene_matrix_dashboard": matrix_dashboard.to_payload(),
-        "scene_matrix_drilldown": matrix_drilldown.to_payload(),
+        "scene_matrix_dashboard": matrix_dashboard_payload,
+        "scene_matrix_drilldown": matrix_drilldown_payload,
         "fixture_library_output_dir": str(output_dir),
     }
     if _pytest_release_gate_lightweight_enabled():

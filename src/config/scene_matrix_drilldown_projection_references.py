@@ -7,21 +7,6 @@ from functools import lru_cache
 from src.config.scene_ambiguity_clarification_ui_audit import (
     build_scene_ambiguity_clarification_ui_audit_report,
 )
-from src.config.scene_boundary_guarded_completion_audit import (
-    build_scene_boundary_guarded_completion_audit_report,
-)
-from src.config.scene_boundary_maturity_release_envelope_audit import (
-    build_scene_boundary_maturity_release_envelope_audit_report,
-)
-from src.config.scene_boundary_readiness_reconciliation_audit import (
-    build_scene_boundary_readiness_reconciliation_audit_report,
-)
-from src.config.scene_boundary_subject_release_continuity_audit import (
-    build_scene_boundary_subject_release_continuity_audit_report,
-)
-from src.config.scene_boundary_subject_release_dossier_audit import (
-    build_scene_boundary_subject_release_dossier_audit_report,
-)
 from src.config.scene_control_runtime_consistency_audit import (
     build_scene_control_runtime_consistency_audit_report,
 )
@@ -42,40 +27,27 @@ from src.config.scene_material_repair_flow_audit import (
 )
 from src.config.scene_matrix_dashboard_lenses import SCENE_MATRIX_DASHBOARD_SOURCE_IDS
 from src.config.scene_matrix_drilldown_models import SceneMatrixDrilldownReport
-from src.config.scene_non_subject_release_trace_attribution_audit import (
-    build_scene_non_subject_release_trace_attribution_audit_report,
-)
-from src.config.scene_release_acceptance_certificate_audit import (
+from src.config.scene_release_governance_registry import (
     SCENE_RELEASE_GOVERNANCE_EXPORT_SCRIPT_EVIDENCE_SOURCE_ID,
-    build_scene_release_acceptance_certificate_audit_report,
-)
-from src.config.scene_release_closure_ledger_audit import (
-    build_scene_release_closure_ledger_audit_report,
-)
-from src.config.scene_release_projection_surface_parity_audit import (
-    build_scene_release_projection_surface_parity_audit_report,
-)
-from src.config.scene_release_residual_explanation_audit import (
-    build_scene_release_residual_explanation_audit_report,
-)
-from src.config.scene_release_residual_ratio_ledger_audit import (
-    build_scene_release_residual_ratio_ledger_audit_report,
-)
-from src.config.scene_release_trace_partition_guard_audit import (
-    build_scene_release_trace_partition_guard_audit_report,
+    build_scene_release_governance_report,
+    scene_release_governance_drilldown_id,
+    scene_release_governance_report_id,
 )
 from src.config.scene_report_artifact_drilldown_audit import (
     build_scene_report_artifact_drilldown_audit_report,
 )
-from src.config.scene_residual_warning_governance_audit import (
-    build_scene_residual_warning_governance_audit_report,
-)
-from src.config.scene_retained_gap_exit_criteria_audit import (
-    build_scene_retained_gap_exit_criteria_audit_report,
-)
-from src.config.scene_terminal_release_exception_audit import (
-    build_scene_terminal_release_exception_audit_report,
-)
+
+
+@lru_cache(maxsize=None)
+def _release_governance_report(report_attribute: str) -> object:
+    return build_scene_release_governance_report(
+        scene_release_governance_report_id(report_attribute)
+    )
+
+
+def _release_report_rows(report_attribute: str) -> tuple[str, tuple[object, ...]]:
+    report = _release_governance_report(report_attribute)
+    return scene_release_governance_drilldown_id(report_attribute), report.rows
 
 
 def _projection_source_reference_ids(
@@ -102,7 +74,9 @@ def _projection_source_reference_map() -> dict[tuple[str, str, str], frozenset[s
         if normalized:
             references[(drilldown_id, row_id, field_name)] = normalized
 
-    terminal_report = build_scene_terminal_release_exception_audit_report()
+    terminal_report = _release_governance_report(
+        "terminal_release_exception_report"
+    )
     for row in terminal_report.rows:
         add(
             "terminal_release_exception",
@@ -111,8 +85,8 @@ def _projection_source_reference_map() -> dict[tuple[str, str, str], frozenset[s
             row.source_ids,
         )
 
-    non_subject_report = (
-        build_scene_non_subject_release_trace_attribution_audit_report()
+    non_subject_report = _release_governance_report(
+        "non_subject_release_trace_attribution_report"
     )
     for row in non_subject_report.rows:
         add(
@@ -122,7 +96,9 @@ def _projection_source_reference_map() -> dict[tuple[str, str, str], frozenset[s
             (row.surface_source_id,),
         )
 
-    parity_report = build_scene_release_projection_surface_parity_audit_report()
+    parity_report = _release_governance_report(
+        "release_projection_surface_parity_report"
+    )
     for row in parity_report.rows:
         add(
             "release_projection_surface_parity",
@@ -131,7 +107,9 @@ def _projection_source_reference_map() -> dict[tuple[str, str, str], frozenset[s
             (row.audit_source_id,),
         )
 
-    closure_report = build_scene_release_closure_ledger_audit_report()
+    closure_report = _release_governance_report(
+        "release_closure_ledger_report"
+    )
     for row in closure_report.rows:
         add(
             "release_closure_ledger",
@@ -140,7 +118,9 @@ def _projection_source_reference_map() -> dict[tuple[str, str, str], frozenset[s
             (row.source_id,),
         )
 
-    acceptance_report = build_scene_release_acceptance_certificate_audit_report()
+    acceptance_report = _release_governance_report(
+        "release_acceptance_certificate_report"
+    )
     for row in acceptance_report.rows:
         add(
             "release_acceptance_certificate",
@@ -285,7 +265,9 @@ def _projection_path_reference_map() -> dict[tuple[str, str, str], frozenset[str
                 normalized
             )
 
-    for row in build_scene_release_projection_surface_parity_audit_report().rows:
+    for row in _release_governance_report(
+        "release_projection_surface_parity_report"
+    ).rows:
         add(
             "release_projection_surface_parity",
             row.projection_id,
@@ -297,7 +279,9 @@ def _projection_path_reference_map() -> dict[tuple[str, str, str], frozenset[str
                 *row.supplemental_closure_doc_paths,
             ),
         )
-    for row in build_scene_release_closure_ledger_audit_report().rows:
+    for row in _release_governance_report(
+        "release_closure_ledger_report"
+    ).rows:
         add(
             "release_closure_ledger",
             row.stage_id,
@@ -332,91 +316,117 @@ def _projection_evidence_reference_map() -> dict[tuple[str, str, str], frozenset
                 normalized
             )
 
-    for row in build_scene_boundary_guarded_completion_audit_report().rows:
+    for row in _release_governance_report(
+        "boundary_guarded_completion_report"
+    ).rows:
         add(
             "boundary_guarded_completion",
             f"{row.subject_type}:{row.subject_id}",
             "action_behavior_ids",
             row.evidence_ids,
         )
-    for row in build_scene_residual_warning_governance_audit_report().rows:
+    for row in _release_governance_report(
+        "residual_warning_governance_report"
+    ).rows:
         add(
             "residual_warning_governance",
             row.row_id,
             "capability_ids",
             row.evidence_ids,
         )
-    for row in build_scene_boundary_readiness_reconciliation_audit_report().rows:
+    for row in _release_governance_report(
+        "boundary_readiness_reconciliation_report"
+    ).rows:
         add(
             "boundary_readiness_reconciliation",
             row.row_id,
             "capability_ids",
             row.evidence_ids,
         )
-    for row in build_scene_terminal_release_exception_audit_report().rows:
+    for row in _release_governance_report(
+        "terminal_release_exception_report"
+    ).rows:
         add(
             "terminal_release_exception",
             row.exception_id,
             "capability_ids",
             row.evidence_ids,
         )
-    for row in build_scene_boundary_subject_release_dossier_audit_report().rows:
+    for row in _release_governance_report(
+        "boundary_subject_release_dossier_report"
+    ).rows:
         add(
             "boundary_subject_release_dossier",
             row.subject_key,
             "capability_ids",
             row.evidence_ids,
         )
-    for row in build_scene_non_subject_release_trace_attribution_audit_report().rows:
+    for row in _release_governance_report(
+        "non_subject_release_trace_attribution_report"
+    ).rows:
         add(
             "non_subject_release_trace_attribution",
             row.trace_id,
             "capability_ids",
             row.evidence_ids,
         )
-    for row in build_scene_release_trace_partition_guard_audit_report().rows:
+    for row in _release_governance_report(
+        "release_trace_partition_guard_report"
+    ).rows:
         add(
             "release_trace_partition_guard",
             row.partition_id,
             "capability_ids",
             row.evidence_ids,
         )
-    for row in build_scene_release_projection_surface_parity_audit_report().rows:
+    for row in _release_governance_report(
+        "release_projection_surface_parity_report"
+    ).rows:
         add(
             "release_projection_surface_parity",
             row.projection_id,
             "capability_ids",
             row.evidence_ids,
         )
-    for row in build_scene_boundary_subject_release_continuity_audit_report().rows:
+    for row in _release_governance_report(
+        "boundary_subject_release_continuity_report"
+    ).rows:
         add(
             "boundary_subject_release_continuity",
             row.subject_key,
             "capability_ids",
             row.evidence_ids,
         )
-    for row in build_scene_release_closure_ledger_audit_report().rows:
+    for row in _release_governance_report(
+        "release_closure_ledger_report"
+    ).rows:
         add(
             "release_closure_ledger",
             row.stage_id,
             "capability_ids",
             row.evidence_ids,
         )
-    for row in build_scene_boundary_maturity_release_envelope_audit_report().rows:
+    for row in _release_governance_report(
+        "boundary_maturity_release_envelope_report"
+    ).rows:
         add(
             "boundary_maturity_release_envelope",
             row.envelope_id,
             "capability_ids",
             row.evidence_ids,
         )
-    for row in build_scene_release_residual_ratio_ledger_audit_report().rows:
+    for row in _release_governance_report(
+        "release_residual_ratio_ledger_report"
+    ).rows:
         add(
             "release_residual_ratio_ledger",
             row.ratio_id,
             "capability_ids",
             row.evidence_ids,
         )
-    acceptance_report = build_scene_release_acceptance_certificate_audit_report()
+    acceptance_report = _release_governance_report(
+        "release_acceptance_certificate_report"
+    )
     for row in acceptance_report.rows:
         add(
             "release_acceptance_certificate",
@@ -456,9 +466,12 @@ def _projection_release_marker_reference_map() -> dict[
                 normalized
             )
 
-    for row in build_scene_release_projection_surface_parity_audit_report().rows:
+    drilldown_id, rows = _release_report_rows(
+        "release_projection_surface_parity_report"
+    )
+    for row in rows:
         add(
-            "release_projection_surface_parity",
+            drilldown_id,
             row.projection_id,
             "action_behavior_ids",
             (
@@ -468,14 +481,17 @@ def _projection_release_marker_reference_map() -> dict[
             ),
         )
         add(
-            "release_projection_surface_parity",
+            drilldown_id,
             row.projection_id,
             "capability_ids",
             (row.summary_marker,),
         )
-    for row in build_scene_release_closure_ledger_audit_report().rows:
+    drilldown_id, rows = _release_report_rows(
+        "release_closure_ledger_report"
+    )
+    for row in rows:
         add(
-            "release_closure_ledger",
+            drilldown_id,
             row.stage_id,
             "action_behavior_ids",
             (
@@ -510,22 +526,28 @@ def _projection_release_link_reference_map() -> dict[
                 normalized
             )
 
-    for row in build_scene_terminal_release_exception_audit_report().rows:
+    drilldown_id, rows = _release_report_rows(
+        "terminal_release_exception_report"
+    )
+    for row in rows:
         add(
-            "terminal_release_exception",
+            drilldown_id,
             row.exception_id,
             "capability_ids",
             row.source_trace_ids,
         )
-    for row in build_scene_boundary_subject_release_dossier_audit_report().rows:
+    drilldown_id, rows = _release_report_rows(
+        "boundary_subject_release_dossier_report"
+    )
+    for row in rows:
         add(
-            "boundary_subject_release_dossier",
+            drilldown_id,
             row.subject_key,
             "action_behavior_ids",
             row.terminal_exception_ids,
         )
         add(
-            "boundary_subject_release_dossier",
+            drilldown_id,
             row.subject_key,
             "capability_ids",
             (
@@ -533,29 +555,38 @@ def _projection_release_link_reference_map() -> dict[
                 *row.release_exception_trace_ids,
             ),
         )
-    for row in build_scene_non_subject_release_trace_attribution_audit_report().rows:
+    drilldown_id, rows = _release_report_rows(
+        "non_subject_release_trace_attribution_report"
+    )
+    for row in rows:
         add(
-            "non_subject_release_trace_attribution",
+            drilldown_id,
             row.trace_id,
             "action_behavior_ids",
             (row.terminal_exception_id,),
         )
         add(
-            "non_subject_release_trace_attribution",
+            drilldown_id,
             row.trace_id,
             "capability_ids",
             (row.source_trace_id,),
         )
-    for row in build_scene_release_trace_partition_guard_audit_report().rows:
+    drilldown_id, rows = _release_report_rows(
+        "release_trace_partition_guard_report"
+    )
+    for row in rows:
         add(
-            "release_trace_partition_guard",
+            drilldown_id,
             row.partition_id,
             "capability_ids",
             row.trace_ids,
         )
-    for row in build_scene_boundary_subject_release_continuity_audit_report().rows:
+    drilldown_id, rows = _release_report_rows(
+        "boundary_subject_release_continuity_report"
+    )
+    for row in rows:
         add(
-            "boundary_subject_release_continuity",
+            drilldown_id,
             row.subject_key,
             "capability_ids",
             (
@@ -564,16 +595,22 @@ def _projection_release_link_reference_map() -> dict[
                 *row.dossier_trace_ids,
             ),
         )
-    for row in build_scene_release_closure_ledger_audit_report().rows:
+    drilldown_id, rows = _release_report_rows(
+        "release_closure_ledger_report"
+    )
+    for row in rows:
         add(
-            "release_closure_ledger",
+            drilldown_id,
             row.stage_id,
             "capability_ids",
             row.upstream_stage_ids,
         )
-    for row in build_scene_boundary_maturity_release_envelope_audit_report().rows:
+    drilldown_id, rows = _release_report_rows(
+        "boundary_maturity_release_envelope_report"
+    )
+    for row in rows:
         add(
-            "boundary_maturity_release_envelope",
+            drilldown_id,
             row.envelope_id,
             "capability_ids",
             (
@@ -582,22 +619,28 @@ def _projection_release_link_reference_map() -> dict[
                 *row.dossier_trace_ids,
             ),
         )
-    for row in build_scene_retained_gap_exit_criteria_audit_report().rows:
+    drilldown_id, rows = _release_report_rows(
+        "retained_gap_exit_criteria_report"
+    )
+    for row in rows:
         add(
-            "retained_gap_exit_criteria",
+            drilldown_id,
             row.criteria_id,
             "action_behavior_ids",
             (row.release_envelope_id,),
         )
-    for row in build_scene_release_residual_ratio_ledger_audit_report().rows:
+    drilldown_id, rows = _release_report_rows(
+        "release_residual_ratio_ledger_report"
+    )
+    for row in rows:
         add(
-            "release_residual_ratio_ledger",
+            drilldown_id,
             row.ratio_id,
             "action_behavior_ids",
             row.terminal_exception_ids,
         )
         add(
-            "release_residual_ratio_ledger",
+            drilldown_id,
             row.ratio_id,
             "capability_ids",
             (
@@ -632,7 +675,9 @@ def _projection_retained_gap_exit_reference_map() -> dict[
                 normalized
             )
 
-    for row in build_scene_retained_gap_exit_criteria_audit_report().rows:
+    for row in _release_governance_report(
+        "retained_gap_exit_criteria_report"
+    ).rows:
         add(
             "retained_gap_exit_criteria",
             row.criteria_id,
@@ -737,14 +782,18 @@ def _projection_release_metric_reference_map() -> dict[
                 normalized
             )
 
-    for row in build_scene_release_residual_ratio_ledger_audit_report().rows:
+    for row in _release_governance_report(
+        "release_residual_ratio_ledger_report"
+    ).rows:
         add(
             "release_residual_ratio_ledger",
             row.ratio_id,
             "action_behavior_ids",
             _release_residual_receipt_action_ids(row),
         )
-    for row in build_scene_release_residual_explanation_audit_report().rows:
+    for row in _release_governance_report(
+        "release_residual_explanation_report"
+    ).rows:
         add(
             "release_residual_explanation",
             row.residual_id,
@@ -776,28 +825,36 @@ def _projection_external_handoff_contract_reference_map() -> dict[
                 normalized
             )
 
-    for row in build_scene_boundary_guarded_completion_audit_report().rows:
+    for row in _release_governance_report(
+        "boundary_guarded_completion_report"
+    ).rows:
         add(
             "boundary_guarded_completion",
             f"{row.subject_type}:{row.subject_id}",
             "capability_ids",
             row.external_handoff_contract_ids,
         )
-    for row in build_scene_boundary_subject_release_dossier_audit_report().rows:
+    for row in _release_governance_report(
+        "boundary_subject_release_dossier_report"
+    ).rows:
         add(
             "boundary_subject_release_dossier",
             row.subject_key,
             "capability_ids",
             row.external_handoff_contract_ids,
         )
-    for row in build_scene_boundary_maturity_release_envelope_audit_report().rows:
+    for row in _release_governance_report(
+        "boundary_maturity_release_envelope_report"
+    ).rows:
         add(
             "boundary_maturity_release_envelope",
             row.envelope_id,
             "action_behavior_ids",
             (row.external_handoff_contract_id,),
         )
-    for row in build_scene_retained_gap_exit_criteria_audit_report().rows:
+    for row in _release_governance_report(
+        "retained_gap_exit_criteria_report"
+    ).rows:
         add(
             "retained_gap_exit_criteria",
             row.criteria_id,
@@ -874,7 +931,9 @@ def _projection_requirement_dimension_reference_map() -> dict[
                 normalized
             )
 
-    acceptance_report = build_scene_release_acceptance_certificate_audit_report()
+    acceptance_report = _release_governance_report(
+        "release_acceptance_certificate_report"
+    )
     for row in acceptance_report.requirement_dimension_rows:
         add(
             "release_acceptance_certificate",
@@ -914,7 +973,9 @@ def _projection_target_plugin_reference_map() -> dict[
             "capability_ids",
             (row.target_plugin_id,),
         )
-    for row in build_scene_boundary_guarded_completion_audit_report().rows:
+    for row in _release_governance_report(
+        "boundary_guarded_completion_report"
+    ).rows:
         add(
             "boundary_guarded_completion",
             f"{row.subject_type}:{row.subject_id}",

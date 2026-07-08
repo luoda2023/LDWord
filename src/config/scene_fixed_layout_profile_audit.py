@@ -16,6 +16,7 @@ from src.config.scene_coverage_manifest import (
     SceneCoveragePack,
     list_scene_coverage_packs,
 )
+from src.config.scene_source_evidence import scan_scene_source_markers
 
 
 SCENE_FIXED_LAYOUT_PROFILE_AUDIT_ID = "scene_fixed_layout_profile_audit"
@@ -982,23 +983,29 @@ def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneFixedLayoutProfileEvidence, ...]:
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
-    evidence: list[SceneFixedLayoutProfileEvidence] = []
-    for spec in specs:
-        for item in spec.evidence:
-            path = root / item.source_path
-            text = path.read_text(encoding="utf-8") if path.exists() else ""
-            missing = tuple(marker for marker in item.markers if marker not in text)
-            evidence.append(
-                SceneFixedLayoutProfileEvidence(
-                    profile_channel_id=spec.profile_channel_id,
-                    evidence_id=item.evidence_id,
-                    source_path=item.source_path,
-                    markers=item.markers,
-                    missing_markers=missing,
-                    evidence_layer=item.evidence_layer,
-                )
-            )
-    return tuple(evidence)
+    evidence_specs = tuple(
+        (spec.profile_channel_id, item)
+        for spec in specs
+        for item in spec.evidence
+    )
+    marker_results = scan_scene_source_markers(
+        root,
+        tuple(
+            (item.evidence_id, item.source_path, item.markers)
+            for _, item in evidence_specs
+        ),
+    )
+    return tuple(
+        SceneFixedLayoutProfileEvidence(
+            profile_channel_id=profile_channel_id,
+            evidence_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
+            evidence_layer=item.evidence_layer,
+        )
+        for (profile_channel_id, item), result in zip(evidence_specs, marker_results)
+    )
 
 
 def _evidence_by_channel(

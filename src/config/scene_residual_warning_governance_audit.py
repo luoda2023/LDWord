@@ -26,6 +26,10 @@ from src.config.scene_object_preflight_action_audit import (
 from src.config.scene_plugin_boundary_confirmation_audit import (
     build_scene_plugin_boundary_confirmation_audit_report,
 )
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 
 
 SCENE_RESIDUAL_WARNING_GOVERNANCE_AUDIT_SOURCE_ID = (
@@ -233,14 +237,15 @@ SCENE_RESIDUAL_WARNING_GOVERNANCE_SOURCE_MARKERS: tuple[
         "export_script",
         "scripts/export_scene_residual_warning_governance_audit.py",
         (
-            "build_scene_residual_warning_governance_audit_report",
+            "run_registered_scene_audit_export",
+            SCENE_RESIDUAL_WARNING_GOVERNANCE_AUDIT_SOURCE_ID,
             "Managed warnings",
             "row.scope_type",
             "row.scope_id",
             "row.warning_kind",
             "row.governance_mode",
             "row.evidence_ids",
-            "json",
+            "_builder_kwargs",
             "markdown",
         ),
     ),
@@ -763,23 +768,18 @@ def _warning_key(
 def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneResidualWarningGovernanceSourceEvidence, ...]:
-    root = Path(project_root) if project_root is not None else Path.cwd()
-    evidence: list[SceneResidualWarningGovernanceSourceEvidence] = []
-    for source_id, source_path, markers in SCENE_RESIDUAL_WARNING_GOVERNANCE_SOURCE_MARKERS:
-        path = Path(source_path)
-        if not path.is_absolute():
-            path = root / source_path
-        text = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneResidualWarningGovernanceSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneResidualWarningGovernanceSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            project_root,
+            SCENE_RESIDUAL_WARNING_GOVERNANCE_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -789,9 +789,9 @@ def _source_evidence_issues(
         SceneResidualWarningGovernanceIssue(
             evidence.source_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence

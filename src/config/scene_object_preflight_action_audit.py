@@ -25,6 +25,7 @@ from src.config.scene_family_registry import (
 )
 from src.config.scene_repair_routing import repair_route_for_target
 from src.config.scene_sample_fixture_registry import list_scene_sample_fixtures
+from src.config.scene_source_evidence import scan_scene_source_markers
 from src.config.scene_word_risk_closure_audit import (
     build_scene_word_risk_closure_audit_report,
 )
@@ -728,23 +729,27 @@ def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneObjectPreflightActionSourceEvidence, ...]:
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
-    evidence: list[SceneObjectPreflightActionSourceEvidence] = []
-    for source_id, source_path, markers in SCENE_OBJECT_PREFLIGHT_ACTION_SOURCE_MARKERS:
-        path = root / source_path
-        text = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        if not path.exists():
-            missing = ("<missing file>", *missing)
-        evidence.append(
-            SceneObjectPreflightActionSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-                status="ready" if path.exists() and not missing else "missing",
-            )
+    return tuple(
+        SceneObjectPreflightActionSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=(
+                result.missing_markers
+                if result.source_exists
+                else ("<missing file>", *result.missing_markers)
+            ),
+            status=(
+                "ready"
+                if result.source_exists and not result.missing_markers
+                else "missing"
+            ),
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            root,
+            SCENE_OBJECT_PREFLIGHT_ACTION_SOURCE_MARKERS,
+        )
+    )
 
 
 def _ordered_targets(values: Iterable[object]) -> tuple[str, ...]:

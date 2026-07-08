@@ -11,116 +11,14 @@ from scripts.verify_scene_matrix_release_gate import (  # noqa: E402
     _print_human,
     build_scene_matrix_release_gate_payload,
 )
-from src.config.scene_boundary_guarded_completion_audit import (  # noqa: E402
-    build_scene_boundary_guarded_completion_audit_report,
-)
-from src.config.scene_boundary_maturity_release_envelope_audit import (  # noqa: E402
-    build_scene_boundary_maturity_release_envelope_audit_report,
-)
-from src.config.scene_boundary_readiness_reconciliation_audit import (  # noqa: E402
-    build_scene_boundary_readiness_reconciliation_audit_report,
-)
-from src.config.scene_boundary_subject_release_continuity_audit import (  # noqa: E402
-    build_scene_boundary_subject_release_continuity_audit_report,
-)
-from src.config.scene_boundary_subject_release_dossier_audit import (  # noqa: E402
-    build_scene_boundary_subject_release_dossier_audit_report,
-)
-from src.config.scene_non_subject_release_trace_attribution_audit import (  # noqa: E402
-    build_scene_non_subject_release_trace_attribution_audit_report,
-)
-from src.config.scene_release_acceptance_certificate_audit import (  # noqa: E402
-    build_scene_release_acceptance_certificate_audit_report,
-)
 from src.config.scene_release_closure_ledger_audit import (  # noqa: E402
     SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS,
     audit_scene_release_closure_ledger_report,
     build_scene_release_closure_ledger_audit_report,
 )
-from src.config.scene_release_projection_surface_parity_audit import (  # noqa: E402
-    build_scene_release_projection_surface_parity_audit_report,
-)
-from src.config.scene_release_residual_explanation_audit import (  # noqa: E402
-    build_scene_release_residual_explanation_audit_report,
-)
-from src.config.scene_release_residual_ratio_ledger_audit import (  # noqa: E402
-    build_scene_release_residual_ratio_ledger_audit_report,
-)
-from src.config.scene_release_trace_partition_guard_audit import (  # noqa: E402
-    build_scene_release_trace_partition_guard_audit_report,
-)
-from src.config.scene_residual_warning_governance_audit import (  # noqa: E402
-    build_scene_residual_warning_governance_audit_report,
-)
-from src.config.scene_retained_gap_exit_criteria_audit import (  # noqa: E402
-    build_scene_retained_gap_exit_criteria_audit_report,
-)
-from src.config.scene_terminal_release_exception_audit import (  # noqa: E402
-    build_scene_terminal_release_exception_audit_report,
-)
-
-
-RELEASE_GOVERNANCE_REPORT_BUILDERS = (
-    (
-        "scene_boundary_guarded_completion_audit",
-        build_scene_boundary_guarded_completion_audit_report,
-    ),
-    (
-        "scene_residual_warning_governance_audit",
-        build_scene_residual_warning_governance_audit_report,
-    ),
-    (
-        "scene_boundary_readiness_reconciliation_audit",
-        build_scene_boundary_readiness_reconciliation_audit_report,
-    ),
-    (
-        "scene_terminal_release_exception_audit",
-        build_scene_terminal_release_exception_audit_report,
-    ),
-    (
-        "scene_boundary_subject_release_dossier_audit",
-        build_scene_boundary_subject_release_dossier_audit_report,
-    ),
-    (
-        "scene_non_subject_release_trace_attribution_audit",
-        build_scene_non_subject_release_trace_attribution_audit_report,
-    ),
-    (
-        "scene_release_trace_partition_guard_audit",
-        build_scene_release_trace_partition_guard_audit_report,
-    ),
-    (
-        "scene_release_projection_surface_parity_audit",
-        build_scene_release_projection_surface_parity_audit_report,
-    ),
-    (
-        "scene_boundary_subject_release_continuity_audit",
-        build_scene_boundary_subject_release_continuity_audit_report,
-    ),
-    (
-        "scene_boundary_maturity_release_envelope_audit",
-        build_scene_boundary_maturity_release_envelope_audit_report,
-    ),
-    (
-        "scene_retained_gap_exit_criteria_audit",
-        build_scene_retained_gap_exit_criteria_audit_report,
-    ),
-    (
-        "scene_release_residual_ratio_ledger_audit",
-        build_scene_release_residual_ratio_ledger_audit_report,
-    ),
-    (
-        "scene_release_residual_explanation_audit",
-        build_scene_release_residual_explanation_audit_report,
-    ),
-    (
-        "scene_release_closure_ledger_audit",
-        build_scene_release_closure_ledger_audit_report,
-    ),
-    (
-        "scene_release_acceptance_certificate_audit",
-        build_scene_release_acceptance_certificate_audit_report,
-    ),
+from src.config.scene_release_governance_registry import (  # noqa: E402
+    SCENE_RELEASE_GOVERNANCE_EXPORT_REPORT_SPECS,
+    build_scene_release_governance_report,
 )
 
 
@@ -156,9 +54,12 @@ def test_release_closure_ledger_orders_release_stages_across_surfaces():
     assert source_status["n2_399_projection_trace_plan"] == "ready"
     assert source_status["n2_400_acceptance_receipt_plan"] == "ready"
     assert source_status["n2_401_acceptance_projection_trace_plan"] == "ready"
-    assert tuple(row.stage_id for row in report.rows) == tuple(
+    stage_ids = tuple(row.stage_id for row in report.rows)
+    assert stage_ids == tuple(
         spec.stage_id for spec in SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS
     )
+    assert "release_projection_surface_parity" in stage_ids
+    assert "release_closure_ledger" not in stage_ids
     assert rows["terminal_release_trace_ledger"].source_id == (
         "scene_terminal_release_exception_audit"
     )
@@ -209,24 +110,54 @@ def test_release_governance_reports_expose_export_script_source_evidence():
     missing_export_script = []
     unready_export_script = []
 
-    assert len(RELEASE_GOVERNANCE_REPORT_BUILDERS) == 15
-    for expected_source_id, build_report in RELEASE_GOVERNANCE_REPORT_BUILDERS:
-        payload = build_report(project_root=ROOT).to_payload()
+    for spec in SCENE_RELEASE_GOVERNANCE_EXPORT_REPORT_SPECS:
+        payload = build_scene_release_governance_report(
+            spec.report_id, project_root=ROOT
+        ).to_payload()
         source_status = {
             item["source_id"]: item["status"] for item in payload["source_evidence"]
         }
 
-        assert payload["source_id"] == expected_source_id
+        assert payload["source_id"] == spec.report_id
         if "export_script" not in source_status:
-            missing_export_script.append(expected_source_id)
+            missing_export_script.append(spec.report_id)
             continue
         if source_status["export_script"] != "ready":
             unready_export_script.append(
-                (expected_source_id, source_status["export_script"])
+                (spec.report_id, source_status["export_script"])
             )
 
     assert missing_export_script == []
     assert unready_export_script == []
+
+
+def test_release_closure_ledger_registry_paths_do_not_drift():
+    registry_specs = {
+        spec.report_id: spec for spec in SCENE_RELEASE_GOVERNANCE_EXPORT_REPORT_SPECS
+    }
+    source = (
+        ROOT / "src" / "config" / "scene_release_closure_ledger_audit.py"
+    ).read_text(encoding="utf-8")
+    spec_block = source.split("SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS", 1)[
+        1
+    ].split("class SceneReleaseClosureLedgerIssue", 1)[0]
+
+    assert "def release_gate_check_id(self) -> str:" in source
+    assert "return self.source_id" in source
+    assert "scene_release_governance_report_spec(self.source_id)" in source
+    assert "release_gate_check_id=" not in spec_block
+    assert "export_script_path=" not in spec_block
+    assert "test_path=" not in spec_block
+    assert "dashboard_card_id=" in spec_block
+    assert "drilldown_id=" in spec_block
+    assert "summary_marker=" in spec_block
+
+    for spec in SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS:
+        registry_spec = registry_specs[spec.source_id]
+
+        assert spec.release_gate_check_id == spec.source_id
+        assert spec.export_script_path == registry_spec.export_script_path
+        assert spec.test_path == registry_spec.test_path
 
 
 def test_release_closure_ledger_export_script_supports_json_and_markdown():

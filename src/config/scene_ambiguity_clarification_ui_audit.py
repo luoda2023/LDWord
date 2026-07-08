@@ -16,6 +16,7 @@ from src.config.scene_ambiguous_boundary_audit import (
     SceneAmbiguousBoundaryRow,
     build_scene_ambiguous_boundary_audit_report,
 )
+from src.config.scene_source_evidence import scan_scene_source_markers
 from src.config.scene_natural_request_router import (
     natural_request_route_payload,
     route_natural_scene_request,
@@ -394,21 +395,23 @@ def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneAmbiguityClarificationSourceEvidence, ...]:
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
-    evidence: list[SceneAmbiguityClarificationSourceEvidence] = []
-    for source_id, source_path, markers in SCENE_AMBIGUITY_CLARIFICATION_SOURCE_MARKERS:
-        path = root / source_path
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneAmbiguityClarificationSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-                status="ready" if path.exists() and not missing else "missing",
-            )
+    return tuple(
+        SceneAmbiguityClarificationSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
+            status=(
+                "ready"
+                if result.source_exists and not result.missing_markers
+                else "missing"
+            ),
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            root,
+            SCENE_AMBIGUITY_CLARIFICATION_SOURCE_MARKERS,
+        )
+    )
 
 
 def _request_cell_anchor(sample_id: str) -> str:

@@ -30,6 +30,7 @@ from src.config.scene_rule_source_governance import (
     scene_rule_sources_for_family,
     scene_rule_sources_for_pack,
 )
+from src.config.scene_source_evidence import scan_scene_source_markers
 from src.shared.engine.count_engine import (
     COUNT_PROFILE_MAP,
     CountProfile,
@@ -829,21 +830,23 @@ def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneCountProfileSourceEvidence, ...]:
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
-    evidence: list[SceneCountProfileSourceEvidence] = []
-    for source_id, source_path, markers in SCENE_COUNT_PROFILE_SOURCE_MARKERS:
-        path = root / source_path
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneCountProfileSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-                status="ready" if path.exists() and not missing else "missing",
-            )
+    return tuple(
+        SceneCountProfileSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
+            status=(
+                "ready"
+                if result.source_exists and not result.missing_markers
+                else "missing"
+            ),
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            root,
+            SCENE_COUNT_PROFILE_SOURCE_MARKERS,
+        )
+    )
 
 
 def _unique_values(values) -> tuple[str, ...]:

@@ -15,6 +15,9 @@ from src.config.scene_release_projection_surface_parity_audit import (  # noqa: 
     audit_scene_release_projection_surface_parity_report,
     build_scene_release_projection_surface_parity_audit_report,
 )
+from src.config.scene_release_governance_registry import (  # noqa: E402
+    SCENE_RELEASE_GOVERNANCE_EXPORT_REPORT_SPECS,
+)
 
 
 def test_release_projection_surfaces_are_projected_across_gate_and_ui():
@@ -48,9 +51,12 @@ def test_release_projection_surfaces_are_projected_across_gate_and_ui():
     assert source_status["n2_399_projection_trace_plan"] == "ready"
     assert source_status["n2_400_acceptance_receipt_plan"] == "ready"
     assert source_status["n2_401_acceptance_projection_trace_plan"] == "ready"
-    assert tuple(row.projection_id for row in report.rows) == tuple(
+    projection_ids = tuple(row.projection_id for row in report.rows)
+    assert projection_ids == tuple(
         spec.projection_id for spec in SCENE_RELEASE_PROJECTION_SURFACE_SPECS
     )
+    assert "release_closure_ledger" in projection_ids
+    assert "release_projection_surface_parity" not in projection_ids
     assert rows["release_trace_partition_guard"].dashboard_card_id == (
         "release_trace_partition"
     )
@@ -94,6 +100,36 @@ def test_release_projection_surfaces_are_projected_across_gate_and_ui():
         "docs/audits/scene_release_acceptance_receipt_trace_N2_400_2026-06-25.md",
         "docs/audits/scene_release_acceptance_projection_trace_N2_401_2026-06-25.md",
     )
+
+
+def test_release_projection_surface_registry_paths_do_not_drift():
+    registry_specs = {
+        spec.report_id: spec for spec in SCENE_RELEASE_GOVERNANCE_EXPORT_REPORT_SPECS
+    }
+    source = (
+        ROOT / "src" / "config" / "scene_release_projection_surface_parity_audit.py"
+    ).read_text(encoding="utf-8")
+    spec_block = source.split("SCENE_RELEASE_PROJECTION_SURFACE_SPECS", 1)[1].split(
+        "class SceneReleaseProjectionSurfaceParityIssue", 1
+    )[0]
+
+    assert "def release_gate_check_id(self) -> str:" in source
+    assert "return self.audit_source_id" in source
+    assert "scene_release_governance_report_spec(" in source
+    assert "self.audit_source_id" in source
+    assert "release_gate_check_id=" not in spec_block
+    assert "export_script_path=" not in spec_block
+    assert "test_path=" not in spec_block
+    assert "dashboard_card_id=" in spec_block
+    assert "drilldown_id=" in spec_block
+    assert "summary_marker=" in spec_block
+
+    for spec in SCENE_RELEASE_PROJECTION_SURFACE_SPECS:
+        registry_spec = registry_specs[spec.audit_source_id]
+
+        assert spec.release_gate_check_id == spec.audit_source_id
+        assert spec.export_script_path == registry_spec.export_script_path
+        assert spec.test_path == registry_spec.test_path
 
 
 def test_release_projection_surface_parity_export_script_supports_json_and_markdown():

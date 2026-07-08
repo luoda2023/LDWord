@@ -35,6 +35,14 @@ def test_high_frequency_task_lexicon_audit_locks_v29_task_families():
     assert report.missing_source_evidence_count == 0
     assert audit_high_frequency_task_lexicon_report(report) == ()
     assert tuple(payload["required_task_ids"]) == N2_161_REQUIRED_TASK_IDS
+    assert payload["counts"]["task_count"] == report.task_count
+    assert payload["counts"]["phrase_count"] == report.phrase_count
+    assert payload["counts"]["negative_task_count"] == report.negative_task_count
+    assert payload["counts"]["issue_count"] == report.issue_count
+    assert (
+        payload["counts"]["missing_source_evidence_count"]
+        == report.missing_source_evidence_count
+    )
 
     for row in report.rows:
         assert row.status == "ready"

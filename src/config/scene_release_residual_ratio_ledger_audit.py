@@ -12,6 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 from src.config.scene_boundary_guarded_completion_audit import (
     build_scene_boundary_guarded_completion_audit_report,
 )
@@ -293,7 +297,8 @@ SCENE_RELEASE_RESIDUAL_RATIO_LEDGER_SOURCE_MARKERS: tuple[
         "export_script",
         "scripts/export_scene_release_residual_ratio_ledger_audit.py",
         (
-            "build_scene_release_residual_ratio_ledger_audit_report",
+            "run_registered_scene_audit_export",
+            SCENE_RELEASE_RESIDUAL_RATIO_LEDGER_AUDIT_SOURCE_ID,
             "Residual ratios published",
             "row.ratio_id",
             "row.observed_ratio",
@@ -303,7 +308,6 @@ SCENE_RELEASE_RESIDUAL_RATIO_LEDGER_SOURCE_MARKERS: tuple[
             "Count/delivery receipt alignments",
             "Maturity L5 receipt alignments",
             "row.retained_gap_receipt_alignment_ids",
-            "json",
             "markdown",
         ),
     ),
@@ -1183,22 +1187,18 @@ def _retained_gap_receipts_are_aligned(criteria_row: object) -> bool:
 def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneReleaseResidualRatioLedgerSourceEvidence, ...]:
-    root = Path(project_root) if project_root is not None else Path.cwd()
-    evidence: list[SceneReleaseResidualRatioLedgerSourceEvidence] = []
-    for source_id, source_path, markers in (
-        SCENE_RELEASE_RESIDUAL_RATIO_LEDGER_SOURCE_MARKERS
-    ):
-        text = _read_text(root / source_path)
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneReleaseResidualRatioLedgerSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneReleaseResidualRatioLedgerSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            project_root,
+            SCENE_RELEASE_RESIDUAL_RATIO_LEDGER_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -1208,18 +1208,14 @@ def _source_evidence_issues(
         SceneReleaseResidualRatioLedgerIssue(
             evidence.source_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence
         if evidence.missing_markers
     )
-
-
-def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
 
 
 __all__ = [

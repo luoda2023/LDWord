@@ -11,6 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 from src.config.scene_boundary_guarded_completion_audit import (
     build_scene_boundary_guarded_completion_audit_report,
 )
@@ -86,6 +90,12 @@ from src.config.scene_word_risk_closure_audit import (
 from src.config.scene_release_closure_ledger_audit import (
     build_scene_release_closure_ledger_audit_report,
 )
+from src.config.scene_release_governance_registry import (
+    SCENE_RELEASE_ACCEPTANCE_CERTIFICATE_AUDIT_SOURCE_ID,
+    SCENE_RELEASE_GOVERNANCE_EXPORT_REPORT_SPECS,
+    SCENE_RELEASE_GOVERNANCE_EXPORT_SCRIPT_EVIDENCE_SOURCE_ID,
+    scene_release_governance_report_pairs,
+)
 from src.config.scene_release_projection_surface_parity_audit import (
     build_scene_release_projection_surface_parity_audit_report,
 )
@@ -108,13 +118,6 @@ from src.config.scene_terminal_release_exception_audit import (
     build_scene_terminal_release_exception_audit_report,
 )
 
-
-SCENE_RELEASE_ACCEPTANCE_CERTIFICATE_AUDIT_SOURCE_ID = (
-    "scene_release_acceptance_certificate_audit"
-)
-SCENE_RELEASE_GOVERNANCE_EXPORT_SCRIPT_EVIDENCE_SOURCE_ID = (
-    "scene_release_governance_export_script_evidence"
-)
 
 SCENE_RELEASE_ACCEPTANCE_CERTIFICATE_REQUIRED_EVIDENCE_IDS: tuple[str, ...] = (
     "component_report_passed",
@@ -274,8 +277,8 @@ SCENE_RELEASE_ACCEPTANCE_CERTIFICATE_SPECS: tuple[
         source_id=SCENE_RELEASE_GOVERNANCE_EXPORT_SCRIPT_EVIDENCE_SOURCE_ID,
         observed_numerator_attr="ready_export_script_count",
         observed_denominator_attr="report_count",
-        expected_numerator=15,
-        expected_denominator=15,
+        expected_numerator=len(SCENE_RELEASE_GOVERNANCE_EXPORT_REPORT_SPECS),
+        expected_denominator=len(SCENE_RELEASE_GOVERNANCE_EXPORT_REPORT_SPECS),
         summary=(
             "Every release governance report exposes export_script as ready "
             "source evidence."
@@ -555,7 +558,8 @@ SCENE_RELEASE_ACCEPTANCE_CERTIFICATE_SOURCE_MARKERS: tuple[
         "export_script",
         "scripts/export_scene_release_acceptance_certificate_audit.py",
         (
-            "build_scene_release_acceptance_certificate_audit_report",
+            "run_registered_scene_audit_export",
+            SCENE_RELEASE_ACCEPTANCE_CERTIFICATE_AUDIT_SOURCE_ID,
             "Certificates ready",
             "Receipt certificates ready",
             "Requirement dimensions ready",
@@ -563,7 +567,6 @@ SCENE_RELEASE_ACCEPTANCE_CERTIFICATE_SOURCE_MARKERS: tuple[
             "row.certificate_id",
             "row.observed_ratio",
             "row.expected_ratio",
-            "json",
             "markdown",
         ),
     ),
@@ -598,7 +601,7 @@ SCENE_RELEASE_ACCEPTANCE_CERTIFICATE_SOURCE_MARKERS: tuple[
     ),
     (
         "release_shell",
-        "tests/test_release_shell.py",
+        "tests/test_scene_matrix_release_workflow.py",
         (
             "export_scene_release_acceptance_certificate_audit.py",
             "test_scene_release_acceptance_certificate_audit.py",
@@ -1099,63 +1102,9 @@ def _component_reports(
     )
     release_governance_export_script_evidence_report = (
         _release_governance_export_script_evidence_report(
-            (
-                (
-                    "scene_boundary_guarded_completion_audit",
-                    boundary_guarded_completion_report,
-                ),
-                (
-                    "scene_residual_warning_governance_audit",
-                    residual_warning_governance_report,
-                ),
-                (
-                    "scene_boundary_readiness_reconciliation_audit",
-                    boundary_readiness_reconciliation_report,
-                ),
-                (
-                    "scene_terminal_release_exception_audit",
-                    terminal_release_exception_report,
-                ),
-                (
-                    "scene_boundary_subject_release_dossier_audit",
-                    boundary_subject_release_dossier_report,
-                ),
-                (
-                    "scene_non_subject_release_trace_attribution_audit",
-                    non_subject_release_trace_attribution_report,
-                ),
-                (
-                    "scene_release_trace_partition_guard_audit",
-                    release_trace_partition_guard_report,
-                ),
-                (
-                    "scene_release_projection_surface_parity_audit",
-                    release_projection_surface_parity_report,
-                ),
-                (
-                    "scene_boundary_subject_release_continuity_audit",
-                    boundary_subject_release_continuity_report,
-                ),
-                (
-                    "scene_boundary_maturity_release_envelope_audit",
-                    boundary_maturity_release_envelope_report,
-                ),
-                (
-                    "scene_retained_gap_exit_criteria_audit",
-                    retained_gap_exit_criteria_report,
-                ),
-                (
-                    "scene_release_residual_ratio_ledger_audit",
-                    release_residual_ratio_ledger_report,
-                ),
-                (
-                    "scene_release_residual_explanation_audit",
-                    release_residual_explanation_report,
-                ),
-                (
-                    "scene_release_closure_ledger_audit",
-                    release_closure_ledger_report,
-                ),
+            scene_release_governance_report_pairs(
+                locals(),
+                include_acceptance_certificate=False,
             ),
             acceptance_source_evidence=acceptance_source_evidence,
         )
@@ -1592,21 +1541,18 @@ def _passed_total(
 def _source_evidence(
     root: Path,
 ) -> tuple[SceneReleaseAcceptanceCertificateSourceEvidence, ...]:
-    evidence: list[SceneReleaseAcceptanceCertificateSourceEvidence] = []
-    for source_id, source_path, markers in (
-        SCENE_RELEASE_ACCEPTANCE_CERTIFICATE_SOURCE_MARKERS
-    ):
-        text = _read_text(root / source_path)
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneReleaseAcceptanceCertificateSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneReleaseAcceptanceCertificateSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            root,
+            SCENE_RELEASE_ACCEPTANCE_CERTIFICATE_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -1616,18 +1562,14 @@ def _source_evidence_issues(
         SceneReleaseAcceptanceCertificateIssue(
             evidence.source_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence
         if evidence.missing_markers
     )
-
-
-def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
 
 
 __all__ = [

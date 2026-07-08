@@ -187,6 +187,20 @@ class SceneControlRuntimeConsistencyReport:
             "runtime_consumer_count": self.runtime_consumer_count,
             "source_evidence_count": self.source_evidence_count,
             "missing_source_evidence_count": self.missing_source_evidence_count,
+            "counts": {
+                "runtime_control_count": self.runtime_control_count,
+                "ready_runtime_control_count": self.ready_runtime_control_count,
+                "issue_count": self.issue_count,
+                "control_contract_link_count": self.control_contract_link_count,
+                "scene_surface_count": self.scene_surface_count,
+                "template_surface_count": self.template_surface_count,
+                "shared_component_count": self.shared_component_count,
+                "runtime_consumer_count": self.runtime_consumer_count,
+                "source_evidence_count": self.source_evidence_count,
+                "missing_source_evidence_count": (
+                    self.missing_source_evidence_count
+                ),
+            },
             "owner_layer_counts": [
                 {"owner_layer": layer, "count": count}
                 for layer, count in self.owner_layer_counts

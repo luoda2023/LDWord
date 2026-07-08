@@ -11,6 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.config.scene_coverage_manifest import SCENE_COVERAGE_PACK_MAP
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 from src.config.scene_high_frequency_request_samples import (
     HighFrequencyRequestSample,
     list_high_frequency_request_samples,
@@ -501,21 +505,18 @@ def _registry_issues(
 def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneAmbiguousBoundarySourceEvidence, ...]:
-    root = Path(project_root) if project_root is not None else Path.cwd()
-    evidence: list[SceneAmbiguousBoundarySourceEvidence] = []
-    for evidence_id, source_path, markers in N2_162_SOURCE_EVIDENCE:
-        path = root / source_path
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneAmbiguousBoundarySourceEvidence(
-                evidence_id=evidence_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneAmbiguousBoundarySourceEvidence(
+            evidence_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            project_root,
+            N2_162_SOURCE_EVIDENCE,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -525,9 +526,9 @@ def _source_evidence_issues(
         SceneAmbiguousBoundaryIssue(
             evidence.evidence_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence

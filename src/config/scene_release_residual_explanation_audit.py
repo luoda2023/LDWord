@@ -26,6 +26,10 @@ from src.config.scene_release_residual_ratio_ledger_audit import (
 from src.config.scene_residual_warning_governance_audit import (
     build_scene_residual_warning_governance_audit_report,
 )
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 from src.config.scene_terminal_release_exception_audit import (
     build_scene_terminal_release_exception_audit_report,
 )
@@ -175,9 +179,9 @@ SCENE_RELEASE_RESIDUAL_EXPLANATION_SOURCE_MARKERS: tuple[
         "export_script",
         "scripts/export_scene_release_residual_explanation_audit.py",
         (
-            "build_scene_release_residual_explanation_audit_report",
+            "run_registered_scene_audit_export",
+            SCENE_RELEASE_RESIDUAL_EXPLANATION_AUDIT_SOURCE_ID,
             "Residual explanations covered",
-            "json",
             "markdown",
         ),
     ),
@@ -504,21 +508,18 @@ def _row_issues(
 def _source_evidence(
     root: Path,
 ) -> tuple[SceneReleaseResidualExplanationSourceEvidence, ...]:
-    evidence: list[SceneReleaseResidualExplanationSourceEvidence] = []
-    for source_id, source_path, markers in (
-        SCENE_RELEASE_RESIDUAL_EXPLANATION_SOURCE_MARKERS
-    ):
-        text = _source_text(root, source_path)
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneReleaseResidualExplanationSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneReleaseResidualExplanationSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            root,
+            SCENE_RELEASE_RESIDUAL_EXPLANATION_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_text(root: Path, source_path: str) -> str:
@@ -535,9 +536,9 @@ def _source_evidence_issues(
         SceneReleaseResidualExplanationIssue(
             evidence.source_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence

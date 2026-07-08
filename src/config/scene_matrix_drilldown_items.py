@@ -68,6 +68,10 @@ from src.config.scene_matrix_drilldown_release_items import (
     _retained_gap_exit_criteria_item,
     _terminal_release_exception_item,
 )
+from src.config.scene_release_governance_registry import (
+    SCENE_RELEASE_GOVERNANCE_DASHBOARD_SOURCE_IDS,
+    scene_release_governance_report_spec,
+)
 from src.config.scene_object_preflight_action_audit import (
     build_scene_object_preflight_action_audit_report,
 )
@@ -94,6 +98,27 @@ from src.config.scene_word_risk_closure_audit import (
 SceneMatrixDrilldownItemFactory = Callable[[], SceneMatrixDrilldownItem]
 
 
+def _release_governance_item_factory(
+    report_id: str,
+) -> SceneMatrixDrilldownItemFactory:
+    spec = scene_release_governance_report_spec(report_id)
+    factory_name = f"_{spec.report_attribute.removesuffix('_report')}_item"
+    factory = globals().get(factory_name)
+    if not callable(factory):
+        raise KeyError(f"Missing release governance drilldown item: {factory_name}")
+    return factory
+
+
+def _release_governance_item_factories() -> tuple[
+    tuple[str, SceneMatrixDrilldownItemFactory],
+    ...,
+]:
+    return tuple(
+        (report_id, _release_governance_item_factory(report_id))
+        for report_id in SCENE_RELEASE_GOVERNANCE_DASHBOARD_SOURCE_IDS
+    )
+
+
 def _item_factories_for_source(
     source_id: str,
 ) -> tuple[SceneMatrixDrilldownItemFactory, ...]:
@@ -118,60 +143,7 @@ def _item_factories_for_source(
         ),
         ("scene_plugin_boundary_confirmation_audit", _plugin_boundary_item),
         ("scene_external_handoff_contract_audit", _external_handoff_contract_item),
-        (
-            "scene_boundary_guarded_completion_audit",
-            _boundary_guarded_completion_item,
-        ),
-        (
-            "scene_residual_warning_governance_audit",
-            _residual_warning_governance_item,
-        ),
-        (
-            "scene_boundary_readiness_reconciliation_audit",
-            _boundary_readiness_reconciliation_item,
-        ),
-        ("scene_terminal_release_exception_audit", _terminal_release_exception_item),
-        (
-            "scene_boundary_subject_release_dossier_audit",
-            _boundary_subject_release_dossier_item,
-        ),
-        (
-            "scene_non_subject_release_trace_attribution_audit",
-            _non_subject_release_trace_attribution_item,
-        ),
-        (
-            "scene_release_trace_partition_guard_audit",
-            _release_trace_partition_guard_item,
-        ),
-        (
-            "scene_release_projection_surface_parity_audit",
-            _release_projection_surface_parity_item,
-        ),
-        (
-            "scene_boundary_subject_release_continuity_audit",
-            _boundary_subject_release_continuity_item,
-        ),
-        ("scene_release_closure_ledger_audit", _release_closure_ledger_item),
-        (
-            "scene_boundary_maturity_release_envelope_audit",
-            _boundary_maturity_release_envelope_item,
-        ),
-        (
-            "scene_retained_gap_exit_criteria_audit",
-            _retained_gap_exit_criteria_item,
-        ),
-        (
-            "scene_release_residual_ratio_ledger_audit",
-            _release_residual_ratio_ledger_item,
-        ),
-        (
-            "scene_release_residual_explanation_audit",
-            _release_residual_explanation_item,
-        ),
-        (
-            "scene_release_acceptance_certificate_audit",
-            _release_acceptance_certificate_item,
-        ),
+        *_release_governance_item_factories(),
         ("scene_word_risk_closure_audit", _word_risk_item),
         ("scene_import_handoff_audit", _import_handoff_item),
         ("scene_input_source_audit", _input_source_item),

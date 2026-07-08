@@ -62,6 +62,10 @@ from src.config.scene_high_frequency_request_samples import (
     HighFrequencyRequestSample,
     list_high_frequency_request_samples,
 )
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 
 
 SCENE_BUSINESS_CAPABILITY_MATRIX_AUDIT_ID = (
@@ -580,9 +584,9 @@ def audit_scene_business_capability_matrix_report(
                     "source_evidence",
                     evidence.source_id,
                     "missing_source_evidence",
-                    (
-                        f"{evidence.source_path} missing markers: "
-                        f"{', '.join(evidence.missing_markers)}"
+                    scene_source_marker_issue_message(
+                        evidence.source_path,
+                        evidence.missing_markers,
                     ),
                 )
             )
@@ -1092,23 +1096,23 @@ def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneBusinessCapabilitySourceEvidence, ...]:
     root = Path(project_root) if project_root is not None else Path(__file__).resolve().parents[2]
-    evidence: list[SceneBusinessCapabilitySourceEvidence] = []
-    for source_id, source_path, markers in SCENE_BUSINESS_CAPABILITY_SOURCE_MARKERS:
-        path = Path(source_path)
-        if not path.is_absolute():
-            path = root / source_path
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneBusinessCapabilitySourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-                status="ready" if path.exists() and not missing else "missing",
-            )
+    return tuple(
+        SceneBusinessCapabilitySourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
+            status=(
+                "ready"
+                if result.source_exists and not result.missing_markers
+                else "missing"
+            ),
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            root,
+            SCENE_BUSINESS_CAPABILITY_SOURCE_MARKERS,
+        )
+    )
 
 
 def _issue(

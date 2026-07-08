@@ -25,6 +25,10 @@ from src.config.scene_plugin_boundary_confirmation_audit import (
 from src.config.scene_product_maturity_upgrade_audit import (
     build_scene_product_maturity_upgrade_audit_report,
 )
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 
 
 SCENE_BOUNDARY_GUARDED_COMPLETION_AUDIT_SOURCE_ID = (
@@ -100,14 +104,15 @@ SCENE_BOUNDARY_GUARDED_COMPLETION_SOURCE_MARKERS: tuple[
         "export_script",
         "scripts/export_scene_boundary_guarded_completion_audit.py",
         (
-            "build_scene_boundary_guarded_completion_audit_report",
+            "run_registered_scene_audit_export",
+            SCENE_BOUNDARY_GUARDED_COMPLETION_AUDIT_SOURCE_ID,
             "Subjects:",
             "row.subject_type",
             "row.subject_id",
             "row.remaining_gap_ids",
             "row.external_handoff_contract_ids",
             "row.excluded_core_claims",
-            "json",
+            "_builder_kwargs",
             "markdown",
         ),
     ),
@@ -526,23 +531,18 @@ def _row_issues(
 def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneBoundaryGuardedCompletionSourceEvidence, ...]:
-    root = Path(project_root) if project_root is not None else Path.cwd()
-    evidence: list[SceneBoundaryGuardedCompletionSourceEvidence] = []
-    for source_id, source_path, markers in SCENE_BOUNDARY_GUARDED_COMPLETION_SOURCE_MARKERS:
-        path = Path(source_path)
-        if not path.is_absolute():
-            path = root / source_path
-        text = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneBoundaryGuardedCompletionSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneBoundaryGuardedCompletionSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            project_root,
+            SCENE_BOUNDARY_GUARDED_COMPLETION_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -552,9 +552,9 @@ def _source_evidence_issues(
         SceneBoundaryGuardedCompletionIssue(
             evidence.source_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence

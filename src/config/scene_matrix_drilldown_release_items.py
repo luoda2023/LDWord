@@ -4,21 +4,6 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from src.config.scene_boundary_guarded_completion_audit import (
-    build_scene_boundary_guarded_completion_audit_report,
-)
-from src.config.scene_boundary_maturity_release_envelope_audit import (
-    build_scene_boundary_maturity_release_envelope_audit_report,
-)
-from src.config.scene_boundary_readiness_reconciliation_audit import (
-    build_scene_boundary_readiness_reconciliation_audit_report,
-)
-from src.config.scene_boundary_subject_release_continuity_audit import (
-    build_scene_boundary_subject_release_continuity_audit_report,
-)
-from src.config.scene_boundary_subject_release_dossier_audit import (
-    build_scene_boundary_subject_release_dossier_audit_report,
-)
 from src.config.scene_matrix_drilldown_models import (
     SceneMatrixDrilldownItem,
     SceneMatrixDrilldownRow,
@@ -26,40 +11,18 @@ from src.config.scene_matrix_drilldown_models import (
 from src.config.scene_matrix_drilldown_projection_references import (
     _release_residual_receipt_action_ids,
 )
-from src.config.scene_non_subject_release_trace_attribution_audit import (
-    build_scene_non_subject_release_trace_attribution_audit_report,
+from src.config.scene_release_governance_registry import (
+    build_scene_release_governance_report,
 )
-from src.config.scene_release_acceptance_certificate_audit import (
-    build_scene_release_acceptance_certificate_audit_report,
-)
-from src.config.scene_release_closure_ledger_audit import (
-    build_scene_release_closure_ledger_audit_report,
-)
-from src.config.scene_release_projection_surface_parity_audit import (
-    build_scene_release_projection_surface_parity_audit_report,
-)
-from src.config.scene_release_residual_explanation_audit import (
-    build_scene_release_residual_explanation_audit_report,
-)
-from src.config.scene_release_residual_ratio_ledger_audit import (
-    build_scene_release_residual_ratio_ledger_audit_report,
-)
-from src.config.scene_release_trace_partition_guard_audit import (
-    build_scene_release_trace_partition_guard_audit_report,
-)
-from src.config.scene_residual_warning_governance_audit import (
-    build_scene_residual_warning_governance_audit_report,
-)
-from src.config.scene_retained_gap_exit_criteria_audit import (
-    build_scene_retained_gap_exit_criteria_audit_report,
-)
-from src.config.scene_terminal_release_exception_audit import (
-    build_scene_terminal_release_exception_audit_report,
-)
+
+
+@lru_cache(maxsize=None)
+def _release_governance_report(report_id: str) -> object:
+    return build_scene_release_governance_report(report_id)
 
 
 def _boundary_guarded_completion_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_boundary_guarded_completion_audit_report()
+    report = _release_governance_report("scene_boundary_guarded_completion_audit")
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=f"{row.subject_type}:{row.subject_id}",
@@ -107,7 +70,7 @@ def _boundary_guarded_completion_item() -> SceneMatrixDrilldownItem:
 
 
 def _residual_warning_governance_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_residual_warning_governance_audit_report()
+    report = _release_governance_report("scene_residual_warning_governance_audit")
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.row_id,
@@ -145,7 +108,9 @@ def _residual_warning_governance_item() -> SceneMatrixDrilldownItem:
 
 
 def _boundary_readiness_reconciliation_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_boundary_readiness_reconciliation_audit_report()
+    report = _release_governance_report(
+        "scene_boundary_readiness_reconciliation_audit"
+    )
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.row_id,
@@ -192,7 +157,7 @@ def _boundary_readiness_reconciliation_item() -> SceneMatrixDrilldownItem:
 
 
 def _terminal_release_exception_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_terminal_release_exception_audit_report()
+    report = _release_governance_report("scene_terminal_release_exception_audit")
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.exception_id,
@@ -239,7 +204,9 @@ def _terminal_release_exception_item() -> SceneMatrixDrilldownItem:
 
 
 def _boundary_subject_release_dossier_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_boundary_subject_release_dossier_audit_report()
+    report = _release_governance_report(
+        "scene_boundary_subject_release_dossier_audit"
+    )
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.subject_key,
@@ -288,7 +255,9 @@ def _boundary_subject_release_dossier_item() -> SceneMatrixDrilldownItem:
 
 
 def _non_subject_release_trace_attribution_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_non_subject_release_trace_attribution_audit_report()
+    report = _release_governance_report(
+        "scene_non_subject_release_trace_attribution_audit"
+    )
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.trace_id,
@@ -329,7 +298,7 @@ def _non_subject_release_trace_attribution_item() -> SceneMatrixDrilldownItem:
 
 
 def _release_trace_partition_guard_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_release_trace_partition_guard_audit_report()
+    report = _release_governance_report("scene_release_trace_partition_guard_audit")
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.partition_id,
@@ -366,7 +335,9 @@ def _release_trace_partition_guard_item() -> SceneMatrixDrilldownItem:
 
 
 def _release_projection_surface_parity_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_release_projection_surface_parity_audit_report()
+    report = _release_governance_report(
+        "scene_release_projection_surface_parity_audit"
+    )
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.projection_id,
@@ -412,7 +383,9 @@ def _release_projection_surface_parity_item() -> SceneMatrixDrilldownItem:
 
 
 def _boundary_subject_release_continuity_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_boundary_subject_release_continuity_audit_report()
+    report = _release_governance_report(
+        "scene_boundary_subject_release_continuity_audit"
+    )
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.subject_key,
@@ -466,7 +439,7 @@ def _boundary_subject_release_continuity_item() -> SceneMatrixDrilldownItem:
 
 
 def _release_closure_ledger_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_release_closure_ledger_audit_report()
+    report = _release_governance_report("scene_release_closure_ledger_audit")
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.stage_id,
@@ -515,7 +488,9 @@ def _release_closure_ledger_item() -> SceneMatrixDrilldownItem:
 
 
 def _boundary_maturity_release_envelope_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_boundary_maturity_release_envelope_audit_report()
+    report = _release_governance_report(
+        "scene_boundary_maturity_release_envelope_audit"
+    )
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.envelope_id,
@@ -562,7 +537,7 @@ def _boundary_maturity_release_envelope_item() -> SceneMatrixDrilldownItem:
 
 
 def _retained_gap_exit_criteria_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_retained_gap_exit_criteria_audit_report()
+    report = _release_governance_report("scene_retained_gap_exit_criteria_audit")
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.criteria_id,
@@ -609,7 +584,7 @@ def _retained_gap_exit_criteria_item() -> SceneMatrixDrilldownItem:
 
 
 def _release_residual_ratio_ledger_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_release_residual_ratio_ledger_audit_report()
+    report = _release_governance_report("scene_release_residual_ratio_ledger_audit")
     guarded_by_envelope_id = _guarded_completion_rows_by_envelope_id()
     rows = tuple(
         SceneMatrixDrilldownRow(
@@ -668,7 +643,7 @@ def _release_residual_ratio_ledger_item() -> SceneMatrixDrilldownItem:
 
 
 def _guarded_completion_rows_by_envelope_id() -> dict[str, object]:
-    report = build_scene_boundary_guarded_completion_audit_report()
+    report = _release_governance_report("scene_boundary_guarded_completion_audit")
     rows_by_envelope_id: dict[str, object] = {}
     for row in report.rows:
         subject_type = str(getattr(row, "subject_type", "") or "")
@@ -755,7 +730,7 @@ def _release_residual_boundary_scope_detail(
 
 
 def _release_residual_explanation_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_release_residual_explanation_audit_report()
+    report = _release_governance_report("scene_release_residual_explanation_audit")
     rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.residual_id,
@@ -797,7 +772,9 @@ def _release_residual_explanation_item() -> SceneMatrixDrilldownItem:
 
 
 def _release_acceptance_certificate_item() -> SceneMatrixDrilldownItem:
-    report = build_scene_release_acceptance_certificate_audit_report()
+    report = _release_governance_report(
+        "scene_release_acceptance_certificate_audit"
+    )
     certificate_rows = tuple(
         SceneMatrixDrilldownRow(
             row_id=row.certificate_id,

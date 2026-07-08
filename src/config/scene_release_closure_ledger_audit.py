@@ -11,6 +11,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
+from src.config.scene_release_governance_registry import (
+    scene_release_governance_report_spec,
+)
+
 
 SCENE_RELEASE_CLOSURE_LEDGER_AUDIT_SOURCE_ID = (
     "scene_release_closure_ledger_audit"
@@ -84,14 +92,14 @@ SCENE_RELEASE_CLOSURE_LEDGER_SOURCE_MARKERS: tuple[
         "export_script",
         "scripts/export_scene_release_closure_ledger_audit.py",
         (
-            "build_scene_release_closure_ledger_audit_report",
+            "run_registered_scene_audit_export",
+            SCENE_RELEASE_CLOSURE_LEDGER_AUDIT_SOURCE_ID,
             "Stages ready",
             "row.order",
             "row.stage_id",
             "row.evidence_ids",
             "Supplemental",
             "_supplemental_detail",
-            "json",
             "markdown",
         ),
     ),
@@ -102,7 +110,7 @@ SCENE_RELEASE_CLOSURE_LEDGER_SOURCE_MARKERS: tuple[
     ),
     (
         "release_shell",
-        "tests/test_release_shell.py",
+        "tests/test_scene_matrix_release_workflow.py",
         (
             "export_scene_release_closure_ledger_audit.py",
             "test_scene_release_closure_ledger_audit.py",
@@ -179,16 +187,25 @@ class SceneReleaseClosureLedgerStageSpec:
     n2_id: str
     source_id: str
     upstream_stage_ids: tuple[str, ...]
-    release_gate_check_id: str
     dashboard_card_id: str
     drilldown_id: str
     summary_marker: str
-    export_script_path: str
-    test_path: str
     closure_doc_path: str
     supplemental_source_markers: tuple[tuple[str, str], ...] = ()
     supplemental_closure_doc_paths: tuple[str, ...] = ()
     supplemental_evidence_ids: tuple[str, ...] = ()
+
+    @property
+    def release_gate_check_id(self) -> str:
+        return self.source_id
+
+    @property
+    def export_script_path(self) -> str:
+        return scene_release_governance_report_spec(self.source_id).export_script_path
+
+    @property
+    def test_path(self) -> str:
+        return scene_release_governance_report_spec(self.source_id).test_path
 
 
 SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
@@ -200,12 +217,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
         n2_id="N2.380",
         source_id="scene_boundary_guarded_completion_audit",
         upstream_stage_ids=(),
-        release_gate_check_id="scene_boundary_guarded_completion_audit",
         dashboard_card_id="boundary_guarded_completion",
         drilldown_id="boundary_guarded_completion",
         summary_marker="boundary guarded",
-        export_script_path="scripts/export_scene_boundary_guarded_completion_audit.py",
-        test_path="tests/test_scene_boundary_guarded_completion_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_380边界守护完成度闭环_2026-06-24.md"
         ),
@@ -216,12 +230,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
         n2_id="N2.381",
         source_id="scene_residual_warning_governance_audit",
         upstream_stage_ids=("boundary_guarded_completion",),
-        release_gate_check_id="scene_residual_warning_governance_audit",
         dashboard_card_id="residual_warning_governance",
         drilldown_id="residual_warning_governance",
         summary_marker="managed warnings",
-        export_script_path="scripts/export_scene_residual_warning_governance_audit.py",
-        test_path="tests/test_scene_residual_warning_governance_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_381残留Warning治理闭环_2026-06-24.md"
         ),
@@ -235,14 +246,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
             "boundary_guarded_completion",
             "residual_warning_governance",
         ),
-        release_gate_check_id="scene_boundary_readiness_reconciliation_audit",
         dashboard_card_id="boundary_readiness_reconciliation",
         drilldown_id="boundary_readiness_reconciliation",
         summary_marker="readiness reconciled",
-        export_script_path=(
-            "scripts/export_scene_boundary_readiness_reconciliation_audit.py"
-        ),
-        test_path="tests/test_scene_boundary_readiness_reconciliation_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_382边界Readiness读数调和闭环_2026-06-24.md"
         ),
@@ -253,12 +259,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
         n2_id="N2.383",
         source_id="scene_terminal_release_exception_audit",
         upstream_stage_ids=("boundary_readiness_reconciliation",),
-        release_gate_check_id="scene_terminal_release_exception_audit",
         dashboard_card_id="terminal_release_exceptions",
         drilldown_id="terminal_release_exception",
         summary_marker="release exceptions",
-        export_script_path="scripts/export_scene_terminal_release_exception_audit.py",
-        test_path="tests/test_scene_terminal_release_exception_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_383发布例外账本闭环_2026-06-24.md"
         ),
@@ -269,12 +272,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
         n2_id="N2.384",
         source_id="scene_terminal_release_exception_audit",
         upstream_stage_ids=("terminal_release_exception",),
-        release_gate_check_id="scene_terminal_release_exception_audit",
         dashboard_card_id="terminal_release_exceptions",
         drilldown_id="terminal_release_exception",
         summary_marker="release exceptions",
-        export_script_path="scripts/export_scene_terminal_release_exception_audit.py",
-        test_path="tests/test_scene_terminal_release_exception_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_384发布例外账本行级追踪闭环_2026-06-24.md"
         ),
@@ -285,14 +285,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
         n2_id="N2.385",
         source_id="scene_boundary_subject_release_dossier_audit",
         upstream_stage_ids=("terminal_release_trace_ledger",),
-        release_gate_check_id="scene_boundary_subject_release_dossier_audit",
         dashboard_card_id="boundary_subject_dossiers",
         drilldown_id="boundary_subject_release_dossier",
         summary_marker="boundary dossiers",
-        export_script_path=(
-            "scripts/export_scene_boundary_subject_release_dossier_audit.py"
-        ),
-        test_path="tests/test_scene_boundary_subject_release_dossier_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_385边界主体发布证据包闭环_2026-06-24.md"
         ),
@@ -303,14 +298,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
         n2_id="N2.386",
         source_id="scene_non_subject_release_trace_attribution_audit",
         upstream_stage_ids=("terminal_release_trace_ledger",),
-        release_gate_check_id="scene_non_subject_release_trace_attribution_audit",
         dashboard_card_id="non_subject_release_traces",
         drilldown_id="non_subject_release_trace_attribution",
         summary_marker="non-subject traces",
-        export_script_path=(
-            "scripts/export_scene_non_subject_release_trace_attribution_audit.py"
-        ),
-        test_path="tests/test_scene_non_subject_release_trace_attribution_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_386非主体发布Trace归因闭环_2026-06-24.md"
         ),
@@ -324,12 +314,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
             "boundary_subject_release_dossier",
             "non_subject_release_trace_attribution",
         ),
-        release_gate_check_id="scene_release_trace_partition_guard_audit",
         dashboard_card_id="release_trace_partition",
         drilldown_id="release_trace_partition_guard",
         summary_marker="trace partition",
-        export_script_path="scripts/export_scene_release_trace_partition_guard_audit.py",
-        test_path="tests/test_scene_release_trace_partition_guard_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_387发布Trace分区守门闭环_2026-06-24.md"
         ),
@@ -340,14 +327,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
         n2_id="N2.388",
         source_id="scene_release_projection_surface_parity_audit",
         upstream_stage_ids=("release_trace_partition_guard",),
-        release_gate_check_id="scene_release_projection_surface_parity_audit",
         dashboard_card_id="release_projection_surfaces",
         drilldown_id="release_projection_surface_parity",
         summary_marker="release projections",
-        export_script_path=(
-            "scripts/export_scene_release_projection_surface_parity_audit.py"
-        ),
-        test_path="tests/test_scene_release_projection_surface_parity_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_388发布投影面一致性闭环_2026-06-24.md"
         ),
@@ -361,14 +343,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
             "boundary_subject_release_dossier",
             "release_projection_surface_parity",
         ),
-        release_gate_check_id="scene_boundary_subject_release_continuity_audit",
         dashboard_card_id="boundary_subject_continuity",
         drilldown_id="boundary_subject_release_continuity",
         summary_marker="subject continuity",
-        export_script_path=(
-            "scripts/export_scene_boundary_subject_release_continuity_audit.py"
-        ),
-        test_path="tests/test_scene_boundary_subject_release_continuity_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_389边界主体发布链连续性闭环_2026-06-24.md"
         ),
@@ -382,14 +359,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
             "boundary_subject_release_continuity",
             "release_projection_surface_parity",
         ),
-        release_gate_check_id="scene_boundary_maturity_release_envelope_audit",
         dashboard_card_id="boundary_release_envelopes",
         drilldown_id="boundary_maturity_release_envelope",
         summary_marker="boundary release envelopes",
-        export_script_path=(
-            "scripts/export_scene_boundary_maturity_release_envelope_audit.py"
-        ),
-        test_path="tests/test_scene_boundary_maturity_release_envelope_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_392边界成熟度发布保留项证据封套闭环_2026-06-24.md"
         ),
@@ -403,14 +375,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
             "boundary_readiness_reconciliation",
             "boundary_maturity_release_envelope",
         ),
-        release_gate_check_id="scene_release_residual_ratio_ledger_audit",
         dashboard_card_id="release_residual_ratios",
         drilldown_id="release_residual_ratio_ledger",
         summary_marker="release residual ratios",
-        export_script_path=(
-            "scripts/export_scene_release_residual_ratio_ledger_audit.py"
-        ),
-        test_path="tests/test_scene_release_residual_ratio_ledger_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_393发布残留比例读数账本闭环_2026-06-24.md"
         ),
@@ -434,14 +401,9 @@ SCENE_RELEASE_CLOSURE_LEDGER_STAGE_SPECS: tuple[
             "release_projection_surface_parity",
             "release_residual_ratio_ledger",
         ),
-        release_gate_check_id="scene_release_acceptance_certificate_audit",
         dashboard_card_id="release_acceptance_certificate",
         drilldown_id="release_acceptance_certificate",
         summary_marker="release acceptance certificate",
-        export_script_path=(
-            "scripts/export_scene_release_acceptance_certificate_audit.py"
-        ),
-        test_path="tests/test_scene_release_acceptance_certificate_audit.py",
         closure_doc_path=(
             "docs/audits/高层场景能力矩阵N2_394发布验收证书闭环_2026-06-24.md"
         ),
@@ -830,19 +792,18 @@ def _source_texts(root: Path) -> dict[str, str]:
 def _source_evidence(
     root: Path,
 ) -> tuple[SceneReleaseClosureLedgerSourceEvidence, ...]:
-    evidence: list[SceneReleaseClosureLedgerSourceEvidence] = []
-    for source_id, source_path, markers in SCENE_RELEASE_CLOSURE_LEDGER_SOURCE_MARKERS:
-        text = _read_text(root / source_path)
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneReleaseClosureLedgerSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneReleaseClosureLedgerSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            root,
+            SCENE_RELEASE_CLOSURE_LEDGER_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -852,9 +813,9 @@ def _source_evidence_issues(
         SceneReleaseClosureLedgerIssue(
             evidence.source_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence

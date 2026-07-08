@@ -17,6 +17,10 @@ from src.config.scene_boundary_subject_release_dossier_audit import (
 from src.config.scene_non_subject_release_trace_attribution_audit import (
     build_scene_non_subject_release_trace_attribution_audit_report,
 )
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 from src.config.scene_terminal_release_exception_audit import (
     build_scene_terminal_release_exception_audit_report,
 )
@@ -109,13 +113,13 @@ SCENE_RELEASE_TRACE_PARTITION_GUARD_SOURCE_MARKERS: tuple[
         "export_script",
         "scripts/export_scene_release_trace_partition_guard_audit.py",
         (
-            "build_scene_release_trace_partition_guard_audit_report",
+            "run_registered_scene_audit_export",
+            SCENE_RELEASE_TRACE_PARTITION_GUARD_AUDIT_SOURCE_ID,
             "Partitioned traces",
             "row.partition_id",
             "row.trace_count",
             "row.expected_trace_count",
             "row.evidence_ids",
-            "json",
             "markdown",
         ),
     ),
@@ -477,25 +481,18 @@ def _issue_ids(
 def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneReleaseTracePartitionGuardSourceEvidence, ...]:
-    root = Path(project_root) if project_root is not None else Path.cwd()
-    evidence: list[SceneReleaseTracePartitionGuardSourceEvidence] = []
-    for source_id, source_path, markers in (
-        SCENE_RELEASE_TRACE_PARTITION_GUARD_SOURCE_MARKERS
-    ):
-        path = Path(source_path)
-        if not path.is_absolute():
-            path = root / source_path
-        text = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneReleaseTracePartitionGuardSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneReleaseTracePartitionGuardSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            project_root,
+            SCENE_RELEASE_TRACE_PARTITION_GUARD_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -505,9 +502,9 @@ def _source_evidence_issues(
         SceneReleaseTracePartitionGuardIssue(
             evidence.source_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence

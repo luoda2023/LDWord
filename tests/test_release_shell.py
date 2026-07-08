@@ -74,83 +74,6 @@ def test_release_shell_files_exist():
         assert path.exists(), f"Missing release-shell file: {path}"
 
 
-def test_scene_matrix_release_gate_is_wired_into_ci_workflow():
-    workflow = (
-        ROOT / ".github" / "workflows" / "scene-matrix-release-gate.yml"
-    ).read_text(encoding="utf-8")
-
-    assert "Scene Matrix Release Gate" in workflow
-    assert "workflow_dispatch" in workflow
-    assert "python scripts/verify_scene_matrix_release_gate.py" in workflow
-    assert "tests/test_scene_ambiguity_clarification_ui_audit.py" in workflow
-    assert "tests/test_scene_ambiguous_boundary_audit.py" in workflow
-    assert "tests/test_scene_boundary_capability_matrix.py" in workflow
-    assert "tests/test_scene_boundary_readiness_reconciliation_audit.py" in workflow
-    assert "tests/test_scene_boundary_guarded_completion_audit.py" in workflow
-    assert "tests/test_scene_boundary_subject_release_continuity_audit.py" in workflow
-    assert "tests/test_scene_release_closure_ledger_audit.py" in workflow
-    assert (
-        "tests/test_scene_boundary_maturity_release_envelope_audit.py" in workflow
-    )
-    assert "tests/test_scene_retained_gap_exit_criteria_audit.py" in workflow
-    assert "tests/test_scene_release_residual_ratio_ledger_audit.py" in workflow
-    assert "tests/test_scene_release_residual_explanation_audit.py" in workflow
-    assert "tests/test_scene_release_acceptance_certificate_audit.py" in workflow
-    assert "tests/test_scene_boundary_subject_release_dossier_audit.py" in workflow
-    assert "tests/test_scene_business_capability_matrix_audit.py" in workflow
-    assert "tests/test_scene_control_consistency_audit.py" in workflow
-    assert "tests/test_scene_control_runtime_consistency_audit.py" in workflow
-    assert "tests/test_scene_count_profile_audit.py" in workflow
-    assert "tests/test_scene_delivery_preset_audit.py" in workflow
-    assert "tests/test_scene_delivery_preset_execution_audit.py" in workflow
-    assert "tests/test_scene_external_handoff_contract_audit.py" in workflow
-    assert "tests/test_scene_family_fixture_depth_audit.py" in workflow
-    assert "tests/test_scene_family_subscene_audit.py" in workflow
-    assert "tests/test_scene_formula_output_watermark_audit.py" in workflow
-    assert "tests/test_scene_word_risk_closure_audit.py" in workflow
-    assert "tests/test_scene_sample_fixture_regression.py" in workflow
-    assert "tests/test_scene_request_cell_registry_browser.py" in workflow
-    assert "tests/test_scene_user_journey_fixture_audit.py" in workflow
-    assert "tests/test_scene_high_frequency_completeness_audit.py" in workflow
-    assert "tests/test_scene_high_frequency_request_samples.py" in workflow
-    assert "tests/test_scene_high_frequency_task_lexicon_audit.py" in workflow
-    assert "tests/test_scene_import_handoff_audit.py" in workflow
-    assert "tests/test_scene_input_source_audit.py" in workflow
-    assert "tests/test_scene_non_subject_release_trace_attribution_audit.py" in workflow
-    assert "tests/test_scene_release_trace_partition_guard_audit.py" in workflow
-    assert "tests/test_scene_release_projection_surface_parity_audit.py" in workflow
-    assert "tests/test_scene_material_schema_audit.py" in workflow
-    assert "tests/test_scene_material_repair_flow_audit.py" in workflow
-    assert "tests/test_scene_fixed_layout_profile_audit.py" in workflow
-    assert "tests/test_scene_report_artifact_drilldown_audit.py" in workflow
-    assert "tests/test_scene_residual_warning_governance_audit.py" in workflow
-    assert "tests/test_scene_terminal_release_exception_audit.py" in workflow
-    assert "tests/test_scene_matrix_dashboard.py" in workflow
-    assert "tests/test_scene_matrix_drilldown.py" in workflow
-    assert "tests/test_scene_object_preflight_action_audit.py" in workflow
-    assert "tests/test_scene_plugin_boundary_confirmation_audit.py" in workflow
-    assert "tests/test_scene_product_maturity_upgrade_audit.py" in workflow
-    assert "tests/test_scene_coverage_manifest.py" in workflow
-    assert "tests/test_scene_parameter_ownership.py" in workflow
-
-
-def test_scene_matrix_release_gate_cli_stays_thin_and_delegates_payload_builder():
-    script = (ROOT / "scripts" / "verify_scene_matrix_release_gate.py").read_text(
-        encoding="utf-8"
-    )
-    payload_module = (
-        ROOT / "scripts" / "scene_matrix_release_gate_payload.py"
-    ).read_text(encoding="utf-8")
-
-    assert "from scripts.scene_matrix_release_gate_payload import" in script
-    assert "def build_scene_matrix_release_gate_payload" not in script
-    assert "from src.config." not in script
-    assert len(script.splitlines()) <= 350
-
-    assert "def build_scene_matrix_release_gate_payload" in payload_module
-    assert "from src.config." in payload_module
-
-
 def test_root_batch_wrappers_delegate_to_windows_scripts():
     install_wrapper = (ROOT / "install_env.bat").read_text(encoding="utf-8")
     package_wrapper = (ROOT / "package_release.bat").read_text(encoding="utf-8")
@@ -209,6 +132,7 @@ def test_windows_package_script_builds_pyside6_release_and_copies_notices():
     assert "PyInstaller" in script
     assert "main.py" in script
     assert "Alavette-Form_V1.0" in script
+    assert "ZIP_PATH=dist\\%APP_NAME%.zip" in script
     assert "--collect-submodules PySide6" not in script
     assert '--hidden-import PySide6.QtCore' in script
     assert '--hidden-import PySide6.QtGui' in script
@@ -218,8 +142,15 @@ def test_windows_package_script_builds_pyside6_release_and_copies_notices():
     assert '--exclude-module PySide6.QtGraphs' in script
     assert '--exclude-module PySide6.QtGraphsWidgets' in script
     assert '--exclude-module PySide6.QtHttpServer' in script
+    assert '--exclude-module PySide6.QtMultimedia' in script
     assert '--exclude-module PySide6.QtNetworkAuth' in script
+    assert '--exclude-module PySide6.QtQml' in script
     assert '--exclude-module PySide6.QtQuick3D' in script
+    assert '--exclude-module PySide6.QtWebEngineWidgets' in script
+    assert "Qt6WebEngineCore.dll" in script
+    assert "for %%P in (qml resources translations)" in script
+    assert "Compress-Archive" in script
+    assert "Output archive: %ZIP_PATH%" in script
     assert '-m pip install pyinstaller' not in script
     assert "PyInstaller is missing in .venv" in script
     assert "THIRD_PARTY_NOTICES.md" in script

@@ -6,15 +6,6 @@ from functools import lru_cache
 
 from src.config.material_schema_registry import list_material_schemas
 from src.config.plugin_manual_gate import list_plugin_manual_gates
-from src.config.scene_boundary_guarded_completion_audit import (
-    build_scene_boundary_guarded_completion_audit_report,
-)
-from src.config.scene_boundary_maturity_release_envelope_audit import (
-    build_scene_boundary_maturity_release_envelope_audit_report,
-)
-from src.config.scene_boundary_subject_release_dossier_audit import (
-    build_scene_boundary_subject_release_dossier_audit_report,
-)
 from src.config.scene_delivery_preset_audit import (
     DELIVERY_ARTIFACT_PSEUDO_IDS,
     build_scene_delivery_preset_audit_report,
@@ -45,12 +36,17 @@ from src.config.scene_product_maturity_upgrade_audit import (
 from src.config.scene_report_artifact_drilldown_audit import (
     build_scene_report_artifact_drilldown_audit_report,
 )
-from src.config.scene_retained_gap_exit_criteria_audit import (
-    build_scene_retained_gap_exit_criteria_audit_report,
+from src.config.scene_release_governance_registry import (
+    build_scene_release_governance_report,
 )
 from src.config.scene_word_risk_closure_audit import (
     build_scene_word_risk_closure_audit_report,
 )
+
+
+@lru_cache(maxsize=None)
+def _release_governance_report(report_id: str) -> object:
+    return build_scene_release_governance_report(report_id)
 
 
 def _delivery_reference_ids() -> set[str]:
@@ -163,11 +159,19 @@ def _risk_domain_reference_ids() -> set[str]:
 
 def _maturity_gap_reference_ids() -> set[str]:
     product_report = build_scene_product_maturity_upgrade_audit_report()
-    guarded_report = build_scene_boundary_guarded_completion_audit_report()
-    dossier_report = build_scene_boundary_subject_release_dossier_audit_report()
+    guarded_report = _release_governance_report(
+        "scene_boundary_guarded_completion_audit"
+    )
+    dossier_report = _release_governance_report(
+        "scene_boundary_subject_release_dossier_audit"
+    )
     external_report = build_scene_external_handoff_contract_audit_report()
-    envelope_report = build_scene_boundary_maturity_release_envelope_audit_report()
-    exit_report = build_scene_retained_gap_exit_criteria_audit_report()
+    envelope_report = _release_governance_report(
+        "scene_boundary_maturity_release_envelope_audit"
+    )
+    exit_report = _release_governance_report(
+        "scene_retained_gap_exit_criteria_audit"
+    )
     ids: set[str] = set(PRODUCT_MATURITY_UPGRADE_DOMAIN_IDS)
     for row in product_report.rows:
         ids.update(row.gap_domain_ids)

@@ -135,7 +135,7 @@ def test_scene_repair_routing_classifies_existing_workbench_issue_items():
         issue_id="template.body.left_indent",
         category="template_field",
         severity="warning",
-        title="妯℃澘瀛楁淇",
+        title="模板字段修复",
         summary="body.left_indent",
         repair_target_type="template_style_field",
         repair_target_key="template.styles.body.left_indent_chars",

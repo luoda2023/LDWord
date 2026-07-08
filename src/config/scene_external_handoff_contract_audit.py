@@ -21,6 +21,10 @@ from src.config.scene_product_readiness import (
     SCENE_PRODUCT_READINESS_MAP,
 )
 from src.config.scene_sample_fixture_registry import SCENE_SAMPLE_FIXTURE_MAP
+from src.config.scene_source_evidence import (
+    scan_scene_source_markers,
+    scene_source_marker_issue_message,
+)
 
 
 SCENE_EXTERNAL_HANDOFF_CONTRACT_AUDIT_SOURCE_ID = (
@@ -751,23 +755,18 @@ def _gate_pack_id(gate_id: str) -> str:
 def _source_evidence(
     project_root: Path | str | None,
 ) -> tuple[SceneExternalHandoffSourceEvidence, ...]:
-    root = Path(project_root) if project_root is not None else Path.cwd()
-    evidence: list[SceneExternalHandoffSourceEvidence] = []
-    for source_id, source_path, markers in SCENE_EXTERNAL_HANDOFF_SOURCE_MARKERS:
-        path = Path(source_path)
-        if not path.is_absolute():
-            path = root / source_path
-        text = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
-        missing = tuple(marker for marker in markers if marker not in text)
-        evidence.append(
-            SceneExternalHandoffSourceEvidence(
-                source_id=source_id,
-                source_path=source_path,
-                markers=markers,
-                missing_markers=missing,
-            )
+    return tuple(
+        SceneExternalHandoffSourceEvidence(
+            source_id=result.source_id,
+            source_path=result.source_path,
+            markers=result.markers,
+            missing_markers=result.missing_markers,
         )
-    return tuple(evidence)
+        for result in scan_scene_source_markers(
+            project_root,
+            SCENE_EXTERNAL_HANDOFF_SOURCE_MARKERS,
+        )
+    )
 
 
 def _source_evidence_issues(
@@ -777,9 +776,9 @@ def _source_evidence_issues(
         SceneExternalHandoffContractIssue(
             evidence.source_id,
             "missing_source_evidence",
-            (
-                f"{evidence.source_path} missing markers: "
-                f"{', '.join(evidence.missing_markers)}"
+            scene_source_marker_issue_message(
+                evidence.source_path,
+                evidence.missing_markers,
             ),
         )
         for evidence in source_evidence

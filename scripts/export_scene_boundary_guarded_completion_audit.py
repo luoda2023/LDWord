@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -10,41 +8,28 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.config.scene_boundary_guarded_completion_audit import (  # noqa: E402
-    build_scene_boundary_guarded_completion_audit_report,
+from scripts.export_scene_audit import (  # noqa: E402
+    run_registered_scene_audit_export,
 )
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
+    return run_registered_scene_audit_export(
+        "scene_boundary_guarded_completion_audit",
+        argv,
         description="Export the N2.380 boundary guarded-completion audit.",
+        markdown_formatter=_report_markdown,
+        configure_parser=_configure_parser,
+        builder_kwargs_from_args=_builder_kwargs,
     )
-    parser.add_argument(
-        "--format",
-        choices=("json", "markdown"),
-        default="markdown",
-        help="Export format. Defaults to markdown.",
-    )
-    parser.add_argument("--output", help="Optional output file. Defaults to stdout.")
+
+
+def _configure_parser(parser) -> None:
     parser.add_argument("--subject", default="", help="Filter by subject id.")
-    args = parser.parse_args(argv)
 
-    report = build_scene_boundary_guarded_completion_audit_report(
-        subject_id=args.subject,
-        project_root=ROOT,
-    )
-    if args.format == "json":
-        content = json.dumps(report.to_payload(), ensure_ascii=False, indent=2)
-    else:
-        content = _report_markdown(report)
 
-    if args.output:
-        output_path = Path(args.output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(content + "\n", encoding="utf-8")
-    else:
-        print(content)
-    return 0 if report.status == "passed" else 1
+def _builder_kwargs(args) -> dict[str, object]:
+    return {"subject_id": args.subject}
 
 
 def _report_markdown(report) -> str:
