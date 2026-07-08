@@ -23,10 +23,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install scene-matrix dependencies
+      - name: Install project dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install python-docx lxml PyYAML pytest
+          python -m pip install -e ".[dev]"
 
       - name: Run scene matrix release gate
         run: python scripts/verify_scene_matrix_release_gate.py
