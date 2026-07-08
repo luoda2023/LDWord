@@ -1475,6 +1475,22 @@ def test_workbench_execution_adapter_reuses_scene_style_path_descriptors():
     assert "canonical_paragraph_style_field_id" in source
 
 
+def test_workbench_execution_adapter_reexports_issue_models_from_model_module():
+    adapter_source = (ROOT / "src/ui/adapters/workbench_execution_adapter.py").read_text(
+        encoding="utf-8"
+    )
+    model_source = (ROOT / "src/ui/adapters/workbench_issue_models.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from src.ui.adapters.workbench_issue_models import" in adapter_source
+    assert "class WorkbenchIssueItem" not in adapter_source
+    assert "class MaterialReadinessIssueGroups" in model_source
+    assert "class WorkbenchIssueItem" in model_source
+    assert "class WorkbenchIssueQueueSummary" in model_source
+    assert "ISSUE_TERMINAL_STATUS_VALUES" in model_source
+
+
 def test_execution_diagnostic_issue_items_infer_scene_field_targets():
     items = execution_diagnostic_issue_items(
         [

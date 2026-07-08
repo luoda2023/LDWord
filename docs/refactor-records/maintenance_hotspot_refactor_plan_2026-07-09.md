@@ -361,6 +361,11 @@ python scripts\verify_scene_matrix_release_gate.py
   - 已迁出 `_normalise_scene_detail_card_id`、导航别名、scope mode label、输出字段集合、导航 subtitle 拼接和输入格式摘要纯函数。
   - `scene_panel.py` 继续 import 原函数名，调用点不变。
   - `tests/test_scene_panel_architecture.py` 已改为检查职责归属在新模块。
+- Workbench W1 首片:
+  - 新增 `src/ui/adapters/workbench_issue_models.py`。
+  - 已迁出 `MaterialReadinessIssueGroups`、`WorkbenchIssueItem`、`WorkbenchIssueQueueSummary`、`WorkbenchIssueActionVisualProjection`、`WorkbenchIssueEvidenceLineProjection` 和 issue status/action group 常量。
+  - `workbench_execution_adapter.py` 继续 import 并 re-export 这些名字，外部导入路径不变。
+  - `tests/test_workbench_execution_center.py` 已增加模型归属守门。
 
 验证:
 
@@ -373,9 +378,12 @@ python scripts\check_public_release.py --strict
 
 python scripts\engineering_gate.py
 # Engineering gate passed; 1871 tests collected; smoke 10 passed.
+
+python -m pytest -q tests/test_workbench_execution_center.py tests/test_quick_execution_detail_architecture.py tests/test_scene_repair_routing.py tests/test_workbench_issue_navigation.py
+# 139 passed
 ```
 
 下一步:
 
 1. 继续 ScenePanel S1.2: 评估 `_navigation_card_snapshots()` 及相关 snapshot 方法能否在不接触 Qt 生命周期的前提下迁到 projection builder。
-2. 或按推荐顺序进入 Workbench W1: 先抽 `WorkbenchIssueItem` 等 dataclass/model 到 `workbench_issue_models.py`。
+2. 或按推荐顺序进入 report_writer R1: official numbering / technical chapter / application word limits section 拆分。
