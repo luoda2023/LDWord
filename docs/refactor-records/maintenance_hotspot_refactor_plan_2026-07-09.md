@@ -366,6 +366,12 @@ python scripts\verify_scene_matrix_release_gate.py
   - 已迁出 `MaterialReadinessIssueGroups`、`WorkbenchIssueItem`、`WorkbenchIssueQueueSummary`、`WorkbenchIssueActionVisualProjection`、`WorkbenchIssueEvidenceLineProjection` 和 issue status/action group 常量。
   - `workbench_execution_adapter.py` 继续 import 并 re-export 这些名字，外部导入路径不变。
   - `tests/test_workbench_execution_center.py` 已增加模型归属守门。
+- report_writer R1 首片:
+  - 新增 `src/reporting/document_sections.py`。
+  - 已迁出 official numbering、technical chapter、application section word limits 三组无副作用 extractor/formatter。
+  - `report_writer.py` 继续 import 原函数名，`write_json_report` / `write_markdown_report` 输出入口不变。
+  - `tests/test_execution_diagnostics_reporting.py` 已增加 section 归属守门。
+  - `report_writer.py` 已降至 2917 行，短期目标 3000 行以下已达成。
 
 验证:
 
@@ -381,9 +387,21 @@ python scripts\engineering_gate.py
 
 python -m pytest -q tests/test_workbench_execution_center.py tests/test_quick_execution_detail_architecture.py tests/test_scene_repair_routing.py tests/test_workbench_issue_navigation.py
 # 139 passed
+
+python -m pytest -q tests/test_execution_diagnostics_reporting.py tests/test_count_engine_semantics.py tests/test_output_runtime_semantics.py
+# 61 passed
+
+python -m pytest -q tests/test_release_shell.py tests/test_execution_diagnostics_reporting.py tests/test_count_engine_semantics.py tests/test_output_runtime_semantics.py
+# 72 passed
+
+python scripts\check_public_release.py --strict
+# [OK] No obvious public-release blockers were found.
+
+python scripts\engineering_gate.py
+# Engineering gate passed; 1873 tests collected; smoke 10 passed.
 ```
 
 下一步:
 
 1. 继续 ScenePanel S1.2: 评估 `_navigation_card_snapshots()` 及相关 snapshot 方法能否在不接触 Qt 生命周期的前提下迁到 projection builder。
-2. 或按推荐顺序进入 report_writer R1: official numbering / technical chapter / application word limits section 拆分。
+2. 按推荐顺序进入 report_writer R2 或 Workbench W2: 继续拆无副作用 formatter / evidence projection，避免一次触碰执行副作用和 UI 生命周期。

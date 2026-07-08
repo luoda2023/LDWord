@@ -103,6 +103,25 @@ def test_build_execution_diagnostics_collects_skip_and_failure_records():
     assert "诊断提示（2）" in diagnostics["summary"]
 
 
+def test_report_writer_keeps_document_family_sections_in_dedicated_module():
+    writer_source = (ROOT / "src/report_writer.py").read_text(encoding="utf-8")
+    section_source = (
+        ROOT / "src/reporting/document_sections.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from src.reporting.document_sections import" in writer_source
+    for function_name in (
+        "_extract_official_numbering_preservation",
+        "_format_official_numbering_preservation_markdown",
+        "_extract_technical_chapter_inventory",
+        "_format_technical_chapter_inventory_markdown",
+        "_extract_application_section_word_limits",
+        "_format_application_section_word_limits_markdown",
+    ):
+        assert f"def {function_name}" not in writer_source
+        assert f"def {function_name}" in section_source
+
+
 def test_report_writer_emits_diagnostics_into_json_and_markdown(tmp_path):
     result = _build_result_with_diagnostics()
     report_json = tmp_path / "changes.json"
