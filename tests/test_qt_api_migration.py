@@ -15,10 +15,14 @@ def test_qt_api_uses_pyside6_signal_and_property_symbols():
     assert qt_api.QSvgRenderer.__module__.startswith("PySide6.")
 
 
-def test_requirements_switches_runtime_binding_to_pyside6():
+def test_dependency_manifests_use_pyside6_essentials_runtime_binding():
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
-    assert "PySide6" in requirements
+    assert "PySide6_Essentials>=6.6.0" in requirements
+    assert '"PySide6_Essentials>=6.6.0"' in pyproject
+    assert "PySide6>=6.6.0" not in requirements
+    assert '"PySide6>=6.6.0"' not in pyproject
     assert "PyQt5" not in requirements
 
 

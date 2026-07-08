@@ -41,6 +41,7 @@ python main.py --gui
 默认输出目录：
 
 - `dist/Alavette-Form_V1.0/`
+- `dist/Alavette-Form_V1.0.zip`
 
 打包脚本会：
 
@@ -49,6 +50,8 @@ python main.py --gui
 - 带上 `defaults/`
 - 带上 `LICENSE`
 - 带上 `THIRD_PARTY_NOTICES.md`
+- 清理未使用的 Qt add-on payload
+- 生成压缩发布包
 
 ## MIT 开源发布口径
 

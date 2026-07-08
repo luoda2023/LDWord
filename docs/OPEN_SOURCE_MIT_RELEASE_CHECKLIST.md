@@ -61,7 +61,7 @@
 
 - [ ] `README.md` 已说明 MIT 源码口径
 - [ ] `THIRD_PARTY_NOTICES.md` 已说明第三方依赖许可证
-- [ ] `requirements.txt` 使用 `PySide6`，不再依赖 `PyQt5`
+- [ ] `requirements.txt` 使用 `PySide6_Essentials`，不再依赖 `PyQt5`
 - [ ] 若刚执行过安装 / 打包 / 预览，先运行 `.\clean_public_release.bat`
 - [ ] 运行 `.\check_public_release.bat --strict`
 - [ ] GitHub Actions 中 `Scene Matrix Release Gate` 已通过

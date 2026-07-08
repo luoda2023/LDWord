@@ -13,6 +13,7 @@ if not exist ".venv\Scripts\python.exe" (
 
 set "APP_NAME=Alavette-Form_V1.0"
 set "DIST_DIR=dist\%APP_NAME%"
+set "ZIP_PATH=dist\%APP_NAME%.zip"
 
 tasklist /FI "IMAGENAME eq %APP_NAME%.exe" 2>nul | find /I "%APP_NAME%.exe" >nul
 if not errorlevel 1 (
@@ -22,7 +23,7 @@ if not errorlevel 1 (
     exit /b 1
 )
 
-echo [1/3] Ensure PyInstaller is installed
+echo [1/4] Ensure PyInstaller is installed
 ".venv\Scripts\python.exe" -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] PyInstaller is missing in .venv
@@ -33,7 +34,7 @@ if errorlevel 1 (
     echo PyInstaller already installed.
 )
 
-echo [2/3] Build release package from main.py
+echo [2/4] Build release package from main.py
 ".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --windowed ^
     --name "%APP_NAME%" ^
     --hidden-import PySide6.QtCore ^
@@ -41,11 +42,48 @@ echo [2/3] Build release package from main.py
     --hidden-import PySide6.QtWidgets ^
     --hidden-import PySide6.QtSvg ^
     --hidden-import shiboken6 ^
+    --exclude-module PySide6.Qt3DAnimation ^
+    --exclude-module PySide6.Qt3DCore ^
+    --exclude-module PySide6.Qt3DExtras ^
+    --exclude-module PySide6.Qt3DInput ^
+    --exclude-module PySide6.Qt3DLogic ^
+    --exclude-module PySide6.Qt3DRender ^
+    --exclude-module PySide6.QtBluetooth ^
+    --exclude-module PySide6.QtCharts ^
+    --exclude-module PySide6.QtDataVisualization ^
+    --exclude-module PySide6.QtDesigner ^
+    --exclude-module PySide6.QtHelp ^
     --exclude-module PySide6.QtGraphs ^
     --exclude-module PySide6.QtGraphsWidgets ^
     --exclude-module PySide6.QtHttpServer ^
+    --exclude-module PySide6.QtLocation ^
+    --exclude-module PySide6.QtMultimedia ^
+    --exclude-module PySide6.QtMultimediaWidgets ^
     --exclude-module PySide6.QtNetworkAuth ^
+    --exclude-module PySide6.QtNfc ^
+    --exclude-module PySide6.QtOpenGL ^
+    --exclude-module PySide6.QtOpenGLWidgets ^
+    --exclude-module PySide6.QtPdf ^
+    --exclude-module PySide6.QtPdfWidgets ^
+    --exclude-module PySide6.QtPositioning ^
+    --exclude-module PySide6.QtQml ^
+    --exclude-module PySide6.QtQuick ^
     --exclude-module PySide6.QtQuick3D ^
+    --exclude-module PySide6.QtQuickWidgets ^
+    --exclude-module PySide6.QtRemoteObjects ^
+    --exclude-module PySide6.QtScxml ^
+    --exclude-module PySide6.QtSensors ^
+    --exclude-module PySide6.QtSerialBus ^
+    --exclude-module PySide6.QtSerialPort ^
+    --exclude-module PySide6.QtSpatialAudio ^
+    --exclude-module PySide6.QtSql ^
+    --exclude-module PySide6.QtStateMachine ^
+    --exclude-module PySide6.QtTextToSpeech ^
+    --exclude-module PySide6.QtWebChannel ^
+    --exclude-module PySide6.QtWebEngineCore ^
+    --exclude-module PySide6.QtWebEngineQuick ^
+    --exclude-module PySide6.QtWebEngineWidgets ^
+    --exclude-module PySide6.QtWebSockets ^
     --add-data "defaults;defaults" ^
     --add-data "src\ui\icons;src\ui\icons" ^
     --add-data "LICENSE;." ^
@@ -57,7 +95,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [3/3] Copy human-readable notices next to the EXE
+echo [3/4] Copy human-readable notices next to the EXE
 if not exist "%DIST_DIR%" (
     echo [ERROR] Dist folder not found: %DIST_DIR%
     pause
@@ -70,6 +108,43 @@ if exist "defaults" (
     xcopy /E /I /Y "defaults" "%DIST_DIR%\defaults" >nul
 )
 
+echo Removing accidentally collected Qt add-on payloads, if any...
+for %%D in ("%DIST_DIR%\_internal\PySide6" "%DIST_DIR%\PySide6") do (
+    if exist "%%~D" (
+        for %%F in (
+            Qt6WebEngineCore.dll
+            Qt6WebEngineQuick.dll
+            Qt6WebEngineWidgets.dll
+            Qt6QmlMeta.dll
+            Qt6QmlModels.dll
+            Qt6QmlWorkerScript.dll
+            Qt6Qml.dll
+            Qt6Quick.dll
+            Qt6Quick3D.dll
+            Qt6Multimedia.dll
+            Qt6Charts.dll
+            Qt6Pdf.dll
+        ) do (
+            if exist "%%~D\%%~F" del /q "%%~D\%%~F"
+        )
+        for %%P in (qml resources translations) do (
+            if exist "%%~D\%%~P" rmdir /s /q "%%~D\%%~P"
+        )
+    )
+)
+
+echo [4/4] Create compressed release archive
+if exist "%ZIP_PATH%" del /q "%ZIP_PATH%"
+for %%I in ("%DIST_DIR%") do set "DIST_DIR_ABS=%%~fI"
+for %%I in ("%ZIP_PATH%") do set "ZIP_PATH_ABS=%%~fI"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; Compress-Archive -LiteralPath $env:DIST_DIR_ABS -DestinationPath $env:ZIP_PATH_ABS -CompressionLevel Optimal -Force"
+if errorlevel 1 (
+    echo [ERROR] Failed to create release archive
+    pause
+    exit /b 1
+)
+
 echo [OK] Build completed.
 echo Output folder: %DIST_DIR%
+echo Output archive: %ZIP_PATH%
 exit /b 0
