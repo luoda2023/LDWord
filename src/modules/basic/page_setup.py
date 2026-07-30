@@ -54,7 +54,6 @@ class PageSetupModule(BaseModule):
         description="页面设置",
         category="basic",
         requires_config=("page_setup",),
-        enabled_by_default=True,
     )
 
     def apply(

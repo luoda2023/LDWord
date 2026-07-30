@@ -31,7 +31,6 @@ class ValidationModule(BaseModule):
         depends_on=("heading_recognition",),
         consumes=("doc_tree", "heading_map"),
         provides=("validation_issues", "count_result"),
-        enabled_by_default=True,
     )
 
     def apply(
@@ -47,13 +46,14 @@ class ValidationModule(BaseModule):
             or ""
         ).strip()
         if count_profile_id:
-            context.count_result = count_document(doc, profile_id=count_profile_id)
+            count_result = count_document(doc, profile_id=count_profile_id)
+            context.count_result = count_result
             tracker.record(
                 rule_name="count_engine",
                 target=count_profile_id,
                 section="global",
                 change_type="count_summary",
-                after=context.count_result.summary(),
+                after=count_result.summary(),
                 paragraph_index=-1,
                 success=True,
             )

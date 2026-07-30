@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 from src.config.material_schema_registry import resolve_material_schema_ids
 from src.shared.engine.count_engine import CountSectionLimit, get_count_profile
+from src.shared.engine.document_structure_model import normalize_heading_map
 
 
 APPLICATION_COUNT_PROFILE_ID = "application_word_limits"
@@ -302,7 +303,7 @@ def _build_heading_items(
         return _with_end_indexes(items, len(getattr(doc, "paragraphs", []) or []))
 
     paragraphs = list(getattr(doc, "paragraphs", []) or [])
-    normalized_heading_map = _normalize_heading_map(heading_map)
+    normalized_heading_map = normalize_heading_map(heading_map)
     if not normalized_heading_map:
         normalized_heading_map = _style_heading_map(paragraphs)
     items = [
@@ -327,19 +328,6 @@ def _with_end_indexes(items: list[dict[str, object]], total: int) -> list[dict[s
         later = normalized[index + 1 :]
         item["end_index"] = int(later[0]["paragraph_index"]) if later else total
     return normalized
-
-
-def _normalize_heading_map(heading_map: Mapping[int, int] | None) -> dict[int, int]:
-    result: dict[int, int] = {}
-    for key, value in dict(heading_map or {}).items():
-        try:
-            index = int(key)
-            level = int(value)
-        except (TypeError, ValueError):
-            continue
-        if index >= 0 and level > 0:
-            result[index] = level
-    return dict(sorted(result.items()))
 
 
 def _style_heading_map(paragraphs: list) -> dict[int, int]:

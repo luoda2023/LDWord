@@ -65,7 +65,6 @@ class HeaderFooterModule(BaseModule):
         requires_config=("header_footer",),
         soft_after=("heading_recognition", "section_format"),
         soft_consumes=("doc_tree",),
-        enabled_by_default=True,
     )
 
     def validate(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from src.config.journal_rule_source_registry import (
+from src.config.journal_rule_source_catalog import (
     JournalRuleSourceSpec,
     get_journal_rule_source,
     journal_rule_source_for_count_profile,
@@ -136,6 +136,8 @@ class JournalRuleSourceGovernanceResult:
 
 def inspect_journal_rule_source_governance(
     config,
+    *,
+    entity_data: Mapping[str, object] | None = None,
 ) -> JournalRuleSourceGovernanceResult:
     """Build governance evidence for reviewed English journal rule sources."""
 
@@ -146,15 +148,36 @@ def inspect_journal_rule_source_governance(
 
     compliance = getattr(config, "compliance_profile", None)
     count_profile_id = str(getattr(compliance, "count_profile_id", "") or "").strip()
-    if not count_profile_id:
-        count_profile_id = "journal_words"
-    entity_data = getattr(config, "entity_data", {}) or {}
-    if not isinstance(entity_data, Mapping):
-        entity_data = {}
-    target_journal_name = _first_entity_value(entity_data, _JOURNAL_NAME_KEYS)
-    requested_source_id = _first_entity_value(entity_data, _RULE_SOURCE_KEYS)
+    effective_entity_data = (
+        getattr(config, "entity_data", {}) or {}
+        if entity_data is None
+        else entity_data
+    )
+    if not isinstance(effective_entity_data, Mapping):
+        effective_entity_data = {}
+    target_journal_name = _first_entity_value(
+        effective_entity_data,
+        _JOURNAL_NAME_KEYS,
+    )
+    requested_source_id = _first_entity_value(
+        effective_entity_data,
+        _RULE_SOURCE_KEYS,
+    )
 
     issues: list[JournalRuleSourceIssue] = []
+    if not count_profile_id:
+        issues.append(
+            JournalRuleSourceIssue(
+                path="compliance_profile.count_profile_id",
+                kind="count_profile_missing",
+                severity="error",
+                expected="explicit reviewed journal count profile id",
+                message=(
+                    "Journal execution requires an explicit count profile; "
+                    "no implicit default is selected."
+                ),
+            )
+        )
     if requested_source_id:
         try:
             source = get_journal_rule_source(requested_source_id)
@@ -176,19 +199,20 @@ def inspect_journal_rule_source_governance(
     else:
         source = journal_rule_source_for_count_profile(count_profile_id)
     if source is None:
-        issues.append(
-            JournalRuleSourceIssue(
-                path="compliance_profile.count_profile_id",
-                kind="unregistered_count_profile",
-                severity="error",
-                expected="CountProfile bound to a reviewed journal rule source",
-                observed=count_profile_id,
-                message=(
-                    f"CountProfile '{count_profile_id}' is not bound to a "
-                    "reviewed journal rule source."
-                ),
+        if not requested_source_id and count_profile_id:
+            issues.append(
+                JournalRuleSourceIssue(
+                    path="compliance_profile.count_profile_id",
+                    kind="unregistered_count_profile",
+                    severity="error",
+                    expected="CountProfile bound to a reviewed journal rule source",
+                    observed=count_profile_id,
+                    message=(
+                        f"CountProfile '{count_profile_id}' is not bound to a "
+                        "reviewed journal rule source."
+                    ),
+                )
             )
-        )
         return _result_from_source(
             None,
             family_id=family_id or JOURNAL_FAMILY_ID,
@@ -289,6 +313,44 @@ def _status_for_issues(issues: tuple[JournalRuleSourceIssue, ...]) -> str:
     return "ok"
 
 
+def journal_rule_source_governance_execution_issues(
+    config,
+    *,
+    entity_data: Mapping[str, object] | None = None,
+) -> tuple[str, ...]:
+    """Return every rule-source error that must block execution.
+
+    Reviewed generic profiles deliberately remain executable: their
+    publisher-specific boundary is report/manual-review evidence, not a
+    configuration error.  Warnings follow the same non-blocking contract.
+    """
+
+    result = inspect_journal_rule_source_governance(
+        config,
+        entity_data=entity_data,
+    )
+    return tuple(
+        "journal_rule_source_governance_error:"
+        f"{issue.kind}:{issue.observed or '-'}"
+        for issue in result.issues
+        if issue.severity == "error"
+    )
+
+
+def journal_rule_source_governance_execution_issue(
+    config,
+    *,
+    entity_data: Mapping[str, object] | None = None,
+) -> str:
+    """Return the first blocking journal rule-source error, if any."""
+
+    issues = journal_rule_source_governance_execution_issues(
+        config,
+        entity_data=entity_data,
+    )
+    return issues[0] if issues else ""
+
+
 def _first_entity_value(entity_data: Mapping[str, object], keys: tuple[str, ...]) -> str:
     for key in keys:
         value = str(entity_data.get(key, "") or "").strip()
@@ -347,4 +409,6 @@ __all__ = [
     "JournalRuleSourceIssue",
     "JournalRuleSourceSummary",
     "inspect_journal_rule_source_governance",
+    "journal_rule_source_governance_execution_issue",
+    "journal_rule_source_governance_execution_issues",
 ]

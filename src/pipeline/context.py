@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.config.scene import FormatScopeConfig, SceneApplicationBoundaryConfig
+from src.config.document_scope import DocumentScopePolicy
 
 
 @dataclass(slots=True)
@@ -19,10 +19,15 @@ class PipelineContext:
 
     source_doc_path: str = ""
     source_doc_dir: str = ""
-    application_boundary: SceneApplicationBoundaryConfig = field(
-        default_factory=SceneApplicationBoundaryConfig
-    )
-    format_scope: FormatScopeConfig = field(default_factory=FormatScopeConfig)
+    working_doc_path: str = ""
+    working_doc_dir: str = ""
+    mode_id: str = "custom"
+    document_scope: DocumentScopePolicy = field(default_factory=DocumentScopePolicy)
+    document_structure_evidence: Any | None = None
+    document_scope_decisions: tuple[Any, ...] = ()
+    document_scope_binding: Any | None = None
+    document_scope_receipt: dict[str, Any] | None = None
+    document_scope_gate_active: bool = False
 
     doc_tree: Any | None = None
     heading_map: dict[int, int] | None = None
@@ -31,8 +36,11 @@ class PipelineContext:
     count_result: Any | None = None
     scene_journey_runtime: Any | None = None
     material_field_consistency: Any | None = None
+    exam_markdown_import: Any | None = None
     exam_question_schema: Any | None = None
     exam_delivery_runtime: Any | None = None
+    official_document_assembly: Any | None = None
+    terminal_assembly_owner: str = ""
     journal_rule_source_governance: Any | None = None
     journal_citations: Any | None = None
     journal_submission_package: Any | None = None
@@ -47,6 +55,7 @@ class PipelineContext:
     parameter_runtime_consumption: list[dict[str, Any]] | None = None
     content_visibility_scan: Any | None = None
     content_visibility_preview: Any | None = None
+    content_visibility_receipts: dict[str, Any] | None = None
     entity_values: dict[str, str] | None = None
     source_values: dict[str, str] | None = None
     inserted_images: list[dict[str, Any]] | None = None

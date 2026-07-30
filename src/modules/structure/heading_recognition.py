@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.config.section_semantics import canonicalize_section_type
@@ -15,6 +15,7 @@ from src.shared.engine.document_text_heuristics import (
     looks_like_reference_entry_line,
     looks_like_toc_entry_line,
 )
+from src.shared.engine.document_structure_model import DocSection, DocTree, HeadingInfo
 from src.shared.engine.style_resolver import get_heading_level
 
 if TYPE_CHECKING:
@@ -207,58 +208,10 @@ MIN_SECTION_SCORE = 4.0
 
 
 @dataclass
-class HeadingInfo:
-    para_index: int
-    level: int
-    text: str
-    confidence: str = "high"
-
-
-@dataclass
-class DocSection:
-    section_type: str
-    start_index: int
-    end_index: int = -1
-    confidence: float = 0.0
-    title_confident: bool = True
-
-
-@dataclass
 class _SectionCandidate:
     para_index: int
     section_type: str
     score: float
-
-
-@dataclass
-class DocTree:
-    headings: list[HeadingInfo] = field(default_factory=list)
-    heading_map: dict[int, int] = field(default_factory=dict)
-    section_ranges: dict[str, tuple[int, int]] = field(default_factory=dict)
-    sections: list[DocSection] = field(default_factory=list)
-    detection_log: list[str] = field(default_factory=list)
-
-    def get_heading_level(self, para_index: int) -> int | None:
-        return self.heading_map.get(para_index)
-
-    def get_section(self, section_type: str) -> DocSection | None:
-        canonical = canonicalize_section_type(section_type)
-        for section in self.sections:
-            if section.section_type == canonical:
-                return section
-        if canonical in self.section_ranges:
-            start, end = self.section_ranges[canonical]
-            return DocSection(canonical, start, end)
-        return None
-
-    def get_section_for_paragraph(self, para_index: int) -> str:
-        for section in self.sections:
-            if section.start_index <= para_index < section.end_index:
-                return canonicalize_section_type(section.section_type)
-        for section_name, (start, end) in self.section_ranges.items():
-            if start <= para_index < end:
-                return canonicalize_section_type(section_name)
-        return "body"
 
 
 class HeadingRecognitionModule(BaseModule):
@@ -268,7 +221,6 @@ class HeadingRecognitionModule(BaseModule):
         category="structure",
         requires_config=(),
         provides=("doc_tree", "heading_map"),
-        enabled_by_default=True,
     )
 
     def apply(
@@ -278,23 +230,8 @@ class HeadingRecognitionModule(BaseModule):
         tracker: ChangeTracker,
         context: PipelineContext,
     ) -> None:
-        # Sanitize spurious outlineLvl before heading scan.
-        _sanitize_outline_levels(doc)
-
-        candidate_headings = _scan_heading_infos(doc)
-        sections, detection_log = _build_sections(doc, candidate_headings)
-        headings = _filter_body_headings(candidate_headings, sections)
-        heading_map = {heading.para_index: heading.level for heading in headings}
-        section_ranges = {section.section_type: (section.start_index, section.end_index) for section in sections}
-
-        context.doc_tree = DocTree(
-            headings=headings,
-            heading_map=heading_map,
-            section_ranges=section_ranges,
-            sections=sections,
-            detection_log=detection_log,
-        )
-        context.heading_map = heading_map
+        doc_tree = rebuild_document_index(doc, context)
+        headings = doc_tree.headings
 
         if headings:
             counts: dict[int, int] = {}
@@ -308,6 +245,50 @@ class HeadingRecognitionModule(BaseModule):
                 before="(none)",
                 after=", ".join(f"H{level}={count}" for level, count in sorted(counts.items())),
             )
+
+
+def rebuild_document_index(doc: Document, context: PipelineContext) -> DocTree:
+    """Rebuild the shared heading/section index after a structural mutation.
+
+    The pipeline may call this between modules without replaying the heading
+    recognition tracker event.  Keeping the index construction here prevents
+    later consumers from observing stale paragraph indices after content,
+    caption, TOC, section, or image mutations.
+    """
+
+    doc_tree = analyze_document_tree(doc)
+    from src.shared.engine.document_scope_runtime import project_document_scope_tree
+
+    doc_tree = project_document_scope_tree(
+        doc,
+        doc_tree,
+        getattr(context, "document_scope_binding", None),
+        getattr(context, "document_scope", None),
+        mode_id=str(getattr(context, "mode_id", "") or "custom"),
+    )
+    context.doc_tree = doc_tree
+    context.heading_map = dict(doc_tree.heading_map)
+    return doc_tree
+
+
+def analyze_document_tree(doc: Document) -> DocTree:
+    """Return the canonical read-only heading and logical-region analysis."""
+
+    candidate_headings = _scan_heading_infos(doc)
+    sections, detection_log = _build_sections(doc, candidate_headings)
+    headings = _filter_body_headings(candidate_headings, sections)
+    heading_map = {heading.para_index: heading.level for heading in headings}
+    section_ranges = {
+        section.section_type: (section.start_index, section.end_index)
+        for section in sections
+    }
+    return DocTree(
+        headings=headings,
+        heading_map=heading_map,
+        section_ranges=section_ranges,
+        sections=sections,
+        detection_log=detection_log,
+    )
 
 
 def _scan_heading_infos(doc: Document) -> list[HeadingInfo]:
@@ -923,22 +904,6 @@ def _build_sections(doc: Document, headings: list[HeadingInfo]) -> tuple[list[Do
     if not sections and total > 0:
         sections = [DocSection("body", 0, total, confidence=10.0)]
     return sections, detection_log
-
-
-def _sanitize_outline_levels(doc: Document) -> None:
-    """Remove outlineLvl from empty paragraphs and reference-like entries."""
-    from src.shared.engine.ooxml_ops import qn, remove_child
-
-    for para in doc.paragraphs:
-        p_pr = para._element.find(qn("w:pPr"))
-        if p_pr is None or p_pr.find(qn("w:outlineLvl")) is None:
-            continue
-        text = (para.text or "").strip()
-        if not text:
-            remove_child(p_pr, "w:outlineLvl")
-            continue
-        if looks_like_reference_entry_line(text):
-            remove_child(p_pr, "w:outlineLvl")
 
 
 def _has_list_numpr(para: Paragraph) -> bool:

@@ -57,82 +57,28 @@ def _format_delivery_preset_markdown(
     lines.append("")
     return lines
 
-def _normalize_style_source_summary(value: Mapping[str, object] | None) -> dict[str, object]:
+def _normalize_style_source_summary(
+    value: Mapping[str, object] | None,
+) -> dict[str, object]:
     if not isinstance(value, Mapping):
         return {}
-    if not any(
-        value.get(key)
-        for key in (
-            "summary",
-            "template_label",
-            "section_status",
-            "sections",
-        )
-    ):
+    template_label = _clean_text(value.get("template_label", ""))
+    summary = _clean_text(value.get("summary", ""))
+    if not template_label and not summary:
         return {}
-    sections = []
-    for item in list(value.get("sections") or []):
-        if not isinstance(item, Mapping):
-            continue
-        changed_labels = [
-            _clean_text(label)
-            for label in list(item.get("changed_labels") or [])
-            if _clean_text(label)
-        ]
-        sections.append(
-            {
-                "variant_key": _clean_text(item.get("variant_key", "")),
-                "label": _clean_text(item.get("label", "")),
-                "status": _clean_text(item.get("status", "")),
-                "current_status": _clean_text(item.get("current_status", "")),
-                "difference_status": _clean_text(item.get("difference_status", "")),
-                "detail": _clean_text(item.get("detail", "")),
-                "detail_label": _clean_text(item.get("detail_label", "")),
-                "compact_label": _clean_text(item.get("compact_label", "")),
-                "changed_labels": changed_labels,
-                "changed_count": int(item.get("changed_count") or len(changed_labels)),
-                "follows_template": bool(item.get("follows_template", False)),
-                "overridden": bool(item.get("overridden", False)),
-            }
-        )
     return {
-        "template_label": _clean_text(value.get("template_label", "")),
-        "summary": _clean_text(value.get("summary", "")),
-        "section_status": _clean_text(value.get("section_status", "")),
-        "independent_section_count": int(value.get("independent_section_count") or 0),
-        "changed_section_count": int(value.get("changed_section_count") or 0),
-        "sections": sections,
+        "template_label": template_label,
+        "summary": summary,
     }
 
 
 def _format_style_source_markdown(style_source: Mapping[str, object]) -> list[str]:
     summary = _clean_text(style_source.get("summary", ""))
     template_label = _clean_text(style_source.get("template_label", ""))
-    section_status = _clean_text(style_source.get("section_status", ""))
     lines = ["## 样式来源", ""]
     if summary:
         lines.append(f"- 摘要: {summary}")
     if template_label:
         lines.append(f"- 模板: {template_label}")
-    if section_status:
-        lines.append(f"- 分区: {section_status}")
-    sections = [
-        item
-        for item in list(style_source.get("sections") or [])
-        if isinstance(item, Mapping)
-    ]
-    if sections:
-        lines.append("")
-        for item in sections:
-            label = _clean_text(item.get("compact_label", "")) or _clean_text(
-                item.get("label", "")
-            )
-            difference_status = _clean_text(item.get("difference_status", ""))
-            detail = _clean_text(item.get("detail", ""))
-            tail = f"：{detail}" if detail else ""
-            if difference_status:
-                lines.append(f"- {label}: {difference_status}{tail}")
-            else:
-                lines.append(f"- {label}")
     lines.append("")
     return lines

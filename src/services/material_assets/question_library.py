@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from src.config.asset_resolution import (
+    asset_item_from_payload,
+    asset_item_payload,
+    normalize_asset_item_payloads,
+)
 from src.config.materials import AssetItem
 from src.services.material_assets.common import (
-    _metric_int,
     _metric_time_label,
     _ui_utc_now_iso,
 )
@@ -321,33 +323,10 @@ def question_figure_library_master_version_entries(
 
 
 def asset_items_from_payloads(items: object) -> list[AssetItem]:
-    result: list[AssetItem] = []
-    for item in normalize_asset_item_payloads(items):
-        result.append(
-            AssetItem(
-                item_id=str(item.get("item_id", "") or ""),
-                label=str(item.get("label", "") or ""),
-                role=str(item.get("role", "") or ""),
-                path=str(item.get("path", "") or ""),
-                mime_type=str(item.get("mime_type", "") or ""),
-                tags=(
-                    [str(tag) for tag in item.get("tags", [])]
-                    if isinstance(item.get("tags"), list)
-                    else []
-                ),
-                width_cm=(
-                    item.get("width_cm")
-                    if isinstance(item.get("width_cm"), (int, float))
-                    else None
-                ),
-                metadata={
-                    str(key): str(value)
-                    for key, value in dict(item.get("metadata", {}) or {}).items()
-                    if str(key or "").strip() and str(value or "").strip()
-                },
-            )
-        )
-    return result
+    return [
+        asset_item_from_payload(item)
+        for item in normalize_asset_item_payloads(items)
+    ]
 
 
 def json_list_from_record_value(value: object) -> list[object]:
@@ -986,85 +965,6 @@ def apply_question_figure_library_metadata(
         "payloads": normalized_payloads,
         "history_record": None,
     }
-
-
-def normalize_asset_item_payloads(items: object) -> list[dict[str, object]]:
-    normalized: list[dict[str, object]] = []
-    if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
-        return normalized
-    for item in items:
-        if isinstance(item, AssetItem):
-            payload = asset_item_payload(item)
-        elif isinstance(item, Mapping):
-            metadata = item.get("metadata", {})
-            if not isinstance(metadata, Mapping):
-                metadata = {}
-            role = str(item.get("role", "") or "").strip().lower().replace(" ", "_")
-            path = str(item.get("path", "") or "").strip()
-            item_asset_id = _asset_metadata_asset_id_value(metadata)
-            if not role or (not path and not item_asset_id):
-                continue
-            width = item.get("width_cm")
-            try:
-                width_cm = float(width) if width not in (None, "") else None
-            except (TypeError, ValueError):
-                width_cm = None
-            raw_tags = item.get("tags", [])
-            tags = (
-                [str(tag) for tag in raw_tags]
-                if isinstance(raw_tags, Sequence)
-                and not isinstance(raw_tags, (str, bytes))
-                else []
-            )
-            payload = {
-                "item_id": str(item.get("item_id", "") or ""),
-                "label": str(item.get("label", "") or "")
-                or Path(path).stem
-                or item_asset_id
-                or role,
-                "role": role,
-                "path": path,
-                "metadata": {
-                    str(key): str(value)
-                    for key, value in metadata.items()
-                    if str(key or "").strip() and str(value or "").strip()
-                },
-            }
-            mime_type = str(item.get("mime_type", "") or "")
-            if mime_type:
-                payload["mime_type"] = mime_type
-            if tags:
-                payload["tags"] = tags
-            if width_cm is not None:
-                payload["width_cm"] = width_cm
-        else:
-            continue
-        normalized.append(payload)
-    return normalized
-
-
-def asset_item_payload(item: AssetItem) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "item_id": str(getattr(item, "item_id", "") or ""),
-        "label": str(getattr(item, "label", "") or ""),
-        "role": str(getattr(item, "role", "") or "").strip().lower().replace(" ", "_"),
-        "path": str(getattr(item, "path", "") or ""),
-        "metadata": {
-            str(key): str(value)
-            for key, value in dict(getattr(item, "metadata", {}) or {}).items()
-            if str(key or "").strip() and str(value or "").strip()
-        },
-    }
-    mime_type = str(getattr(item, "mime_type", "") or "")
-    if mime_type:
-        payload["mime_type"] = mime_type
-    tags = [str(tag) for tag in list(getattr(item, "tags", []) or [])]
-    if tags:
-        payload["tags"] = tags
-    width_cm = getattr(item, "width_cm", None)
-    if width_cm is not None:
-        payload["width_cm"] = width_cm
-    return payload
 
 
 def normalized_asset_item_history_records(records: object) -> list[dict[str, object]]:

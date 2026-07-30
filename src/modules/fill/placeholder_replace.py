@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.modules.base import BaseModule, ModuleMeta
-from src.shared.engine.run_ops import replace_run_text, get_full_text
+from src.shared.engine.run_ops import replace_run_text, get_full_text, iter_story_paragraphs
 from src.shared.engine.fixed_layout_text import replace_fixed_layout_placeholders
 
 if TYPE_CHECKING:
@@ -54,7 +54,7 @@ class PlaceholderReplaceModule(BaseModule):
             if not old_text:
                 continue
 
-            for para in doc.paragraphs:
+            for para in iter_story_paragraphs(doc):
                 text = get_full_text(para)
                 if old_text in text:
                     count = replace_run_text(para, old_text, new_text)

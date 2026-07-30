@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from docx.oxml import OxmlElement
 
 from src.modules.base import BaseModule, ModuleMeta
+from src.shared.engine.document_scope_runtime import document_scope_allows_paragraph
 from src.shared.engine.ooxml_ops import qn
 
 if TYPE_CHECKING:
@@ -47,7 +48,6 @@ class WhitespaceNormalizeModule(BaseModule):
         requires_config=("whitespace",),
         soft_after=("heading_recognition",),
         soft_consumes=("doc_tree",),
-        enabled_by_default=False,
     )
 
     def apply(
@@ -78,6 +78,8 @@ class WhitespaceNormalizeModule(BaseModule):
         _ref_section = doc_tree.get_section("references") if doc_tree else None
 
         for para_index, para in enumerate(doc.paragraphs):
+            if not document_scope_allows_paragraph(context, para_index):
+                continue
             if _is_skipped_style(para):
                 continue
             if _has_complex_content(para._element):

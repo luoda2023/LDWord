@@ -10,7 +10,7 @@ import re
 from typing import TYPE_CHECKING
 
 from src.modules.base import BaseModule, ModuleMeta
-from src.shared.engine.run_ops import replace_run_text, get_full_text
+from src.shared.engine.run_ops import get_full_text
 
 if TYPE_CHECKING:
     from docx import Document

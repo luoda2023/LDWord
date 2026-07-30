@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from src.config.materials import AssetItem
+from src.config.asset_resolution import asset_sequence_value
 
 
 def _question_figure_candidate_list(value) -> list[str]:
@@ -61,7 +62,7 @@ def _repeated_question_figure_status(role: str, asset_items) -> str:
 def _question_figure_target_label(item: AssetItem) -> str:
     metadata = dict(getattr(item, "metadata", {}) or {})
     target = _question_figure_target_value(metadata)
-    order = _question_figure_order_value(metadata)
+    order = asset_sequence_value(item) or _question_figure_order_value(metadata)
     if target and order is not None:
         return f"题{target}-图{order}"
     if target:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.reporting.common import _clean_list, _clean_text, _join_or_dash
+from src.reporting.common import _clean_issue, _clean_list, _clean_text, _join_or_dash
 
 
 def _extract_journal_rule_source_governance(result) -> dict | None:
@@ -30,7 +30,7 @@ def _extract_journal_rule_source_governance(result) -> dict | None:
     issues = [
         issue
         for issue in (
-            _clean_journal_rule_source_issue(issue)
+            _clean_issue(issue)
             for issue in list(payload.get("issues", []) or [])
         )
         if issue
@@ -74,23 +74,6 @@ def _extract_journal_rule_source_governance(result) -> dict | None:
         "error_count": int(payload.get("error_count") or 0),
         "warning_count": int(payload.get("warning_count") or 0),
         "issues": issues,
-    }
-
-
-def _clean_journal_rule_source_issue(value) -> dict[str, str]:
-    if not isinstance(value, dict):
-        return {}
-    kind = _clean_text(value.get("kind", ""))
-    message = _clean_text(value.get("message", ""))
-    if not kind and not message:
-        return {}
-    return {
-        "path": _clean_text(value.get("path", "")),
-        "kind": kind,
-        "severity": _clean_text(value.get("severity", "")) or "warning",
-        "expected": _clean_text(value.get("expected", "")),
-        "observed": _clean_text(value.get("observed", "")),
-        "message": message,
     }
 
 

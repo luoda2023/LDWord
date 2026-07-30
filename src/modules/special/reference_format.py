@@ -12,6 +12,7 @@ from docx.shared import Pt
 from src.config.style_semantics import apply_style_special_indent
 from src.config.template import StyleConfig
 from src.modules.base import BaseModule, ModuleMeta
+from src.shared.engine.document_scope_runtime import document_scope_allows_role
 from src.shared.engine.font_resolver import resolve_font
 from src.shared.engine.indent_ops import apply_style_config_indents
 from src.shared.engine.line_spacing_ops import apply_line_spacing, apply_paragraph_spacing, sync_spacing_ooxml
@@ -54,7 +55,6 @@ class ReferenceFormatModule(BaseModule):
         requires_config=("reference_style",),
         soft_after=("heading_recognition",),
         soft_consumes=("doc_tree",),
-        enabled_by_default=True,
     )
 
     def apply(
@@ -64,6 +64,8 @@ class ReferenceFormatModule(BaseModule):
         tracker: ChangeTracker,
         context: PipelineContext,
     ) -> None:
+        if not document_scope_allows_role(context, "references"):
+            return
         ref_range = _resolve_reference_range(doc, context)
         if ref_range is None:
             return
@@ -135,22 +137,6 @@ def _resolve_reference_range(
             end = max(start, min(int(getattr(ref_section, "end_index", total)), total))
             if end > start:
                 return (start, end)
-
-    ref_start = _find_reference_start(doc)
-    if ref_start is None:
-        return None
-    return (ref_start, total)
-
-
-def _find_reference_start(doc: Document) -> int | None:
-    """查找参考文献区域的起始位置。"""
-    ref_titles = {"参考文献", "references", "bibliography", "文献"}
-
-    for i, para in enumerate(doc.paragraphs):
-        text = (para.text or "").strip().lower()
-        for title in ref_titles:
-            if title in text and len(text) < 30:
-                return i + 1
 
     return None
 

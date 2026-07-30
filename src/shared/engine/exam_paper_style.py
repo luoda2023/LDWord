@@ -22,14 +22,17 @@ from docx.text.paragraph import Paragraph
 from lxml import etree
 
 from src.config.scene import ExamBlankStyleConfig, ExamPaperConfig
+from src.shared.engine.ooxml_ops import set_inline_shape_alt_text
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-EXAM_MASTER_ROOT = PROJECT_ROOT / "exam_masters"
+EXAM_MASTER_ROOT = PROJECT_ROOT / "config_library" / "masters" / "exam"
 BUILTIN_EXAM_MASTER_DIR = EXAM_MASTER_ROOT / "builtin"
 USER_EXAM_MASTER_DIR = EXAM_MASTER_ROOT / "user"
 
-BUILTIN_EXAM_BLANK_STYLE_IDS = ("default_exam",)
+BUILTIN_EXAM_BLANK_STYLE_IDS = (
+    "default_exam",
+)
 BUILTIN_MASTER_VERSION = "exam-master-v20-free-answer-area-2026-07-06"
 MASTER_TITLE_PLACEHOLDER = "{{af_title}}"
 MASTER_SUBTITLE_PLACEHOLDER = "{{af_version}}"
@@ -41,7 +44,7 @@ MASTER_METADATA_PLACEHOLDER = (
     f"{MASTER_SUBJECT_PLACEHOLDER}    {MASTER_GRADE_PLACEHOLDER}    "
     f"{MASTER_DURATION_PLACEHOLDER}    {MASTER_TOTAL_SCORE_PLACEHOLDER}"
 )
-MASTER_CONTROL_GUIDE_TEXT = "占位符保持原样；页眉页脚和密封线由试卷母版决定。"
+MASTER_CONTROL_GUIDE_TEXT = "占位符保持原样；页眉页脚和密封线由试卷卷面决定。"
 MASTER_METADATA_GUIDE_TEXT = "工作台字段：{{af_title}}、{{af_subject}}、{{af_grade}}、{{af_duration}}、{{af_total_score}}。"
 MASTER_DELIVERY_GUIDE_TEXT = "生成结果字段：{{af_version}}。"
 MASTER_SCORE_TABLE_GUIDE_TEXT = "固定区：得分栏、密封线、页眉页脚可直接在 Word 中调整。"
@@ -66,6 +69,10 @@ ANSWER_SPACE_DEFAULT_LINES = 2
 ANSWER_FREE_AREA_MIN_LINES = 4
 ANSWER_FREE_AREA_DEFAULT_LINES = 5
 ANSWER_AREA_LEFT_INDENT_CM = 0.72
+SEALED_HEADER_REQUIRED_NAMESPACE_DECLARATIONS = (
+    ("xmlns:w15", "http://schemas.microsoft.com/office/word/2012/wordml"),
+    ("xmlns:wpsCustomData", "http://www.wps.cn/officeDocument/2013/wpsCustomData"),
+)
 MASTER_CONTROL_GUIDE_TEXTS = frozenset(
     {
         MASTER_CONTROL_GUIDE_TEXT,
@@ -80,7 +87,7 @@ MASTER_CONTROL_GUIDE_TEXTS = frozenset(
         "题目区占位符：工作台导入的题目会从下方插入点开始生成。",
     }
 )
-EXAM_MARKDOWN_AUTHORING_PROMPT = """你是一名严谨的中小学命题老师。请根据我提供的要求，生成一份适合导入 Alavette Form 试卷场景的 Markdown 试卷内容。
+EXAM_MARKDOWN_AUTHORING_PROMPT = """你是一名严谨的中小学命题老师。请根据我提供的要求，生成一份适合导入 Alavette Form 试卷版方案的 Markdown 试卷内容。
 
 【命题要求】
 学科：{{学科}}
@@ -94,7 +101,7 @@ EXAM_MARKDOWN_AUTHORING_PROMPT = """你是一名严谨的中小学命题老师�
 
 【输出规则】
 1. 只输出 Markdown 正文，不要代码围栏，不要解释。
-2. 不要编写页眉、页脚、页码、密封线、字体、页边距、装订线等版式信息，这些由试卷母版决定。
+2. 不要编写页眉、页脚、页码、密封线、字体、页边距、装订线等版式信息，这些由试卷卷面决定。
 3. 使用清晰的大题结构，例如：
    # 试卷标题
    > 科目：语文　年级：七年级　考试时间：90 分钟　满分：100 分
@@ -120,7 +127,7 @@ EXAM_MARKDOWN_AUTHORING_PROMPT = """你是一名严谨的中小学命题老师�
 10. 需要预留答题区时，在题目结构中加入 answer_area_kind 和 answer_lines：语文简答/阅读用 answer_area_kind: lines、answer_lines: 3；数学计算/解答/证明用 answer_area_kind: free、answer_lines: 5；选择题不要设置答题区。
 11. 内容应适合直接导入，不要加入“以下是试卷”等对话性文字。"""
 
-EXAM_MASTER_CONVERSION_PROMPT = """你是一名 Word 试卷模板工程师。请把我提供的常规试卷改造成 Alavette Form 可用的“试卷母版”。
+EXAM_MASTER_CONVERSION_PROMPT = """你是一名 Word 试卷卷面工程师。请把我提供的常规试卷改造成 Alavette Form 可用的“试卷卷面”。
 
 【核心目标】
 保留这份卷子的版式风格，例如标题区、信息栏、注意事项、密封线、页眉、页脚、页码、表格样式和题目排版风格；删除具体题目、答案和解析，把可变内容替换为占位符。
@@ -143,8 +150,8 @@ EXAM_MASTER_CONVERSION_PROMPT = """你是一名 Word 试卷模板工程师。请
 3. 删除所有真实题目、答案、解析和学生作答内容。
 4. 在正文题目开始的位置，单独放一行：{{af_questions}}
 5. 如果卷面需要预留答题区，在合适位置单独放一行：{{af_answer_area}}
-6. 页眉、页脚、页码、密封线、注意事项、装订线可以保留在母版中，因为它们属于试卷版式。
-7. 不要在母版中写具体题目内容，不要写真实答案，不要写示例题。
+6. 页眉、页脚、页码、密封线、注意事项、装订线可以保留在试卷卷面中，因为它们属于试卷版式。
+7. 不要在试卷卷面中写具体题目内容，不要写真实答案，不要写示例题。
 8. 占位符必须是普通可编辑文本，尤其是 {{af_questions}} 和 {{af_answer_area}} 必须作为独立段落存在。
 9. 不要把占位符放在图片、形状、艺术字、文本框或页眉页脚中。
 
@@ -153,16 +160,16 @@ EXAM_MASTER_CONVERSION_PROMPT = """你是一名 Word 试卷模板工程师。请
 如果你只能给出修改方案，请逐项说明应该删除什么、保留什么、替换成哪个占位符。
 
 【自检清单】
-最终母版应满足：
+最终卷面应满足：
 - 能一眼看出标题由 {{af_title}} 决定。
 - 能一眼看出科目、年级、时间、满分由对应占位符决定。
 - 正文题目插入点只有 {{af_questions}}。
 - 没有真实题目、答案、解析残留。
-- 页眉页脚只作为母版版式存在，不再依赖普通模板二次覆盖。"""
+- 页眉页脚只作为卷面版式存在，不再依赖普通模板二次覆盖。"""
 
 EXAM_AI_PROMPT_OPTIONS: tuple[tuple[str, str, str], ...] = (
     ("markdown", "生成试卷", EXAM_MARKDOWN_AUTHORING_PROMPT),
-    ("master", "改造母版", EXAM_MASTER_CONVERSION_PROMPT),
+    ("master", "改造卷面", EXAM_MASTER_CONVERSION_PROMPT),
 )
 LEGACY_MASTER_TITLE_PLACEHOLDERS = (
     "【试卷标题】",
@@ -234,11 +241,27 @@ class ExamPaperDocxOutputs:
     answer_key_docx: Path | None = None
 
 
+@dataclass(frozen=True)
+class ExamUserMasterInventoryItem:
+    """Read-only classification for one file in the user exam master pool."""
+
+    path: Path
+    category: str
+    referenced: bool = False
+    style_id: str = ""
+    label: str = ""
+    note: str = ""
+
+    @property
+    def file_name(self) -> str:
+        return self.path.name
+
+
 _BUILTIN_STYLE_SPECS: dict[str, ExamBlankStyleSpec] = {
     "default_exam": ExamBlankStyleSpec(
         style_id="default_exam",
-        label="默认试卷",
-        summary="标准 A4 卷面，含标题区、考试信息栏、注意事项、题目区和页脚。",
+        label="A4 标准卷面",
+        summary="A4 标准卷面，含标题区、考试信息栏、注意事项、题目区和页脚。",
         status="内置，可直接使用",
         base_style_id="default_exam",
         master_filename="default_exam_v20.docx",
@@ -321,11 +344,96 @@ def exam_blank_style_options(config: ExamPaperConfig | None = None) -> tuple[tup
     return tuple(custom) + builtin_exam_blank_style_options()
 
 
+def sync_user_exam_blank_master_files(
+    config: ExamPaperConfig,
+    directory: Path | str | None = None,
+) -> tuple[ExamBlankStyleConfig, ...]:
+    """Register manually dropped user master docx files on the scene config.
+
+    Program-created files are already tracked through ``custom_blank_styles``.
+    Discovery is intentionally limited to the canonical mode-scoped user
+    directory unless a caller supplies an explicit directory for inspection.
+    """
+
+    existing_paths = _custom_blank_style_paths(config)
+    added: list[ExamBlankStyleConfig] = []
+    for folder in _user_master_discovery_dirs(directory):
+        if not folder.exists() or not folder.is_dir():
+            continue
+        for path in sorted(folder.glob("*.docx"), key=lambda item: item.name.casefold()):
+            try:
+                resolved = path.resolve()
+            except OSError:
+                continue
+            if resolved in existing_paths:
+                continue
+            if not _docx_is_discoverable_exam_master(path):
+                continue
+
+            style_id, label = _unique_discovered_style_identity(config, path)
+            style = ExamBlankStyleConfig(
+                style_id=style_id,
+                label=label,
+                base_style_id="default_exam",
+                master_docx_path=_stored_master_path(path),
+            )
+            config.custom_blank_styles.append(style)
+            existing_paths.add(resolved)
+            added.append(style)
+    return tuple(added)
+
+
+def inventory_user_exam_master_files(
+    config: ExamPaperConfig | None = None,
+    directory: Path | str | None = None,
+    *,
+    reference_configs: Iterable[ExamPaperConfig] | None = None,
+) -> tuple[ExamUserMasterInventoryItem, ...]:
+    """Classify files in the user exam master pool without mutating anything."""
+
+    folder = Path(directory) if directory is not None else USER_EXAM_MASTER_DIR
+    if not folder.exists() or not folder.is_dir():
+        return ()
+
+    referenced_paths = _custom_blank_style_path_refs(config, folder)
+    for reference_config in reference_configs or ():
+        for path, reference in _custom_blank_style_path_refs(reference_config, folder).items():
+            referenced_paths.setdefault(path, reference)
+    items: list[ExamUserMasterInventoryItem] = []
+    for path in sorted(folder.glob("*.docx"), key=lambda item: item.name.casefold()):
+        resolved = _safe_resolve(path)
+        referenced_style = referenced_paths.get(resolved)
+        if referenced_style is not None:
+            style_id, label = referenced_style
+            items.append(
+                ExamUserMasterInventoryItem(
+                    path=path,
+                    category="referenced",
+                    referenced=True,
+                    style_id=style_id,
+                    label=label,
+                    note="referenced_by_current_exam_config",
+                )
+            )
+            continue
+
+        category = _unreferenced_user_master_category(path)
+        items.append(
+            ExamUserMasterInventoryItem(
+                path=path,
+                category=category,
+                referenced=False,
+                note="not_referenced_by_current_exam_config",
+            )
+        )
+    return tuple(items)
+
+
 def exam_blank_style_label(
     style_id: str,
     config: ExamPaperConfig | None = None,
     *,
-    fallback: str = "默认试卷",
+    fallback: str = "A4 标准卷面",
 ) -> str:
     return resolve_exam_blank_style(config, style_id).label if style_id else fallback
 
@@ -362,7 +470,7 @@ def create_exam_blank_style_copy(
 ) -> ExamBlankStyleConfig:
     """Create user-owned style metadata without touching the filesystem."""
 
-    source = resolve_exam_blank_style(config, source_style_id or config.blank_style_id)
+    source = resolve_exam_blank_style(config, source_style_id or "default_exam")
     base_style_id = source.base_style_id if not source.readonly else source.style_id
     existing_ids = {
         str(style.style_id or "").strip()
@@ -398,7 +506,7 @@ def create_exam_blank_master_copy(
     style = create_exam_blank_style_copy(config, source_style_id)
     source_path = ensure_current_exam_blank_master_docx(
         config,
-        source_style_id or config.blank_style_id,
+        source_style_id or "default_exam",
     )
     target_dir = Path(output_dir) if output_dir is not None else USER_EXAM_MASTER_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -416,18 +524,18 @@ def import_exam_blank_master_docx(
     base_style_id: str | None = None,
     output_dir: Path | str | None = None,
 ) -> ExamBlankStyleConfig:
-    """Copy an existing Word file into the scene-owned exam master library."""
+    """Copy an existing Word file into the scene-owned exam shell library."""
 
     source = Path(source_docx_path)
     if source.suffix.lower() != ".docx":
-        raise ValueError("请选择 .docx 格式的 Word 母版")
+        raise ValueError("请选择 .docx 格式的试卷卷面")
     if not _docx_is_openable(source):
-        raise ValueError("选择的 Word 母版无法打开")
+        raise ValueError("选择的试卷卷面无法打开")
 
-    requested_label = _safe_docx_stem(label or source.stem) or "导入试卷母版"
+    requested_label = _safe_docx_stem(label or source.stem) or "导入试卷卷面"
     base_source = resolve_exam_blank_style(
         config,
-        base_style_id or getattr(config, "blank_style_id", "") or "default_exam",
+        base_style_id or "default_exam",
     )
     style_id, style_label = _unique_imported_style_identity(config, requested_label)
     style = ExamBlankStyleConfig(
@@ -445,10 +553,12 @@ def import_exam_blank_master_docx(
 
 
 def ensure_builtin_exam_master_files() -> tuple[Path, ...]:
-    return tuple(
+    prompt_paths = _ensure_builtin_exam_master_prompt_files()
+    docx_paths = tuple(
         ensure_builtin_exam_master_docx(style_id)
         for style_id in BUILTIN_EXAM_BLANK_STYLE_IDS
     )
+    return (*docx_paths, *prompt_paths)
 
 
 def ensure_builtin_exam_master_docx(style_id: str) -> Path:
@@ -457,6 +567,25 @@ def ensure_builtin_exam_master_docx(style_id: str) -> Path:
     if not _builtin_master_is_current(target):
         _write_exam_blank_master_document(spec, target)
     return target
+
+
+def _ensure_builtin_exam_master_prompt_files() -> tuple[Path, Path]:
+    targets = (
+        (
+            BUILTIN_EXAM_MASTER_DIR / "exam_content_generation_prompt.md",
+            EXAM_MARKDOWN_AUTHORING_PROMPT,
+        ),
+        (
+            BUILTIN_EXAM_MASTER_DIR / "exam_master_conversion_prompt.md",
+            EXAM_MASTER_CONVERSION_PROMPT,
+        ),
+    )
+    for path, content in targets:
+        if path.exists() and path.read_text(encoding="utf-8") == content:
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    return tuple(path for path, _content in targets)
 
 
 def ensure_current_exam_blank_master_docx(
@@ -469,14 +598,20 @@ def ensure_current_exam_blank_master_docx(
         return ensure_builtin_exam_master_docx(target)
 
     stored = _resolve_stored_master_path(custom_style.master_docx_path)
-    if stored is None:
-        stored = USER_EXAM_MASTER_DIR / f"{custom_style.style_id}.docx"
+    fallback = _existing_user_master_docx_path(custom_style.style_id)
+    if stored is None and fallback is not None:
+        stored = fallback
         custom_style.master_docx_path = _stored_master_path(stored)
-
+    if stored is None:
+        raise FileNotFoundError(f"自定义卷面未绑定 DOCX: {custom_style.label}")
+    if not stored.exists():
+        if fallback is not None and fallback != stored and _docx_is_openable(fallback):
+            stored = fallback
+            custom_style.master_docx_path = _stored_master_path(stored)
+        else:
+            raise FileNotFoundError(f"自定义卷面 DOCX 不存在: {stored}")
     if not _docx_is_openable(stored):
-        source = ensure_builtin_exam_master_docx(custom_style.base_style_id)
-        stored.parent.mkdir(parents=True, exist_ok=True)
-        copy2(source, stored)
+        raise ValueError(f"自定义卷面 DOCX 无法打开: {stored}")
     return stored
 
 
@@ -542,6 +677,7 @@ def write_exam_paper_docx(
     config: ExamPaperConfig | None = None,
     include_answer_version: bool = False,
     filename: str | None = None,
+    master_docx_path: Path | str | None = None,
 ) -> Path:
     spec = resolve_exam_blank_style(config, style_id)
     target_dir = Path(output_dir)
@@ -552,9 +688,15 @@ def write_exam_paper_docx(
         target_name = f"{target_name}.docx"
     target = target_dir / Path(target_name).name
 
-    master_path = ensure_current_exam_blank_master_docx(config, style_id)
+    master_path = (
+        Path(master_docx_path).expanduser().resolve()
+        if str(master_docx_path or "").strip()
+        else ensure_current_exam_blank_master_docx(config, style_id)
+    )
+    if not master_path.is_file():
+        raise FileNotFoundError(f"试卷母版 DOCX 不存在: {master_path}")
     document = Document(str(master_path))
-    _configure_exam_styles(document, spec)
+    _configure_exam_styles(document, spec, preserve_existing=not spec.readonly)
     _write_exam_payload_into_master(document, spec, exam_payload)
     if include_answer_version:
         document.add_page_break()
@@ -573,6 +715,7 @@ def write_exam_paper_docx_files(
     include_student: bool = True,
     include_answer_key: bool = True,
     filename_stem: str | None = None,
+    master_docx_path: Path | str | None = None,
 ) -> ExamPaperDocxOutputs:
     exam_payload = payload or EXAM_SAMPLE_PAYLOAD
     base_stem = _safe_docx_stem(filename_stem or _exam_payload_title(exam_payload))
@@ -584,6 +727,7 @@ def write_exam_paper_docx_files(
             config=config,
             include_answer_version=False,
             filename=f"{base_stem}_学生卷.docx",
+            master_docx_path=master_docx_path,
         )
         if include_student
         else None
@@ -649,7 +793,7 @@ def write_exam_blank_master_docx(
 def _write_exam_blank_master_document(spec: ExamBlankStyleSpec, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     document = Document()
-    document.core_properties.title = f"{spec.label} 试卷母版"
+    document.core_properties.title = f"{spec.label} 试卷卷面"
     document.core_properties.subject = "Alavette Form exam paper master"
     document.core_properties.comments = BUILTIN_MASTER_VERSION
     _apply_exam_document_page(document, spec)
@@ -687,7 +831,7 @@ def _patch_saved_first_header_xml(target: Path, header_xml: bytes) -> None:
                 for info in archive.infolist():
                     data = archive.read(info.filename)
                     if info.filename == first_header_part:
-                        data = header_xml
+                        data = _ensure_sealed_header_namespace_declarations(header_xml)
                     output.writestr(info, data)
         temp_target.replace(target)
     except (BadZipFile, KeyError, OSError, etree.XMLSyntaxError):
@@ -699,6 +843,13 @@ def _patch_saved_first_header_xml(target: Path, header_xml: bytes) -> None:
 
 
 def _load_first_page_header_xml(path: Path) -> bytes | None:
+    header_xml = _load_first_page_header_xml_raw(path)
+    if header_xml is None:
+        return None
+    return _ensure_sealed_header_namespace_declarations(header_xml)
+
+
+def _load_first_page_header_xml_raw(path: Path) -> bytes | None:
     try:
         with ZipFile(path) as archive:
             document_xml = archive.read("word/document.xml")
@@ -711,8 +862,32 @@ def _load_first_page_header_xml(path: Path) -> bytes | None:
         return None
 
 
+def _ensure_sealed_header_namespace_declarations(header_xml: bytes) -> bytes:
+    """Keep compatibility namespaces that Word/WPS may drop from unused roots."""
+
+    try:
+        text = header_xml.decode("utf-8")
+    except UnicodeDecodeError:
+        return header_xml
+    root_start = text.find("<w:hdr")
+    if root_start < 0:
+        return header_xml
+    root_end = text.find(">", root_start)
+    if root_end < 0:
+        return header_xml
+    root_tag = text[root_start:root_end]
+    additions = [
+        f' {name}="{uri}"'
+        for name, uri in SEALED_HEADER_REQUIRED_NAMESPACE_DECLARATIONS
+        if f"{name}=" not in root_tag
+    ]
+    if not additions:
+        return header_xml
+    return f"{text[:root_end]}{''.join(additions)}{text[root_end:]}".encode("utf-8")
+
+
 def _load_reference_sealed_header_xml() -> bytes | None:
-    reference_path = BUILTIN_EXAM_MASTER_DIR / "default_exam_v10.docx"
+    reference_path = _reference_sealed_header_path()
     if not reference_path.exists():
         return None
 
@@ -723,7 +898,7 @@ def _load_reference_sealed_header_xml() -> bytes | None:
                     continue
                 xml_bytes = archive.read(name)
                 if b"ExamSeal" in xml_bytes and b"rotation:-5898240f" in xml_bytes:
-                    return xml_bytes
+                    return _ensure_sealed_header_namespace_declarations(xml_bytes)
     except (BadZipFile, KeyError, OSError):
         return None
     return None
@@ -766,84 +941,103 @@ def _apply_exam_document_page(document: Document, spec: ExamBlankStyleSpec) -> N
     section.footer_distance = Cm(1.2)
 
 
-def _configure_exam_styles(document: Document, spec: ExamBlankStyleSpec) -> None:
+def _configure_exam_styles(
+    document: Document,
+    spec: ExamBlankStyleSpec,
+    *,
+    preserve_existing: bool = False,
+) -> None:
     styles = document.styles
-    _set_style_font(styles["Normal"], "宋体", spec.body_font_size_pt)
-    styles["Normal"].paragraph_format.line_spacing = spec.line_spacing
-    styles["Normal"].paragraph_format.space_after = Pt(0)
+    normal_style = None if preserve_existing else styles["Normal"]
+    if normal_style is not None:
+        _set_style_font(normal_style, "宋体", spec.body_font_size_pt)
+        normal_style.paragraph_format.line_spacing = spec.line_spacing
+        normal_style.paragraph_format.space_after = Pt(0)
 
-    title_style = _paragraph_style(document, "Exam Title")
-    _set_style_font(title_style, "宋体", 18, bold=True)
-    title_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_style.paragraph_format.space_after = Pt(0)
-    title_style.paragraph_format.line_spacing = spec.line_spacing
+    title_style = _style_for_configuration(document, "Exam Title", preserve_existing)
+    if title_style is not None:
+        _set_style_font(title_style, "宋体", 18, bold=True)
+        title_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_style.paragraph_format.space_after = Pt(0)
+        title_style.paragraph_format.line_spacing = spec.line_spacing
 
-    subtitle_style = _paragraph_style(document, "Exam Subtitle")
-    _set_style_font(subtitle_style, "黑体", 24, bold=True)
-    subtitle_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    subtitle_style.paragraph_format.space_after = Pt(4)
-    subtitle_style.paragraph_format.line_spacing = spec.line_spacing
+    subtitle_style = _style_for_configuration(document, "Exam Subtitle", preserve_existing)
+    if subtitle_style is not None:
+        _set_style_font(subtitle_style, "黑体", 24, bold=True)
+        subtitle_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        subtitle_style.paragraph_format.space_after = Pt(4)
+        subtitle_style.paragraph_format.line_spacing = spec.line_spacing
 
-    meta_style = _paragraph_style(document, "Exam Metadata")
-    _set_style_font(meta_style, "宋体", spec.body_font_size_pt)
-    meta_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    meta_style.paragraph_format.space_after = Pt(3)
-    meta_style.paragraph_format.line_spacing = spec.line_spacing
+    meta_style = _style_for_configuration(document, "Exam Metadata", preserve_existing)
+    if meta_style is not None:
+        _set_style_font(meta_style, "宋体", spec.body_font_size_pt)
+        meta_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        meta_style.paragraph_format.space_after = Pt(3)
+        meta_style.paragraph_format.line_spacing = spec.line_spacing
 
-    heading_style = _paragraph_style(document, "Exam Section Heading")
-    _set_style_font(heading_style, "宋体", 14, bold=True)
-    heading_style.paragraph_format.space_before = Pt(4)
-    heading_style.paragraph_format.space_after = Pt(0)
-    heading_style.paragraph_format.line_spacing = spec.line_spacing
+    heading_style = _style_for_configuration(document, "Exam Section Heading", preserve_existing)
+    if heading_style is not None:
+        _set_style_font(heading_style, "宋体", 14, bold=True)
+        heading_style.paragraph_format.space_before = Pt(4)
+        heading_style.paragraph_format.space_after = Pt(0)
+        heading_style.paragraph_format.line_spacing = spec.line_spacing
 
-    question_style = _paragraph_style(document, "Exam Question")
-    _set_style_font(question_style, "宋体", spec.body_font_size_pt)
-    question_style.paragraph_format.line_spacing = spec.line_spacing
-    question_style.paragraph_format.space_after = Pt(0)
+    question_style = _style_for_configuration(document, "Exam Question", preserve_existing)
+    if question_style is not None:
+        _set_style_font(question_style, "宋体", spec.body_font_size_pt)
+        question_style.paragraph_format.line_spacing = spec.line_spacing
+        question_style.paragraph_format.space_after = Pt(0)
 
-    question_stem_style = _paragraph_style(document, "Exam Question Stem")
-    _set_style_font(question_stem_style, "宋体", spec.body_font_size_pt)
-    question_stem_style.paragraph_format.line_spacing = spec.line_spacing
-    question_stem_style.paragraph_format.space_before = Pt(4)
-    question_stem_style.paragraph_format.space_after = Pt(1)
-    question_stem_style.paragraph_format.left_indent = Cm(0.72)
-    question_stem_style.paragraph_format.first_line_indent = Cm(-0.72)
+    question_stem_style = _style_for_configuration(document, "Exam Question Stem", preserve_existing)
+    if question_stem_style is not None:
+        _set_style_font(question_stem_style, "宋体", spec.body_font_size_pt)
+        question_stem_style.paragraph_format.line_spacing = spec.line_spacing
+        question_stem_style.paragraph_format.space_before = Pt(4)
+        question_stem_style.paragraph_format.space_after = Pt(1)
+        question_stem_style.paragraph_format.left_indent = Cm(0.72)
+        question_stem_style.paragraph_format.first_line_indent = Cm(-0.72)
 
-    option_style = _paragraph_style(document, "Exam Option")
-    _set_style_font(option_style, "宋体", spec.body_font_size_pt)
-    option_style.paragraph_format.left_indent = Cm(0.72)
-    option_style.paragraph_format.line_spacing = spec.line_spacing
-    option_style.paragraph_format.space_after = Pt(0)
+    option_style = _style_for_configuration(document, "Exam Option", preserve_existing)
+    if option_style is not None:
+        _set_style_font(option_style, "宋体", spec.body_font_size_pt)
+        option_style.paragraph_format.left_indent = Cm(0.72)
+        option_style.paragraph_format.line_spacing = spec.line_spacing
+        option_style.paragraph_format.space_after = Pt(0)
 
-    answer_space_style = _paragraph_style(document, "Exam Answer Space")
-    _set_style_font(answer_space_style, "宋体", spec.body_font_size_pt)
-    answer_space_style.paragraph_format.left_indent = Cm(0.72)
-    answer_space_style.paragraph_format.line_spacing = 1.4
-    answer_space_style.paragraph_format.space_before = Pt(2)
-    answer_space_style.paragraph_format.space_after = Pt(2)
+    answer_space_style = _style_for_configuration(document, "Exam Answer Space", preserve_existing)
+    if answer_space_style is not None:
+        _set_style_font(answer_space_style, "宋体", spec.body_font_size_pt)
+        answer_space_style.paragraph_format.left_indent = Cm(0.72)
+        answer_space_style.paragraph_format.line_spacing = 1.4
+        answer_space_style.paragraph_format.space_before = Pt(2)
+        answer_space_style.paragraph_format.space_after = Pt(2)
 
-    free_answer_style = _paragraph_style(document, "Exam Free Answer Area")
-    _set_style_font(free_answer_style, "宋体", spec.body_font_size_pt)
-    free_answer_style.paragraph_format.line_spacing = 1.0
-    free_answer_style.paragraph_format.space_before = Pt(0)
-    free_answer_style.paragraph_format.space_after = Pt(0)
+    free_answer_style = _style_for_configuration(document, "Exam Free Answer Area", preserve_existing)
+    if free_answer_style is not None:
+        _set_style_font(free_answer_style, "宋体", spec.body_font_size_pt)
+        free_answer_style.paragraph_format.line_spacing = 1.0
+        free_answer_style.paragraph_format.space_before = Pt(0)
+        free_answer_style.paragraph_format.space_after = Pt(0)
 
-    muted_style = _paragraph_style(document, "Exam Muted")
-    _set_style_font(muted_style, "宋体", 10, color="666666")
-    muted_style.paragraph_format.line_spacing = spec.line_spacing
-    muted_style.paragraph_format.space_after = Pt(0)
+    muted_style = _style_for_configuration(document, "Exam Muted", preserve_existing)
+    if muted_style is not None:
+        _set_style_font(muted_style, "宋体", 10, color="666666")
+        muted_style.paragraph_format.line_spacing = spec.line_spacing
+        muted_style.paragraph_format.space_after = Pt(0)
 
-    guide_style = _paragraph_style(document, "Exam Control Guide")
-    _set_style_font(guide_style, "微软雅黑", 9, color="1677FF")
-    guide_style.paragraph_format.line_spacing = 1.0
-    guide_style.paragraph_format.space_after = Pt(2)
+    guide_style = _style_for_configuration(document, "Exam Control Guide", preserve_existing)
+    if guide_style is not None:
+        _set_style_font(guide_style, "微软雅黑", 9, color="1677FF")
+        guide_style.paragraph_format.line_spacing = 1.0
+        guide_style.paragraph_format.space_after = Pt(2)
 
-    marker_style = _paragraph_style(document, "Exam Control Marker")
-    _set_style_font(marker_style, "微软雅黑", 9, bold=True, color="0958D9")
-    marker_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    marker_style.paragraph_format.line_spacing = 1.0
-    marker_style.paragraph_format.space_before = Pt(2)
-    marker_style.paragraph_format.space_after = Pt(2)
+    marker_style = _style_for_configuration(document, "Exam Control Marker", preserve_existing)
+    if marker_style is not None:
+        _set_style_font(marker_style, "微软雅黑", 9, bold=True, color="0958D9")
+        marker_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        marker_style.paragraph_format.line_spacing = 1.0
+        marker_style.paragraph_format.space_before = Pt(2)
+        marker_style.paragraph_format.space_after = Pt(2)
 
 
 def _add_blank_master_page(document: Document, spec: ExamBlankStyleSpec) -> None:
@@ -920,9 +1114,9 @@ def _add_sealed_zone_to_header(document: Document) -> None:
 
 
 def _copy_reference_sealed_header(header_element) -> bool:
-    """Copy the complete manually verified v10 first-page header XML."""
+    """Copy the complete first-page header XML from the final builtin master."""
 
-    reference_path = BUILTIN_EXAM_MASTER_DIR / "default_exam_v10.docx"
+    reference_path = _reference_sealed_header_path()
     if not reference_path.exists():
         return False
 
@@ -961,9 +1155,9 @@ def _reference_header_has_sealed_zone(root) -> bool:
 
 
 def _append_reference_sealed_zone(pict) -> bool:
-    """Fallback: copy v10 VML elements when complete header replacement fails."""
+    """Fallback: copy reference VML elements when complete header replacement fails."""
 
-    reference_path = BUILTIN_EXAM_MASTER_DIR / "default_exam_v10.docx"
+    reference_path = _reference_sealed_header_path()
     if not reference_path.exists():
         return False
 
@@ -992,6 +1186,13 @@ def _append_reference_sealed_zone(pict) -> bool:
         return False
 
     return False
+
+
+def _reference_sealed_header_path() -> Path:
+    spec = _BUILTIN_STYLE_SPECS.get("default_exam")
+    if spec is not None and spec.master_filename:
+        return BUILTIN_EXAM_MASTER_DIR / spec.master_filename
+    return BUILTIN_EXAM_MASTER_DIR / "default_exam_v20.docx"
 
 
 def _is_reference_seal_element(element) -> bool:
@@ -1593,6 +1794,9 @@ def _add_answer_version(
         document.add_paragraph(_section_title(section, section_index), style="Exam Section Heading")
         for question_number, question in enumerate(_section_questions(section), start=1):
             document.add_paragraph(_answer_key_line(question_number, question), style="Exam Question")
+            analysis = _question_analysis(question)
+            if analysis:
+                document.add_paragraph(f"解析：{analysis}", style="Exam Question")
 
 
 def _add_exam_header(
@@ -2024,7 +2228,7 @@ def _insert_question_figures_after_block(
             continue
         alt_text = _question_figure_alt_text(figure)
         if alt_text:
-            _set_inline_shape_alt_text(
+            set_inline_shape_alt_text(
                 inline_shape,
                 alt_text=alt_text,
                 title=_question_figure_title(figure),
@@ -2065,20 +2269,6 @@ def _question_figure_title(figure: Mapping[str, object]) -> str:
     return _payload_text(figure, ("title", "caption", "asset_id", "source"))
 
 
-def _set_inline_shape_alt_text(
-    inline_shape,
-    *,
-    alt_text: str,
-    title: str = "",
-) -> None:
-    doc_pr = getattr(getattr(inline_shape, "_inline", None), "docPr", None)
-    if doc_pr is None:
-        return
-    doc_pr.set("descr", alt_text)
-    if title:
-        doc_pr.set("title", title)
-
-
 def _question_answer(question: Mapping[str, object]) -> str:
     raw_answer = (
         question.get("answer")
@@ -2089,6 +2279,10 @@ def _question_answer(question: Mapping[str, object]) -> str:
     if isinstance(raw_answer, (list, tuple, set)):
         return "、".join(str(item).strip() for item in raw_answer if str(item).strip())
     return str(raw_answer or "").strip()
+
+
+def _question_analysis(question: Mapping[str, object]) -> str:
+    return _payload_text(question, ("analysis", "explanation", "解析"))
 
 
 def _question_score(question: Mapping[str, object]) -> str:
@@ -2146,6 +2340,104 @@ def _find_custom_blank_style(
     return None
 
 
+def _custom_blank_style_paths(config: ExamPaperConfig) -> set[Path]:
+    paths: set[Path] = set()
+    for style in getattr(config, "custom_blank_styles", []) or []:
+        path = _resolve_stored_master_path(getattr(style, "master_docx_path", ""))
+        if path is None:
+            continue
+        try:
+            paths.add(path.resolve())
+        except OSError:
+            continue
+    return paths
+
+
+def _custom_blank_style_path_refs(
+    config: ExamPaperConfig | None,
+    fallback_dir: Path,
+) -> dict[Path, tuple[str, str]]:
+    refs: dict[Path, tuple[str, str]] = {}
+    if config is None:
+        return refs
+    for style in getattr(config, "custom_blank_styles", []) or []:
+        style_id = str(getattr(style, "style_id", "") or "").strip()
+        path = _resolve_stored_master_path(getattr(style, "master_docx_path", ""))
+        if path is None and style_id:
+            path = fallback_dir / f"{style_id}.docx"
+        if path is None:
+            continue
+        refs[_safe_resolve(path)] = (
+            style_id,
+            str(getattr(style, "label", "") or style_id).strip(),
+        )
+    return refs
+
+
+def _safe_resolve(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except OSError:
+        return path.absolute()
+
+
+def _unreferenced_user_master_category(path: Path) -> str:
+    name = path.stem.casefold()
+    if name == "user_default_exam_copy" or name.startswith("user_default_exam_copy_"):
+        return "program_copy_unreferenced"
+    if name == "user_imported_exam" or name.startswith("user_imported_exam_"):
+        return "program_import_unreferenced"
+    if _docx_is_discoverable_exam_master(path):
+        return "manual_discoverable"
+    return "unknown_or_invalid"
+
+
+def _docx_is_discoverable_exam_master(path: Path) -> bool:
+    if not path.exists() or path.suffix.lower() != ".docx":
+        return False
+    try:
+        document = Document(str(path))
+    except Exception:
+        return False
+
+    paragraph_texts = [paragraph.text.strip() for paragraph in _iter_paragraphs(document)]
+    if MASTER_QUESTION_INSERT_MARKER not in paragraph_texts:
+        return False
+    body_text = "\n".join(paragraph_texts)
+    return MASTER_TITLE_PLACEHOLDER in body_text
+
+
+def _unique_discovered_style_identity(
+    config: ExamPaperConfig,
+    source_docx_path: Path,
+) -> tuple[str, str]:
+    existing_ids = {
+        *BUILTIN_EXAM_BLANK_STYLE_IDS,
+        *(
+            str(style.style_id or "").strip()
+            for style in getattr(config, "custom_blank_styles", []) or []
+        ),
+    }
+    existing_labels = {
+        "A4 标准卷面",
+        *(
+            str(style.label or "").strip()
+            for style in getattr(config, "custom_blank_styles", []) or []
+        ),
+    }
+    label_seed = _safe_docx_stem(source_docx_path.stem) or "试卷卷面"
+    id_seed = _safe_style_id_part(label_seed) or "exam_master"
+    index = 1
+    while True:
+        suffix = "" if index == 1 else f"_{index}"
+        label_suffix = "" if index == 1 else f" {index}"
+        style_id = f"user_file_{id_seed}{suffix}"
+        label = f"{label_seed}{label_suffix}"
+        if style_id not in existing_ids and label not in existing_labels:
+            return style_id, label
+        index += 1
+
+
 def _unique_imported_style_identity(
     config: ExamPaperConfig,
     requested_label: str,
@@ -2161,7 +2453,7 @@ def _unique_imported_style_identity(
         str(style.label or "").strip()
         for style in getattr(config, "custom_blank_styles", []) or []
     }
-    label_seed = _safe_stem(requested_label) or "导入试卷母版"
+    label_seed = _safe_stem(requested_label) or "导入试卷卷面"
     index = 1
     while True:
         suffix = "" if index == 1 else f"_{index}"
@@ -2181,6 +2473,20 @@ def _resolve_stored_master_path(value: str) -> Path | None:
     if not path.is_absolute():
         path = PROJECT_ROOT / path
     return path
+
+
+def _user_master_discovery_dirs(directory: Path | str | None = None) -> tuple[Path, ...]:
+    if directory is not None:
+        return (Path(directory),)
+    return (USER_EXAM_MASTER_DIR,)
+
+
+def _existing_user_master_docx_path(style_id: str) -> Path | None:
+    name = str(style_id or "").strip()
+    if not name:
+        return None
+    path = USER_EXAM_MASTER_DIR / f"{name}.docx"
+    return path if path.exists() else None
 
 
 def _stored_master_path(path: Path) -> str:
@@ -2221,7 +2527,20 @@ def _builtin_master_is_current(path: Path) -> bool:
         document = Document(str(path))
     except Exception:
         return False
-    return document.core_properties.comments == BUILTIN_MASTER_VERSION
+    if document.core_properties.comments != BUILTIN_MASTER_VERSION:
+        return False
+    text_values = {paragraph.text.strip() for paragraph in _iter_paragraphs(document)}
+    if not (
+        MASTER_CONTROL_GUIDE_TEXT in text_values
+        and MASTER_QUESTION_INSERT_MARKER in text_values
+        and MASTER_ANSWER_AREA_MARKER in text_values
+    ):
+        return False
+    header_xml = _load_first_page_header_xml_raw(path) or b""
+    return all(
+        f"{name}=".encode("utf-8") in header_xml
+        for name, _uri in SEALED_HEADER_REQUIRED_NAMESPACE_DECLARATIONS
+    )
 
 
 def _paragraph_style(document: Document, name: str):
@@ -2229,6 +2548,18 @@ def _paragraph_style(document: Document, name: str):
         return document.styles[name]
     except KeyError:
         return document.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+
+
+def _style_for_configuration(
+    document: Document,
+    name: str,
+    preserve_existing: bool,
+):
+    try:
+        style = document.styles[name]
+    except KeyError:
+        return document.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+    return None if preserve_existing else style
 
 
 def _set_style_font(
@@ -2383,7 +2714,7 @@ def _insert_paragraph_after_block(
 def _safe_stem(value: str) -> str:
     forbidden = '<>:"/\\|?*'
     cleaned = "".join(ch if ch not in forbidden else "_" for ch in str(value or "").strip())
-    return cleaned.strip(" ._") or "默认试卷"
+    return cleaned.strip(" ._") or "试卷卷面"
 
 
 def _safe_docx_stem(value: str) -> str:
@@ -2391,6 +2722,14 @@ def _safe_docx_stem(value: str) -> str:
     if raw.lower().endswith(".docx"):
         raw = Path(raw).stem
     return _safe_stem(raw)
+
+
+def _safe_style_id_part(value: str) -> str:
+    cleaned = "".join(
+        char if char.isalnum() else "_"
+        for char in str(value or "").strip().casefold()
+    )
+    return "_".join(part for part in cleaned.split("_") if part)
 
 
 __all__ = [
@@ -2404,6 +2743,7 @@ __all__ = [
     "EXAM_SAMPLE_PAYLOAD",
     "USER_EXAM_MASTER_DIR",
     "ExamBlankStyleSpec",
+    "ExamUserMasterInventoryItem",
     "builtin_exam_blank_style_options",
     "create_exam_blank_master_copy",
     "create_exam_blank_style_copy",
@@ -2414,8 +2754,10 @@ __all__ = [
     "exam_blank_style_label",
     "exam_blank_style_options",
     "exam_blank_style_preview_lines",
+    "inventory_user_exam_master_files",
     "import_exam_blank_master_docx",
     "resolve_exam_blank_style",
+    "sync_user_exam_blank_master_files",
     "write_exam_blank_master_docx",
     "write_exam_blank_style_sample_docx",
     "write_exam_answer_key_docx",

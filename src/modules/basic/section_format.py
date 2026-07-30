@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.modules.base import BaseModule, Issue, ModuleMeta
-from src.shared.engine.ooxml_ops import clone_element, qn, find, find_or_create, remove_element
+from src.shared.engine.ooxml_ops import clone_element, qn, find, find_or_create
 from src.shared.engine.page_number_planner import (
     build_page_number_execution_plan,
     collect_page_number_diagnostics,
@@ -19,7 +19,6 @@ from src.shared.engine.page_number_planner import (
 
 if TYPE_CHECKING:
     from docx import Document
-    from docx.section import Section
     from src.config.resolved import ResolvedConfig
     from src.pipeline.context import PipelineContext
     from src.pipeline.tracker import ChangeTracker
@@ -41,9 +40,8 @@ class SectionFormatModule(BaseModule):
         category="basic",
         requires_config=("section",),
         soft_after=("heading_recognition",),
-        consumes=("doc_tree", "heading_map"),
+        soft_consumes=("doc_tree", "heading_map"),
         modifies_structure=True,
-        enabled_by_default=True,
     )
 
     def validate(

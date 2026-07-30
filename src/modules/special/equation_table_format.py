@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
-from lxml import etree
 
 from src.modules.base import BaseModule, ModuleMeta
+from src.shared.engine.document_scope_runtime import document_scope_allows_paragraph
 from src.modules.table.table_format import _is_equation_table, top_level_table_anchor_positions
 from src.config.style_semantics import normalize_spacing_unit, spacing_value_to_pt
 from src.shared.engine.font_resolver import resolve_font
@@ -107,7 +107,6 @@ class EquationTableFormatModule(BaseModule):
         requires_config=("formula_table", "formula_style", "equation_numbering"),
         soft_after=("table_format",),
         soft_consumes=("heading_map", "doc_tree"),
-        enabled_by_default=True,
     )
 
     def apply(
@@ -137,6 +136,8 @@ class EquationTableFormatModule(BaseModule):
                 continue
 
             table_para_index = table_positions[table_index] if table_index < len(table_positions) else -1
+            if not document_scope_allows_paragraph(context, table_para_index):
+                continue
             stats = _format_equation_table(
                 table,
                 plan,

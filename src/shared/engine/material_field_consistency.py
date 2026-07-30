@@ -10,6 +10,10 @@ from docx.document import Document as DocxDocument
 
 from src.config.material_schema_registry import get_material_schema
 from src.shared.engine.fixed_layout_text import iter_fixed_layout_text_blocks
+from src.shared.engine.material_token_contract import (
+    MaterialTokenNamespace,
+    material_token,
+)
 
 
 CONTRACT_FIELD_KEYS: tuple[str, ...] = (
@@ -134,7 +138,7 @@ def _inspect_field(
 ) -> MaterialFieldConsistencyItem:
     placeholders = tuple(
         placeholder
-        for placeholder in (f"{{{{{field_key}}}}}", "${" + field_key + "}")
+        for placeholder in (material_token(MaterialTokenNamespace.TEXT, field_key),)
         if placeholder in full_text
     )
     occurrence_count = _count_compact_occurrences(full_text, expected)
@@ -231,7 +235,7 @@ def _first_label_conflict(
             continue
         if expected_digits and expected_digits in _digits_only(block):
             continue
-        if any(placeholder in block for placeholder in (f"{{{{{field_key}}}}}", "${" + field_key + "}")):
+        if material_token(MaterialTokenNamespace.TEXT, field_key) in block:
             continue
         observed = _value_after_separator(block)
         if observed:

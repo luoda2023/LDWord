@@ -17,12 +17,9 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from docx.shared import Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-
-from src.config.heading_normalize import CHAIN_NUMBER_STYLE_BY_CORE, CURRENT_CORE_STYLE_ALIASES
 from src.modules.base import BaseModule, ModuleMeta
-from src.shared.engine.numbering import format_number
+from src.shared.engine.document_scope_runtime import document_scope_allows_paragraph
+from src.shared.engine.heading_numbering_format import format_heading_level_number
 from src.shared.engine.ooxml_ops import qn, find_or_create
 
 if TYPE_CHECKING:
@@ -49,149 +46,6 @@ _EXISTING_NUMBER_RE = re.compile(
     r")"
 )
 
-# ── 占位符 → format_number 格式映射 ────────────
-_PLACEHOLDER_FORMAT: dict[str, str] = {
-    "nn": "arabic",
-    "cn": "cn_lower",
-    "CN": "cn_upper",
-    "rn": "roman_lower",
-    "RN": "roman_upper",
-    "cc": "circled",
-    "al": "alpha_lower",
-    "AL": "alpha_upper",
-}
-
-_PLACEHOLDER_RE = re.compile(r"\{(" + "|".join(_PLACEHOLDER_FORMAT.keys()) + r"|chain)\}")
-
-# ── display_core_style 自动展开表 ────────────────
-_CORE_STYLE_AUTO_EXPAND: dict[str, str] = {
-    "chinese_chapter": "第{cn}章",
-    "chinese_section": "第{cn}节",
-    "chinese_lower": "{cn}、",
-    "chinese_upper": "{CN}、",
-    "chinese_paren": "({cn})",
-    "arabic": "{nn}",
-    "arabic_paren": "{nn})",
-    "roman_upper": "{RN}",
-    "roman_lower": "{rn}",
-    "circled": "{cc}",
-    "circled_paren": "{cc}",
-    "alpha_upper": "{AL}",
-    "alpha_lower": "{al}",
-}
-
-# ── chain 解析 ──────────────────────────────────
-_CHAIN_PATTERN = re.compile(r"^((?:parent\.)*)?current(?:_only)?$")
-
-
-def _parse_chain(chain: str) -> list[str]:
-    """解析 chain 字符串为 segments 列表。"""
-    m = _CHAIN_PATTERN.match(chain)
-    if not m:
-        return chain.split(".")
-    parts = []
-    prefix = m.group(1) or ""
-    if prefix:
-        parts.extend(["parent"] * prefix.count("parent"))
-    parts.append("current")
-    return parts
-
-
-def _resolve_chain_counters(
-    level: int, counters: list[int], chain_segments: list[str],
-) -> list[tuple[int, int, bool]]:
-    """根据 chain segments 提取 (counter_value, source_level, is_current) 三元组。"""
-    result: list[tuple[int, int, bool]] = []
-    current_lvl = level
-    for seg in reversed(chain_segments):
-        if seg == "current":
-            result.append((counters[current_lvl], current_lvl, True))
-        elif seg == "parent":
-            current_lvl -= 1
-            val = counters[current_lvl] if current_lvl >= 1 else 0
-            result.append((val, max(current_lvl, 1), False))
-        else:
-            result.append((0, current_lvl, False))
-    result.reverse()
-    return result
-
-
-# ── 核心格式化引擎 ──────────────────────────────
-
-def _format_level_number(
-    level: int,
-    counters: list[int],
-    binding: HeadingLevelBindingConfig,
-    level_bindings: dict[str, HeadingLevelBindingConfig] | None = None,
-) -> str:
-    """根据 binding 配置生成编号文本。
-
-    渲染流程:
-    1. 确定 display_template (显式 > display_core_style 自动展开)
-    2. 解析 chain → 获取 (counter, source_level) 对列表
-    3. 单级 chain: 替换模板中的 {nn}/{cn}/... 占位符
-    4. 多级 chain: 每段用其源级别的 reference_core_style 格式化
-    5. 拼接 title_separator
-    """
-    # 1. 确定 display_template
-    template = binding.display_template
-    if not template:
-        template = _CORE_STYLE_AUTO_EXPAND.get(binding.display_core_style, "{nn}")
-
-    # 2. 解析 chain
-    chain_segments = _parse_chain(binding.chain)
-    pairs = _resolve_chain_counters(level, counters, chain_segments)
-
-    # 3. 单级 chain → 直接替换占位符
-    if len(pairs) == 1:
-        n = pairs[0][0]
-        result = _replace_placeholders(template, n)
-        return result + binding.title_separator
-
-    # 4. 多级 chain → current 用 display_core_style, parent 用 reference_core_style
-    fallback_fmt = _PLACEHOLDER_FORMAT.get(binding.chain_number_style, "arabic")
-    chain_parts: list[str] = []
-    for value, src_level, is_current in pairs:
-        fmt = fallback_fmt
-        if level_bindings:
-            src_binding = level_bindings.get(f"heading{src_level}")
-            if src_binding:
-                # current 段用自己的 display 样式, parent 段用被引用时的 reference 样式
-                style_key = src_binding.display_core_style if is_current else src_binding.reference_core_style
-                fmt = _resolve_core_style_format(style_key, fallback_fmt)
-        chain_parts.append(format_number(value, fmt))
-    chain_str = binding.chain_separator.join(chain_parts)
-
-    if "{chain}" in template:
-        result = template.replace("{chain}", chain_str)
-    elif _PLACEHOLDER_RE.search(template):
-        result = _PLACEHOLDER_RE.sub(chain_str, template, count=1)
-    else:
-        result = chain_str
-
-    return result + binding.title_separator
-
-
-def _replace_placeholders(template: str, n: int) -> str:
-    """替换模板中所有格式占位符为数字 n。"""
-    def _replacer(m: re.Match) -> str:
-        key = m.group(1)
-        if key == "chain":
-            return str(n)
-        fmt = _PLACEHOLDER_FORMAT.get(key, "arabic")
-        return format_number(n, fmt)
-
-    return _PLACEHOLDER_RE.sub(_replacer, template)
-
-
-def _resolve_core_style_format(style_key: str | None, fallback: str = "arabic") -> str:
-    raw = str(style_key or "").strip()
-    if not raw:
-        return fallback
-    normalized = CURRENT_CORE_STYLE_ALIASES.get(raw, raw)
-    return CHAIN_NUMBER_STYLE_BY_CORE.get(normalized, fallback)
-
-
 # ── 模块主体 ────────────────────────────────────
 
 class HeadingNumberingModule(BaseModule):
@@ -204,7 +58,6 @@ class HeadingNumberingModule(BaseModule):
         requires_config=("heading_numbering", "heading_model"),
         depends_on=("heading_recognition",),
         consumes=("heading_map",),
-        enabled_by_default=True,
     )
 
     def apply(
@@ -216,12 +69,36 @@ class HeadingNumberingModule(BaseModule):
     ) -> None:
         heading_map = context.heading_map
         if not heading_map:
+            tracker.record(
+                rule_name=self.meta.name,
+                target="heading numbering",
+                section="global",
+                change_type="no_effect",
+                before="requested",
+                after="no recognized headings",
+            )
             return
 
         level_bindings = config.heading_numbering.level_bindings
         non_numbered = set(config.heading_model.non_numbered_title_texts or [])
         non_numbered_pfx = list(config.heading_model.non_numbered_prefixes or [])
         max_levels = config.heading_model.max_heading_levels
+        enabled_levels = {
+            level
+            for level in range(1, max_levels + 1)
+            if (binding := level_bindings.get(f"heading{level}")) is not None
+            and binding.enabled
+        }
+        if not enabled_levels:
+            tracker.record(
+                rule_name=self.meta.name,
+                target="heading numbering",
+                section="global",
+                change_type="no_effect",
+                before="requested",
+                after="no enabled heading levels in the committed template",
+            )
+            return
         counters: list[int] = [0] * 10
         counter_started: list[bool] = [False] * 10
         count = 0
@@ -229,6 +106,8 @@ class HeadingNumberingModule(BaseModule):
         for i, para in enumerate(doc.paragraphs):
             level = heading_map.get(i)
             if level is None:
+                continue
+            if not document_scope_allows_paragraph(context, i):
                 continue
 
             binding_key = f"heading{level}"
@@ -254,7 +133,12 @@ class HeadingNumberingModule(BaseModule):
             else:
                 counters[level] += 1
 
-            number_text = _format_level_number(level, counters, binding, level_bindings)
+            number_text = format_heading_level_number(
+                level,
+                counters,
+                binding,
+                level_bindings,
+            )
             _strip_existing_number(para)
 
             if number_text:
@@ -263,6 +147,17 @@ class HeadingNumberingModule(BaseModule):
 
             _set_toc_outline_level(para, level, binding)
             _reset_deeper_counters(level, counters, counter_started, level_bindings)
+
+        if not count:
+            recognized_levels = sorted(set(heading_map.values()))
+            tracker.record(
+                rule_name=self.meta.name,
+                target="heading numbering",
+                section="global",
+                change_type="no_effect",
+                before=f"recognized levels: {recognized_levels}",
+                after="recognized headings were excluded or their levels were disabled",
+            )
 
         if count:
             tracker.record(

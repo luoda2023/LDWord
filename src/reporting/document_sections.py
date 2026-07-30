@@ -10,6 +10,131 @@ if TYPE_CHECKING:
     from src.pipeline.result import PipelineResult
 
 
+def _extract_official_document_assembly(result: PipelineResult) -> dict | None:
+    context = getattr(result, "context", None)
+    assembly = (
+        getattr(context, "official_document_assembly", None)
+        if context is not None
+        else None
+    )
+    if assembly is None:
+        return None
+    to_dict = getattr(assembly, "to_dict", None)
+    if callable(to_dict):
+        payload = to_dict()
+    elif isinstance(assembly, dict):
+        payload = dict(assembly)
+    else:
+        return None
+    status = _clean_text(payload.get("status", ""))
+    if not status or status == "not_applicable":
+        return None
+    raw_output_paths = payload.get("output_paths", {})
+    output_paths = (
+        {
+            _clean_text(key): _clean_text(value)
+            for key, value in raw_output_paths.items()
+            if _clean_text(key) and _clean_text(value)
+        }
+        if isinstance(raw_output_paths, dict)
+        else {}
+    )
+    return {
+        "status": status,
+        "profile_id": _clean_text(payload.get("profile_id", "")),
+        "master_id": _clean_text(payload.get("master_id", "")),
+        "material_schema_ids": _clean_list(payload.get("material_schema_ids", [])),
+        "docx_path": _clean_text(payload.get("docx_path", "")),
+        "internal_review_docx_path": _clean_text(
+            payload.get("internal_review_docx_path", "")
+        ),
+        "archive_manifest_path": _clean_text(payload.get("archive_manifest_path", "")),
+        "archive_manifest_markdown_path": _clean_text(
+            payload.get("archive_manifest_markdown_path", "")
+        ),
+        "review_pdf_path": _clean_text(payload.get("review_pdf_path", "")),
+        "review_pdf_status": (
+            _clean_text(payload.get("review_pdf_status", "not_requested"))
+            or "not_requested"
+        ),
+        "review_pdf_renderer": _clean_text(
+            payload.get("review_pdf_renderer", "")
+        ),
+        "review_pdf_issue": _clean_text(payload.get("review_pdf_issue", "")),
+        "output_paths": output_paths,
+        "replaced_placeholders": _clean_list(
+            payload.get("replaced_placeholders", [])
+        ),
+        "missing_required_fields": _clean_list(
+            payload.get("missing_required_fields", [])
+        ),
+        "unresolved_placeholders": _clean_list(
+            payload.get("unresolved_placeholders", [])
+        ),
+    }
+
+
+def _format_official_document_assembly_markdown(evidence: dict) -> list[str]:
+    lines = ["## 公文版式装配证据", ""]
+    lines.append(f"- Status: {_clean_text(evidence.get('status', '')) or '-'}")
+    profile_id = _clean_text(evidence.get("profile_id", ""))
+    if profile_id:
+        lines.append(f"- Profile: {profile_id}")
+    master_id = _clean_text(evidence.get("master_id", ""))
+    if master_id:
+        lines.append(f"- Master: {master_id}")
+    schemas = _clean_list(evidence.get("material_schema_ids", []))
+    if schemas:
+        lines.append("- Material schemas: " + _join_or_dash(schemas))
+    docx_path = _clean_text(evidence.get("docx_path", ""))
+    if docx_path:
+        lines.append(f"- Formal DOCX: `{docx_path}`")
+    internal_review_docx_path = _clean_text(
+        evidence.get("internal_review_docx_path", "")
+    )
+    if internal_review_docx_path:
+        lines.append(f"- Internal review DOCX: `{internal_review_docx_path}`")
+    archive_manifest_path = _clean_text(evidence.get("archive_manifest_path", ""))
+    if archive_manifest_path:
+        lines.append(f"- Archive manifest: `{archive_manifest_path}`")
+    archive_manifest_markdown_path = _clean_text(
+        evidence.get("archive_manifest_markdown_path", "")
+    )
+    if archive_manifest_markdown_path:
+        lines.append(f"- Archive manifest MD: `{archive_manifest_markdown_path}`")
+    review_pdf_path = _clean_text(evidence.get("review_pdf_path", ""))
+    if review_pdf_path:
+        lines.append(f"- Review PDF: `{review_pdf_path}`")
+    review_pdf_status = (
+        _clean_text(evidence.get("review_pdf_status", "not_requested"))
+        or "not_requested"
+    )
+    if review_pdf_status != "not_requested":
+        renderer = _clean_text(evidence.get("review_pdf_renderer", ""))
+        renderer_suffix = f" ({renderer})" if renderer else ""
+        lines.append(f"- Review PDF status: {review_pdf_status}{renderer_suffix}")
+    review_pdf_issue = _clean_text(evidence.get("review_pdf_issue", ""))
+    if review_pdf_issue:
+        lines.append(f"- Review PDF issue: {review_pdf_issue}")
+    output_paths = evidence.get("output_paths", {})
+    if isinstance(output_paths, dict) and output_paths:
+        lines.append(
+            "- Output keys: "
+            + _join_or_dash(sorted(str(key) for key in output_paths.keys()))
+        )
+    replaced = _clean_list(evidence.get("replaced_placeholders", []))
+    if replaced:
+        lines.append("- Replaced placeholders: " + _join_or_dash(replaced[:20]))
+    missing = _clean_list(evidence.get("missing_required_fields", []))
+    if missing:
+        lines.append("- Missing required fields: " + _join_or_dash(missing[:20]))
+    unresolved = _clean_list(evidence.get("unresolved_placeholders", []))
+    if unresolved:
+        lines.append("- Unresolved placeholders: " + _join_or_dash(unresolved[:20]))
+    lines.append("")
+    return lines
+
+
 def _extract_official_numbering_preservation(result: PipelineResult) -> dict | None:
     context = getattr(result, "context", None)
     validation = (

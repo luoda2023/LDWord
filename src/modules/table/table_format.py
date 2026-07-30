@@ -16,6 +16,9 @@ from src.shared.engine.font_resolver import resolve_font
 from src.shared.engine.ooxml_ops import find_or_create, qn
 from src.shared.engine.paragraph_iter import iter_table_cells
 from src.shared.engine.run_ops import set_run_east_asian_font
+from src.shared.engine.document_scope_runtime import (
+    document_scope_allows_paragraph,
+)
 from src.shared.engine.table_builder import (
     clear_cell_border_overrides,
     clear_repeat_header_row,
@@ -51,7 +54,6 @@ class TableFormatModule(BaseModule):
         category="table",
         requires_config=("table",),
         soft_consumes=("doc_tree",),
-        enabled_by_default=True,
     )
 
     def apply(
@@ -72,33 +74,8 @@ class TableFormatModule(BaseModule):
 
         smart_levels = normalize_table_smart_levels(tbl_cfg.smart_levels)
 
-        doc_tree = context.doc_tree
-        has_doc_tree_scope = bool(getattr(doc_tree, "sections", None))
-
-        body_range: tuple[int, int] | None = None
-        if doc_tree and hasattr(doc_tree, "get_section"):
-            try:
-                body_sec = doc_tree.get_section("body")
-            except Exception:
-                body_sec = None
-            if body_sec is not None and body_sec.end_index >= body_sec.start_index:
-                body_range = (body_sec.start_index, body_sec.end_index)
-
-        def _table_section_type(pos: int) -> str | None:
-            if not has_doc_tree_scope or pos < 0:
-                return None
-            try:
-                return doc_tree.get_section_for_paragraph(pos)
-            except Exception:
-                return None
-
         def _is_table_in_scope(pos: int) -> bool:
-            section_type = _table_section_type(pos)
-            if section_type is not None:
-                return section_type == "body"
-            if body_range is not None:
-                return pos >= 0 and body_range[0] <= pos < body_range[1]
-            return not has_doc_tree_scope
+            return document_scope_allows_paragraph(context, pos)
 
         tbl_para_pos = top_level_table_anchor_positions(doc)
 

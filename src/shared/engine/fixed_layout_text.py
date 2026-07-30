@@ -328,27 +328,78 @@ def _replace_text_nodes(
     *,
     root_index: int,
 ) -> int:
-    replaced = 0
+    text_nodes = []
     for text_node in host.findall(f".//{qn('w:t')}"):
         node_key = _text_node_key(text_node, root_index=root_index)
         if node_key in visited_text_nodes:
             continue
         visited_text_nodes.add(node_key)
-        text = text_node.text or ""
-        if not text:
-            continue
-        next_text = text
-        for old, new in replacements.items():
-            occurrences = next_text.count(old)
-            if not occurrences:
-                continue
-            next_text = next_text.replace(old, new)
-            replaced += occurrences
-            if old not in replaced_tokens:
-                replaced_tokens.append(old)
-        if next_text != text:
-            text_node.text = next_text
-    return replaced
+        text_nodes.append(text_node)
+    if not text_nodes:
+        return 0
+
+    texts = [str(text_node.text or "") for text_node in text_nodes]
+    full_text = "".join(texts)
+    matches = _non_overlapping_replacement_matches(full_text, replacements)
+    if not matches:
+        return 0
+
+    starts: list[int] = []
+    offset = 0
+    for text in texts:
+        starts.append(offset)
+        offset += len(text)
+
+    for start, end, old, new in sorted(matches, reverse=True):
+        start_index, start_offset = _text_item_position(starts, texts, start)
+        end_index, end_offset = _text_item_position(starts, texts, end - 1)
+        end_offset += 1
+        if start_index == end_index:
+            current = str(text_nodes[start_index].text or "")
+            text_nodes[start_index].text = (
+                current[:start_offset] + new + current[end_offset:]
+            )
+        else:
+            first_text = str(text_nodes[start_index].text or "")
+            last_text = str(text_nodes[end_index].text or "")
+            text_nodes[start_index].text = first_text[:start_offset] + new
+            for node_index in range(start_index + 1, end_index):
+                text_nodes[node_index].text = ""
+            text_nodes[end_index].text = last_text[end_offset:]
+        if old not in replaced_tokens:
+            replaced_tokens.append(old)
+    return len(matches)
+
+
+def _non_overlapping_replacement_matches(
+    text: str,
+    replacements: Mapping[str, str],
+) -> list[tuple[int, int, str, str]]:
+    matches: list[tuple[int, int, str, str]] = []
+    occupied: list[tuple[int, int]] = []
+    for old, new in replacements.items():
+        start = 0
+        while True:
+            index = text.find(old, start)
+            if index < 0:
+                break
+            end = index + len(old)
+            if not any(index < used_end and end > used_start for used_start, used_end in occupied):
+                matches.append((index, end, old, new))
+                occupied.append((index, end))
+            start = end
+    return matches
+
+
+def _text_item_position(
+    starts: Sequence[int],
+    texts: Sequence[str],
+    position: int,
+) -> tuple[int, int]:
+    for index in range(len(texts) - 1, -1, -1):
+        if position >= starts[index] and texts[index]:
+            return index, position - starts[index]
+    return 0, max(0, position)
 
 
 def _replace_host_text(

@@ -1,23 +1,55 @@
-"""
-cli_runner — CLI 模式执行入口
-
-从 main.py 中拆分出来的核心 CLI 执行逻辑。
-"""
+"""CLI resource resolution and production-execution entry point."""
 
 from __future__ import annotations
 
-import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
-from src.config.loader import load_template, load_scene
-from src.config.template import TemplateConfig
+from src.config.library import (
+    default_scene_entry,
+    get_template_entry,
+    load_scene_from_library,
+    load_template_from_library,
+    scene_source_type_for_path,
+    template_source_type_for_path,
+    validate_scene_resource_ids,
+)
+from src.config.loader import load_scene, load_template
+from src.config.material_context import MaterialExecutionContext
 from src.config.scene import SceneWorkspace
-from src.config.resolver import resolve_config
-from src.config.style_source_report_summary import build_style_source_report_summary
-from src.modules.registry import create_all_modules
-from src.pipeline.runner import Pipeline
-from src.pipeline.scheduler import select_enabled_modules
-from src.report_writer import write_json_report, write_markdown_report
+from src.config.template import TemplateConfig
+from src.config.work_mode import (
+    default_work_mode,
+    get_work_mode,
+)
+from src.services.console_output import console_print
+from src.services.execution_session import (
+    official_document_type_applicability_issue,
+)
+from src.services.production_execution import (
+    ProductionExecutionRequest,
+    execute_production_request,
+)
+
+
+CLI_EXIT_SUCCESS = 0
+CLI_EXIT_FAILED = 1
+CLI_EXIT_PARTIAL = 2
+CLI_EXIT_CANCELLED = 130
+
+
+@dataclass(frozen=True, slots=True)
+class CliExecutionResources:
+    mode_id: str
+    scene: SceneWorkspace
+    template: TemplateConfig
+    plan_id: str
+    plan_path: str
+    plan_source_type: str
+    template_id: str
+    template_path: str
+    template_source_type: str
 
 
 def run(
@@ -26,124 +58,269 @@ def run(
     template_path: str | None = None,
     scene_path: str | None = None,
     output_dir: Path | None = None,
-    project_root: Path | None = None,
+    document_type_id: str | None = None,
 ) -> int:
-    """执行 CLI 模式排版管线，返回退出码。"""
-    root = project_root or Path(__file__).resolve().parent.parent
+    """Execute one CLI request through the same frozen production path as GUI."""
 
-    # ── 输出目录 ──
-    if output_dir is None:
-        output_dir = input_path.parent / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    input_path = Path(input_path).expanduser()
+    input_error = _input_path_error(input_path)
+    if input_error:
+        console_print(f"[ERROR] {input_error}")
+        return CLI_EXIT_FAILED
 
-    # ── 安全检查: 输出路径 ≠ 输入路径 ──
-    output_docx = output_dir / f"{input_path.stem}_formatted.docx"
-    if output_docx.resolve() == input_path.resolve():
-        print("❌ 输出路径与输入路径相同，会覆盖源文件！请指定不同的输出目录。")
-        return 1
-
-    # ── 加载配置 ──
-    template = _load_template(template_path, root)
-    scene = _load_scene(scene_path)
-    config = resolve_config(template, scene)
-    style_source_summary = build_style_source_report_summary(scene, template)
-
-    # ── 创建模块 ──
-    modules = create_all_modules()
-    enabled, auto_pruned = select_enabled_modules(
-        modules,
-        config.is_module_enabled,
+    output_root = (
+        Path(output_dir).expanduser()
+        if output_dir is not None
+        else input_path.parent / "output"
     )
-    skipped = len(modules) - len(enabled)
-
-    print(
-        f"🔧 模块: 启用 {len(enabled)} / 总共 {len(modules)}"
-        + (f" (跳过 {skipped})" if skipped else "")
-    )
-    if auto_pruned:
-        print("⚠️ 因硬依赖未满足，已自动跳过以下模块：")
-        for name in sorted(auto_pruned):
-            missing = ", ".join(auto_pruned[name])
-            print(f"   - {name} (缺少: {missing})")
-
-    # ── 执行管线 ──
-    print(f"📄 处理: {input_path.name}")
-    t0 = time.perf_counter()
-
-    pipeline = Pipeline(
-        modules=enabled,
-        config=config,
-        output_dir=str(output_dir),
-        output_suffix="_formatted",
-    )
-    result = pipeline.execute(str(input_path))
-    elapsed = time.perf_counter() - t0
-
-    if not result.success:
-        print(f"❌ 管线执行失败: {result.error}")
-        return 1
-
-    # ── 输出结果 ──
-    final_output_raw = result.output_paths.get("final", "")
-    final_output = Path(final_output_raw) if final_output_raw else None
-    if final_output is not None:
-        print(f"✅ 输出: {final_output}")
-
-    # ── 报告 ──
-    output_cfg = getattr(config, "output", None)
-    if bool(getattr(output_cfg, "report_json", True)):
-        report_json = output_dir / f"{input_path.stem}_changes.json"
-        write_json_report(
-            result,
-            input_path=input_path,
-            output_path=final_output,
-            report_path=report_json,
-            elapsed=elapsed,
-            modules_enabled=len(enabled),
-            modules_total=len(modules),
-            style_source_summary=style_source_summary,
+    try:
+        resources = _resolve_cli_resources(
+            template_path=template_path,
+            scene_path=scene_path,
         )
-        print(f"📊 报告: {report_json}")
+    except Exception as exc:
+        console_print(f"[ERROR] 配置解析失败: {str(exc) or type(exc).__name__}")
+        return CLI_EXIT_FAILED
 
-    if bool(getattr(output_cfg, "report_markdown", True)):
-        report_md = output_dir / f"{input_path.stem}_changes.md"
-        write_markdown_report(
-            result,
-            input_path=input_path,
-            report_path=report_md,
-            elapsed=elapsed,
-            modules_enabled=len(enabled),
-            modules_total=len(modules),
-            style_source_summary=style_source_summary,
-        )
-        print(f"📝 报告: {report_md}")
+    explicit_document_type_id = str(document_type_id or "").strip()
+    applicability_issue = official_document_type_applicability_issue(
+        resources.mode_id,
+        explicit_document_type_id,
+    )
+    if applicability_issue:
+        console_print(f"[ERROR] {applicability_issue}")
+        return CLI_EXIT_FAILED
+    if resources.mode_id == "official" and not explicit_document_type_id:
+        console_print("[ERROR] official_document_type_missing")
+        return CLI_EXIT_FAILED
 
-    # ── 汇总 ──
-    print(f"\n{'='*50}")
-    print(f"✅ 完成！耗时 {elapsed:.2f}s, 状态: {result.status}")
-    if result.failed_items:
-        print(f"⚠️  {len(result.failed_items)} 个非关键失败")
-    print(f"{'='*50}")
+    console_print(
+        "[INFO] 执行绑定: "
+        f"mode={resources.mode_id}, "
+        f"plan={resources.plan_id}, "
+        f"template={resources.template_id}"
+    )
+    console_print(f"[INFO] 输入: {input_path}")
+    console_print(f"[INFO] 输出根目录: {output_root}")
 
-    return 0
+    request = ProductionExecutionRequest(
+        input_path=input_path,
+        output_root=output_root,
+        mode_id=resources.mode_id,
+        scene=resources.scene,
+        template=resources.template,
+        plan_id=resources.plan_id,
+        plan_path=resources.plan_path,
+        plan_source_type=resources.plan_source_type,
+        template_id=resources.template_id,
+        template_path=resources.template_path,
+        template_source_type=resources.template_source_type,
+        document_type_id=explicit_document_type_id,
+        material_context=MaterialExecutionContext(),
+    )
+    payload = execute_production_request(
+        request,
+        progress_callback=_print_progress,
+    )
+    return _emit_execution_summary(payload)
 
 
-def _load_template(template_path: str | None, root: Path) -> TemplateConfig:
-    if template_path:
-        print(f"📋 加载模板: {template_path}")
-        return load_template(template_path)
-
-    default_tpl = root / "defaults" / "thesis.yaml"
-    if default_tpl.exists():
-        print(f"📋 使用默认模板: {default_tpl.name}")
-        return load_template(default_tpl)
-
-    print("📋 使用内置默认参数")
-    return TemplateConfig()
-
-
-def _load_scene(scene_path: str | None) -> SceneWorkspace:
+def _resolve_cli_resources(
+    *,
+    template_path: str | None,
+    scene_path: str | None,
+) -> CliExecutionResources:
     if scene_path:
-        print(f"🎬 加载场景: {scene_path}")
-        return load_scene(scene_path)
-    return SceneWorkspace()
+        resolved_scene_path = Path(scene_path).expanduser().resolve()
+        scene = load_scene(resolved_scene_path)
+        plan_id = str(scene.scene_id or "").strip()
+        if not plan_id:
+            raise ValueError("plan_identity_missing: field=scene_id")
+        mode_id = str(scene.mode_id or "").strip()
+        if not mode_id:
+            raise ValueError(
+                f"plan_mode_missing: plan_id={plan_id}; field=mode_id"
+            )
+        mode = get_work_mode(mode_id)
+        if mode is None:
+            raise ValueError(f"unknown_work_mode:{mode_id or '<empty>'}")
+        mode_id = mode.mode_id
+        scene = validate_scene_resource_ids(scene, mode_id=mode_id)
+        plan_path = str(resolved_scene_path)
+        plan_source_type = scene_source_type_for_path(resolved_scene_path)
+    else:
+        mode = default_work_mode()
+        mode_id = mode.mode_id
+        plan_id = mode.default_scene_id
+        entry = default_scene_entry(mode_id=mode_id)
+        if entry is None:
+            raise FileNotFoundError(
+                f"plan_ref_unresolved: mode={mode_id}; plan_id={plan_id}"
+            )
+        scene = load_scene_from_library(plan_id, mode_id=mode_id)
+        plan_path = str(entry.path)
+        plan_source_type = str(entry.source_type or "builtin")
+
+    if template_path:
+        resolved_template_path = Path(template_path).expanduser().resolve()
+        template = load_template(resolved_template_path)
+        template_id = resolved_template_path.stem
+        template_path_text = str(resolved_template_path)
+        template_source_type = template_source_type_for_path(resolved_template_path)
+        _validate_explicit_template_selection(
+            scene,
+            mode_id=mode_id,
+            template_id=template_id,
+        )
+    else:
+        template_id = _scene_template_id(scene)
+        if not template_id:
+            raise ValueError(
+                f"plan_template_missing: plan_id={plan_id}; field=template_id"
+            )
+        entry = get_template_entry(template_id, mode_id=mode_id)
+        if entry is None:
+            raise FileNotFoundError(
+                "template_ref_unresolved: "
+                f"mode={mode_id}; template_id={template_id or '<empty>'}"
+            )
+        template = load_template_from_library(template_id, mode_id=mode_id)
+        template_path_text = str(entry.path)
+        template_source_type = str(entry.source_type or "builtin")
+
+    return CliExecutionResources(
+        mode_id=mode_id,
+        scene=scene,
+        template=template,
+        plan_id=plan_id,
+        plan_path=plan_path,
+        plan_source_type=plan_source_type,
+        template_id=template_id,
+        template_path=template_path_text,
+        template_source_type=template_source_type,
+    )
+
+
+def _scene_template_id(scene: SceneWorkspace) -> str:
+    return str(getattr(scene, "template_id", "") or "").strip()
+
+
+def _validate_explicit_template_selection(
+    scene: SceneWorkspace,
+    *,
+    mode_id: str,
+    template_id: str,
+) -> None:
+    compatible = {
+        str(item or "").strip()
+        for item in list(scene.compatible_template_ids or [])
+        if str(item or "").strip()
+    }
+    if template_id not in compatible:
+        raise ValueError(
+            "runtime_template_not_compatible:"
+            f" mode={mode_id}; template_id={template_id};"
+            f" plan_id={str(scene.scene_id or '').strip() or '<empty>'}"
+        )
+
+
+def _input_path_error(input_path: Path) -> str:
+    if not input_path.is_file():
+        return f"输入文件不存在: {input_path}"
+    if input_path.suffix.casefold() != ".docx":
+        return f"不支持的文件格式: {input_path.suffix} (仅支持 .docx)"
+    return ""
+
+
+def _print_progress(current: int, total: int, message: str) -> None:
+    label = str(message or "").strip()
+    if not label:
+        return
+    console_print(f"[PROGRESS {int(current)}/{int(total)}] {label}")
+
+
+def _emit_execution_summary(payload: Mapping[str, object]) -> int:
+    status = _effective_terminal_status(payload)
+    for kind, path in _artifact_paths(payload):
+        console_print(f"[ARTIFACT {kind}] {path}")
+
+    error_text = str(payload.get("error_text") or "").strip()
+    failed_count = _safe_int(payload.get("failed_count"))
+    artifact_failure_count = _safe_int(payload.get("artifact_failure_count"))
+    if status == "success":
+        console_print("[OK] 执行完成: status=success")
+        return CLI_EXIT_SUCCESS
+    if status == "partial_success":
+        console_print(
+            "[PARTIAL] 执行部分完成: "
+            f"failed_items={failed_count}, "
+            f"artifact_failures={artifact_failure_count}"
+        )
+        if error_text:
+            console_print(f"[PARTIAL] {error_text}")
+        return CLI_EXIT_PARTIAL
+    if status == "cancelled":
+        console_print(f"[CANCELLED] {error_text or '执行已取消'}")
+        return CLI_EXIT_CANCELLED
+
+    console_print(f"[ERROR] 执行失败: {error_text or 'unknown execution failure'}")
+    return CLI_EXIT_FAILED
+
+
+def _effective_terminal_status(payload: Mapping[str, object]) -> str:
+    status = str(payload.get("status") or "failed").strip()
+    if status == "success" and (
+        _safe_int(payload.get("failed_count")) > 0
+        or _safe_int(payload.get("artifact_failure_count")) > 0
+    ):
+        return "partial_success"
+    if status in {"success", "partial_success", "failed", "cancelled"}:
+        return status
+    return "failed"
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _artifact_paths(payload: Mapping[str, object]):
+    seen: set[str] = set()
+    mapping_fields = (
+        ("output", "output_paths"),
+        ("compare", "compare_paths"),
+        ("intermediate", "intermediate_paths"),
+        ("material_manifest", "material_manifest_paths"),
+        ("material_package", "material_package_paths"),
+    )
+    for label, field_name in mapping_fields:
+        values = payload.get(field_name)
+        if not isinstance(values, Mapping):
+            continue
+        for artifact_id, raw_path in values.items():
+            path = str(raw_path or "").strip()
+            if path and path not in seen:
+                seen.add(path)
+                yield f"{label}:{artifact_id}", path
+
+    primary = str(payload.get("output_path") or "").strip()
+    if primary and primary not in seen:
+        seen.add(primary)
+        yield "output:primary", primary
+    for raw_path in list(payload.get("report_paths") or []):
+        path = str(raw_path or "").strip()
+        if path and path not in seen:
+            seen.add(path)
+            yield "report", path
+
+
+__all__ = [
+    "CLI_EXIT_CANCELLED",
+    "CLI_EXIT_FAILED",
+    "CLI_EXIT_PARTIAL",
+    "CLI_EXIT_SUCCESS",
+    "CliExecutionResources",
+    "run",
+]

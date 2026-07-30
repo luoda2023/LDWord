@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
-from docx.shared import Pt
 
 from src.config.style_semantics import apply_style_special_indent
 from src.config.template import StyleConfig
@@ -26,6 +25,9 @@ from src.shared.engine.sequence_numbering import (
     build_heading_chapter_ranges,
     parse_chapter_numbering_format,
     resolve_chapter_number,
+)
+from src.shared.engine.document_scope_runtime import (
+    document_scope_allows_paragraph,
 )
 
 if TYPE_CHECKING:
@@ -109,7 +111,6 @@ class CaptionModule(BaseModule):
         soft_after=("heading_recognition",),
         soft_consumes=("doc_tree", "heading_map"),
         provides=("caption_counters",),
-        enabled_by_default=True,
     )
 
     def apply(
@@ -564,10 +565,16 @@ def _build_body_items(doc: Document, context: PipelineContext) -> list[tuple[str
     doc_tree = getattr(context, "doc_tree", None)
 
     def section_ok(index: int) -> bool:
-        if doc_tree is None:
-            return True
-        section = getattr(doc_tree, "get_section_for_paragraph", lambda *_: "body")(index)
-        return section not in {"cover", "toc", "references", "abstract_cn", "abstract_en"}
+        section = (
+            doc_tree.get_section_for_paragraph(index)
+            if doc_tree is not None
+            else "body"
+        )
+        return (
+            document_scope_allows_paragraph(context, index)
+            and section
+            not in {"cover", "toc", "references", "abstract_cn", "abstract_en"}
+        )
 
     for child in body:
         tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag

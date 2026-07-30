@@ -15,6 +15,7 @@ from src.config.style_semantics import (
     resolve_style_size_pt,
 )
 from src.modules.base import BaseModule, ModuleMeta
+from src.shared.engine.document_scope_runtime import document_scope_allows_paragraph
 from src.shared.engine.font_resolver import resolve_font
 from src.shared.engine.indent_ops import apply_style_config_indents
 from src.shared.engine.line_spacing_ops import apply_line_spacing, apply_paragraph_spacing, sync_spacing_ooxml
@@ -46,7 +47,6 @@ class ParagraphStyleModule(BaseModule):
         requires_config=("styles",),
         soft_after=("heading_recognition",),
         soft_consumes=("doc_tree",),
-        enabled_by_default=True,
     )
 
     def apply(
@@ -60,15 +60,21 @@ class ParagraphStyleModule(BaseModule):
         max_levels = config.heading_model.max_heading_levels
         non_numbered = set(config.heading_model.non_numbered_title_texts or [])
         non_numbered_pfx = list(config.heading_model.non_numbered_prefixes or [])
-        style_definition_count = _sync_heading_style_definitions(doc, config)
+        style_definition_count = (
+            _sync_heading_style_definitions(doc, config)
+            if str(getattr(context.document_scope, "mode", "") or "") == "all"
+            else 0
+        )
         count = 0
 
-        for para in doc.paragraphs:
+        for para_index, para in enumerate(doc.paragraphs):
+            if not document_scope_allows_paragraph(context, para_index):
+                continue
             text = (para.text or "").strip()
             if not text:
                 continue
 
-            style_key = _resolve_style_key(para, context)
+            style_key = _resolve_style_key(para, context, para_index)
             if style_key == "toc":
                 continue
             if style_key.startswith("heading") and style_key != "heading":
@@ -112,7 +118,11 @@ class ParagraphStyleModule(BaseModule):
             )
 
 
-def _resolve_style_key(para: Paragraph, context: PipelineContext) -> str:
+def _resolve_style_key(
+    para: Paragraph,
+    context: PipelineContext,
+    para_index: int | None = None,
+) -> str:
     style = para.style
     style_name = style.name if style else ""
     style_lower = style_name.lower()
@@ -134,7 +144,8 @@ def _resolve_style_key(para: Paragraph, context: PipelineContext) -> str:
 
     doc_tree = context.doc_tree
     if doc_tree is not None:
-        section_type = doc_tree.get_section_for_paragraph(_get_para_index(para))
+        resolved_index = _get_para_index(para) if para_index is None else para_index
+        section_type = doc_tree.get_section_for_paragraph(resolved_index)
         mapped_style_key = style_key_for_section(section_type)
         if mapped_style_key:
             return mapped_style_key

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from docx.oxml import OxmlElement
 
 from src.modules.base import BaseModule, ModuleMeta
+from src.shared.engine.document_scope_runtime import document_scope_includes_role
 from src.shared.engine.document_text_heuristics import (
     looks_like_numbered_toc_entry_with_page_suffix,
     looks_like_toc_entry_line,
@@ -64,9 +65,9 @@ class TocModule(BaseModule):
         description="\u76ee\u5f55\u751f\u6210",
         category="structure",
         requires_config=("toc",),
-        depends_on=("heading_numbering",),
+        depends_on=("heading_recognition",),
+        soft_after=("heading_numbering",),
         consumes=("heading_map", "doc_tree"),
-        enabled_by_default=True,
     )
 
     def apply(
@@ -76,10 +77,9 @@ class TocModule(BaseModule):
         tracker: ChangeTracker,
         context: PipelineContext,
     ) -> None:
-        toc_cfg = config.toc
-        if not toc_cfg.enabled:
+        if not document_scope_includes_role(context, "toc"):
             return
-
+        toc_cfg = config.toc
         max_level = _clamp_toc_level(toc_cfg.max_level)
         insert_position = toc_cfg.insert_position
         mode = str(getattr(toc_cfg, "mode", "word_native") or "word_native").strip().lower()
@@ -274,34 +274,6 @@ def _infer_toc_level_from_paragraph(para) -> str:
     return "heading1"
 
 
-def _fallback_toc_section(doc):
-    title_index = None
-    for index, para in enumerate(doc.paragraphs):
-        if _is_toc_title_paragraph(para):
-            title_index = index
-            break
-    if title_index is None:
-        return None
-
-    end = title_index + 1
-    entry_count = 0
-    for probe in range(title_index + 1, len(doc.paragraphs)):
-        para = doc.paragraphs[probe]
-        raw = (para.text or "").strip()
-        if not raw:
-            end = probe + 1
-            continue
-        if _is_toc_level_style_para(para) or looks_like_toc_entry_line(raw) or looks_like_numbered_toc_entry_with_page_suffix(raw):
-            end = probe + 1
-            entry_count += 1
-            continue
-        break
-
-    if entry_count >= 1:
-        return (title_index, end)
-    return None
-
-
 def _toc_section_is_suspicious(doc: Document, start: int, end: int) -> bool:
     total = len(doc.paragraphs)
     if start < 0 or end <= start or start >= total:
@@ -345,7 +317,7 @@ def _resolve_existing_toc_range(doc: Document, context: PipelineContext) -> tupl
             end = min(len(doc.paragraphs), int(toc_section.end_index))
             if not _toc_section_is_suspicious(doc, start, end):
                 return (start, end)
-    return _fallback_toc_section(doc)
+    return None
 
 
 def _format_existing_toc_paragraphs(doc: Document, config: ResolvedConfig, context: PipelineContext) -> int:
@@ -402,33 +374,17 @@ def _format_inserted_toc_title(doc: Document, config: ResolvedConfig, insert_idx
 
 
 def _find_insert_position(doc: Document, mode: str, context: PipelineContext) -> int | None:
-    if mode == "auto":
-        doc_tree = getattr(context, "doc_tree", None)
-        if doc_tree is not None:
-            toc_section = getattr(doc_tree, "get_section", lambda *_: None)("toc")
-            if toc_section is not None:
-                return toc_section.start_index
-            cover_section = getattr(doc_tree, "get_section", lambda *_: None)("cover")
-            if cover_section is not None and cover_section.end_index > 0:
-                return min(cover_section.end_index, len(doc.paragraphs))
-
-        heading_map = context.heading_map
-        if heading_map:
-            return max(0, min(heading_map.keys()))
-        return 0
-
-    if mode == "after_cover":
-        doc_tree = getattr(context, "doc_tree", None)
-        if doc_tree is not None:
-            cover_section = getattr(doc_tree, "get_section", lambda *_: None)("cover")
-            if cover_section is not None and cover_section.end_index > 0:
-                return min(cover_section.end_index, len(doc.paragraphs))
-        return min(2, len(doc.paragraphs))
-
-    try:
-        return int(mode)
-    except ValueError:
-        return 0
+    del mode
+    doc_tree = getattr(context, "doc_tree", None)
+    if doc_tree is None:
+        return None
+    resolver = getattr(doc_tree, "insertion_index_for_role", None)
+    if not callable(resolver):
+        return None
+    position = resolver("toc")
+    if position is None:
+        return None
+    return max(0, min(int(position), len(doc.paragraphs)))
 
 
 def _build_text_paragraph_element(text: str):

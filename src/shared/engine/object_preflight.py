@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
+from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile, is_zipfile
 
 from src.config.scene import ObjectPreflightPolicy
+from src.shared.io.safe_docx_package import SafeDocxPackage
 
 
 OBJECT_PREFLIGHT_SCAN_TARGETS: tuple[str, ...] = (
@@ -61,6 +64,8 @@ class ObjectPreflightFinding:
 class ObjectPreflightResult:
     source_path: str = ""
     findings: list[ObjectPreflightFinding] = field(default_factory=list)
+    inspection_status: str = "ok"
+    inspection_error: str = ""
 
     @property
     def has_findings(self) -> bool:
@@ -69,6 +74,10 @@ class ObjectPreflightResult:
     @property
     def blocking_findings(self) -> list[ObjectPreflightFinding]:
         return [finding for finding in self.findings if finding.severity == "error"]
+
+    @property
+    def inspection_succeeded(self) -> bool:
+        return self.inspection_status == "ok"
 
 
 _XML_SCAN_PATTERNS: tuple[tuple[str, tuple[bytes, ...], str], ...] = (
@@ -104,17 +113,44 @@ _XML_SCAN_PATTERNS: tuple[tuple[str, tuple[bytes, ...], str], ...] = (
     ),
 )
 
+_REQUIRED_DOCX_PARTS: frozenset[str] = frozenset(
+    {
+        "[content_types].xml",
+        "_rels/.rels",
+        "word/document.xml",
+    }
+)
+
+_REQUIRED_XML_ROOTS: dict[str, str] = {
+    "[content_types].xml": "Types",
+    "_rels/.rels": "Relationships",
+    "word/document.xml": "document",
+}
+
 
 def inspect_docx_package(
     docx_path: str | Path,
     policy: ObjectPreflightPolicy | None = None,
+    *,
+    safe_package: SafeDocxPackage | None = None,
 ) -> ObjectPreflightResult:
     """Inspect DOCX package parts that python-docx can otherwise hide."""
 
     path = Path(docx_path)
     result = ObjectPreflightResult(source_path=str(path))
-    if not path.exists() or not is_zipfile(path):
-        return result
+    if safe_package is None:
+        try:
+            source_exists = path.is_file()
+        except OSError:
+            source_exists = False
+        if not source_exists:
+            return _inspection_failure_result(result, "source_unavailable")
+        try:
+            package_is_zip = is_zipfile(path)
+        except OSError:
+            return _inspection_failure_result(result, "source_unreadable")
+        if not package_is_zip:
+            return _inspection_failure_result(result, "invalid_docx_package")
 
     policy = policy or ObjectPreflightPolicy()
     allowed_targets = _allowed_scan_targets(policy)
@@ -137,8 +173,20 @@ def inspect_docx_package(
         )
 
     try:
-        with ZipFile(path) as package:
-            names = package.namelist()
+        package_context = (
+            nullcontext(safe_package)
+            if safe_package is not None
+            else ZipFile(path)
+        )
+        with package_context as package:
+            names = _package_names(package)
+            if not _REQUIRED_DOCX_PARTS.issubset(
+                {name.lower() for name in names}
+            ):
+                return _inspection_failure_result(
+                    result,
+                    "invalid_docx_package",
+                )
             for name in names:
                 lower = name.lower()
                 if lower.startswith("word/embeddings/"):
@@ -154,9 +202,33 @@ def inspect_docx_package(
                     or lower == "[content_types].xml"
                 ):
                     _inspect_xml_part(package, name, add)
-    except (BadZipFile, OSError):
-        return result
+    except (BadZipFile, ElementTree.ParseError, KeyError, ValueError):
+        return _inspection_failure_result(result, "invalid_docx_package")
+    except OSError:
+        return _inspection_failure_result(result, "source_unreadable")
+    except (EOFError, NotImplementedError, RuntimeError):
+        return _inspection_failure_result(result, "source_unreadable")
 
+    return result
+
+
+def _inspection_failure_result(
+    result: ObjectPreflightResult,
+    status: str,
+) -> ObjectPreflightResult:
+    result.inspection_status = status
+    result.inspection_error = status
+    result.findings = [
+        ObjectPreflightFinding(
+            kind="object_preflight_inspection_failed",
+            location=result.source_path,
+            message=(
+                "Object preflight could not inspect a valid DOCX package "
+                f"({status})."
+            ),
+            severity="error",
+        )
+    ]
     return result
 
 
@@ -241,11 +313,26 @@ def _inspect_embedding_part(name: str, add) -> None:
     add("ole_objects", name, "Embedded OLE object is present.")
 
 
-def _inspect_relationships(package: ZipFile, name: str, add) -> None:
-    try:
-        data = package.read(name).lower()
-    except (KeyError, OSError):
-        return
+def _package_names(package: ZipFile | SafeDocxPackage) -> list[str]:
+    if isinstance(package, SafeDocxPackage):
+        return list(package.part_names)
+    return package.namelist()
+
+
+def _package_read(package: ZipFile | SafeDocxPackage, name: str) -> bytes:
+    if isinstance(package, SafeDocxPackage):
+        return package.read_part(name)
+    return package.read(name)
+
+
+def _inspect_relationships(
+    package: ZipFile | SafeDocxPackage,
+    name: str,
+    add,
+) -> None:
+    raw_data = _package_read(package, name)
+    _validate_required_xml(name, raw_data)
+    data = raw_data.lower()
 
     if b"oleobject" in data:
         add("ole_objects", name, "OLE object relationship is present.")
@@ -255,11 +342,13 @@ def _inspect_relationships(package: ZipFile, name: str, add) -> None:
         add("macros", name, "Macro relationship is present.")
 
 
-def _inspect_xml_part(package: ZipFile, name: str, add) -> None:
-    try:
-        data = package.read(name)
-    except (KeyError, OSError):
-        return
+def _inspect_xml_part(
+    package: ZipFile | SafeDocxPackage,
+    name: str,
+    add,
+) -> None:
+    data = _package_read(package, name)
+    _validate_required_xml(name, data)
 
     lower = data.lower()
     if b"visio" in lower:
@@ -270,3 +359,13 @@ def _inspect_xml_part(package: ZipFile, name: str, add) -> None:
     for kind, patterns, message in _XML_SCAN_PATTERNS:
         if any(pattern.lower() in lower for pattern in patterns):
             add(kind, name, message)
+
+
+def _validate_required_xml(name: str, data: bytes) -> None:
+    expected_root = _REQUIRED_XML_ROOTS.get(name.lower())
+    if not expected_root:
+        return
+    root = ElementTree.fromstring(data)
+    local_name = str(root.tag).rsplit("}", 1)[-1]
+    if local_name != expected_root:
+        raise ValueError(f"invalid_docx_core_part:{name}")

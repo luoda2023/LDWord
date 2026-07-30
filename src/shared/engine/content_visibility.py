@@ -2,15 +2,35 @@
 
 from __future__ import annotations
 
-import re
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Iterable
 
+from docx.oxml.ns import qn
 
-CONTENT_VISIBILITY_MARKER_RE = re.compile(
-    r"\{\{\s*([#/])\s*(?:visibility|content)\s*:\s*([A-Za-z0-9_.-]+)\s*\}\}"
+from src.shared.engine.content_visibility_contract import CONTENT_VISIBILITY_MARKER_RE
+
+_W_P = qn("w:p")
+_W_T = qn("w:t")
+
+_ALLOWED_VISIBILITY_SELECTOR_TYPES = frozenset({"marker_block"})
+_ALLOWED_VISIBILITY_ACTIONS = frozenset({"remove"})
+_HIGH_RISK_VISIBILITY_SELECTORS = frozenset(
+    {
+        "answer",
+        "analysis",
+        "solution",
+        "question_body",
+        "teacher_note",
+        "knowledge_points",
+        "internal",
+        "internal_note",
+        "review_note",
+    }
 )
+_SELECTOR_TYPO_SIMILARITY_THRESHOLD = 0.8
 
 
 @dataclass(frozen=True)
@@ -33,6 +53,15 @@ class ContentVisibilityScanResult:
     mismatched_end_selectors: dict[str, int] = field(default_factory=dict)
     nested_selectors: dict[str, int] = field(default_factory=dict)
     unclosed_selectors: dict[str, int] = field(default_factory=dict)
+    # Strict direct-body grammar evidence.  These fields are additive so old
+    # report/UI consumers can keep using the selector/count projection above.
+    grammar_valid: bool = True
+    strict_plan_id: str = ""
+    blocking_diagnostics: list[dict[str, object]] = field(default_factory=list)
+
+    @property
+    def has_blocking_issues(self) -> bool:
+        return bool(self.blocking_diagnostics)
 
     @property
     def has_issues(self) -> bool:
@@ -44,6 +73,7 @@ class ContentVisibilityScanResult:
                 self.nested_selectors,
                 self.unclosed_selectors,
                 self.unused_document_selectors,
+                self.blocking_diagnostics,
             )
         )
 
@@ -75,6 +105,25 @@ class ContentVisibilityScanResult:
             messages.append(
                 "存在未闭合 marker block: " + _format_counts(self.unclosed_selectors)
             )
+        represented_codes = {
+            "orphan_end_marker",
+            "mismatched_end_marker",
+            "nested_marker_block",
+            "unclosed_start_marker",
+        }
+        unrepresented = [
+            item
+            for item in self.blocking_diagnostics
+            if str(item.get("code", "") or "") not in represented_codes
+        ]
+        if unrepresented:
+            messages.append(
+                "内容可见性块语法不受支持: "
+                + "; ".join(
+                    f"[{item.get('code', 'invalid')}] {item.get('message', '')}"
+                    for item in unrepresented
+                )
+            )
         return messages
 
 
@@ -87,6 +136,11 @@ class ContentVisibilityBlockPreview:
     text_samples: list[str] = field(default_factory=list)
     context_before: str = ""
     context_after: str = ""
+    start_body_index: int = -1
+    end_body_index: int = -1
+    body_element_count: int = 0
+    table_count: int = 0
+    content_image_markers: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -98,21 +152,28 @@ class ContentVisibilityPresetPreview:
     missing_selectors: list[str] = field(default_factory=list)
     removed_block_count: int = 0
     removed_paragraph_count: int = 0
+    removed_body_element_count: int = 0
+    removed_table_count: int = 0
     stripped_marker_paragraph_count: int = 0
     removed_text_samples: list[str] = field(default_factory=list)
     removed_blocks: list[ContentVisibilityBlockPreview] = field(default_factory=list)
+    strict_plan_id: str = ""
 
 
 def scan_content_visibility_markers(
     document,
     presets: Iterable[object] | None = None,
 ) -> ContentVisibilityScanResult:
+    """Inventory markers and validate the one production block grammar.
+
+    Counting markers is intentionally separate from parsing their ranges.  The
+    latter is delegated to :func:`build_block_visibility_plan`, which is also
+    the authority used by delivery mutation.  Invalid grammar is projected to
+    the legacy issue counters and retained as structured blocking diagnostics.
+    """
+
     start_counts: Counter[str] = Counter()
     end_counts: Counter[str] = Counter()
-    orphan_end_selectors: Counter[str] = Counter()
-    mismatched_end_selectors: Counter[str] = Counter()
-    nested_selectors: Counter[str] = Counter()
-    active_stack: list[str] = []
     marker_paragraph_count = 0
 
     for paragraph_index, paragraph in enumerate(_iter_document_paragraphs(document)):
@@ -123,40 +184,77 @@ def scan_content_visibility_markers(
             selector = marker.selector
             if marker.marker_type == "#":
                 start_counts[selector] += 1
-                if active_stack:
-                    nested_selectors[selector] += 1
-                active_stack.append(selector)
-                continue
-
-            end_counts[selector] += 1
-            if active_stack and active_stack[-1] == selector:
-                active_stack.pop()
-            elif selector in active_stack:
-                mismatched_end_selectors[selector] += 1
-                reverse_index = active_stack[::-1].index(selector)
-                del active_stack[len(active_stack) - reverse_index - 1 :]
             else:
-                orphan_end_selectors[selector] += 1
+                end_counts[selector] += 1
 
-    unclosed_selectors = Counter(active_stack)
+    normalized_presets = list(presets or ())
     document_selectors = sorted(set(start_counts) | set(end_counts))
-    used_rule_selectors = sorted(extract_content_visibility_rule_selectors(presets or ()))
+    used_rule_selectors = sorted(
+        extract_content_visibility_rule_selectors(normalized_presets)
+    )
+    missing_rule_selectors = [
+        selector for selector in used_rule_selectors if selector not in start_counts
+    ]
+    unused_document_selectors = [
+        selector for selector in document_selectors if selector not in used_rule_selectors
+    ]
+    strict_plan_id = ""
+    configuration_diagnostics = content_visibility_configuration_diagnostics(
+        normalized_presets
+    )
+    grammar_diagnostics: list[dict[str, object]] = []
+    try:
+        strict_plan = _build_strict_visibility_plan(
+            document,
+            remove_selectors=document_selectors,
+        )
+        strict_plan_id = str(getattr(strict_plan, "plan_id", "") or "")
+    except Exception as exc:
+        diagnostics = getattr(exc, "diagnostics", None)
+        if diagnostics is None:
+            raise
+        grammar_diagnostics = [item.to_dict() for item in diagnostics]
+
+    blocking_diagnostics = [
+        *configuration_diagnostics,
+        *grammar_diagnostics,
+        *_sensitive_selector_mismatch_diagnostics(
+            normalized_presets,
+            document_selectors=document_selectors,
+        ),
+    ]
+
+    orphan_end_selectors = _diagnostic_selector_counts(
+        grammar_diagnostics,
+        "orphan_end_marker",
+    )
+    mismatched_end_selectors = _diagnostic_selector_counts(
+        grammar_diagnostics,
+        "mismatched_end_marker",
+    )
+    nested_selectors = _diagnostic_selector_counts(
+        grammar_diagnostics,
+        "nested_marker_block",
+    )
+    unclosed_selectors = _diagnostic_selector_counts(
+        grammar_diagnostics,
+        "unclosed_start_marker",
+    )
     return ContentVisibilityScanResult(
         selectors=document_selectors,
         start_counts=dict(sorted(start_counts.items())),
         end_counts=dict(sorted(end_counts.items())),
         marker_paragraph_count=marker_paragraph_count,
         used_rule_selectors=used_rule_selectors,
-        missing_rule_selectors=[
-            selector for selector in used_rule_selectors if selector not in start_counts
-        ],
-        unused_document_selectors=[
-            selector for selector in document_selectors if selector not in used_rule_selectors
-        ],
+        missing_rule_selectors=missing_rule_selectors,
+        unused_document_selectors=unused_document_selectors,
         orphan_end_selectors=dict(sorted(orphan_end_selectors.items())),
         mismatched_end_selectors=dict(sorted(mismatched_end_selectors.items())),
         nested_selectors=dict(sorted(nested_selectors.items())),
         unclosed_selectors=dict(sorted(unclosed_selectors.items())),
+        grammar_valid=not grammar_diagnostics,
+        strict_plan_id=strict_plan_id,
+        blocking_diagnostics=blocking_diagnostics,
     )
 
 
@@ -166,21 +264,10 @@ def preview_content_visibility_effects(
     *,
     sample_limit: int = 5,
 ) -> list[ContentVisibilityPresetPreview]:
-    paragraphs = [
-        str(getattr(paragraph, "text", "") or "")
-        for paragraph in _iter_document_paragraphs(document)
-    ]
-    document_start_selectors = {
-        marker.selector
-        for text in paragraphs
-        for marker in visibility_markers(text)
-        if marker.marker_type == "#"
-    }
     return [
         _preview_preset_visibility_effects(
+            document,
             preset,
-            paragraphs,
-            document_start_selectors=document_start_selectors,
             sample_limit=sample_limit,
         )
         for preset in list(presets or [])
@@ -189,108 +276,64 @@ def preview_content_visibility_effects(
 
 
 def _preview_preset_visibility_effects(
+    document,
     preset,
-    paragraphs: list[str],
     *,
-    document_start_selectors: set[str],
     sample_limit: int,
 ) -> ContentVisibilityPresetPreview:
     remove_selectors = sorted(_preset_content_visibility_rule_selectors(preset))
-    matched_selectors: set[str] = set()
-    removed_paragraph_count = 0
-    stripped_marker_paragraph_count = 0
+    plan = _build_strict_visibility_plan(
+        document,
+        remove_selectors=remove_selectors,
+    )
+    body = document.element.body
+    children = tuple(body)
     removed_samples: list[str] = []
     removed_blocks: list[ContentVisibilityBlockPreview] = []
-    active_remove_selector = ""
-    active_start_index = -1
-    active_paragraph_count = 0
-    active_samples: list[str] = []
-
-    for paragraph_index, text in enumerate(paragraphs):
-        markers = visibility_markers(text)
-
-        if active_remove_selector:
-            removed_paragraph_count += 1
-            active_paragraph_count += 1
-            _append_visibility_sample(
-                removed_samples,
-                text,
-                sample_limit=sample_limit,
-            )
-            _append_visibility_sample(
-                active_samples,
-                text,
-                sample_limit=sample_limit,
-            )
-            if _has_visibility_end(markers, active_remove_selector):
-                removed_blocks.append(
-                    _build_visibility_block_preview(
-                        selector=active_remove_selector,
-                        start_index=active_start_index,
-                        end_index=paragraph_index,
-                        paragraph_count=active_paragraph_count,
-                        text_samples=active_samples,
-                        paragraphs=paragraphs,
-                    )
+    for visibility_range in plan.remove_ranges:
+        block_samples: list[str] = []
+        for element in children[
+            visibility_range.start_body_index : visibility_range.end_body_index + 1
+        ]:
+            for text in _body_element_paragraph_texts(element):
+                _append_visibility_sample(
+                    block_samples,
+                    text,
+                    sample_limit=sample_limit,
                 )
-                active_remove_selector = ""
-                active_start_index = -1
-                active_paragraph_count = 0
-                active_samples = []
-            continue
-
-        start_remove_selector = next(
-            (
-                marker.selector
-                for marker in markers
-                if marker.marker_type == "#" and marker.selector in remove_selectors
-            ),
-            "",
-        )
-        if start_remove_selector:
-            matched_selectors.add(start_remove_selector)
-            removed_paragraph_count += 1
-            block_samples: list[str] = []
-            _append_visibility_sample(
-                removed_samples,
-                text,
-                sample_limit=sample_limit,
-            )
-            _append_visibility_sample(
-                block_samples,
-                text,
-                sample_limit=sample_limit,
-            )
-            if _has_visibility_end(markers, start_remove_selector):
-                removed_blocks.append(
-                    _build_visibility_block_preview(
-                        selector=start_remove_selector,
-                        start_index=paragraph_index,
-                        end_index=paragraph_index,
-                        paragraph_count=1,
-                        text_samples=block_samples,
-                        paragraphs=paragraphs,
-                    )
+                _append_visibility_sample(
+                    removed_samples,
+                    text,
+                    sample_limit=sample_limit,
                 )
-            else:
-                active_remove_selector = start_remove_selector
-                active_start_index = paragraph_index
-                active_paragraph_count = 1
-                active_samples = block_samples
-            continue
-
-        if markers:
-            stripped_marker_paragraph_count += 1
-
-    if active_remove_selector:
         removed_blocks.append(
-            _build_visibility_block_preview(
-                selector=active_remove_selector,
-                start_index=active_start_index,
-                end_index=len(paragraphs) - 1,
-                paragraph_count=active_paragraph_count,
-                text_samples=active_samples,
-                paragraphs=paragraphs,
+            ContentVisibilityBlockPreview(
+                selector=visibility_range.selector,
+                start_paragraph_index=_direct_body_paragraph_ordinal(
+                    children,
+                    visibility_range.start_body_index,
+                ),
+                end_paragraph_index=_direct_body_paragraph_ordinal(
+                    children,
+                    visibility_range.end_body_index,
+                ),
+                paragraph_count=visibility_range.paragraph_count,
+                text_samples=block_samples,
+                context_before=_nearest_body_context(
+                    children,
+                    visibility_range.start_body_index,
+                    step=-1,
+                ),
+                context_after=_nearest_body_context(
+                    children,
+                    visibility_range.end_body_index,
+                    step=1,
+                ),
+                start_body_index=visibility_range.start_body_index,
+                end_body_index=visibility_range.end_body_index,
+                body_element_count=visibility_range.body_element_count,
+                table_count=visibility_range.table_count,
+                content_image_markers=list(visibility_range.content_image_markers),
             )
         )
 
@@ -299,15 +342,20 @@ def _preview_preset_visibility_effects(
         preset_id=preset_id,
         label=str(_visibility_rule_value(preset, "label", "") or preset_id).strip(),
         remove_selectors=remove_selectors,
-        matched_selectors=sorted(matched_selectors),
-        missing_selectors=[
-            selector for selector in remove_selectors if selector not in document_start_selectors
-        ],
+        matched_selectors=list(plan.matched_remove_selectors),
+        missing_selectors=list(plan.unmatched_remove_selectors),
         removed_block_count=len(removed_blocks),
-        removed_paragraph_count=removed_paragraph_count,
-        stripped_marker_paragraph_count=stripped_marker_paragraph_count,
+        removed_paragraph_count=sum(
+            item.paragraph_count for item in plan.remove_ranges
+        ),
+        removed_body_element_count=sum(
+            item.body_element_count for item in plan.remove_ranges
+        ),
+        removed_table_count=sum(item.table_count for item in plan.remove_ranges),
+        stripped_marker_paragraph_count=len(plan.retained_marker_paragraphs),
         removed_text_samples=removed_samples,
         removed_blocks=removed_blocks,
+        strict_plan_id=plan.plan_id,
     )
 
 
@@ -316,23 +364,188 @@ def extract_content_visibility_rule_selectors(
 ) -> set[str]:
     selectors: set[str] = set()
     for preset in list(presets or []):
-        if isinstance(preset, dict):
+        if isinstance(preset, Mapping):
             rules = preset.get("content_visibility_rules", [])
         else:
             rules = getattr(preset, "content_visibility_rules", [])
         for rule in list(rules or []):
-            selector_type = str(
-                _visibility_rule_value(rule, "selector_type", "marker_block")
-            ).strip().lower()
-            action = str(_visibility_rule_value(rule, "action", "remove")).strip().lower()
-            selector = normalize_content_visibility_selector(
-                _visibility_rule_value(rule, "selector", "")
-            )
-            if selector_type != "marker_block" or action not in {"remove", "hide", "exclude"}:
-                continue
+            selector = executable_content_visibility_rule_selector(rule)
             if selector:
                 selectors.add(selector)
     return selectors
+
+
+def executable_content_visibility_rule_selector(rule: object) -> str:
+    """Return the selector only when a rule belongs to the production contract."""
+
+    selector_type = str(
+        _visibility_rule_value(rule, "selector_type", "marker_block") or ""
+    ).strip().lower()
+    action = str(
+        _visibility_rule_value(rule, "action", "remove") or ""
+    ).strip().lower()
+    if (
+        selector_type not in _ALLOWED_VISIBILITY_SELECTOR_TYPES
+        or action not in _ALLOWED_VISIBILITY_ACTIONS
+    ):
+        return ""
+    return normalize_content_visibility_selector(
+        _visibility_rule_value(rule, "selector", "")
+    )
+
+
+def content_visibility_configuration_diagnostics(
+    presets: Iterable[object],
+) -> list[dict[str, object]]:
+    """Return fail-closed diagnostics for malformed executable rules."""
+
+    diagnostics: list[dict[str, object]] = []
+    for preset_index, preset in enumerate(list(presets or [])):
+        preset_id = str(
+            _visibility_rule_value(preset, "preset_id", "") or ""
+        ).strip()
+        rules = _preset_content_visibility_rules(preset)
+        for rule_index, rule in enumerate(rules):
+            selector_type = str(
+                _visibility_rule_value(rule, "selector_type", "marker_block")
+                or ""
+            ).strip().lower()
+            action = str(
+                _visibility_rule_value(rule, "action", "remove") or ""
+            ).strip().lower()
+            selector = normalize_content_visibility_selector(
+                _visibility_rule_value(rule, "selector", "")
+            )
+            rule_id = str(
+                _visibility_rule_value(rule, "rule_id", "") or ""
+            ).strip()
+            location = (
+                f"delivery_presets[{preset_index}]."
+                f"content_visibility_rules[{rule_index}]"
+            )
+            identity = rule_id or selector or f"rule-{rule_index + 1}"
+            if selector_type not in _ALLOWED_VISIBILITY_SELECTOR_TYPES:
+                diagnostics.append(
+                    {
+                        "code": "content_visibility_selector_type_invalid",
+                        "message": (
+                            f"Visibility rule '{identity}' in preset "
+                            f"'{preset_id or preset_index}' has unsupported "
+                            f"selector_type '{selector_type or '<empty>'}'."
+                        ),
+                        "selector": selector,
+                        "preset_id": preset_id,
+                        "rule_id": rule_id,
+                        "location": f"{location}.selector_type",
+                    }
+                )
+            if action not in _ALLOWED_VISIBILITY_ACTIONS:
+                diagnostics.append(
+                    {
+                        "code": "content_visibility_action_invalid",
+                        "message": (
+                            f"Visibility rule '{identity}' in preset "
+                            f"'{preset_id or preset_index}' has unsupported "
+                            f"action '{action or '<empty>'}'."
+                        ),
+                        "selector": selector,
+                        "preset_id": preset_id,
+                        "rule_id": rule_id,
+                        "location": f"{location}.action",
+                    }
+                )
+            if not selector:
+                diagnostics.append(
+                    {
+                        "code": "content_visibility_selector_missing",
+                        "message": (
+                            f"Visibility rule '{identity}' in preset "
+                            f"'{preset_id or preset_index}' has no selector."
+                        ),
+                        "selector": "",
+                        "preset_id": preset_id,
+                        "rule_id": rule_id,
+                        "location": f"{location}.selector",
+                    }
+                )
+    return diagnostics
+
+
+def _sensitive_selector_mismatch_diagnostics(
+    presets: Iterable[object],
+    *,
+    document_selectors: Iterable[str],
+) -> list[dict[str, object]]:
+    """Detect likely typos only when a preset leaves a risky near-match uncontrolled."""
+
+    document_selector_set = {
+        normalize_content_visibility_selector(selector)
+        for selector in document_selectors
+        if normalize_content_visibility_selector(selector)
+    }
+    risky_document_selectors = sorted(
+        document_selector_set & _HIGH_RISK_VISIBILITY_SELECTORS
+    )
+    if not risky_document_selectors:
+        return []
+
+    diagnostics: list[dict[str, object]] = []
+    for preset_index, preset in enumerate(list(presets or [])):
+        preset_id = str(
+            _visibility_rule_value(preset, "preset_id", "") or ""
+        ).strip()
+        configured_selectors = _preset_content_visibility_rule_selectors(preset)
+        for configured_selector in sorted(configured_selectors - document_selector_set):
+            for document_selector in risky_document_selectors:
+                if document_selector in configured_selectors:
+                    continue
+                similarity = _selector_similarity(
+                    configured_selector,
+                    document_selector,
+                )
+                if similarity < _SELECTOR_TYPO_SIMILARITY_THRESHOLD:
+                    continue
+                diagnostics.append(
+                    {
+                        "code": "content_visibility_sensitive_selector_mismatch",
+                        "message": (
+                            f"Preset '{preset_id or preset_index}' configures "
+                            f"selector '{configured_selector}', but the document "
+                            f"contains high-risk selector '{document_selector}'. "
+                            "The near-match is treated as a probable typo because "
+                            "continuing would retain the protected block while "
+                            "stripping its markers."
+                        ),
+                        "selector": configured_selector,
+                        "observed_selector": document_selector,
+                        "preset_id": preset_id,
+                        "similarity": round(similarity, 3),
+                        "location": (
+                            f"delivery_presets[{preset_index}]."
+                            "content_visibility_rules"
+                        ),
+                    }
+                )
+                break
+    return diagnostics
+
+
+def _preset_content_visibility_rules(preset) -> list[object]:
+    if isinstance(preset, dict):
+        rules = preset.get("content_visibility_rules", [])
+    else:
+        rules = getattr(preset, "content_visibility_rules", [])
+    return list(rules or [])
+
+
+def _selector_similarity(left: str, right: str) -> float:
+    normalized_left = normalize_content_visibility_selector(left)
+    normalized_right = normalize_content_visibility_selector(right)
+    if not normalized_left or not normalized_right or normalized_left == normalized_right:
+        return 0.0
+    if min(len(normalized_left), len(normalized_right)) < 4:
+        return 0.0
+    return SequenceMatcher(None, normalized_left, normalized_right).ratio()
 
 
 def _preset_content_visibility_rule_selectors(preset) -> set[str]:
@@ -354,13 +567,6 @@ def normalize_content_visibility_selector(value) -> str:
     return str(value or "").strip().lower()
 
 
-def _has_visibility_end(markers: list[ContentVisibilityMarker], selector: str) -> bool:
-    return any(
-        marker.marker_type == "/" and marker.selector == selector
-        for marker in markers
-    )
-
-
 def _append_visibility_sample(
     samples: list[str],
     text: str,
@@ -374,39 +580,54 @@ def _append_visibility_sample(
         samples.append(cleaned)
 
 
-def _build_visibility_block_preview(
-    *,
-    selector: str,
-    start_index: int,
-    end_index: int,
-    paragraph_count: int,
-    text_samples: list[str],
-    paragraphs: list[str],
-) -> ContentVisibilityBlockPreview:
-    return ContentVisibilityBlockPreview(
-        selector=selector,
-        start_paragraph_index=start_index,
-        end_paragraph_index=end_index,
-        paragraph_count=paragraph_count,
-        text_samples=list(text_samples),
-        context_before=_nearest_visibility_context_before(paragraphs, start_index),
-        context_after=_nearest_visibility_context_after(paragraphs, end_index),
+def _build_strict_visibility_plan(document, *, remove_selectors: Iterable[str]):
+    # Lazy import avoids a module cycle: block_visibility owns the grammar but
+    # imports the shared marker regex defined by this module.
+    from src.shared.engine.block_visibility import build_block_visibility_plan
+
+    return build_block_visibility_plan(
+        document,
+        remove_selectors=remove_selectors,
     )
 
 
-def _nearest_visibility_context_before(paragraphs: list[str], start_index: int) -> str:
-    for index in range(max(0, start_index) - 1, -1, -1):
-        cleaned = _clean_visibility_text(paragraphs[index])
-        if cleaned:
-            return cleaned
-    return ""
+def _diagnostic_selector_counts(
+    diagnostics: list[dict[str, object]],
+    code: str,
+) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for item in diagnostics:
+        if str(item.get("code", "") or "") != code:
+            continue
+        selectors = str(item.get("selector", "") or "").split(",")
+        for selector in selectors:
+            normalized = normalize_content_visibility_selector(selector)
+            if normalized:
+                counts[normalized] += 1
+    return counts
 
 
-def _nearest_visibility_context_after(paragraphs: list[str], end_index: int) -> str:
-    for index in range(max(-1, end_index) + 1, len(paragraphs)):
-        cleaned = _clean_visibility_text(paragraphs[index])
-        if cleaned:
-            return cleaned
+def _body_element_paragraph_texts(element) -> list[str]:
+    return [
+        "".join(str(node.text or "") for node in paragraph.iter(_W_T))
+        for paragraph in element.iter(_W_P)
+    ]
+
+
+def _direct_body_paragraph_ordinal(children, body_index: int) -> int:
+    if body_index < 0:
+        return -1
+    return sum(1 for element in children[:body_index] if element.tag == _W_P)
+
+
+def _nearest_body_context(children, body_index: int, *, step: int) -> str:
+    index = body_index + step
+    while 0 <= index < len(children):
+        for text in _body_element_paragraph_texts(children[index]):
+            cleaned = _clean_visibility_text(text)
+            if cleaned:
+                return cleaned
+        index += step
     return ""
 
 
@@ -415,7 +636,7 @@ def _clean_visibility_text(text: str) -> str:
 
 
 def _visibility_rule_value(rule, key: str, default=""):
-    if isinstance(rule, dict):
+    if isinstance(rule, Mapping):
         return rule.get(key, default)
     return getattr(rule, key, default)
 

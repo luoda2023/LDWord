@@ -6,7 +6,6 @@ source_fill — 来源信息填充模块
 
 from __future__ import annotations
 
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING

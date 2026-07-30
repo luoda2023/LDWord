@@ -1545,7 +1545,6 @@ def _build_token_formula_marks(
     m_suffix = re.fullmatch(r"(?P<core>.+?)(?P<suffix>[-_][A-Za-z]{2,12})", token)
     if m_suffix:
         core = m_suffix.group("core")
-        suffix = m_suffix.group("suffix")
         if any(ch.isdigit() for ch in core):
             nested = _build_token_formula_marks(
                 core,

@@ -9,33 +9,17 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import is_dataclass
+from importlib import import_module
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
-from src.config.control_contract_registry import (
-    ALLOWED_CONTROL_OWNER_LAYERS,
-    audit_control_contract_registry,
-    list_control_contracts,
-    resolve_control_contract_evidence_locations,
-)
+from src import product_report_writer as _product_report
+from src.config.atomic_io import atomic_write_text
 from src.config.scene import SceneWorkspace
 from src.config.scene_coverage_manifest import (
     coverage_candidate_keys_for_config,
     coverage_packs_for_config,
-)
-from src.config.scene_parameter_ownership import (
-    ALLOWED_PARAMETER_OWNER_LAYERS,
-    REQUIRED_SCENE_PARAMETER_PATHS,
-    audit_parameter_execution_consumers,
-    audit_scene_parameter_ownership,
-    parameter_consumer_anchors,
-    scene_parameter_ownership_specs,
-)
-from src.config.scene_product_readiness import (
-    SceneProductReadinessSpec,
-    audit_scene_product_readiness,
-    product_readiness_for,
 )
 from src.execution_diagnostics import build_execution_diagnostics, describe_execution_diagnostic
 from src.reporting.academic_confidence import (
@@ -51,16 +35,20 @@ from src.reporting.common import (
 )
 from src.reporting.document_sections import (
     _extract_application_section_word_limits,
+    _extract_official_document_assembly,
     _extract_official_numbering_preservation,
     _extract_technical_chapter_inventory,
     _format_application_section_word_limits_markdown,
+    _format_official_document_assembly_markdown,
     _format_official_numbering_preservation_markdown,
     _format_technical_chapter_inventory_markdown,
 )
 from src.reporting.exam_sections import (
     _extract_exam_delivery_runtime,
+    _extract_exam_markdown_import,
     _extract_exam_question_schema,
     _format_exam_delivery_runtime_markdown,
+    format_exam_markdown_import_markdown,
     _format_exam_question_schema_markdown,
 )
 from src.reporting.front_matter import (
@@ -85,10 +73,48 @@ from src.reporting.material_sections import (
     _format_material_field_consistency_markdown,
     _format_object_preflight_markdown,
 )
-from src.shared.engine.scene_sample_docx_builder import scene_sample_fixture_manifest_paths
-
+from src.reporting.material_assembly import (
+    extract_material_assembly,
+    format_material_assembly_markdown,
+)
+from src.reporting.execution_payload import document_scope_payload
 if TYPE_CHECKING:
     from src.pipeline.result import PipelineResult
+
+
+class _SceneProductReadinessSpec(Protocol):
+    subject_type: str
+    subject_id: str
+    static_closure_level: str
+    product_readiness_level: str
+    is_green: bool
+    is_boundary: bool
+    evidence_surfaces: tuple[str, ...]
+    remaining_product_gaps: tuple[str, ...]
+    rationale: str
+
+
+def _audit_scene_product_readiness():
+    module = import_module("src.config.scene_product_readiness")
+    return module.audit_scene_product_readiness()
+
+
+def _product_readiness_for(subject_id: str, *, subject_type: str):
+    module = import_module("src.config.scene_product_readiness")
+    return module.product_readiness_for(subject_id, subject_type=subject_type)
+
+
+def _control_contract_registry():
+    return import_module("src.config.control_contract_registry")
+
+
+def _scene_parameter_ownership():
+    return import_module("src.config.scene_parameter_ownership")
+
+
+def scene_sample_fixture_manifest_paths() -> dict[str, str]:
+    module = import_module("src.shared.engine.scene_sample_docx_builder")
+    return module.scene_sample_fixture_manifest_paths()
 
 
 def write_json_report(
@@ -103,6 +129,7 @@ def write_json_report(
     extra_diagnostics: list[dict] | None = None,
     style_source_summary: Mapping[str, object] | None = None,
     delivery_preset: Mapping[str, object] | None = None,
+    include_internal_evidence: bool = False,
 ) -> None:
     """写入 JSON 变更报告。"""
     changes = _extract_changes(result)
@@ -116,19 +143,28 @@ def write_json_report(
     journal_rule_source_governance = _extract_journal_rule_source_governance(result)
     journal_citations = _extract_journal_citations(result)
     journal_submission_package = _extract_journal_submission_package(result)
+    official_document_assembly = _extract_official_document_assembly(result)
     official_numbering_preservation = _extract_official_numbering_preservation(result)
     technical_chapter_inventory = _extract_technical_chapter_inventory(result)
     application_section_word_limits = _extract_application_section_word_limits(result)
+    exam_markdown_import = _extract_exam_markdown_import(result)
     exam_question_schema = _extract_exam_question_schema(result)
     exam_delivery_runtime = _extract_exam_delivery_runtime(result)
     field_consistency = _extract_material_field_consistency(result)
+    material_assembly = extract_material_assembly(result)
     object_preflight = _extract_object_preflight(result)
     coverage_boundaries = _extract_coverage_boundaries(result)
+    document_scope = document_scope_payload(result)
     scene_journey_runtime = _extract_scene_journey_runtime(result)
-    scene_product_readiness = _extract_scene_product_readiness(result)
-    scene_sample_fixtures = _extract_scene_sample_fixture_manifest()
-    parameter_ownership = _extract_parameter_ownership(result)
-    control_contracts = _extract_control_contracts(result)
+    scene_product_readiness = None
+    scene_sample_fixtures = None
+    parameter_ownership = None
+    control_contracts = None
+    if include_internal_evidence:
+        scene_product_readiness = _extract_scene_product_readiness(result)
+        scene_sample_fixtures = _extract_scene_sample_fixture_manifest()
+        parameter_ownership = _extract_parameter_ownership(result)
+        control_contracts = _extract_control_contracts(result)
     style_source = _normalize_style_source_summary(style_source_summary)
     delivery_context = _normalize_delivery_preset_context(delivery_preset)
     report_data = {
@@ -149,23 +185,29 @@ def write_json_report(
         "journal_rule_source_governance": journal_rule_source_governance,
         "journal_citations": journal_citations,
         "journal_submission_package": journal_submission_package,
+        "official_document_assembly": official_document_assembly,
         "official_numbering_preservation": official_numbering_preservation,
         "technical_chapter_inventory": technical_chapter_inventory,
         "application_section_word_limits": application_section_word_limits,
+        "exam_markdown_import": exam_markdown_import,
         "exam_question_schema": exam_question_schema,
         "exam_delivery_runtime": exam_delivery_runtime,
         "material_field_consistency": field_consistency,
+        "material_assembly": material_assembly,
         "object_preflight": object_preflight,
         "coverage_boundaries": coverage_boundaries,
+        "document_scope": document_scope,
         "scene_journey_runtime": scene_journey_runtime,
-        "scene_product_readiness": scene_product_readiness,
-        "scene_sample_fixtures": scene_sample_fixtures,
-        "parameter_ownership": parameter_ownership,
-        "control_contracts": control_contracts,
         "style_source": style_source,
         "failed_items": result.failed_items or [],
     }
-    report_path.write_text(
+    if include_internal_evidence:
+        report_data["scene_product_readiness"] = scene_product_readiness
+        report_data["scene_sample_fixtures"] = scene_sample_fixtures
+        report_data["parameter_ownership"] = parameter_ownership
+        report_data["control_contracts"] = control_contracts
+    atomic_write_text(
+        report_path,
         json.dumps(report_data, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
@@ -183,6 +225,7 @@ def write_markdown_report(
     extra_diagnostics: list[dict] | None = None,
     style_source_summary: Mapping[str, object] | None = None,
     delivery_preset: Mapping[str, object] | None = None,
+    include_internal_evidence: bool = False,
 ) -> None:
     """写入 Markdown 变更报告。"""
     changes = _extract_changes(result)
@@ -196,19 +239,27 @@ def write_markdown_report(
     journal_rule_source_governance = _extract_journal_rule_source_governance(result)
     journal_citations = _extract_journal_citations(result)
     journal_submission_package = _extract_journal_submission_package(result)
+    official_document_assembly = _extract_official_document_assembly(result)
     official_numbering_preservation = _extract_official_numbering_preservation(result)
     technical_chapter_inventory = _extract_technical_chapter_inventory(result)
     application_section_word_limits = _extract_application_section_word_limits(result)
+    exam_markdown_import = _extract_exam_markdown_import(result)
     exam_question_schema = _extract_exam_question_schema(result)
     exam_delivery_runtime = _extract_exam_delivery_runtime(result)
     field_consistency = _extract_material_field_consistency(result)
+    material_assembly = extract_material_assembly(result)
     object_preflight = _extract_object_preflight(result)
     coverage_boundaries = _extract_coverage_boundaries(result)
     scene_journey_runtime = _extract_scene_journey_runtime(result)
-    scene_product_readiness = _extract_scene_product_readiness(result)
-    scene_sample_fixtures = _extract_scene_sample_fixture_manifest()
-    parameter_ownership = _extract_parameter_ownership(result)
-    control_contracts = _extract_control_contracts(result)
+    scene_product_readiness = None
+    scene_sample_fixtures = None
+    parameter_ownership = None
+    control_contracts = None
+    if include_internal_evidence:
+        scene_product_readiness = _extract_scene_product_readiness(result)
+        scene_sample_fixtures = _extract_scene_sample_fixture_manifest()
+        parameter_ownership = _extract_parameter_ownership(result)
+        control_contracts = _extract_control_contracts(result)
     style_source = _normalize_style_source_summary(style_source_summary)
     delivery_context = _normalize_delivery_preset_context(delivery_preset)
     lines = [
@@ -292,6 +343,9 @@ def write_markdown_report(
     if journal_submission_package:
         lines.extend(_format_journal_submission_package_markdown(journal_submission_package))
 
+    if official_document_assembly:
+        lines.extend(_format_official_document_assembly_markdown(official_document_assembly))
+
     if official_numbering_preservation:
         lines.extend(
             _format_official_numbering_preservation_markdown(
@@ -313,6 +367,9 @@ def write_markdown_report(
             )
         )
 
+    if exam_markdown_import:
+        lines.extend(format_exam_markdown_import_markdown(exam_markdown_import))
+
     if exam_question_schema:
         lines.extend(_format_exam_question_schema_markdown(exam_question_schema))
 
@@ -321,6 +378,8 @@ def write_markdown_report(
 
     if field_consistency:
         lines.extend(_format_material_field_consistency_markdown(field_consistency))
+
+    lines.extend(format_material_assembly_markdown(material_assembly))
 
     if object_preflight:
         lines.extend(_format_object_preflight_markdown(object_preflight))
@@ -353,326 +412,20 @@ def write_markdown_report(
             )
     lines.append("")
 
-    report_path.write_text("\n".join(lines), encoding="utf-8")
+    atomic_write_text(report_path, "\n".join(lines), encoding="utf-8")
 
 
-def _extract_changes(result: PipelineResult) -> list[dict]:
-    """从 tracker 提取变更记录。"""
-    if not result.tracker:
-        return []
-    return [
-        {
-            "rule_name": r.rule_name,
-            "target": r.target,
-            "section": r.section,
-            "change_type": r.change_type,
-            "before": r.before,
-            "after": r.after,
-            "paragraph_index": r.paragraph_index,
-            "success": r.success,
-        }
-        for r in result.tracker.get_all()
-    ]
-
-
-def _extract_journal_submission_package(result: PipelineResult) -> dict | None:
-    context = getattr(result, "context", None)
-    validation = (
-        getattr(context, "journal_submission_package", None)
-        if context is not None
-        else None
-    )
-    if validation is None:
-        return None
-    to_dict = getattr(validation, "to_dict", None)
-    if callable(to_dict):
-        payload = to_dict()
-    elif isinstance(validation, dict):
-        payload = dict(validation)
-    else:
-        return None
-    status = _clean_text(payload.get("status", ""))
-    if not status or status == "not_applicable":
-        return None
-    summary = payload.get("summary", {})
-    if not isinstance(summary, dict):
-        summary = {}
-    items = [
-        item
-        for item in (
-            _clean_journal_submission_package_item(item)
-            for item in list(payload.get("items", []) or [])
-        )
-        if item
-    ]
-    issues = [
-        issue
-        for issue in (
-            _clean_journal_submission_package_issue(issue)
-            for issue in list(payload.get("issues", []) or [])
-        )
-        if issue
-    ]
-    return {
-        "family_id": _clean_text(payload.get("family_id", "")),
-        "status": status,
-        "default_delivery_preset_id": _clean_text(
-            payload.get("default_delivery_preset_id", "")
-        ),
-        "manual_confirmation_required": bool(
-            payload.get("manual_confirmation_required", False)
-        ),
-        "summary": {
-            "component_count": int(summary.get("component_count") or 0),
-            "required_component_count": int(summary.get("required_component_count") or 0),
-            "satisfied_required_count": int(summary.get("satisfied_required_count") or 0),
-            "output_count": int(summary.get("output_count") or 0),
-            "report_enabled_count": int(summary.get("report_enabled_count") or 0),
-            "material_artifact_enabled_count": int(
-                summary.get("material_artifact_enabled_count") or 0
-            ),
-        },
-        "items": items,
-        "issue_count": len(issues),
-        "error_count": int(payload.get("error_count") or 0),
-        "warning_count": int(payload.get("warning_count") or 0),
-        "issues": issues,
-    }
-
-
-def _clean_journal_submission_package_item(value) -> dict[str, object]:
-    if not isinstance(value, dict):
-        return {}
-    component_id = _clean_text(value.get("component_id", ""))
-    if not component_id:
-        return {}
-    return {
-        "component_id": component_id,
-        "label": _clean_text(value.get("label", "")),
-        "required": bool(value.get("required", False)),
-        "preset_id": _clean_text(value.get("preset_id", "")),
-        "output_path": _clean_text(value.get("output_path", "")),
-        "report_json": bool(value.get("report_json", False)),
-        "report_markdown": bool(value.get("report_markdown", False)),
-        "material_manifest": bool(value.get("material_manifest", False)),
-        "material_package": bool(value.get("material_package", False)),
-        "include_structured_intermediate": bool(
-            value.get("include_structured_intermediate", False)
-        ),
-        "satisfied": bool(value.get("satisfied", False)),
-    }
-
-
-def _clean_journal_submission_package_issue(value) -> dict[str, str]:
-    if not isinstance(value, dict):
-        return {}
-    kind = _clean_text(value.get("kind", ""))
-    message = _clean_text(value.get("message", ""))
-    if not kind and not message:
-        return {}
-    return {
-        "component_id": _clean_text(value.get("component_id", "")),
-        "kind": kind,
-        "severity": _clean_text(value.get("severity", "")) or "warning",
-        "expected": _clean_text(value.get("expected", "")),
-        "observed": _clean_text(value.get("observed", "")),
-        "message": message,
-    }
-
-
-def _format_journal_submission_package_markdown(evidence: dict) -> list[str]:
-    lines = ["## 英文期刊投稿包证据", ""]
-    family_id = _clean_text(evidence.get("family_id", ""))
-    if family_id:
-        lines.append(f"- Family: {family_id}")
-    default_preset = _clean_text(evidence.get("default_delivery_preset_id", ""))
-    if default_preset:
-        lines.append(f"- Default preset: {default_preset}")
-    lines.append(f"- Status: {_clean_text(evidence.get('status', '')) or '-'}")
-    lines.append(
-        "- Manual confirmation: "
-        + ("yes" if evidence.get("manual_confirmation_required") else "no")
-    )
-    summary = evidence.get("summary", {})
-    if not isinstance(summary, dict):
-        summary = {}
-    lines.append(
-        "- Required components: "
-        f"{int(summary.get('satisfied_required_count') or 0)}/"
-        f"{int(summary.get('required_component_count') or 0)}"
-    )
-    lines.append(f"- Runtime outputs: {int(summary.get('output_count') or 0)}")
-    lines.append(f"- Report-enabled components: {int(summary.get('report_enabled_count') or 0)}")
-    lines.append(
-        "- Material package components: "
-        f"{int(summary.get('material_artifact_enabled_count') or 0)}"
-    )
-    items = list(evidence.get("items", []) or [])
-    if items:
-        lines.append("- Components:")
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            marker = "ok" if item.get("satisfied") else "missing"
-            required = "required" if item.get("required") else "optional"
-            artifact_parts = []
-            if item.get("output_path"):
-                artifact_parts.append("docx")
-            if item.get("report_json") or item.get("report_markdown"):
-                artifact_parts.append("report")
-            if item.get("material_manifest") or item.get("material_package"):
-                artifact_parts.append("material_package")
-            if item.get("include_structured_intermediate"):
-                artifact_parts.append("intermediate")
-            lines.append(
-                "  - "
-                f"{_clean_text(item.get('component_id', ''))} "
-                f"({required}, {marker}): "
-                f"{_join_or_dash(artifact_parts)}"
-            )
-    issues = list(evidence.get("issues", []) or [])
-    if issues:
-        lines.append("- Issues:")
-        for issue in issues[:20]:
-            lines.append(
-                "  - "
-                f"[{_clean_text(issue.get('severity', 'warning'))}] "
-                f"{_clean_text(issue.get('component_id', '-'))}: "
-                f"{_clean_text(issue.get('kind', 'issue'))} - "
-                f"{_clean_text(issue.get('message', ''))}"
-            )
-        if len(issues) > 20:
-            lines.append("  - ...")
-    lines.append("")
-    return lines
-
-
-def _extract_scene_journey_runtime(
-    result: PipelineResult,
-) -> dict[str, object] | None:
-    context = getattr(result, "context", None)
-    evidence = (
-        getattr(context, "scene_journey_runtime", None)
-        if context is not None
-        else None
-    )
-    if evidence is None:
-        return None
-    to_payload = getattr(evidence, "to_payload", None)
-    if callable(to_payload):
-        payload = to_payload()
-    elif isinstance(evidence, dict):
-        payload = dict(evidence)
-    else:
-        return None
-    status = _clean_text(payload.get("status", ""))
-    if not status or status == "not_applicable":
-        return None
-    paths = [
-        path
-        for path in (
-            _clean_scene_journey_runtime_path(path)
-            for path in list(payload.get("paths", []) or [])
-        )
-        if path
-    ]
-    return {
-        "status": status,
-        "pack_ids": _clean_list(payload.get("pack_ids", [])),
-        "family_ids": _clean_list(payload.get("family_ids", [])),
-        "capability_ids": _clean_list(payload.get("capability_ids", [])),
-        "journey_type_ids": _clean_list(payload.get("journey_type_ids", [])),
-        "request_cell_ids": _clean_list(payload.get("request_cell_ids", [])),
-        "fixture_ids": _clean_list(payload.get("fixture_ids", [])),
-        "manual_gate_ids": _clean_list(payload.get("manual_gate_ids", [])),
-        "manual_gate_count": _safe_int(payload.get("manual_gate_count")),
-        "expected_behaviors": _clean_list(payload.get("expected_behaviors", [])),
-        "report_expectations": _clean_list(payload.get("report_expectations", [])),
-        "artifact_channel_ids": _clean_list(payload.get("artifact_channel_ids", [])),
-        "repair_target_types": _clean_list(payload.get("repair_target_types", [])),
-        "boundary_notes": _clean_list(payload.get("boundary_notes", [])),
-        "path_count": _safe_int(payload.get("path_count")),
-        "sampled_path_count": _safe_int(payload.get("sampled_path_count")),
-        "paths": paths,
-    }
-
-
-def _clean_scene_journey_runtime_path(value) -> dict[str, object]:
-    if not isinstance(value, dict):
-        return {}
-    path_id = _clean_text(value.get("path_id", ""))
-    if not path_id:
-        return {}
-    return {
-        "path_id": path_id,
-        "journey_type": _clean_text(value.get("journey_type", "")),
-        "label": _clean_text(value.get("label", "")),
-        "request_cell_ids": _clean_list(value.get("request_cell_ids", [])),
-        "fixture_ids": _clean_list(value.get("fixture_ids", [])),
-        "manual_gate_ids": _clean_list(value.get("manual_gate_ids", [])),
-        "expected_behaviors": _clean_list(value.get("expected_behaviors", [])),
-        "report_expectations": _clean_list(value.get("report_expectations", [])),
-        "boundary_notes": _clean_list(value.get("boundary_notes", [])),
-    }
-
-
-def _format_scene_journey_runtime_markdown(evidence: dict) -> list[str]:
-    lines = ["## 场景旅程运行时证据", ""]
-    lines.append(f"- Status: {_clean_text(evidence.get('status', '')) or '-'}")
-    lines.append("- Packs: " + _join_or_dash(evidence.get("pack_ids", [])))
-    families = _clean_list(evidence.get("family_ids", []))
-    if families:
-        lines.append("- Families: " + _join_or_dash(families))
-    capabilities = _clean_list(evidence.get("capability_ids", []))
-    if capabilities:
-        lines.append("- Capabilities: " + _join_or_dash(capabilities))
-    lines.append(
-        "- Journeys: "
-        f"{_safe_int(evidence.get('path_count'))} paths, "
-        + _join_or_dash(evidence.get("journey_type_ids", []))
-    )
-    reports = _clean_list(evidence.get("report_expectations", []))
-    if reports:
-        lines.append("- Expected reports: " + _join_or_dash(reports[:18]))
-    artifacts = _clean_list(evidence.get("artifact_channel_ids", []))
-    if artifacts:
-        lines.append("- Artifact channels: " + _join_or_dash(artifacts[:18]))
-    repairs = _clean_list(evidence.get("repair_target_types", []))
-    if repairs:
-        lines.append("- Repair targets: " + _join_or_dash(repairs))
-    gates = _clean_list(evidence.get("manual_gate_ids", []))
-    if gates:
-        lines.append("- Manual/plugin gates: " + _join_or_dash(gates))
-    notes = _clean_list(evidence.get("boundary_notes", []))
-    if notes:
-        lines.append("- Boundary notes:")
-        for note in notes[:6]:
-            lines.append(f"  - {note}")
-    paths = list(evidence.get("paths", []) or [])
-    if paths:
-        lines.append("- Path samples:")
-        for path in paths[:8]:
-            if not isinstance(path, dict):
-                continue
-            suffix_parts = []
-            fixtures = _clean_list(path.get("fixture_ids", []))
-            reports_for_path = _clean_list(path.get("report_expectations", []))
-            gates_for_path = _clean_list(path.get("manual_gate_ids", []))
-            if fixtures:
-                suffix_parts.append("fixtures=" + _join_or_dash(fixtures[:4]))
-            if reports_for_path:
-                suffix_parts.append("reports=" + _join_or_dash(reports_for_path[:4]))
-            if gates_for_path:
-                suffix_parts.append("gates=" + _join_or_dash(gates_for_path[:4]))
-            suffix = "; " + "; ".join(suffix_parts) if suffix_parts else ""
-            lines.append(
-                "  - "
-                f"{_clean_text(path.get('path_id', ''))} "
-                f"[{_clean_text(path.get('journey_type', ''))}]"
-                f"{suffix}"
-            )
-    lines.append("")
-    return lines
+# Product and engineering reports share these pure projections.
+# Keep one implementation so their serialized evidence cannot drift.
+_extract_changes = _product_report._extract_changes
+_extract_journal_submission_package = _product_report._extract_journal_submission_package
+_clean_journal_submission_package_item = _product_report._clean_journal_submission_package_item
+_clean_journal_submission_package_issue = _product_report._clean_journal_submission_package_issue
+_format_journal_submission_package_markdown = _product_report._format_journal_submission_package_markdown
+_extract_scene_journey_runtime = _product_report._extract_scene_journey_runtime
+_clean_scene_journey_runtime_path = _product_report._clean_scene_journey_runtime_path
+_format_scene_journey_runtime_markdown = _product_report._format_scene_journey_runtime_markdown
+_safe_int = _product_report._safe_int
 
 
 def _extract_scene_product_readiness(
@@ -682,7 +435,7 @@ def _extract_scene_product_readiness(
     if not specs:
         return None
 
-    audit = audit_scene_product_readiness()
+    audit = _audit_scene_product_readiness()
     level_counts = Counter(spec.product_readiness_level for spec in specs)
     static_counts = Counter(spec.static_closure_level for spec in specs)
     static_closed_not_green = [
@@ -721,8 +474,8 @@ def _extract_scene_product_readiness(
 
 def _scene_product_readiness_specs_for_result(
     result: PipelineResult,
-) -> tuple[SceneProductReadinessSpec, ...]:
-    specs: list[SceneProductReadinessSpec] = []
+) -> tuple[_SceneProductReadinessSpec, ...]:
+    specs: list[_SceneProductReadinessSpec] = []
     seen: set[tuple[str, str]] = set()
     config = getattr(result, "config", None)
     if config is not None:
@@ -737,7 +490,7 @@ def _scene_product_readiness_specs_for_result(
 
 
 def _append_scene_product_readiness_spec(
-    specs: list[SceneProductReadinessSpec],
+    specs: list[_SceneProductReadinessSpec],
     seen: set[tuple[str, str]],
     subject_type: str,
     subject_id: str,
@@ -749,7 +502,7 @@ def _append_scene_product_readiness_spec(
     if key in seen:
         return
     try:
-        spec = product_readiness_for(normalized, subject_type=subject_type)
+        spec = _product_readiness_for(normalized, subject_type=subject_type)
     except KeyError:
         return
     specs.append(spec)
@@ -773,7 +526,7 @@ def _coverage_boundary_pack_ids_for_product_readiness(
 
 
 def _scene_product_readiness_status(
-    specs: tuple[SceneProductReadinessSpec, ...],
+    specs: tuple[_SceneProductReadinessSpec, ...],
 ) -> str:
     if all(spec.is_green for spec in specs):
         return "green_l5"
@@ -783,7 +536,7 @@ def _scene_product_readiness_status(
 
 
 def _scene_product_readiness_subject_payload(
-    spec: SceneProductReadinessSpec,
+    spec: _SceneProductReadinessSpec,
 ) -> dict[str, object]:
     return {
         "subject_type": spec.subject_type,
@@ -801,7 +554,7 @@ def _scene_product_readiness_subject_payload(
 def _format_scene_product_readiness_markdown(
     evidence: dict[str, object],
 ) -> list[str]:
-    lines = ["## 场景产品成熟度证据", ""]
+    lines = ["## 方案产品成熟度证据", ""]
     lines.append(f"- Status: {_clean_text(evidence.get('status', '')) or '-'}")
     lines.append(
         "- Registry audit: "
@@ -1087,22 +840,16 @@ def _unique_clean_values(values) -> list[str]:
     return result
 
 
-def _safe_int(value, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _extract_control_contracts(result: PipelineResult) -> dict[str, object]:
-    contracts = list_control_contracts()
-    audit = audit_control_contract_registry()
+    registry = _control_contract_registry()
+    contracts = registry.list_control_contracts()
+    audit = registry.audit_control_contract_registry()
     config = getattr(result, "config", None)
     context = getattr(result, "context", None)
     owner_counts_counter = Counter(contract.owner_layer for contract in contracts)
     owner_counts = {
         layer: int(owner_counts_counter.get(layer, 0))
-        for layer in ALLOWED_CONTROL_OWNER_LAYERS
+        for layer in registry.ALLOWED_CONTROL_OWNER_LAYERS
     }
     for layer, count in sorted(owner_counts_counter.items()):
         owner_counts.setdefault(layer, int(count))
@@ -1317,11 +1064,9 @@ def _control_contract_runtime_path_map(
 
 def _control_contract_runtime_path(declared_path: str) -> str:
     path = _clean_text(declared_path)
-    for prefix in ("template.styles.body.", "scene.section_styles.*."):
+    for prefix in ("template.styles.body.",):
         if path.startswith(prefix):
             return "styles.body." + path[len(prefix):]
-    if path.startswith("scene.section_styles.body."):
-        return "styles.body." + path[len("scene.section_styles.body."):]
     return ""
 
 
@@ -1391,24 +1136,28 @@ def _prioritized_control_contracts(contracts) -> list:
 
 
 def _control_contract_evidence_locations(contract_id: str) -> list[dict[str, object]]:
+    registry = _control_contract_registry()
     return [
         {
             "source_path": location.source_path,
             "marker": location.marker,
             "line_number": int(location.line_number or 0),
         }
-        for location in resolve_control_contract_evidence_locations(contract_id)
+        for location in registry.resolve_control_contract_evidence_locations(contract_id)
     ]
 
 
 def _extract_parameter_ownership(result: PipelineResult) -> dict[str, object]:
-    specs = scene_parameter_ownership_specs()
+    registry = _scene_parameter_ownership()
+    specs = registry.scene_parameter_ownership_specs()
     config = getattr(result, "config", None)
-    audit = audit_scene_parameter_ownership(_parameter_ownership_audit_type(config))
+    audit = registry.audit_scene_parameter_ownership(
+        _parameter_ownership_audit_type(config)
+    )
     layer_counts_counter = Counter(spec.owner_layer for spec in specs.values())
     layer_counts = {
         layer: int(layer_counts_counter.get(layer, 0))
-        for layer in ALLOWED_PARAMETER_OWNER_LAYERS
+        for layer in registry.ALLOWED_PARAMETER_OWNER_LAYERS
     }
     for layer, count in sorted(layer_counts_counter.items()):
         layer_counts.setdefault(layer, int(count))
@@ -1426,7 +1175,7 @@ def _extract_parameter_ownership(result: PipelineResult) -> dict[str, object]:
         }
     )
     audit_payload = _parameter_ownership_audit_payload(audit)
-    consumer_audit = audit_parameter_execution_consumers()
+    consumer_audit = registry.audit_parameter_execution_consumers()
     consumer_anchor_payload = _parameter_consumer_anchor_audit_payload(consumer_audit)
     effective_value_samples = _parameter_effective_value_samples(specs, config)
     effective_value_gaps = _parameter_effective_value_gap_paths(specs, config)
@@ -1457,7 +1206,7 @@ def _extract_parameter_ownership(result: PipelineResult) -> dict[str, object]:
             "clean" if consumer_audit.is_clean else "has_gaps"
         ),
         "execution_consumer_anchor_count": sum(
-            len(anchors) for anchors in parameter_consumer_anchors().values()
+            len(anchors) for anchors in registry.parameter_consumer_anchors().values()
         ),
         "execution_consumer_anchor_audit": consumer_anchor_payload,
         "execution_consumer_anchor_samples": _parameter_consumer_anchor_samples(),
@@ -1541,7 +1290,9 @@ def _parameter_consumer_anchor_audit_payload(audit) -> dict[str, object]:
 
 def _parameter_consumer_anchor_samples() -> list[dict[str, object]]:
     samples: list[dict[str, object]] = []
-    for consumer, anchors in sorted(parameter_consumer_anchors().items()):
+    for consumer, anchors in sorted(
+        _scene_parameter_ownership().parameter_consumer_anchors().items()
+    ):
         for anchor in anchors:
             samples.append(
                 {
@@ -1561,7 +1312,6 @@ def _parameter_ownership_config_identity(config) -> dict[str, object]:
         "scene_id",
         "category",
         "template_id",
-        "default_template_id",
         "default_delivery_preset_id",
     ):
         value = _clean_text(getattr(config, key, ""))
@@ -1748,7 +1498,7 @@ def _parameter_source_counts_for_section(path: str, config) -> Counter:
 
 def _parameter_priority_paths(specs: dict) -> list[str]:
     priority_paths: list[str] = []
-    for path in REQUIRED_SCENE_PARAMETER_PATHS:
+    for path in _scene_parameter_ownership().REQUIRED_SCENE_PARAMETER_PATHS:
         if path in specs and path not in priority_paths:
             priority_paths.append(path)
     for path in specs:
@@ -1913,7 +1663,7 @@ def _format_parameter_ownership_markdown(evidence: dict[str, object]) -> list[st
             "- Owner layers: "
             + ", ".join(
                 f"{layer}={int(layer_counts.get(layer) or 0)}"
-                for layer in ALLOWED_PARAMETER_OWNER_LAYERS
+                for layer in _scene_parameter_ownership().ALLOWED_PARAMETER_OWNER_LAYERS
             )
         )
 
@@ -2057,7 +1807,7 @@ def _format_control_contracts_markdown(evidence: dict[str, object]) -> list[str]
             "- Owner layers: "
             + ", ".join(
                 f"{layer}={int(owner_counts.get(layer) or 0)}"
-                for layer in ALLOWED_CONTROL_OWNER_LAYERS
+                for layer in _control_contract_registry().ALLOWED_CONTROL_OWNER_LAYERS
             )
         )
 

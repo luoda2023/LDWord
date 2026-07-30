@@ -4,10 +4,29 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.reporting.common import _clean_list, _clean_text, _join_or_dash
+from src.reporting.common import _clean_issue, _clean_list, _clean_text, _join_or_dash
 
 if TYPE_CHECKING:
     from src.pipeline.result import PipelineResult
+
+
+def _extract_exam_markdown_import(result: PipelineResult) -> dict | None:
+    context = getattr(result, "context", None)
+    import_result = (
+        getattr(context, "exam_markdown_import", None)
+        if context is not None
+        else None
+    )
+    if import_result is None:
+        return None
+    to_dict = getattr(import_result, "to_dict", None)
+    if callable(to_dict):
+        payload = to_dict()
+    elif isinstance(import_result, dict):
+        payload = dict(import_result)
+    else:
+        return None
+    return payload if isinstance(payload, dict) and payload else None
 
 
 def _extract_exam_question_schema(result: PipelineResult) -> dict | None:
@@ -36,7 +55,7 @@ def _extract_exam_question_schema(result: PipelineResult) -> dict | None:
     issues = [
         issue
         for issue in (
-            _clean_exam_question_schema_issue(issue)
+            _clean_issue(issue)
             for issue in list(payload.get("issues", []) or [])
         )
         if issue
@@ -96,6 +115,7 @@ def _extract_exam_delivery_runtime(result: PipelineResult) -> dict | None:
         for version in list(payload.get("rendered_versions", []) or [])
     ]
     versions = [version for version in versions if version]
+    master_evidence = _clean_exam_master_evidence(payload.get("master_evidence", {}))
     return {
         "schema_id": _clean_text(payload.get("schema_id", "")),
         "family_id": _clean_text(payload.get("family_id", "")),
@@ -107,6 +127,7 @@ def _extract_exam_delivery_runtime(result: PipelineResult) -> dict | None:
         ),
         "version_count": int(payload.get("version_count") or len(versions)),
         "skipped_reason": _clean_text(payload.get("skipped_reason", "")),
+        "master_evidence": master_evidence,
         "rendered_versions": versions,
     }
 
@@ -158,20 +179,79 @@ def _clean_exam_rendered_version(value) -> dict[str, object]:
     }
 
 
-def _clean_exam_question_schema_issue(value) -> dict[str, str]:
+def format_exam_markdown_import_markdown(evidence: dict) -> list[str]:
+    """Render the source-import receipt separately from later schema/runtime."""
+
+    lines = ["## Markdown 题稿导入证据", ""]
+    lines.append(f"- Status: {_clean_text(evidence.get('status', '')) or '-'}")
+    source_path = _clean_text(evidence.get("source_path", ""))
+    if source_path:
+        lines.append(f"- Source: `{source_path}`")
+    summary = evidence.get("summary", {})
+    if not isinstance(summary, dict):
+        summary = {}
+    lines.extend(
+        [
+            f"- Sections: {int(summary.get('section_count') or 0)}",
+            f"- Questions: {int(summary.get('question_count') or 0)}",
+            (
+                "- Answers / analysis: "
+                f"{int(summary.get('answered_question_count') or 0)} / "
+                f"{int(summary.get('analysis_count') or 0)}"
+            ),
+            (
+                "- Issues: "
+                f"{int(evidence.get('issue_count') or 0)} "
+                f"(errors={int(evidence.get('error_count') or 0)}, "
+                f"warnings={int(evidence.get('warning_count') or 0)})"
+            ),
+        ]
+    )
+    issues = [
+        item
+        for item in list(evidence.get("issues", []) or [])
+        if isinstance(item, dict)
+    ]
+    if issues:
+        lines.append("- Import issues:")
+        for issue in issues[:20]:
+            lines.append(
+                "  - "
+                f"[{_clean_text(issue.get('severity', 'warning'))}] "
+                f"{_clean_text(issue.get('path', '-'))}: "
+                f"{_clean_text(issue.get('kind', 'issue'))} - "
+                f"{_clean_text(issue.get('message', ''))}"
+            )
+        if len(issues) > 20:
+            lines.append("  - ...")
+    lines.append("")
+    return lines
+
+
+def _clean_exam_master_evidence(value) -> dict[str, object]:
     if not isinstance(value, dict):
         return {}
-    kind = _clean_text(value.get("kind", ""))
-    message = _clean_text(value.get("message", ""))
-    if not kind and not message:
+    master_id = _clean_text(value.get("master_id", ""))
+    docx_path = _clean_text(value.get("master_docx_path", ""))
+    status = _clean_text(value.get("placeholder_contract_status", ""))
+    if not master_id and not docx_path and not status:
         return {}
     return {
-        "path": _clean_text(value.get("path", "")),
-        "kind": kind,
-        "severity": _clean_text(value.get("severity", "")) or "warning",
-        "expected": _clean_text(value.get("expected", "")),
-        "observed": _clean_text(value.get("observed", "")),
-        "message": message,
+        "mode_id": _clean_text(value.get("mode_id", "")),
+        "master_id": master_id,
+        "master_label": _clean_text(value.get("master_label", "")),
+        "master_source_type": _clean_text(value.get("master_source_type", "")),
+        "master_docx_path": docx_path,
+        "master_version": _clean_text(value.get("master_version", "")),
+        "manifest_path": _clean_text(value.get("manifest_path", "")),
+        "placeholder_contract_status": status,
+        "required_placeholders": _clean_list(value.get("required_placeholders", [])),
+        "optional_placeholders": _clean_list(value.get("optional_placeholders", [])),
+        "runtime_fields": _clean_list(value.get("runtime_fields", [])),
+        "generated_fields": _clean_list(value.get("generated_fields", [])),
+        "missing_required_placeholders": _clean_list(
+            value.get("missing_required_placeholders", [])
+        ),
     }
 
 
@@ -237,6 +317,35 @@ def _format_exam_delivery_runtime_markdown(evidence: dict) -> list[str]:
     source_key = _clean_text(evidence.get("source_key", ""))
     if source_key:
         lines.append(f"- Source: {source_key}")
+    master_evidence = evidence.get("master_evidence", {})
+    if isinstance(master_evidence, dict) and master_evidence:
+        mode_id = _clean_text(master_evidence.get("mode_id", ""))
+        if mode_id:
+            lines.append(f"- Work mode: {mode_id}")
+        master_id = _clean_text(master_evidence.get("master_id", ""))
+        master_label = _clean_text(master_evidence.get("master_label", ""))
+        source_type = _clean_text(master_evidence.get("master_source_type", ""))
+        contract_status = _clean_text(
+            master_evidence.get("placeholder_contract_status", "")
+        )
+        master_bits = [bit for bit in (master_label, master_id) if bit]
+        if master_bits:
+            suffix_bits = []
+            if source_type:
+                suffix_bits.append(f"source={source_type}")
+            if contract_status:
+                suffix_bits.append(f"contract={contract_status}")
+            suffix = f" ({', '.join(suffix_bits)})" if suffix_bits else ""
+            lines.append(f"- Master: {' / '.join(master_bits)}{suffix}")
+        master_path = _clean_text(master_evidence.get("master_docx_path", ""))
+        if master_path:
+            lines.append(f"- Master DOCX: `{master_path}`")
+        manifest_path = _clean_text(master_evidence.get("manifest_path", ""))
+        if manifest_path:
+            lines.append(f"- Master manifest: `{manifest_path}`")
+        missing = _clean_list(master_evidence.get("missing_required_placeholders", []))
+        if missing:
+            lines.append("- Missing placeholders: " + _join_or_dash(missing))
     preview_path = _clean_text(evidence.get("markdown_preview_path", ""))
     if preview_path:
         lines.append(f"- Markdown preview: `{preview_path}`")

@@ -13,8 +13,10 @@ import re
 from typing import TYPE_CHECKING
 
 from src.modules.base import BaseModule, ModuleMeta
+from src.modules.table.table_format import top_level_table_anchor_positions
+from src.shared.engine.document_scope_runtime import document_scope_allows_paragraph
 from src.shared.engine.chem_marks import apply_chem_typography_to_paragraph
-from src.shared.engine.paragraph_iter import iter_tables, iter_table_cells
+from src.shared.engine.paragraph_iter import iter_table_cells
 
 if TYPE_CHECKING:
     from docx import Document
@@ -91,7 +93,15 @@ class ChemTypographyModule(BaseModule):
                 mark_chars += para_mark_chars
 
         if 'tables' in active_scopes:
-            for _, table in iter_tables(doc):
+            table_positions = top_level_table_anchor_positions(doc)
+            for table_index, table in enumerate(doc.tables):
+                anchor_index = (
+                    table_positions[table_index]
+                    if table_index < len(table_positions)
+                    else -1
+                )
+                if not document_scope_allows_paragraph(context, anchor_index):
+                    continue
                 for _, _, cell in iter_table_cells(table):
                     for para in cell.paragraphs:
                         text = para.text or ''
@@ -177,6 +187,8 @@ def _should_process_paragraph(
     active_scopes: set[str],
     compatibility_global: bool,
 ) -> bool:
+    if not document_scope_allows_paragraph(context, para_index):
+        return False
     if compatibility_global:
         return True
 

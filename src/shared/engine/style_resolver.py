@@ -9,11 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from src.shared.engine.ooxml_ops import qn, get_val, find
+from src.shared.engine.ooxml_ops import qn
 
 if TYPE_CHECKING:
     from docx.text.paragraph import Paragraph
-    from docx import Document
 
 
 @dataclass

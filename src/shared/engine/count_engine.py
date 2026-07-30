@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,36 @@ _REFERENCE_STOP_RE = re.compile(
     r"^\s*(?:\u9644\u5f55|appendix|\u81f4\u8c22|acknowledg(?:e)?ments?"
     r"|\u58f0\u660e|declaration)\b",
     re.IGNORECASE,
+)
+
+
+class CountProfileRegistryError(RuntimeError):
+    """The count-profile registry cannot safely serve execution."""
+
+
+REQUIRED_BUILTIN_COUNT_PROFILE_IDS = frozenset(
+    {
+        "administrative_sections",
+        "application_word_limits",
+        "attachment_inventory",
+        "basic",
+        "batch_item_inventory",
+        "bid_package",
+        "bilingual_parallel_text",
+        "chapter_inventory",
+        "contract_fields",
+        "disclosure_section_inventory",
+        "exam_items",
+        "finance_attachment_inventory",
+        "journal_display_items",
+        "journal_words",
+        "patent_section_inventory",
+        "product_asset_inventory",
+        "school_thesis",
+        "teaching_sections",
+        "thesis_cn",
+        "word_xml_full",
+    }
 )
 
 
@@ -177,27 +208,47 @@ def list_count_profiles() -> tuple[CountProfile, ...]:
 
 def get_count_profile(profile_id: str) -> CountProfile:
     normalized = str(profile_id or "").strip() or "basic"
-    profile = COUNT_PROFILE_MAP.get(normalized)
-    if profile is not None:
-        return profile
-    return CountProfile(
-        profile_id=normalized,
-        label=f"Ad hoc count profile: {normalized}",
-        notes=(
-            "This count profile is not registered; the broad local document scope was used.",
-        ),
-    )
+    registry_issue = count_profile_registry_issue(normalized)
+    if registry_issue:
+        if registry_issue.startswith("unknown_count_profile:"):
+            raise KeyError(registry_issue)
+        raise CountProfileRegistryError(registry_issue)
+    return COUNT_PROFILE_MAP[normalized]
 
 
-def load_count_profiles_from_directory(directory: str | Path) -> tuple[CountProfile, ...]:
+def count_profile_registry_issue(profile_id: str = "") -> str:
+    """Return the first registry issue that must block counting/execution."""
+
+    registered_ids = set(COUNT_PROFILE_MAP)
+    if not registered_ids:
+        return "count_profile_registry_empty"
+    missing_required = sorted(REQUIRED_BUILTIN_COUNT_PROFILE_IDS - registered_ids)
+    if missing_required:
+        return "count_profile_registry_required_profiles_missing:" + ",".join(
+            missing_required
+        )
+    normalized = str(profile_id or "").strip()
+    if normalized and normalized not in registered_ids:
+        return f"unknown_count_profile:{normalized}"
+    return ""
+
+
+def load_count_profiles_from_directory(
+    directory: str | Path,
+    *,
+    required_profile_ids: Iterable[str] = (),
+) -> tuple[CountProfile, ...]:
     """Load count profiles from JSON files in a directory."""
 
     root = Path(directory)
-    if not root.exists():
-        return ()
+    if not root.is_dir():
+        raise CountProfileRegistryError(f"count_profile_registry_missing:{root}")
+    profile_paths = sorted(root.glob("*.json"))
+    if not profile_paths:
+        raise CountProfileRegistryError(f"count_profile_registry_empty:{root}")
     profiles: list[CountProfile] = []
     seen: set[str] = set()
-    for path in sorted(root.glob("*.json")):
+    for path in profile_paths:
         payload = json.loads(path.read_text(encoding="utf-8"))
         entries = payload.get("profiles", payload)
         if isinstance(entries, dict):
@@ -212,6 +263,19 @@ def load_count_profiles_from_directory(directory: str | Path) -> tuple[CountProf
                 raise ValueError(f"Duplicate count profile id: {profile.profile_id}")
             seen.add(profile.profile_id)
             profiles.append(profile)
+    if not profiles:
+        raise CountProfileRegistryError(f"count_profile_registry_empty:{root}")
+    required_ids = {
+        str(profile_id or "").strip()
+        for profile_id in required_profile_ids
+        if str(profile_id or "").strip()
+    }
+    missing_required = sorted(required_ids - seen)
+    if missing_required:
+        raise CountProfileRegistryError(
+            "count_profile_registry_required_profiles_missing:"
+            + ",".join(missing_required)
+        )
     return tuple(profiles)
 
 
@@ -282,7 +346,8 @@ def _int_field(payload: dict[str, Any], key: str) -> int:
 
 
 COUNT_PROFILES: tuple[CountProfile, ...] = load_count_profiles_from_directory(
-    COUNT_PROFILE_DIR
+    COUNT_PROFILE_DIR,
+    required_profile_ids=REQUIRED_BUILTIN_COUNT_PROFILE_IDS,
 )
 
 COUNT_PROFILE_MAP: dict[str, CountProfile] = {
@@ -465,8 +530,12 @@ def _field_code_texts(root) -> list[str]:
     if root is None:
         return []
     codes: list[str] = []
-    for field in root.xpath(".//*[local-name()='fldSimple']"):
-        instr = field.get(f"{{{_WORD_NS}}}instr") or field.get("instr") or ""
+    for field_node in root.xpath(".//*[local-name()='fldSimple']"):
+        instr = (
+            field_node.get(f"{{{_WORD_NS}}}instr")
+            or field_node.get("instr")
+            or ""
+        )
         if instr.strip():
             codes.append(instr.strip())
     paragraph_codes: list[str] = []
@@ -483,8 +552,8 @@ def _field_result_texts(root) -> list[str]:
     if root is None:
         return []
     results: list[str] = []
-    for field in root.xpath(".//*[local-name()='fldSimple']"):
-        result = _text_under(field, allow_textbox=True)
+    for field_node in root.xpath(".//*[local-name()='fldSimple']"):
+        result = _text_under(field_node, allow_textbox=True)
         if result.strip():
             results.append(result)
     for paragraph in root.xpath(".//w:p", namespaces=_NS):
@@ -645,10 +714,13 @@ __all__ = [
     "COUNT_PROFILE_DIR",
     "COUNT_PROFILES",
     "COUNT_PROFILE_MAP",
+    "REQUIRED_BUILTIN_COUNT_PROFILE_IDS",
     "CountEngineResult",
     "CountProfile",
+    "CountProfileRegistryError",
     "CountSectionLimit",
     "count_document",
+    "count_profile_registry_issue",
     "get_count_profile",
     "load_count_profiles_from_directory",
     "list_count_profiles",

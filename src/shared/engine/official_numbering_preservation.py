@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.config.material_schema_registry import get_material_schema, resolve_material_schema_ids
+from src.shared.engine.document_structure_model import normalize_heading_map
 
 
 OFFICIAL_RULE_FAMILIES = ("official_document", "meeting_policy_documents")
@@ -151,7 +152,7 @@ def inspect_official_numbering_preservation(
     heading_numbering_enabled = bool(
         dict(getattr(config, "module_switches", {}) or {}).get("heading_numbering", False)
     )
-    normalized_heading_map = _normalize_heading_map(heading_map)
+    normalized_heading_map = normalize_heading_map(heading_map)
     changed_headings = _changed_heading_samples(
         original_doc,
         current_doc,
@@ -255,19 +256,6 @@ def _official_family_for_schema_ids(schema_ids: tuple[str, ...]) -> str:
         if family == "official":
             return "official_document"
     return ""
-
-
-def _normalize_heading_map(heading_map: Mapping[int, int] | None) -> dict[int, int]:
-    result: dict[int, int] = {}
-    for key, value in dict(heading_map or {}).items():
-        try:
-            index = int(key)
-            level = int(value)
-        except (TypeError, ValueError):
-            continue
-        if index >= 0 and level > 0:
-            result[index] = level
-    return dict(sorted(result.items()))
 
 
 def _changed_heading_samples(

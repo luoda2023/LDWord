@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from src.config.material_schema_registry import get_material_schema, resolve_material_schema_ids
+from src.shared.engine.document_structure_model import normalize_heading_map
 
 
 TECHNICAL_RULE_FAMILIES = (
@@ -284,7 +285,7 @@ def _build_heading_items(
             )
         return tuple(sorted(result, key=lambda item: item.paragraph_index))
 
-    normalized_heading_map = _normalize_heading_map(heading_map)
+    normalized_heading_map = normalize_heading_map(heading_map)
     paragraphs = list(getattr(doc, "paragraphs", []) or [])
     result = []
     for index, level in normalized_heading_map.items():
@@ -301,19 +302,6 @@ def _build_heading_items(
             )
         )
     return tuple(result)
-
-
-def _normalize_heading_map(heading_map: Mapping[int, int] | None) -> dict[int, int]:
-    result: dict[int, int] = {}
-    for key, value in dict(heading_map or {}).items():
-        try:
-            index = int(key)
-            level = int(value)
-        except (TypeError, ValueError):
-            continue
-        if index >= 0 and level > 0:
-            result[index] = level
-    return dict(sorted(result.items()))
 
 
 def _section_for_index(doc_tree, index: int) -> str:

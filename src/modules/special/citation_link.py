@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from docx.oxml import OxmlElement
 
 from src.modules.base import BaseModule, ModuleMeta
+from src.shared.engine.document_scope_runtime import document_scope_allows_role
 from src.shared.engine.ooxml_ops import qn
 
 if TYPE_CHECKING:
@@ -31,7 +32,6 @@ class CitationLinkModule(BaseModule):
         category="special",
         consumes=("doc_tree",),
         soft_after=("heading_recognition", "reference_format"),
-        enabled_by_default=False,
     )
 
     def apply(
@@ -41,6 +41,11 @@ class CitationLinkModule(BaseModule):
         tracker: ChangeTracker,
         context: PipelineContext,
     ) -> None:
+        if not (
+            document_scope_allows_role(context, "body")
+            and document_scope_allows_role(context, "references")
+        ):
+            return
         citation_cfg = config.citation_link
         doc_tree = getattr(context, "doc_tree", None)
 
@@ -125,9 +130,6 @@ def _resolve_reference_range(doc: Document, doc_tree) -> tuple[int, int] | None:
             if start >= 0 and end > start:
                 return (start, end - 1)
 
-    for index, para in enumerate(doc.paragraphs):
-        if _norm_no_space_lower(para.text or "") in {"\u53c2\u8003\u6587\u732e", "references"}:
-            return (index + 1, len(doc.paragraphs) - 1)
     return None
 
 
@@ -145,10 +147,6 @@ def _resolve_body_range(doc: Document, doc_tree, reference_start: int | None) ->
     if isinstance(reference_start, int) and reference_start > 0:
         end = min(end, reference_start - 1)
     return (start, end)
-
-
-def _norm_no_space_lower(text: str) -> str:
-    return re.sub(r"\s+", "", text or "").strip().lower()
 
 
 def _paragraph_has_field(para) -> bool:

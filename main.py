@@ -2,9 +2,10 @@
 Alavette Form V1.0 — 主入口
 
 用法:
-    python main.py input.docx                           # CLI 模式
-    python main.py input.docx -t defaults/thesis.yaml   # 指定模板
-    python main.py --gui                                # GUI 模式
+    python main.py input.docx                          # CLI: custom/default
+    python main.py input.docx --scene plan.json        # 按方案引用解析模板
+    python main.py input.docx --template template.json # 显式覆盖模板
+    python main.py --gui                               # GUI 模式
 """
 
 from __future__ import annotations
@@ -14,10 +15,21 @@ import sys
 from pathlib import Path
 
 from src.app_meta import APP_CLI_NAME, APP_DISPLAY_NAME_FULL, APP_LOG_FILE
+from src.services.console_output import (
+    configure_console_output,
+    console_print,
+    write_console,
+)
 
 # 项目根目录加入 sys.path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+
+
+class _ConsoleSafeArgumentParser(argparse.ArgumentParser):
+    def _print_message(self, message, file=None) -> None:
+        if message:
+            write_console(message, stream=file or sys.stderr)
 
 
 def _create_gui_exception_logger(log_path: Path):
@@ -40,39 +52,86 @@ def _create_gui_exception_logger(log_path: Path):
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(
+    p = _ConsoleSafeArgumentParser(
         prog=APP_CLI_NAME,
         description=f"{APP_DISPLAY_NAME_FULL} — 文档排版格式化工具",
     )
     p.add_argument("input", nargs="?", default=None,
                    help="输入 .docx 文件路径 (GUI 模式可省略)")
-    p.add_argument("-t", "--template", help="模板配置文件 (.yaml/.json)")
-    p.add_argument("-s", "--scene", help="场景配置文件 (.yaml/.json)")
+    p.add_argument(
+        "-t",
+        "--template",
+        help="显式模板配置文件 (.yaml/.json)；省略时使用方案引用",
+    )
+    p.add_argument("-s", "--scene", help="方案配置文件 (.yaml/.json)")
     p.add_argument("-o", "--output", help="输出目录 (默认: input目录/output/)")
+    p.add_argument(
+        "--document-type",
+        default=None,
+        help="公文模式的文种 ID（公文模式必填，其他模式不可用）",
+    )
     p.add_argument("--gui", action="store_true", help="启动 GUI 模式")
+    p.add_argument(
+        "--font-engine",
+        choices=("freetype", "directwrite", "system"),
+        default=None,
+        help=(
+            "Windows GUI 字体后端（默认 freetype；也可通过 "
+            "ALAVETTE_FORM_FONT_ENGINE 设置）"
+        ),
+    )
     return p.parse_args(argv)
 
 
-def _start_gui() -> int:
+def _start_gui(font_engine: str | None = None) -> int:
     """启动 GUI 模式。"""
+    # The Windows font backend is a QPA startup option and must be selected
+    # before src.qt_api imports PySide6 or QApplication is constructed.
+    from src.shared.ui.font_engine_policy import (
+        configure_application_windows_font_engine,
+    )
+
+    font_engine_configuration = configure_application_windows_font_engine(font_engine)
+
     import traceback
 
-    from src.qt_api import QApplication, QFont, QTimer, Qt
+    from src.qt_api import QApplication, QTimer, Qt
+    from PySide6.QtCore import QDir, QLockFile
+    from PySide6.QtWidgets import QMessageBox
 
-    # Hi-DPI 适配（必须在 QApplication 之前设置）
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-    try:
-        QApplication.setHighDpiScaleFactorRoundingPolicy(
-            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-    except AttributeError:
-        pass  # Qt < 5.14
+    # PySide6 always enables high-DPI support. Keep the exact Windows scale;
+    # custom-painted strokes are snapped at the paint boundary instead.
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+
+    app = QApplication(sys.argv)
+    instance_lock = QLockFile(
+        QDir.temp().filePath("alavette-form-v1-gui.lock")
+    )
+    if not instance_lock.tryLock(0):
+        QMessageBox.information(
+            None,
+            "程序已在运行",
+            "Alavette Form 已经打开。请使用现有窗口，避免两个实例持有不同的草稿状态。",
+        )
+        return 0
+
+    # FreeType needs the OS-provided YaHei TTC faces registered explicitly so
+    # that weight 700 resolves the real Bold face instead of synthetic bold.
+    # This must precede imports that may construct application fonts/widgets.
+    from src.shared.ui.typography_policy import (
+        apply_application_typography,
+        register_windows_ui_fonts_for_freetype,
+    )
+
+    _font_registration = register_windows_ui_fonts_for_freetype(
+        font_engine_configuration.engine
+    )  # noqa: F841 - keep the startup evidence alive for diagnostics
+    apply_application_typography(app)
 
     from src.ui.main_window import MainWindow
     from src.ui.startup_splash import StartupSplash
-
-
-    app = QApplication(sys.argv)
 
     # ── GUI 全局异常处理 ──
     _log_path = ROOT / APP_LOG_FILE
@@ -97,15 +156,6 @@ def _start_gui() -> int:
 
     sys.excepthook = _gui_excepthook
 
-    # 全局字体
-    font = QFont("Microsoft YaHei")
-    font.setPointSize(10)
-    try:
-        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-    except AttributeError:
-        pass
-    app.setFont(font)
-
     # 全局输入守卫（滚轮防劫持 + SpinBox Enter/Click 行为修正）
     from src.shared.ui.input_guard import install_global_input_guard
     _input_guard = install_global_input_guard(app)  # noqa: F841  保持引用防 GC
@@ -119,7 +169,7 @@ def _start_gui() -> int:
     splash.set_status("正在准备工作台")
     app.processEvents()
 
-    win = MainWindow()
+    win = MainWindow(enable_background_services=True)
 
     def _show_main_window() -> None:
         splash.set_status("正在打开首页")
@@ -135,7 +185,10 @@ def _start_gui() -> int:
 
     win.startup_status_changed.connect(splash.set_status)
     win.startup_ready.connect(_show_main_window)
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        instance_lock.unlock()
 
 
 def _run_cli(args: argparse.Namespace) -> int:
@@ -143,29 +196,66 @@ def _run_cli(args: argparse.Namespace) -> int:
     input_path = Path(args.input)
 
     if not input_path.exists():
-        print(f"❌ 输入文件不存在: {input_path}")
+        console_print(f"[ERROR] 输入文件不存在: {input_path}")
         return 1
     if input_path.suffix.lower() != ".docx":
-        print(f"❌ 不支持的文件格式: {input_path.suffix} (仅支持 .docx)")
+        console_print(
+            f"[ERROR] 不支持的文件格式: {input_path.suffix} (仅支持 .docx)"
+        )
         return 1
 
     from src.cli_runner import run
 
-    return run(
-        input_path,
-        template_path=args.template,
-        scene_path=args.scene,
-        output_dir=Path(args.output) if args.output else None,
-        project_root=ROOT,
-    )
+    try:
+        return run(
+            input_path,
+            template_path=args.template,
+            scene_path=args.scene,
+            output_dir=Path(args.output) if args.output else None,
+            document_type_id=args.document_type,
+        )
+    except Exception as exc:
+        console_print(f"[ERROR] CLI 未预期失败: {str(exc) or type(exc).__name__}")
+        return 1
 
 
 def run_app(argv: list[str] | None = None) -> int:
     """Route startup to GUI or CLI based on the provided arguments."""
-    args = parse_args(argv)
+    configure_console_output()
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    internal_result = _run_internal_office_child(raw_argv)
+    if internal_result is not None:
+        return internal_result
+    args = parse_args(raw_argv)
     if args.gui or not args.input:
-        return _start_gui()
+        return _start_gui(args.font_engine)
     return _run_cli(args)
+
+
+def _run_internal_office_child(argv: list[str]) -> int | None:
+    """Dispatch frozen broker children before importing Qt or app surfaces."""
+
+    if len(argv) != 2:
+        return None
+    flag, request_path = argv
+    from src.shared.engine.office_broker_command import (
+        OFFICE_IMAGE_LAYOUT_CHILD_FLAG,
+        OFFICE_LAYOUT_PROBE_CHILD_FLAG,
+    )
+
+    if flag == OFFICE_IMAGE_LAYOUT_CHILD_FLAG:
+        from src.shared.engine.office_image_layout import (
+            run_office_image_layout_child,
+        )
+
+        return run_office_image_layout_child(request_path)
+    if flag == OFFICE_LAYOUT_PROBE_CHILD_FLAG:
+        from src.shared.engine.office_layout_probe import (
+            run_office_layout_probe_child,
+        )
+
+        return run_office_layout_probe_child(request_path)
+    return None
 
 
 if __name__ == "__main__":

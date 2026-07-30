@@ -3,23 +3,31 @@
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from tempfile import TemporaryDirectory
+from uuid import uuid4
 
 from docx import Document
 from docx.shared import Inches
 
-from src.config.fixed_layout import FixedLayoutRowHeightPolicy
+from src.config.fixed_layout_contract import FixedLayoutRowHeightPolicy
+from src.config.master_preflight import check_master_preflight
 from src.config.material_schema_registry import get_material_schema, resolve_material_schema_ids
+from src.shared.io.artifact_publication import StagedArtifact, publish_staged_artifacts
 from src.shared.engine.fixed_layout_tables import (
     apply_fixed_layout_row_height_policy,
     row_height_state,
 )
 from src.shared.engine.exam_paper_style import write_exam_paper_docx_files
+from src.shared.engine.ooxml_ops import set_inline_shape_alt_text
+from src.shared.engine.content_visibility import (
+    executable_content_visibility_rule_selector,
+)
 
 
 EXAM_SCHEMA_ID = "exam_items_v1"
@@ -41,6 +49,19 @@ _QUESTION_KEYS: tuple[str, ...] = ("questions", "items")
 _ANSWER_KEYS: tuple[str, ...] = ("answer", "answers", "correct_answer", "correctAnswers")
 _ANALYSIS_KEYS: tuple[str, ...] = ("analysis", "explanation", "solution")
 _KNOWLEDGE_KEYS: tuple[str, ...] = ("knowledge_points", "knowledgePoints", "tags")
+
+_MARKDOWN_TITLE_RE = re.compile(r"^\s*#\s+(.+?)\s*$")
+_MARKDOWN_SECTION_RE = re.compile(r"^\s*##+\s+(.+?)\s*$")
+_MARKDOWN_QUESTION_RE = re.compile(r"^\s*(\d+)[\.\u3001]\s*(.+?)\s*$")
+_MARKDOWN_OPTION_RE = re.compile(r"^\s*([A-Ha-h])[\.\uFF0E\u3001]\s*(.+?)\s*$")
+_MARKDOWN_FIELD_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*[:：]\s*(.*?)\s*$")
+_MARKDOWN_SCORE_RE = re.compile(r"[\(（]\s*(\d+(?:\.\d+)?)\s*分\s*[\)）]")
+_MARKDOWN_METADATA_PAIR_RE = re.compile(
+    r"(科目|学科|年级|考试时间|时间|满分|总分)\s*[:：]\s*([^　]+?)(?=(?:　+| {2,}|\s*(?:科目|学科|年级|考试时间|时间|满分|总分)\s*[:：])|$)"
+)
+_MARKDOWN_ANSWER_SPLIT_RE = re.compile(r"^(.*?)(?:[。；;]?\s*解析\s*[:：]\s*(.+))$")
+_MARKDOWN_ANSWER_GROUP_RE = re.compile(r"^\s*[一二三四五六七八九十]+[\u3001\.\uFF0E]\s*.+")
+_MARKDOWN_ALLOWED_ANSWER_AREA_KINDS = {"lines", "free", "blank"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +156,74 @@ class ExamQuestionSchemaValidationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ExamMarkdownImportIssue:
+    """One issue found while importing a Markdown exam source."""
+
+    path: str
+    kind: str
+    message: str
+    severity: str = "warning"
+    observed: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "kind": self.kind,
+            "severity": self.severity,
+            "observed": self.observed,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ExamMarkdownImportResult:
+    """Normalized result for one Markdown exam source import."""
+
+    payload: dict[str, object] = field(default_factory=dict)
+    summary: ExamQuestionSchemaSummary = field(default_factory=ExamQuestionSchemaSummary)
+    issues: tuple[ExamMarkdownImportIssue, ...] = ()
+    source_path: str = ""
+    source_excerpt: str = ""
+    status: str = "ok"
+
+    @property
+    def has_issues(self) -> bool:
+        return bool(self.issues)
+
+    @property
+    def error_count(self) -> int:
+        return sum(1 for issue in self.issues if issue.severity == "error")
+
+    @property
+    def warning_count(self) -> int:
+        return sum(1 for issue in self.issues if issue.severity != "error")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "source_path": self.source_path,
+            "source_excerpt": self.source_excerpt,
+            "summary": {
+                "section_count": self.summary.section_count,
+                "question_count": self.summary.question_count,
+                "answered_question_count": self.summary.answered_question_count,
+                "analysis_count": self.summary.analysis_count,
+                "knowledge_point_count": self.summary.knowledge_point_count,
+                "figure_count": self.summary.figure_count,
+                "scored_question_count": self.summary.scored_question_count,
+                "declared_total_score": self.summary.declared_total_score,
+                "computed_total_score": self.summary.computed_total_score,
+                "question_types": list(self.summary.question_types),
+            },
+            "issue_count": len(self.issues),
+            "error_count": self.error_count,
+            "warning_count": self.warning_count,
+            "issues": [issue.to_dict() for issue in self.issues],
+            "payload": copy.deepcopy(self.payload),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ExamRenderedVersion:
     """One Word version rendered from the structured exam source."""
 
@@ -185,6 +274,42 @@ class ExamRenderedVersion:
 
 
 @dataclass(frozen=True, slots=True)
+class ExamMasterEvidence:
+    """Traceability for the master used by exam-paper assembly."""
+
+    mode_id: str = "exam"
+    master_id: str = ""
+    master_label: str = ""
+    master_source_type: str = ""
+    master_docx_path: str = ""
+    master_version: str = ""
+    manifest_path: str = ""
+    placeholder_contract_status: str = "not_checked"
+    required_placeholders: tuple[str, ...] = ()
+    optional_placeholders: tuple[str, ...] = ()
+    runtime_fields: tuple[str, ...] = ()
+    generated_fields: tuple[str, ...] = ()
+    missing_required_placeholders: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "mode_id": self.mode_id,
+            "master_id": self.master_id,
+            "master_label": self.master_label,
+            "master_source_type": self.master_source_type,
+            "master_docx_path": self.master_docx_path,
+            "master_version": self.master_version,
+            "manifest_path": self.manifest_path,
+            "placeholder_contract_status": self.placeholder_contract_status,
+            "required_placeholders": list(self.required_placeholders),
+            "optional_placeholders": list(self.optional_placeholders),
+            "runtime_fields": list(self.runtime_fields),
+            "generated_fields": list(self.generated_fields),
+            "missing_required_placeholders": list(self.missing_required_placeholders),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ExamDeliveryRuntimeResult:
     """Runtime evidence for JSON -> Markdown preview -> Word versions."""
 
@@ -195,6 +320,7 @@ class ExamDeliveryRuntimeResult:
     markdown_preview_path: str = ""
     markdown_preview_excerpt: str = ""
     rendered_versions: tuple[ExamRenderedVersion, ...] = ()
+    master_evidence: ExamMasterEvidence | None = None
     skipped_reason: str = ""
 
     @property
@@ -211,6 +337,11 @@ class ExamDeliveryRuntimeResult:
             "markdown_preview_excerpt": self.markdown_preview_excerpt,
             "version_count": self.version_count,
             "skipped_reason": self.skipped_reason,
+            "master_evidence": (
+                self.master_evidence.to_dict()
+                if self.master_evidence is not None
+                else {}
+            ),
             "rendered_versions": [
                 version.to_dict() for version in self.rendered_versions
             ],
@@ -266,6 +397,7 @@ def build_exam_delivery_runtime(
     output_dir: Path | str,
     source_stem: str = "exam",
     validation: ExamQuestionSchemaValidationResult | None = None,
+    master=None,
 ) -> ExamDeliveryRuntimeResult:
     """Render first-slice exam artifacts from one structured question source.
 
@@ -288,12 +420,10 @@ def build_exam_delivery_runtime(
             skipped_reason="missing_structured_source",
         )
 
-    artifact_dir = Path(output_dir) / "exam_runtime"
-    artifact_dir.mkdir(parents=True, exist_ok=True)
     safe_stem = _safe_artifact_stem(source_stem)
     markdown = render_exam_markdown_preview(payload)
-    markdown_path = artifact_dir / f"{safe_stem}_preview.md"
-    markdown_path.write_text(markdown, encoding="utf-8")
+    exam_paper_config = getattr(config, "exam_paper", None)
+    master_evidence = _exam_master_evidence(master)
 
     if validation.error_count:
         return ExamDeliveryRuntimeResult(
@@ -301,44 +431,111 @@ def build_exam_delivery_runtime(
             family_id=validation.family_id or EXAM_FAMILY_ID,
             status="blocked",
             source_key=validation.source_key or source_key,
-            markdown_preview_path=str(markdown_path),
             markdown_preview_excerpt=_preview_excerpt(markdown),
+            master_evidence=master_evidence,
             skipped_reason="schema_validation_errors",
         )
 
-    versions: list[ExamRenderedVersion] = []
-    exam_paper_config = getattr(config, "exam_paper", None)
-    if exam_paper_config is not None:
-        versions.extend(
-            _render_exam_master_docx(
-                payload,
-                exam_paper_config,
-                artifact_dir,
-                source_stem=safe_stem,
-                summary=getattr(validation, "summary", None),
-            )
+    if exam_paper_config is not None and master is None:
+        return ExamDeliveryRuntimeResult(
+            schema_id=EXAM_SCHEMA_ID,
+            family_id=validation.family_id or EXAM_FAMILY_ID,
+            status="blocked",
+            source_key=validation.source_key or source_key,
+            markdown_preview_excerpt=_preview_excerpt(markdown),
+            skipped_reason="execution_master_required",
         )
-    else:
-        for preset in _delivery_presets_for_runtime(config):
-            if not _preset_final_docx_enabled(preset):
-                continue
-            preset_id = _preset_value(preset, "preset_id", "final").strip() or "final"
-            label = _preset_value(preset, "label", preset_id).strip() or preset_id
-            docx_path = artifact_dir / f"{safe_stem}_{_safe_artifact_stem(preset_id)}.docx"
-            versions.append(_render_exam_version_docx(payload, preset, docx_path, label=label))
 
-    status = "warning" if validation.warning_count else "ok"
-    if not versions:
-        status = "blocked"
+    output_root = Path(output_dir).expanduser().resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    artifact_dir = output_root / "exam_runtime"
+    with TemporaryDirectory(prefix=".exam-runtime-", dir=str(output_root)) as temp_dir:
+        staging_dir = Path(temp_dir).resolve()
+        staged_markdown_path = staging_dir / f"{safe_stem}_preview.md"
+        staged_markdown_path.write_text(markdown, encoding="utf-8")
+
+        versions: list[ExamRenderedVersion] = []
+        if exam_paper_config is not None:
+            versions.extend(
+                _render_exam_master_docx(
+                    payload,
+                    exam_paper_config,
+                    staging_dir,
+                    source_stem=safe_stem,
+                    summary=getattr(validation, "summary", None),
+                    master=master,
+                )
+            )
+        else:
+            for preset in _delivery_presets_for_runtime(config):
+                if not _preset_final_docx_enabled(preset):
+                    continue
+                preset_id = _preset_value(preset, "preset_id", "final").strip() or "final"
+                label = _preset_value(preset, "label", preset_id).strip() or preset_id
+                docx_path = (
+                    staging_dir
+                    / f"{safe_stem}_{_safe_artifact_stem(preset_id)}.docx"
+                )
+                versions.append(
+                    _render_exam_version_docx(payload, preset, docx_path, label=label)
+                )
+
+        if not versions:
+            return ExamDeliveryRuntimeResult(
+                schema_id=EXAM_SCHEMA_ID,
+                family_id=validation.family_id or EXAM_FAMILY_ID,
+                status="blocked",
+                source_key=validation.source_key or source_key,
+                markdown_preview_excerpt=_preview_excerpt(markdown),
+                master_evidence=master_evidence,
+                skipped_reason="no_final_docx_delivery_preset",
+            )
+
+        staged_artifacts = [
+            StagedArtifact(
+                artifact_id="preview",
+                stage_path=staged_markdown_path,
+                final_path=artifact_dir / staged_markdown_path.name,
+            )
+        ]
+        version_artifact_ids: list[str] = []
+        for index, version in enumerate(versions):
+            staged_docx = Path(version.docx_path).expanduser().resolve()
+            try:
+                relative_docx = staged_docx.relative_to(staging_dir)
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"exam renderer escaped its staging directory: {staged_docx}"
+                ) from exc
+            artifact_id = f"version-{index}-{_safe_artifact_stem(version.preset_id)}"
+            version_artifact_ids.append(artifact_id)
+            staged_artifacts.append(
+                StagedArtifact(
+                    artifact_id=artifact_id,
+                    stage_path=staged_docx,
+                    final_path=artifact_dir / relative_docx,
+                )
+            )
+
+        published_paths = publish_staged_artifacts(
+            staged_artifacts,
+            execution_id=f"exam-{uuid4().hex}",
+            work_root=output_root,
+        )
+        published_versions = tuple(
+            replace(version, docx_path=published_paths[artifact_id])
+            for version, artifact_id in zip(versions, version_artifact_ids)
+        )
+
     return ExamDeliveryRuntimeResult(
         schema_id=EXAM_SCHEMA_ID,
         family_id=validation.family_id or EXAM_FAMILY_ID,
-        status=status,
+        status="warning" if validation.warning_count else "ok",
         source_key=validation.source_key or source_key,
-        markdown_preview_path=str(markdown_path),
+        markdown_preview_path=published_paths["preview"],
         markdown_preview_excerpt=_preview_excerpt(markdown),
-        rendered_versions=tuple(versions),
-        skipped_reason="" if versions else "no_final_docx_delivery_preset",
+        rendered_versions=published_versions,
+        master_evidence=master_evidence,
     )
 
 
@@ -380,6 +577,551 @@ def render_exam_markdown_preview(payload: object) -> str:
                 lines.append(f"   - Score: {score}")
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def parse_exam_markdown_source(
+    markdown: str,
+    *,
+    source_path: str | Path = "",
+) -> ExamMarkdownImportResult:
+    """Parse the supported exam Markdown draft format into ``exam_items_v1``."""
+
+    text = str(markdown or "")
+    issues: list[ExamMarkdownImportIssue] = []
+    payload: dict[str, object] = {}
+    sections: list[dict[str, object]] = []
+    current_section: dict[str, object] | None = None
+    current_question: dict[str, object] | None = None
+    in_answer_block = False
+    answer_groups: list[dict[str, object]] = []
+    current_answer_group: dict[str, object] | None = None
+    current_answer_item: dict[str, object] | None = None
+
+    def ensure_section(title: str = "") -> dict[str, object]:
+        nonlocal current_section
+        if current_section is None:
+            current_section = {
+                "title": title or "一、题目区",
+                "questions": [],
+            }
+            sections.append(current_section)
+        return current_section
+
+    def ensure_answer_group(title: str = "") -> dict[str, object]:
+        nonlocal current_answer_group
+        if current_answer_group is None or title:
+            current_answer_group = {
+                "title": title,
+                "answers": {},
+            }
+            answer_groups.append(current_answer_group)
+        return current_answer_group
+
+    def append_stem_line(line: str) -> None:
+        if current_question is None:
+            return
+        existing = str(current_question.get("stem", "") or "").rstrip()
+        current_question["stem"] = f"{existing}\n{line.strip()}".strip()
+
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+
+        section_match = _MARKDOWN_SECTION_RE.match(stripped)
+        if section_match:
+            section_title = section_match.group(1).strip()
+            if _markdown_is_answer_heading(section_title):
+                in_answer_block = True
+                current_question = None
+                current_answer_group = None
+                current_answer_item = None
+                continue
+            in_answer_block = False
+            current_section = {
+                "title": section_title,
+                "questions": [],
+            }
+            sections.append(current_section)
+            current_question = None
+            continue
+
+        if in_answer_block:
+            answer_match = _MARKDOWN_QUESTION_RE.match(stripped)
+            if answer_match:
+                group = ensure_answer_group()
+                answer_number = int(answer_match.group(1))
+                answer_payload = _parse_markdown_answer_text(answer_match.group(2))
+                group_answers = group.setdefault("answers", {})
+                if isinstance(group_answers, dict):
+                    if answer_number in group_answers:
+                        issues.append(
+                            _markdown_issue(
+                                f"line.{line_number}",
+                                "duplicate_answer_number",
+                                "同一答案分组内的答案题号不能重复。",
+                                severity="error",
+                                observed=str(answer_number),
+                            )
+                        )
+                    group_answers[answer_number] = answer_payload
+                current_answer_item = answer_payload
+                continue
+
+            if _markdown_looks_like_answer_group(stripped):
+                current_answer_group = ensure_answer_group(stripped)
+                current_answer_item = None
+                continue
+
+            if current_answer_item is not None:
+                extra = stripped
+                if "analysis" in current_answer_item:
+                    current_answer_item["analysis"] = (
+                        f"{current_answer_item['analysis']}\n{extra}".strip()
+                    )
+                else:
+                    current_answer_item["answer"] = (
+                        f"{current_answer_item.get('answer', '')}\n{extra}".strip()
+                    )
+                continue
+
+            issues.append(
+                _markdown_issue(
+                    f"line.{line_number}",
+                    "unrecognized_answer_line",
+                    "答案速查区域存在未识别内容。",
+                    observed=stripped,
+                )
+            )
+            continue
+
+        title_match = _MARKDOWN_TITLE_RE.match(stripped)
+        if title_match and "paper_title" not in payload:
+            payload["paper_title"] = title_match.group(1).strip()
+            continue
+
+        if stripped.startswith(">"):
+            _merge_markdown_metadata(payload, stripped.lstrip("> "))
+            continue
+
+        question_match = _MARKDOWN_QUESTION_RE.match(stripped)
+        if question_match:
+            section = ensure_section()
+            question_number = int(question_match.group(1))
+            existing_questions = section.get("questions")
+            expected_number = (
+                len(existing_questions) + 1
+                if isinstance(existing_questions, list)
+                else 1
+            )
+            if question_number != expected_number:
+                issues.append(
+                    _markdown_issue(
+                        f"line.{line_number}",
+                        "question_number_sequence_invalid",
+                        "每个大题内的小题必须从 1 开始连续编号。",
+                        severity="error",
+                        observed=str(question_number),
+                    )
+                )
+            question: dict[str, object] = {
+                "number": question_number,
+                "stem": question_match.group(2).strip(),
+            }
+            questions = section.setdefault("questions", [])
+            if isinstance(questions, list):
+                questions.append(question)
+            current_question = question
+            continue
+
+        option_match = _MARKDOWN_OPTION_RE.match(stripped)
+        if option_match and current_question is not None:
+            options = current_question.setdefault("options", [])
+            if isinstance(options, list):
+                option_label = option_match.group(1).upper()
+                option_text = option_match.group(2).strip()
+                options.append(f"{option_label}. {option_text}")
+            continue
+
+        field_match = _MARKDOWN_FIELD_RE.match(stripped)
+        if field_match and current_question is not None:
+            field_key = field_match.group(1).strip()
+            field_value = field_match.group(2).strip()
+            if field_key == "answer_area_kind":
+                normalized_kind = field_value.lower()
+                if normalized_kind in _MARKDOWN_ALLOWED_ANSWER_AREA_KINDS:
+                    current_question["answer_area_kind"] = normalized_kind
+                else:
+                    issues.append(
+                        _markdown_issue(
+                            f"line.{line_number}",
+                            "unknown_answer_area_kind",
+                            "答题区类型未识别。",
+                            observed=field_value,
+                        )
+                    )
+                continue
+            if field_key == "answer_lines":
+                try:
+                    current_question["answer_lines"] = max(0, int(float(field_value)))
+                except ValueError:
+                    issues.append(
+                        _markdown_issue(
+                            f"line.{line_number}",
+                            "invalid_answer_lines",
+                            "答题区行数必须是数字。",
+                            observed=field_value,
+                        )
+                    )
+                continue
+
+        if current_question is not None:
+            append_stem_line(stripped)
+        else:
+            issues.append(
+                _markdown_issue(
+                    f"line.{line_number}",
+                    "unrecognized_line",
+                    "题稿中存在未挂接到试卷结构的内容。",
+                    observed=stripped,
+                )
+            )
+
+    payload["sections"] = sections
+    _finalize_markdown_questions(payload)
+    _apply_markdown_answers(payload, answer_groups, issues)
+
+    validation = _validate_exam_payload(
+        _normalize_exam_payload(payload),
+        source_key="markdown",
+        family_id=EXAM_FAMILY_ID,
+        metadata=payload,
+    )
+    issues.extend(_markdown_issues_from_validation(validation))
+
+    status = "ok"
+    if any(issue.severity == "error" for issue in issues):
+        status = "error"
+    elif issues:
+        status = "warning"
+
+    return ExamMarkdownImportResult(
+        payload=payload,
+        summary=validation.summary,
+        issues=tuple(issues),
+        source_path=str(source_path or ""),
+        source_excerpt=_preview_excerpt(text),
+        status=status,
+    )
+
+
+def parse_exam_markdown_file(path: str | Path) -> ExamMarkdownImportResult:
+    """Read and parse one Markdown exam source file."""
+
+    source = Path(path)
+    try:
+        markdown = source.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        markdown = source.read_text(encoding="utf-8-sig")
+    return parse_exam_markdown_source(markdown, source_path=str(source))
+
+
+def exam_markdown_import_entity_data(
+    result: ExamMarkdownImportResult,
+) -> dict[str, str]:
+    """Return ``entity_data`` values produced by a Markdown import."""
+
+    payload = dict(result.payload or {})
+    data = {
+        "exam_items": json.dumps(payload, ensure_ascii=False),
+    }
+    for source_key, target_key in (
+        ("paper_title", "title"),
+        ("subject", "subject"),
+        ("grade", "grade"),
+        ("duration", "duration"),
+        ("total_score", "total_score"),
+    ):
+        value = str(payload.get(source_key, "") or "").strip()
+        if value:
+            data[target_key] = value
+    return data
+
+
+def _merge_markdown_metadata(payload: dict[str, object], text: str) -> None:
+    for match in _MARKDOWN_METADATA_PAIR_RE.finditer(str(text or "")):
+        key = match.group(1).strip()
+        value = match.group(2).strip()
+        if not value:
+            continue
+        target = {
+            "科目": "subject",
+            "学科": "subject",
+            "年级": "grade",
+            "考试时间": "duration",
+            "时间": "duration",
+            "满分": "total_score",
+            "总分": "total_score",
+        }.get(key)
+        if target:
+            payload[target] = value
+
+
+def _markdown_is_answer_heading(title: str) -> bool:
+    normalized = str(title or "").strip()
+    return bool(normalized) and any(
+        token in normalized
+        for token in ("答案速查", "参考答案", "答案与解析", "答案")
+    )
+
+
+def _markdown_looks_like_answer_group(line: str) -> bool:
+    text = str(line or "").strip()
+    if not text:
+        return False
+    if _MARKDOWN_QUESTION_RE.match(text):
+        return False
+    if _MARKDOWN_OPTION_RE.match(text):
+        return False
+    return bool(_MARKDOWN_ANSWER_GROUP_RE.match(text)) or text.endswith("题")
+
+
+def _parse_markdown_answer_text(text: str) -> dict[str, object]:
+    raw = str(text or "").strip()
+    match = _MARKDOWN_ANSWER_SPLIT_RE.match(raw)
+    if match and match.group(2):
+        answer = match.group(1).strip(" 。；;")
+        analysis = match.group(2).strip()
+        return {
+            "answer": answer,
+            "analysis": analysis,
+        }
+    return {"answer": raw}
+
+
+def _finalize_markdown_questions(payload: dict[str, object]) -> None:
+    for section in list(payload.get("sections") or []):
+        if not isinstance(section, Mapping):
+            continue
+        for question in list(section.get("questions") or []):
+            if not isinstance(question, dict):
+                continue
+            stem = str(question.get("stem", "") or "").strip()
+            matches = list(_MARKDOWN_SCORE_RE.finditer(stem))
+            if matches and "score" not in question:
+                question["score"] = matches[-1].group(1)
+            if matches:
+                stem = _MARKDOWN_SCORE_RE.sub("", stem).strip()
+            question["stem"] = _normalize_markdown_inline_text(stem)
+            if "options" in question and isinstance(question["options"], list):
+                question["options"] = [
+                    _normalize_markdown_inline_text(str(option or ""))
+                    for option in question["options"]
+                    if str(option or "").strip()
+                ]
+
+
+def _normalize_markdown_inline_text(text: str) -> str:
+    normalized = str(text or "").strip()
+    normalized = re.sub(r"`([^`]+)`", r"\1", normalized)
+    normalized = re.sub(r"[ \t]+\n", "\n", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
+def _apply_markdown_answers(
+    payload: dict[str, object],
+    answer_groups: list[dict[str, object]],
+    issues: list[ExamMarkdownImportIssue],
+) -> None:
+    sections = [
+        section
+        for section in list(payload.get("sections") or [])
+        if isinstance(section, dict)
+    ]
+    if not answer_groups:
+        issues.append(
+            _markdown_issue(
+                "answers",
+                "missing_answer_block",
+                "Markdown 题稿缺少“答案速查”区域。",
+                severity="error",
+            )
+        )
+        return
+
+    grouped = [
+        group
+        for group in answer_groups
+        if str(group.get("title", "") or "").strip()
+    ]
+    if grouped:
+        for group_index, group in enumerate(grouped):
+            if group_index >= len(sections):
+                issues.append(
+                    _markdown_issue(
+                        f"answers.{group_index}",
+                        "unmatched_answer_group",
+                        "答案分组多于题目大题，未能全部回填。",
+                        severity="error",
+                        observed=str(group.get("title", "") or ""),
+                    )
+                )
+                continue
+            group_family = _markdown_question_family(
+                str(group.get("title", "") or "")
+            )
+            section_family = _markdown_question_family(
+                str(sections[group_index].get("title", "") or "")
+            )
+            if (
+                group_family
+                and section_family
+                and group_family != section_family
+            ):
+                issues.append(
+                    _markdown_issue(
+                        f"answers.{group_index}",
+                        "answer_group_section_mismatch",
+                        "答案分组顺序或题型与对应大题不一致。",
+                        severity="error",
+                        observed=str(group.get("title", "") or ""),
+                    )
+                )
+            _apply_answer_group_to_section(
+                group,
+                sections[group_index],
+                issues,
+                group_path=f"answers.{group_index}",
+            )
+        return
+
+    flat_questions: list[dict[str, object]] = []
+    for section in sections:
+        flat_questions.extend(
+            question
+            for question in list(section.get("questions") or [])
+            if isinstance(question, dict)
+        )
+    answers: dict[int, object] = {}
+    for group in answer_groups:
+        group_answers = group.get("answers", {})
+        if isinstance(group_answers, Mapping):
+            answers.update(group_answers)
+    for answer_number, answer_payload in answers.items():
+        target_index = int(answer_number) - 1
+        if target_index < 0 or target_index >= len(flat_questions):
+            issues.append(
+                _markdown_issue(
+                    f"answers.{answer_number}",
+                    "unmatched_answer",
+                    "答案题号无法匹配到题目。",
+                    severity="error",
+                    observed=str(answer_number),
+                )
+            )
+            continue
+        _merge_answer_payload(flat_questions[target_index], answer_payload)
+
+
+def _apply_answer_group_to_section(
+    group: Mapping[str, object],
+    section: dict[str, object],
+    issues: list[ExamMarkdownImportIssue],
+    *,
+    group_path: str,
+) -> None:
+    questions = [
+        question
+        for question in list(section.get("questions") or [])
+        if isinstance(question, dict)
+    ]
+    answers = group.get("answers", {})
+    if not isinstance(answers, Mapping):
+        return
+    for answer_number, answer_payload in answers.items():
+        target_index = int(answer_number) - 1
+        if target_index < 0 or target_index >= len(questions):
+            issues.append(
+                _markdown_issue(
+                    f"{group_path}.{answer_number}",
+                    "unmatched_answer",
+                    "答案题号无法匹配到当前大题的小题。",
+                    severity="error",
+                    observed=str(answer_number),
+                )
+            )
+            continue
+        _merge_answer_payload(questions[target_index], answer_payload)
+
+
+def _merge_answer_payload(
+    question: dict[str, object],
+    answer_payload: object,
+) -> None:
+    if not isinstance(answer_payload, Mapping):
+        question["answer"] = str(answer_payload or "").strip()
+        return
+    answer = str(answer_payload.get("answer", "") or "").strip()
+    analysis = str(answer_payload.get("analysis", "") or "").strip()
+    if answer:
+        question["answer"] = _normalize_markdown_inline_text(answer)
+    if analysis:
+        question["analysis"] = _normalize_markdown_inline_text(analysis)
+
+
+def _markdown_question_family(value: str) -> str:
+    normalized = str(value or "").casefold()
+    groups = (
+        ("choice", ("选择题", "单选题", "多选题", "选择")),
+        ("judgment", ("判断题", "判断")),
+        ("fill", ("填空题", "填空")),
+        (
+            "calculation",
+            ("计算题", "解答题", "应用题", "证明题", "计算", "解答", "证明"),
+        ),
+        ("reading", ("阅读题", "阅读理解", "阅读")),
+        ("writing", ("作文题", "写作题", "作文", "写作")),
+        ("short_answer", ("简答题", "问答题", "简答", "问答")),
+    )
+    for family, tokens in groups:
+        if any(token in normalized for token in tokens):
+            return family
+    return ""
+
+
+def _markdown_issues_from_validation(
+    validation: ExamQuestionSchemaValidationResult,
+) -> list[ExamMarkdownImportIssue]:
+    issues: list[ExamMarkdownImportIssue] = []
+    for item in validation.issues:
+        issues.append(
+            _markdown_issue(
+                item.path,
+                item.kind,
+                item.message,
+                severity=item.severity,
+                observed=item.observed,
+            )
+        )
+    return issues
+
+
+def _markdown_issue(
+    path: str,
+    kind: str,
+    message: str,
+    *,
+    severity: str = "warning",
+    observed: str = "",
+) -> ExamMarkdownImportIssue:
+    return ExamMarkdownImportIssue(
+        path=str(path or ""),
+        kind=str(kind or ""),
+        message=str(message or ""),
+        severity=str(severity or "warning"),
+        observed=str(observed or ""),
+    )
 
 
 def _config_material_schema_ids(config) -> tuple[str, ...]:
@@ -858,6 +1600,27 @@ def _delivery_presets_for_runtime(config) -> tuple[object, ...]:
     )
 
 
+def _exam_master_evidence(master) -> ExamMasterEvidence | None:
+    if master is None:
+        return None
+    preflight = check_master_preflight(master)
+    return ExamMasterEvidence(
+        mode_id=master.mode_id,
+        master_id=master.master_id,
+        master_label=master.label,
+        master_source_type=master.source_type,
+        master_docx_path=str(master.docx_path),
+        master_version=master.master_version,
+        manifest_path=str(master.manifest_path or ""),
+        placeholder_contract_status=preflight.status,
+        required_placeholders=master.placeholder_contract.required,
+        optional_placeholders=master.placeholder_contract.optional,
+        runtime_fields=master.placeholder_contract.runtime_fields,
+        generated_fields=master.placeholder_contract.generated_fields,
+        missing_required_placeholders=preflight.missing_required_placeholders,
+    )
+
+
 def _render_exam_master_docx(
     payload: dict[str, object],
     exam_paper_config,
@@ -865,18 +1628,20 @@ def _render_exam_master_docx(
     *,
     source_stem: str,
     summary: ExamQuestionSchemaSummary | None = None,
+    master,
 ) -> tuple[ExamRenderedVersion, ...]:
     answer_policy = str(getattr(exam_paper_config, "answer_policy", "") or "").strip()
     include_student_version = answer_policy != "answer_only"
     include_answer_version = answer_policy != "student_only"
     outputs = write_exam_paper_docx_files(
-        str(getattr(exam_paper_config, "blank_style_id", "") or "default_exam"),
+        str(getattr(master, "master_id", "") or ""),
         artifact_dir,
         payload=payload,
         config=exam_paper_config,
         include_student=include_student_version,
         include_answer_key=include_answer_version,
         filename_stem=source_stem,
+        master_docx_path=getattr(master, "docx_path", ""),
     )
 
     question_count = int(getattr(summary, "question_count", 0) or 0)
@@ -913,15 +1678,16 @@ def _render_exam_master_docx(
             )
         )
     if include_answer_version and outputs.answer_key_docx is not None:
+        analysis_count = int(getattr(summary, "analysis_count", 0) or 0)
         versions.append(
             ExamRenderedVersion(
                 preset_id="answer_key",
                 label="答案速查",
                 docx_path=str(outputs.answer_key_docx),
-                hidden_selectors=("question_body", "analysis", "solution", "knowledge_points"),
+                hidden_selectors=("question_body", "knowledge_points"),
                 visible_question_count=0,
                 visible_answer_count=answer_count,
-                visible_analysis_count=0,
+                visible_analysis_count=analysis_count,
                 question_asset_count=0,
                 rendered_question_asset_count=0,
                 missing_question_asset_count=0,
@@ -1117,10 +1883,8 @@ def _is_answer_sheet_preset(
 def _preset_hidden_selectors(preset: object) -> tuple[str, ...]:
     selectors: list[str] = []
     for rule in list(_preset_value_raw(preset, "content_visibility_rules", ()) or ()):
-        selector_type = _rule_value(rule, "selector_type", "marker_block").strip().lower()
-        action = _rule_value(rule, "action", "remove").strip().lower()
-        selector = _normalize_selector(_rule_value(rule, "selector", ""))
-        if selector_type == "marker_block" and action in {"remove", "hide", "exclude"} and selector:
+        selector = executable_content_visibility_rule_selector(rule)
+        if selector:
             selectors.append(selector)
     return tuple(dict.fromkeys(selectors))
 
@@ -1142,20 +1906,6 @@ def _preset_value_raw(preset: object, key: str, default: object = "") -> object:
     if isinstance(preset, Mapping):
         return preset.get(key, default)
     return getattr(preset, key, default)
-
-
-def _rule_value(rule: object, key: str, default: str = "") -> str:
-    if isinstance(rule, Mapping):
-        return _text(rule.get(key, default))
-    return _text(getattr(rule, key, default))
-
-
-def _normalize_selector(value: object) -> str:
-    text = _text(value)
-    match = re.search(r"\{\{\s*#\s*(?:visibility|content)\s*:\s*([^}]+)\}\}", text)
-    if match:
-        text = match.group(1)
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", text.strip()).strip("_").lower()
 
 
 def _exam_title(payload: Mapping[str, object]) -> str:
@@ -1224,7 +1974,7 @@ def _render_question_figures(
         try:
             inline_shape = document.add_picture(str(figure_path), width=Inches(2.0))
             if alt_text:
-                _set_inline_shape_alt_text(
+                set_inline_shape_alt_text(
                     inline_shape,
                     alt_text=alt_text,
                     title=_question_figure_title(figure),
@@ -1277,20 +2027,6 @@ def _question_figure_title(figure: Mapping[str, object]) -> str:
         figure,
         ("title", "caption", "asset_id", "source"),
     )
-
-
-def _set_inline_shape_alt_text(
-    inline_shape,
-    *,
-    alt_text: str,
-    title: str = "",
-) -> None:
-    doc_pr = getattr(getattr(inline_shape, "_inline", None), "docPr", None)
-    if doc_pr is None:
-        return
-    doc_pr.set("descr", alt_text)
-    if title:
-        doc_pr.set("title", title)
 
 
 def _question_stem(question: Mapping[str, object]) -> str:
@@ -1475,9 +2211,15 @@ __all__ = [
     "ExamQuestionSchemaIssue",
     "ExamQuestionSchemaSummary",
     "ExamQuestionSchemaValidationResult",
+    "ExamMarkdownImportIssue",
+    "ExamMarkdownImportResult",
     "ExamRenderedVersion",
+    "ExamMasterEvidence",
     "ExamDeliveryRuntimeResult",
     "build_exam_delivery_runtime",
+    "exam_markdown_import_entity_data",
     "inspect_exam_question_schema",
+    "parse_exam_markdown_file",
+    "parse_exam_markdown_source",
     "render_exam_markdown_preview",
 ]

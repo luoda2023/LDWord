@@ -32,7 +32,34 @@ class ModuleMeta:
     requires_config: tuple[str, ...] = ()
 
     modifies_structure: bool = False
-    enabled_by_default: bool = False
+    enabled_by_default: bool | None = None
+    # Stored as a serialized value to keep the module base layer independent
+    # from pipeline orchestration.  The phase adapter is the sole authority
+    # that coerces this value to ``Phase``.
+    execution_phase: str = ""
+    # Stored as a serialized value for the same reason.  The module adapter
+    # validates it against the closed document-scope behavior contract.
+    scope_behavior: str = ""
+
+    def __post_init__(self) -> None:
+        if self.enabled_by_default is None:
+            from src.modules.default_switches import default_enabled_for_module
+
+            object.__setattr__(
+                self,
+                "enabled_by_default",
+                default_enabled_for_module(self.name),
+            )
+        elif type(self.enabled_by_default) is not bool:
+            raise TypeError("enabled_by_default must be a boolean")
+        if not isinstance(self.execution_phase, str):
+            raise TypeError("execution_phase must be a string")
+        if self.execution_phase != self.execution_phase.strip():
+            raise ValueError("execution_phase cannot contain surrounding whitespace")
+        if not isinstance(self.scope_behavior, str):
+            raise TypeError("scope_behavior must be a string")
+        if self.scope_behavior != self.scope_behavior.strip():
+            raise ValueError("scope_behavior cannot contain surrounding whitespace")
 
 
 @dataclass

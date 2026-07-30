@@ -11,12 +11,14 @@ import json
 from pathlib import Path
 from typing import Mapping
 
+from src.config.atomic_io import atomic_write_text
 from src.config.materials import AssetItem
 from src.services.material_assets.question_figures import (
     _question_figure_candidate_list,
     _question_figure_target_label,
     _question_figure_target_value,
 )
+
 
 def _question_figure_repair_audit_record(
     candidate: Mapping[str, object],
@@ -181,6 +183,10 @@ def _question_figure_repair_audit_dir(
     return None
 
 
+class QuestionFigureRepairAuditIntegrityError(RuntimeError):
+    """Existing repair evidence cannot be read without risking data loss."""
+
+
 def _append_question_figure_repair_audit_record(
     audit_dir: Path | None,
     record: Mapping[str, object],
@@ -188,45 +194,68 @@ def _append_question_figure_repair_audit_record(
     normalized_record = dict(record)
     if audit_dir is None:
         normalized_record["artifact_path"] = ""
+        normalized_record["audit_persistence_status"] = "not_available"
         return normalized_record
     history_path = audit_dir / "question_figure_repair_audit.json"
     payload = _read_question_figure_repair_audit_payload(history_path)
-    records = payload.get("records", [])
-    if not isinstance(records, list):
-        records = []
+    records = list(payload["records"])
     audit_id = str(normalized_record.get("audit_id") or "").strip()
     if audit_id:
         records = [
             item
             for item in records
-            if not isinstance(item, Mapping)
-            or str(item.get("audit_id") or "").strip() != audit_id
+            if str(item.get("audit_id") or "").strip() != audit_id
         ]
     normalized_record["artifact_path"] = str(history_path)
+    normalized_record["audit_persistence_status"] = "written"
     records.append(dict(normalized_record))
     records = records[-100:]
     payload["schema_version"] = 1
     payload["entry_count"] = len(records)
     payload["records"] = records
-    payload["updated_at"] = str(normalized_record.get("applied_at") or "")
+    payload["updated_at"] = str(
+        normalized_record.get("applied_at")
+        or normalized_record.get("rolled_back_at")
+        or ""
+    )
     try:
-        history_path.write_text(
+        atomic_write_text(
+            history_path,
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
     except OSError:
         normalized_record["artifact_path"] = ""
+        normalized_record["audit_persistence_status"] = "failed"
+        normalized_record["audit_persistence_error"] = "write_failed"
     return normalized_record
 
 
 def _read_question_figure_repair_audit_payload(history_path: Path) -> dict[str, object]:
-    if not history_path.exists() or not history_path.is_file():
+    if not history_path.exists():
         return {"schema_version": 1, "records": []}
+    if not history_path.is_file():
+        raise QuestionFigureRepairAuditIntegrityError(
+            f"question_figure_repair_audit_not_file:{history_path}"
+        )
     try:
         payload = json.loads(history_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {"schema_version": 1, "records": []}
-    return payload if isinstance(payload, dict) else {"schema_version": 1, "records": []}
+    except Exception as exc:
+        raise QuestionFigureRepairAuditIntegrityError(
+            f"question_figure_repair_audit_unreadable:{history_path}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise QuestionFigureRepairAuditIntegrityError(
+            f"question_figure_repair_audit_invalid_root:{history_path}"
+        )
+    records = payload.get("records")
+    if not isinstance(records, list) or any(
+        not isinstance(record, Mapping) for record in records
+    ):
+        raise QuestionFigureRepairAuditIntegrityError(
+            f"question_figure_repair_audit_invalid_records:{history_path}"
+        )
+    return payload
 
 
 def _question_figure_repair_audit_id(
@@ -289,6 +318,7 @@ question_figure_repair_rollback_audit_id = _question_figure_repair_rollback_audi
 
 
 __all__ = [
+    'QuestionFigureRepairAuditIntegrityError',
     'build_question_figure_repair_audit_record',
     'build_question_figure_repair_rollback_audit_record',
     'resolve_question_figure_repair_audit_dir',

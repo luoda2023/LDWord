@@ -89,6 +89,22 @@ def set_attribute(element, attr: str, value: str) -> None:
         element.set(attr, value)
 
 
+def set_inline_shape_alt_text(
+    inline_shape,
+    *,
+    alt_text: str,
+    title: str = "",
+) -> None:
+    """Set accessible description metadata on a python-docx inline shape."""
+
+    doc_pr = getattr(getattr(inline_shape, "_inline", None), "docPr", None)
+    if doc_pr is None:
+        return
+    doc_pr.set("descr", alt_text)
+    if title:
+        doc_pr.set("title", title)
+
+
 def get_attribute(element, attr: str) -> str | None:
     """获取元素属性。"""
     if ":" in attr:

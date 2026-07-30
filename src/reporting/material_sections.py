@@ -11,6 +11,9 @@ from src.reporting.common import (
     _clean_text,
     _join_or_dash,
 )
+from src.reporting.execution_payload import (
+    material_field_issue_payload as _material_field_issue_payload,
+)
 
 if TYPE_CHECKING:
     from src.pipeline.result import PipelineResult
@@ -55,18 +58,6 @@ def _extract_material_field_consistency(result: PipelineResult) -> dict | None:
         "issue_count": len(issues),
         "items": items,
         "issues": issues,
-    }
-
-
-def _material_field_issue_payload(issue) -> dict[str, str]:
-    return {
-        "field_key": _clean_text(getattr(issue, "field_key", "")),
-        "kind": _clean_text(getattr(issue, "kind", "")),
-        "severity": _clean_text(getattr(issue, "severity", "")) or "warning",
-        "expected": _clean_text(getattr(issue, "expected", "")),
-        "observed": _clean_text(getattr(issue, "observed", "")),
-        "location": _clean_text(getattr(issue, "location", "")),
-        "message": _clean_text(getattr(issue, "message", "")),
     }
 
 
@@ -298,7 +289,7 @@ def _clean_coverage_closure_task(value) -> dict[str, object]:
 
 
 def _format_coverage_boundaries_markdown(items: list[dict[str, object]]) -> list[str]:
-    lines = ["## 场景边界证据", ""]
+    lines = ["## 方案边界证据", ""]
     for item in items:
         pack_id = _clean_text(item.get("pack_id", ""))
         label = _clean_text(item.get("label", ""))

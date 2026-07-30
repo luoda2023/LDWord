@@ -1,0 +1,56 @@
+"""Transactional, non-UI material assembly services."""
+
+from .assembly import MaterialAssemblyDependencies, MaterialAssemblyService
+from .contracts import (
+    AssemblyDiagnostic,
+    AssemblyFailureCode,
+    AssemblyStage,
+    CancelCheck,
+    FileEvidence,
+    MaterialAssemblyCancelled,
+    MaterialAssemblyError,
+    MaterialAssemblyReceipt,
+    MaterialAssemblyRequest,
+    MaterialPipelineCallback,
+    MaterialPipelineOutcome,
+    MaterialPipelineRequest,
+    MaterialVariantRequest,
+    PipelineRunReceipt,
+    PipelineVariantTarget,
+    PipelineVisibilityEvidence,
+    VariantAssemblyReceipt,
+    VisibilityEvidenceKind,
+)
+from .dependency_indexer import (
+    MaterialDependencyIndexer,
+    MaterialDependencyIndexingError,
+    MaterialDependencyIndexRequest,
+    build_material_dependency_index_from_sources,
+)
+
+__all__ = [
+    "AssemblyDiagnostic",
+    "AssemblyFailureCode",
+    "AssemblyStage",
+    "CancelCheck",
+    "FileEvidence",
+    "MaterialAssemblyCancelled",
+    "MaterialAssemblyDependencies",
+    "MaterialAssemblyError",
+    "MaterialAssemblyReceipt",
+    "MaterialAssemblyRequest",
+    "MaterialAssemblyService",
+    "MaterialDependencyIndexer",
+    "MaterialDependencyIndexingError",
+    "MaterialDependencyIndexRequest",
+    "MaterialPipelineCallback",
+    "MaterialPipelineOutcome",
+    "MaterialPipelineRequest",
+    "MaterialVariantRequest",
+    "PipelineRunReceipt",
+    "PipelineVariantTarget",
+    "PipelineVisibilityEvidence",
+    "VariantAssemblyReceipt",
+    "VisibilityEvidenceKind",
+    "build_material_dependency_index_from_sources",
+]

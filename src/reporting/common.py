@@ -44,6 +44,25 @@ def _clean_module_skips(values) -> list[dict[str, object]]:
     return cleaned
 
 
+def _clean_issue(value) -> dict[str, str]:
+    """Normalize the common issue envelope used by product report sections."""
+
+    if not isinstance(value, dict):
+        return {}
+    kind = _clean_text(value.get("kind", ""))
+    message = _clean_text(value.get("message", ""))
+    if not kind and not message:
+        return {}
+    return {
+        "path": _clean_text(value.get("path", "")),
+        "kind": kind,
+        "severity": _clean_text(value.get("severity", "")) or "warning",
+        "expected": _clean_text(value.get("expected", "")),
+        "observed": _clean_text(value.get("observed", "")),
+        "message": message,
+    }
+
+
 def _join_or_dash(values) -> str:
     items = _clean_list(values)
     return ", ".join(items) if items else "-"

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lxml import etree
 
 from src.shared.engine.ooxml_ops import qn, find_or_create
 

@@ -89,6 +89,27 @@ def get_full_text(paragraph: Paragraph) -> str:
     return "".join(r.text or "" for r in paragraph.runs)
 
 
+def iter_story_paragraphs(document):
+    """Yield paragraphs from body, tables, headers, and footers."""
+
+    seen: set[int] = set()
+    for paragraph in _iter_container_paragraphs(document):
+        paragraph_id = id(getattr(paragraph, "_element", paragraph))
+        if paragraph_id in seen:
+            continue
+        seen.add(paragraph_id)
+        yield paragraph
+
+    for section in list(getattr(document, "sections", []) or []):
+        for part in (section.header, section.footer):
+            for paragraph in _iter_container_paragraphs(part):
+                paragraph_id = id(getattr(paragraph, "_element", paragraph))
+                if paragraph_id in seen:
+                    continue
+                seen.add(paragraph_id)
+                yield paragraph
+
+
 def copy_run_format(source: Run, target: Run) -> None:
     """复制 Run 的格式（字体、大小、粗体等）到目标 Run。"""
     rPr = source._element.find(
@@ -118,6 +139,19 @@ def _runs_same_format(r1: Run, r2: Run) -> bool:
         return False
 
     return etree.tostring(rPr1) == etree.tostring(rPr2)
+
+
+def _iter_container_paragraphs(container):
+    for paragraph in list(getattr(container, "paragraphs", []) or []):
+        yield paragraph
+    for table in list(getattr(container, "tables", []) or []):
+        yield from _iter_table_paragraphs(table)
+
+
+def _iter_table_paragraphs(table):
+    for row in list(getattr(table, "rows", []) or []):
+        for cell in list(getattr(row, "cells", []) or []):
+            yield from _iter_container_paragraphs(cell)
 
 
 # ── 字体操作 ─────────────────────────────────────

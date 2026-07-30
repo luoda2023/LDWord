@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from collections.abc import Callable
-
 from src.config.resolved import ResolvedConfig
 from src.pipeline.context import PipelineContext
 
@@ -94,8 +92,9 @@ def validate_data_flow(modules: list) -> list[str]:
     available: set[str] = {
         "source_doc_path",
         "source_doc_dir",
-        "application_boundary",
-        "format_scope",
+        "document_scope",
+        "document_structure_evidence",
+        "document_scope_decisions",
     }
 
     for mod in modules:
@@ -107,48 +106,6 @@ def validate_data_flow(modules: list) -> list[str]:
         available.update(mod.meta.provides)
 
     return errors
-
-
-def select_enabled_modules(
-    modules: list,
-    is_enabled: Callable[[str], bool],
-) -> tuple[list, dict[str, list[str]]]:
-    """Select enabled modules and prune ones with unmet hard dependencies.
-
-    Rules:
-    1. Respect explicit module switches first.
-    2. If an enabled module's ``depends_on`` target is absent, auto-prune it.
-    3. Repeat until the enabled set is dependency-closed.
-
-    This keeps the enabled module set consistent without silently re-enabling
-    modules the user explicitly turned off.
-    """
-    selected = {
-        mod.meta.name: mod
-        for mod in modules
-        if is_enabled(mod.meta.name)
-    }
-    auto_pruned: dict[str, list[str]] = {}
-
-    changed = True
-    while changed:
-        changed = False
-        for name, mod in list(selected.items()):
-            missing = [
-                dep for dep in mod.meta.depends_on
-                if dep not in selected
-            ]
-            if not missing:
-                continue
-            auto_pruned[name] = sorted(missing)
-            selected.pop(name, None)
-            changed = True
-
-    enabled_modules = [
-        mod for mod in modules
-        if mod.meta.name in selected
-    ]
-    return enabled_modules, auto_pruned
 
 
 def compute_dirty_modules(

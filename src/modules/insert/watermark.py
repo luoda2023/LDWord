@@ -74,7 +74,6 @@ def _inject_text_watermark(header, text: str, wm_cfg) -> None:
 
     # VML 水印 XML
     vml_ns = "urn:schemas-microsoft-com:vml"
-    o_ns = "urn:schemas-microsoft-com:office:office"
 
     # 添加到页眉第一段
     if header.paragraphs:

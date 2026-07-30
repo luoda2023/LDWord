@@ -6,11 +6,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Iterable
 
 from src.config.feature_configs import default_continuous_page_number_phases
-from src.config.section_semantics import canonicalize_section_type
+from src.shared.engine.section_semantics import canonicalize_section_type
 
 if TYPE_CHECKING:
     from docx import Document
-    from src.config.feature_configs import HeaderFooterConfig
     from src.pipeline.context import PipelineContext
 
 

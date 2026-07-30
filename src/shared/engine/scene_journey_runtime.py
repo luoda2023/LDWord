@@ -1,35 +1,39 @@
-"""Runtime bridge from scene journey fixtures to execution reports.
+"""Project stable scene contracts into one product execution report.
 
-The scene matrix already knows which high-frequency journeys are success,
-degraded, failure, manual-boundary, or handoff paths.  This module projects
-that planning evidence onto one runtime config so reports can explain which
-journey expectations, repair targets, and artifact channels apply to the run.
+This module is deliberately runtime-only.  It may consume resolved
+configuration and declarative registries, but it must not import fixture,
+source-marker, dashboard, or release-gate audits.  The full development audit
+entry lives in :mod:`src.config.scene_journey_static_audit`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.config.scene_business_capability_matrix_audit import (
-    build_scene_business_capability_matrix_audit_report,
-)
-from src.config.scene_coverage_manifest import (
+from src.config.material_schema_registry import resolve_material_schema_ids
+from src.config.plugin_manual_gate import plugin_manual_gate_for_pack
+from src.config.scene_product_coverage_manifest import (
     coverage_candidate_keys_for_config,
     coverage_packs_for_config,
 )
-from src.config.scene_family_registry import PLANNED_SCENE_FAMILY_MAP
-from src.config.scene_user_journey_fixture_audit import (
-    build_scene_user_journey_fixture_audit_report,
+from src.config.scene_family_registry import (
+    PLANNED_SCENE_FAMILY_MAP,
+    get_planned_scene_family,
 )
+
+
+RUNTIME_EVIDENCE_SCOPE = "runtime_contract"
+STATIC_AUDIT_NOT_RUN = "not_run"
 
 
 @dataclass(frozen=True, slots=True)
 class SceneJourneyRuntimePath:
+    """One configured runtime contract, not a tested fixture journey."""
+
     path_id: str
     journey_type: str
     label: str
-    request_cell_ids: tuple[str, ...] = ()
-    fixture_ids: tuple[str, ...] = ()
+    contract_id: str = ""
     manual_gate_ids: tuple[str, ...] = ()
     expected_behaviors: tuple[str, ...] = ()
     report_expectations: tuple[str, ...] = ()
@@ -40,8 +44,7 @@ class SceneJourneyRuntimePath:
             "path_id": self.path_id,
             "journey_type": self.journey_type,
             "label": self.label,
-            "request_cell_ids": list(self.request_cell_ids),
-            "fixture_ids": list(self.fixture_ids),
+            "contract_id": self.contract_id,
             "manual_gate_ids": list(self.manual_gate_ids),
             "expected_behaviors": list(self.expected_behaviors),
             "report_expectations": list(self.report_expectations),
@@ -51,13 +54,17 @@ class SceneJourneyRuntimePath:
 
 @dataclass(frozen=True, slots=True)
 class SceneJourneyRuntimeResult:
+    """Report payload for contracts that apply to one resolved execution."""
+
     status: str
+    evidence_scope: str = RUNTIME_EVIDENCE_SCOPE
+    static_audit_status: str = STATIC_AUDIT_NOT_RUN
+    source_scan_performed: bool = False
     pack_ids: tuple[str, ...] = ()
     family_ids: tuple[str, ...] = ()
     capability_ids: tuple[str, ...] = ()
+    contract_ids: tuple[str, ...] = ()
     journey_type_ids: tuple[str, ...] = ()
-    request_cell_ids: tuple[str, ...] = ()
-    fixture_ids: tuple[str, ...] = ()
     manual_gate_ids: tuple[str, ...] = ()
     expected_behaviors: tuple[str, ...] = ()
     report_expectations: tuple[str, ...] = ()
@@ -73,18 +80,25 @@ class SceneJourneyRuntimeResult:
         return len(self.manual_gate_ids)
 
     @property
+    def contract_count(self) -> int:
+        return len(self.contract_ids)
+
+    @property
     def is_applicable(self) -> bool:
         return self.status != "not_applicable"
 
     def to_payload(self) -> dict[str, object]:
         return {
             "status": self.status,
+            "evidence_scope": self.evidence_scope,
+            "static_audit_status": self.static_audit_status,
+            "source_scan_performed": self.source_scan_performed,
             "pack_ids": list(self.pack_ids),
             "family_ids": list(self.family_ids),
             "capability_ids": list(self.capability_ids),
+            "contract_ids": list(self.contract_ids),
+            "contract_count": self.contract_count,
             "journey_type_ids": list(self.journey_type_ids),
-            "request_cell_ids": list(self.request_cell_ids),
-            "fixture_ids": list(self.fixture_ids),
             "manual_gate_ids": list(self.manual_gate_ids),
             "manual_gate_count": self.manual_gate_count,
             "expected_behaviors": list(self.expected_behaviors),
@@ -103,184 +117,217 @@ def build_scene_journey_runtime_evidence(
     *,
     max_path_samples: int = 24,
 ) -> SceneJourneyRuntimeResult:
-    """Build report-ready journey evidence for one runtime config."""
+    """Build lightweight evidence from the resolved runtime contract only.
 
-    packs = coverage_packs_for_config(config)
+    ``status`` describes projection/gating, not product maturity or static
+    audit success.  Source-marker and fixture validation is intentionally not
+    performed here.
+    """
+
+    packs = _runtime_packs_for_config(config)
     pack_ids = _unique_texts(pack.pack_id for pack in packs)
     family_ids = _family_ids_for_config(config, packs)
     if not pack_ids and not family_ids:
         return SceneJourneyRuntimeResult(status="not_applicable")
 
-    journey_report = build_scene_user_journey_fixture_audit_report()
-    capability_report = build_scene_business_capability_matrix_audit_report()
-    path_rows = tuple(
-        row
-        for row in journey_report.path_rows
-        if _intersects(row.pack_ids, pack_ids) or _intersects(row.family_ids, family_ids)
+    gates = tuple(
+        gate
+        for pack_id in pack_ids
+        if (gate := plugin_manual_gate_for_pack(pack_id)) is not None
     )
-    capability_rows = tuple(
-        row
-        for row in capability_report.rows
-        if _intersects(row.pack_ids, pack_ids) or _intersects(row.family_ids, family_ids)
-    )
-    if not path_rows and not capability_rows:
-        return SceneJourneyRuntimeResult(
-            status="not_applicable",
-            pack_ids=pack_ids,
-            family_ids=family_ids,
+    manual_gate_ids = _unique_texts(gate.gate_id for gate in gates)
+    expected_behaviors = _runtime_expected_behaviors(config, gates=gates)
+    report_expectations = _runtime_report_expectations(config, gates=gates)
+    artifact_channel_ids = _runtime_artifact_channel_ids(config, gates=gates)
+    repair_target_types = _runtime_repair_target_types(config, gates=gates)
+    boundary_notes = _runtime_boundary_notes(packs, family_ids)
+    contract_specs = _runtime_contract_specs(packs, family_ids)
+    contract_ids = tuple(spec[0] for spec in contract_specs)
+    paths = tuple(
+        SceneJourneyRuntimePath(
+            path_id=contract_id,
+            contract_id=contract_id,
+            journey_type=(
+                "manual_boundary" if manual_gate_ids else "configured_execution"
+            ),
+            label=label,
+            manual_gate_ids=manual_gate_ids,
+            expected_behaviors=expected_behaviors,
+            report_expectations=report_expectations,
+            boundary_notes=notes,
         )
-
-    manual_gate_ids = _unique_texts(
-        gate_id
-        for row in (*path_rows, *capability_rows)
-        for gate_id in getattr(row, "manual_gate_ids", ())
+        for contract_id, label, notes in contract_specs[
+            : max(0, int(max_path_samples))
+        ]
     )
-    report_expectations = _unique_texts(
-        expectation
-        for row in (*path_rows, *capability_rows)
-        for expectation in getattr(row, "report_expectations", ())
-    )
-    expected_behaviors = _unique_texts(
-        behavior
-        for row in (*path_rows, *capability_rows)
-        for behavior in getattr(row, "expected_behaviors", ())
-    )
-    artifact_channel_ids = _unique_texts(
-        channel
-        for row in capability_rows
-        for channel in getattr(row, "artifact_channel_ids", ())
-    )
-    status = "manual_gate_required" if manual_gate_ids else "ok"
-    sampled = tuple(
-        _runtime_path(row) for row in path_rows[: max(0, int(max_path_samples))]
-    )
+    journey_type_ids = _unique_texts(path.journey_type for path in paths)
+    status = "manual_gate_required" if manual_gate_ids else "contract_projected"
     return SceneJourneyRuntimeResult(
         status=status,
         pack_ids=pack_ids,
         family_ids=family_ids,
-        capability_ids=_unique_texts(row.capability_id for row in capability_rows),
-        journey_type_ids=_ordered_journey_types(row.journey_type for row in path_rows),
-        request_cell_ids=_unique_texts(
-            cell_id for row in path_rows for cell_id in row.request_cell_ids
-        ),
-        fixture_ids=_unique_texts(
-            fixture_id for row in path_rows for fixture_id in row.fixture_ids
-        ),
+        capability_ids=family_ids or pack_ids,
+        contract_ids=contract_ids,
+        journey_type_ids=journey_type_ids,
         manual_gate_ids=manual_gate_ids,
         expected_behaviors=expected_behaviors,
         report_expectations=report_expectations,
         artifact_channel_ids=artifact_channel_ids,
-        repair_target_types=_repair_target_types(
-            manual_gate_ids=manual_gate_ids,
-            report_expectations=report_expectations,
-            expected_behaviors=expected_behaviors,
-            journey_type_ids=(row.journey_type for row in path_rows),
-        ),
-        boundary_notes=_unique_texts(
-            note
-            for row in (*path_rows, *capability_rows)
-            for note in (
-                getattr(row, "boundary_notes", ())
-                or getattr(row, "boundary_note_ids", ())
-            )
-        ),
-        paths=sampled,
-        path_count=len(path_rows),
-        sampled_path_count=len(sampled),
+        repair_target_types=repair_target_types,
+        boundary_notes=boundary_notes,
+        paths=paths,
+        path_count=len(contract_specs),
+        sampled_path_count=len(paths),
     )
 
 
 def _family_ids_for_config(config, packs) -> tuple[str, ...]:
     candidate_keys = coverage_candidate_keys_for_config(config)
+    pack_family_ids = _unique_texts(
+        family_id for pack in packs for family_id in pack.planned_family_ids
+    )
+    exact_family_ids = _unique_texts(
+        key
+        for key in candidate_keys
+        if key in PLANNED_SCENE_FAMILY_MAP and key in pack_family_ids
+    )
+    # Prefer the exact resolved family.  Falling back to all pack families is
+    # necessary for older top-level scenes that do not expose a family id.
+    return exact_family_ids or pack_family_ids
+
+
+def _runtime_packs_for_config(config):
+    """Remove broad top-level fallbacks when an exact family is resolved."""
+
+    packs = coverage_packs_for_config(config)
+    candidate_keys = coverage_candidate_keys_for_config(config)
+    exact_family_ids = {
+        key for key in candidate_keys if key in PLANNED_SCENE_FAMILY_MAP
+    }
+    if not exact_family_ids:
+        return packs
+    exact_packs = tuple(
+        pack
+        for pack in packs
+        if exact_family_ids.intersection(pack.planned_family_ids)
+    )
+    return exact_packs or packs
+
+
+def _runtime_contract_specs(packs, family_ids) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    specs: list[tuple[str, str, tuple[str, ...]]] = []
+    if family_ids:
+        for family_id in family_ids:
+            family = get_planned_scene_family(family_id)
+            if family is None:
+                continue
+            specs.append(
+                (
+                    f"family:{family.family_id}",
+                    family.name,
+                    tuple(family.boundaries),
+                )
+            )
+    if not specs:
+        specs.extend(
+            (f"pack:{pack.pack_id}", pack.label, (pack.boundary,))
+            for pack in packs
+        )
+    return tuple(specs)
+
+
+def _runtime_expected_behaviors(config, *, gates) -> tuple[str, ...]:
+    values: list[str] = ["apply_configured_modules"]
+    compliance = getattr(config, "compliance_profile", None)
+    object_preflight = getattr(compliance, "object_preflight", None)
+    if bool(getattr(object_preflight, "enabled", False)):
+        values.append("preflight_fragile_objects")
+    if _runtime_material_schema_ids(config):
+        values.append("validate_material_contract")
+    if gates:
+        values.append("require_manual_confirmation")
+    return _unique_texts(values)
+
+
+def _runtime_report_expectations(config, *, gates) -> tuple[str, ...]:
+    values: list[str] = ["pipeline_execution_report", "coverage_boundaries"]
+    compliance = getattr(config, "compliance_profile", None)
+    object_preflight = getattr(compliance, "object_preflight", None)
+    if bool(getattr(object_preflight, "enabled", False)):
+        values.append("object_preflight")
+    if _runtime_material_schema_ids(config):
+        values.append("material_field_consistency")
+    if str(getattr(compliance, "count_profile_id", "") or "").strip():
+        values.append("count_report")
+    if _runtime_delivery_preset_ids(config):
+        values.append("delivery_artifact_report")
+    input_profile = getattr(config, "input_source_profile", None)
+    if bool(getattr(input_profile, "require_material_package", False)):
+        values.append("material_package")
+    if gates:
+        values.append("plugin_manual_gate")
+    if any(bool(getattr(gate, "confidence_report_required", False)) for gate in gates):
+        values.append("conversion_confidence_report")
+    return _unique_texts(values)
+
+
+def _runtime_artifact_channel_ids(config, *, gates) -> tuple[str, ...]:
+    values: list[str] = ["execution_report"]
+    values.extend(
+        f"delivery:{preset_id}" for preset_id in _runtime_delivery_preset_ids(config)
+    )
+    input_profile = getattr(config, "input_source_profile", None)
+    if bool(getattr(input_profile, "require_material_package", False)):
+        values.append("material_package")
+    if gates:
+        values.append("manual_gate_receipt")
+    return _unique_texts(values)
+
+
+def _runtime_repair_target_types(config, *, gates) -> tuple[str, ...]:
+    values: list[str] = []
+    compliance = getattr(config, "compliance_profile", None)
+    object_preflight = getattr(compliance, "object_preflight", None)
+    if bool(getattr(object_preflight, "enabled", False)):
+        values.append("object_preflight")
+    if _runtime_material_schema_ids(config):
+        values.append("material_repair")
+    if str(getattr(compliance, "count_profile_id", "") or "").strip():
+        values.append("count_profile")
+    if _runtime_delivery_preset_ids(config):
+        values.append("delivery_preset")
+    if gates:
+        values.append("plugin_manual_gate")
+    return _unique_texts(values)
+
+
+def _runtime_boundary_notes(packs, family_ids) -> tuple[str, ...]:
     return _unique_texts(
         (
-            *(family_id for pack in packs for family_id in pack.planned_family_ids),
-            *(key for key in candidate_keys if key in PLANNED_SCENE_FAMILY_MAP),
+            *(pack.boundary for pack in packs),
+            *(
+                boundary
+                for family_id in family_ids
+                if (family := get_planned_scene_family(family_id)) is not None
+                for boundary in family.boundaries
+            ),
         )
     )
 
 
-def _runtime_path(row) -> SceneJourneyRuntimePath:
-    return SceneJourneyRuntimePath(
-        path_id=str(getattr(row, "path_id", "") or ""),
-        journey_type=str(getattr(row, "journey_type", "") or ""),
-        label=str(getattr(row, "label", "") or ""),
-        request_cell_ids=tuple(getattr(row, "request_cell_ids", ()) or ()),
-        fixture_ids=tuple(getattr(row, "fixture_ids", ()) or ()),
-        manual_gate_ids=tuple(getattr(row, "manual_gate_ids", ()) or ()),
-        expected_behaviors=tuple(getattr(row, "expected_behaviors", ()) or ()),
-        report_expectations=tuple(getattr(row, "report_expectations", ()) or ()),
-        boundary_notes=tuple(getattr(row, "boundary_notes", ()) or ()),
+def _runtime_material_schema_ids(config) -> tuple[str, ...]:
+    input_profile = getattr(config, "input_source_profile", None)
+    return resolve_material_schema_ids(
+        str(getattr(input_profile, "material_schema_id", "") or ""),
+        list(getattr(input_profile, "material_schema_ids", []) or []),
     )
 
 
-def _repair_target_types(
-    *,
-    manual_gate_ids: tuple[str, ...],
-    report_expectations: tuple[str, ...],
-    expected_behaviors: tuple[str, ...],
-    journey_type_ids,
-) -> tuple[str, ...]:
-    targets: list[str] = []
-    lowered_reports = {item.casefold() for item in report_expectations}
-    lowered_behaviors = {item.casefold() for item in expected_behaviors}
-    lowered_journeys = {str(item or "").casefold() for item in journey_type_ids}
-
-    if manual_gate_ids or "manual_boundary" in lowered_journeys:
-        targets.append("plugin_manual_gate")
-    if any("object_preflight" in item for item in lowered_reports):
-        targets.append("object_preflight")
-    if lowered_reports & {
-        "material_package",
-        "attachment_inventory",
-        "missing_items_report",
-        "asset_report",
-        "product_asset_inventory",
-        "budget_attachment_report",
-        "signature_asset_report",
-        "missing_required_fields_report",
-    }:
-        targets.append("material_repair")
-    if "count_report" in lowered_reports:
-        targets.append("count_profile")
-    if lowered_reports & {"rule_source_governance", "journal_rule_source_governance"}:
-        targets.append("rule_source")
-    if lowered_reports & {
-        "customer_internal_version_report",
-        "official_delivery_status_report",
-        "policy_archive",
-        "batch_report",
-    }:
-        targets.append("delivery_preset")
-    if lowered_reports & {"conversion_confidence_report", "import_handoff"}:
-        targets.append("import_handoff")
-    if lowered_reports & {"fixed_layout_row_height", "placeholder_residue_report"}:
-        targets.append("fixed_layout_profile")
-    if (
-        lowered_reports
-        & {"coverage_boundaries", "plugin_manual_gate", "professional_source_quality_report"}
-    ) or lowered_behaviors & {"block_report", "skip_report"}:
-        targets.append("boundary_confirmation")
-    return _unique_texts(targets)
-
-
-def _ordered_journey_types(values) -> tuple[str, ...]:
-    order = {
-        "success": 0,
-        "degraded": 1,
-        "failure": 2,
-        "manual_boundary": 3,
-        "ambiguous_decision": 4,
-        "handoff": 5,
-        "negative_control": 6,
-    }
-    return tuple(
-        sorted(_unique_texts(values), key=lambda value: order.get(value, 100))
+def _runtime_delivery_preset_ids(config) -> tuple[str, ...]:
+    return _unique_texts(
+        getattr(preset, "preset_id", "")
+        for preset in list(getattr(config, "delivery_presets", []) or [])
     )
-
-
-def _intersects(left, right) -> bool:
-    return bool(set(left or ()) & set(right or ()))
 
 
 def _unique_texts(values) -> tuple[str, ...]:
@@ -296,6 +343,8 @@ def _unique_texts(values) -> tuple[str, ...]:
 
 
 __all__ = [
+    "RUNTIME_EVIDENCE_SCOPE",
+    "STATIC_AUDIT_NOT_RUN",
     "SceneJourneyRuntimePath",
     "SceneJourneyRuntimeResult",
     "build_scene_journey_runtime_evidence",
