@@ -18,6 +18,7 @@ from src.services.material_assets import (
     question_figure_items,
 )
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.deferred_call import defer_qt_method
 from src.shared.ui.theme import get_theme
 
 
@@ -90,8 +91,10 @@ class QuestionFigureItemsPresenterMixin:
             button.setStyleSheet(build_button_stylesheet(get_theme()))
             button.setToolTip("替换这一题的图片")
             button.clicked.connect(
-                lambda *_args, selected_row=row_index: self._select_question_figure_item_file(
-                    selected_row
+                lambda *_args, selected_row=row_index: defer_qt_method(
+                    self,
+                    "_select_question_figure_item_file",
+                    selected_row,
                 )
             )
             table.setCellWidget(row_index, 4, button)
@@ -107,8 +110,6 @@ class QuestionFigureItemsPresenterMixin:
             return
         item = table.item(row, 0)
         preview_reference = str(item.data(Qt.UserRole) if item is not None else "").strip()
-        preview_source = str(item.data(Qt.UserRole + 1) if item is not None else "").strip()
-        preview_kind = str(item.data(Qt.UserRole + 2) if item is not None else "").strip()
         compare_reference = str(item.data(Qt.UserRole + 3) if item is not None else "").strip()
         compare_source = str(item.data(Qt.UserRole + 4) if item is not None else "").strip()
         compare_display_name = str(item.data(Qt.UserRole + 5) if item is not None else "").strip()

@@ -24,7 +24,7 @@ class BasePanel(QWidget):
         _connect_signals()  — 连接 bridge 信号
 
     子类可选重写:
-        on_scene_changed()    — 场景切换响应
+        on_scene_changed()    — 方案切换响应
         on_template_changed() — 模板切换响应
     """
 
@@ -46,7 +46,7 @@ class BasePanel(QWidget):
         raise NotImplementedError
 
     def on_scene_changed(self, scene: SceneWorkspace) -> None:
-        """场景切换时的响应，子类按需重写。"""
+        """方案切换时的响应，子类按需重写。"""
 
     def on_template_changed(self, template: TemplateConfig) -> None:
         """模板切换时的响应，子类按需重写。"""

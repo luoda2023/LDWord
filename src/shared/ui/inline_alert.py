@@ -6,12 +6,14 @@ from src.qt_api import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSize,
     QWidget,
     Qt,
     Signal,
 )
 
 from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
+from src.shared.ui.icons.catalog import get_icon
 
 
 class InlineAlert(QWidget):
@@ -65,13 +67,8 @@ class InlineAlert(QWidget):
         layout.setSpacing(12)
 
         # 图标
-        icon_map = {
-            "info": "ℹ️",
-            "success": "✓",
-            "warning": "⚠️",
-            "error": "✕",
-        }
-        self._icon_label = QLabel(icon_map.get(self._variant, "ℹ️"))
+        self._icon_label = QLabel()
+        self._icon_label.setFixedSize(20, 20)
         self._icon_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._icon_label)
 
@@ -82,8 +79,10 @@ class InlineAlert(QWidget):
 
         # 关闭按钮
         if self._closable:
-            self._close_btn = QPushButton("×")
-            self._close_btn.setFixedSize(20, 20)
+            self._close_btn = QPushButton()
+            self._close_btn.setFixedSize(24, 24)
+            self._close_btn.setIconSize(QSize(14, 14))
+            self._close_btn.setAccessibleName("关闭提示")
             self._close_btn.setCursor(Qt.PointingHandCursor)
             self._close_btn.clicked.connect(self._on_close)
             layout.addWidget(self._close_btn)
@@ -102,6 +101,13 @@ class InlineAlert(QWidget):
         accent, bg, border = variant_colors.get(
             self._variant, variant_colors["info"]
         )
+        icon_name = {
+            "info": "info",
+            "success": "circle-check",
+            "warning": "alert-triangle",
+            "error": "circle-x",
+        }.get(self._variant, "info")
+        self._icon_label.setPixmap(get_icon(icon_name, 18, accent).pixmap(18, 18))
 
         self.setStyleSheet(
             f"""
@@ -117,8 +123,6 @@ class InlineAlert(QWidget):
             f"""
             QLabel {{
                 color: {accent};
-                font-size: 16px;
-                font-weight: bold;
                 background: transparent;
                 border: none;
             }}
@@ -137,20 +141,17 @@ class InlineAlert(QWidget):
         )
 
         if self._closable:
+            self._close_btn.setIcon(get_icon("x", 14, t.text_secondary))
             self._close_btn.setStyleSheet(
                 f"""
                 QPushButton {{
                     background: transparent;
                     border: none;
-                    color: {t.text_hint};
-                    font-size: 20px;
-                    font-weight: bold;
                     padding: 0;
                 }}
                 QPushButton:hover {{
                     background: {theme_rgba(t.text_primary, 0.10)};
-                    border-radius: 10px;
-                    color: {t.text_primary};
+                    border-radius: 12px;
                 }}
                 """
             )

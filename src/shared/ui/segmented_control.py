@@ -58,7 +58,7 @@ class SegmentedControl(QWidget):
     def _setup_ui(self) -> None:
         """设置 UI 结构"""
         self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(2, 2, 2, 2)
+        self._layout.setContentsMargins(3, 3, 3, 3)
         self._layout.setSpacing(0)
 
         # 按钮组
@@ -68,13 +68,16 @@ class SegmentedControl(QWidget):
     def _apply_theme(self) -> None:
         """应用主题样式"""
         t = get_theme()
+        track_radius = max(t.radius_sm + 2, 8)
+        min_height = max(t.control_height_md + 6, 36)
+        self.setMinimumHeight(min_height)
 
         self.setStyleSheet(
             f"""
             SegmentedControl {{
-                background: {t.bg_hover};
+                background: {t.bg_window};
                 border: 1px solid {t.border_light};
-                border-radius: {t.radius_full}px;
+                border-radius: {track_radius}px;
             }}
             """
         )
@@ -151,6 +154,10 @@ class SegmentedControl(QWidget):
         t = get_theme()
         btn = self._segments[index]
         is_checked = btn.isChecked()
+        segment_radius = max(t.radius_sm, 6)
+        min_height = max(t.control_height_md, 30)
+
+        btn.setGraphicsEffect(None)
 
         btn.setStyleSheet(
             f"""
@@ -158,18 +165,21 @@ class SegmentedControl(QWidget):
                 background: {t.primary if is_checked else 'transparent'};
                 color: {t.text_on_primary if is_checked else t.text_secondary};
                 border: none;
-                border-radius: {max(t.radius_full - 2, t.radius_sm)}px;
-                padding: {t.button_padding_y}px {t.button_padding_x}px;
-                font-size: {t.font_size_sm}px;
-                font-weight: {t.font_weight_emphasis if is_checked else 500};
-                min-height: 28px;
+                border-radius: {segment_radius}px;
+                padding: 0 {t.button_padding_x}px;
+                font-size: {t.font_size_md}px;
+                font-weight: {t.font_weight_emphasis if is_checked else t.font_weight_medium};
+                min-height: {min_height}px;
             }}
             QPushButton:hover {{
-                background: {t.primary_hover if is_checked else t.bg_selected};
+                background: {t.primary_hover if is_checked else t.bg_card};
                 color: {t.text_on_primary if is_checked else t.text_primary};
             }}
             QPushButton:pressed {{
                 background: {t.primary_pressed if is_checked else t.bg_hover};
+            }}
+            QPushButton:disabled {{
+                color: {t.text_disabled};
             }}
             """
         )
@@ -183,3 +193,30 @@ class SegmentedControl(QWidget):
         if 0 <= index < len(self._segments):
             return self._segments[index].text()
         return ""
+
+    def set_segment_text(self, index: int, text: str) -> None:
+        """Update one segment label without exposing the backing button."""
+
+        if not (0 <= index < len(self._segments)):
+            return
+        self._segments[index].setText(str(text or ""))
+
+    def set_segment_enabled(
+        self,
+        index: int,
+        enabled: bool,
+        *,
+        tooltip: str = "",
+    ) -> None:
+        """Enable one segment without exposing its button implementation."""
+
+        if not (0 <= index < len(self._segments)):
+            return
+        button = self._segments[index]
+        button.setEnabled(bool(enabled))
+        button.setToolTip(str(tooltip or ""))
+
+    def is_segment_enabled(self, index: int) -> bool:
+        if not (0 <= index < len(self._segments)):
+            return False
+        return self._segments[index].isEnabled()

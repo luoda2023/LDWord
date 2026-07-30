@@ -76,6 +76,7 @@ class InspectorForm(QWidget):
         column_stretches: Sequence[int] | None = None,
         align_trailing_labels: bool | None = None,
         stack_slack: int = 0,
+        coordinated_responsive: bool = True,
     ) -> TemplateFormGrid:
         resolved_gap = self._resolve_column_gap(column_gap, column_stretches)
         grid = TemplateFormGrid(
@@ -85,6 +86,7 @@ class InspectorForm(QWidget):
             column_stretches=column_stretches,
             align_trailing_labels=align_trailing_labels,
             stack_slack=stack_slack,
+            coordinated_responsive=coordinated_responsive,
         )
         self.add_widget(grid)
         return grid

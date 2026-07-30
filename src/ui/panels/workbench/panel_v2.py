@@ -1,26 +1,31 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
-from dataclasses import asdict
+from importlib import import_module
 
 from src.config.library import get_scene_entry, get_template_entry, load_template_from_library
+from src.config.object_preflight_evidence import (
+    ObjectPreflightEvidence,
+    build_object_preflight_evidence,
+    object_preflight_evidence_is_current,
+)
 from src.config.scene import SceneWorkspace
-
-from src.config.template import TemplateConfig
-
-from src.qt_api import QFileDialog, QWidget
-
-from src.shared.ui import DetailPaneController, MasterDetailShell
-
-from src.shared.ui.theme import bind_theme, get_theme
-from src.shared.engine.object_preflight import (
-    inspect_docx_package,
-    object_preflight_module_skips,
+from src.config.scene_surface_registry import (
+    scene_uses_exam_paper_surface,
+    scene_uses_official_document_surface,
 )
 
+from src.config.template import TemplateConfig
+from src.qt_api import QWidget
+
+from src.shared.ui import DetailPaneController, MasterDetailShell, Toast
+
+from src.shared.ui.theme import bind_theme, get_theme
+
 from src.ui.adapters.workbench_execution_adapter import WorkbenchExecutionAdapter
-from src.ui.adapters.workbench_issue_navigation import (
+from src.ui.adapters.workbench_product_issue_navigation import (
     WorkbenchIssueNavigationProjection,
     workbench_issue_navigation_for_target,
 )
@@ -33,12 +38,10 @@ from src.ui.adapters.workbench_strategy_adapter import WorkbenchStrategyAdapter
 
 from src.ui.base_panel import BasePanel
 from src.ui.bridge import navigation_intent_value
-from src.ui.panel_registry import PANEL_SPECS
-
-from .config_management_detail import ConfigManagementDetail
-
+from src.ui.panel_specs import PANEL_SPECS
 
 from .document_path_controller import WorkbenchDocumentPathController
+from .document_scope_controller import WorkbenchDocumentScopeController
 
 from .execution_controller import WorkbenchExecutionController
 
@@ -52,8 +55,6 @@ from .feature_detail_panes import (
 
     ContentDataDetailPane,
 
-    ExecutionHistoryDetailPane,
-
     FormulaDetailPane,
 
     TableChartDetailPane,
@@ -64,12 +65,10 @@ from .navigation_controller import WorkbenchNavigationController
 
 from .quick_execution_detail import QuickExecutionDetail
 
-from .scene_presets import (
+from src.config.scene_presets import (
     CAPABILITY_FEATURE_CARD_DEFINITIONS,
     CAPABILITY_FEATURE_CARD_ORDER,
 )
-
-from .strategy_card import StrategyCard
 
 from .styles import apply_workbench_v2_shell_theme
 
@@ -159,8 +158,7 @@ class WorkbenchPanel(BasePanel):
     CARD_DEFINITIONS = {
 
         "quick_execute": ("\u5feb\u901f\u6267\u884c", "zap"),
-
-        "config_management": ("\u914d\u7f6e\u7ba1\u7406", "save"),
+        "batch_generate": ("批量生成", "layers"),
 
     }
     CARD_DEFINITIONS.update(CAPABILITY_FEATURE_CARD_DEFINITIONS)
@@ -178,8 +176,9 @@ class WorkbenchPanel(BasePanel):
         self._execution_session.set_active_worker(worker)
 
     def shutdown_active_execution(self, timeout_ms: int | None = 1000) -> bool:
-
-        return self._execution_session.shutdown_active_execution(timeout_ms=timeout_ms)
+        return self._execution_session.shutdown_active_execution(
+            timeout_ms=timeout_ms
+        )
 
     def _setup_ui(self) -> None:
 
@@ -219,9 +218,6 @@ class WorkbenchPanel(BasePanel):
 
         self._current_scene: SceneWorkspace | None = None
 
-        self._scene_dirty = self.bridge.is_scene_dirty()
-
-        self._template_dirty = self.bridge.is_template_dirty()
         self._ignore_own_scene_changed = False
         self._skip_next_scene_dirty_recheck = False
 
@@ -233,8 +229,9 @@ class WorkbenchPanel(BasePanel):
 
         )
         self._pending_object_preflight_confirmation_key = ""
-
-        self._strategy_card = StrategyCard(self)
+        self._pending_object_preflight_evidence: ObjectPreflightEvidence | None = None
+        self._confirmed_object_preflight_source_revision = ""
+        self._confirmed_object_preflight_digest = ""
 
         self._strategy_state = self._strategy_adapter.build_summary(None, None)
 
@@ -256,8 +253,17 @@ class WorkbenchPanel(BasePanel):
     def _build_detail_panes(self) -> None:
 
         self._quick_execution_detail = QuickExecutionDetail(self)
+        if hasattr(self._quick_execution_detail, "set_work_mode"):
+            self._quick_execution_detail.set_work_mode(self.bridge.current_work_mode_id())
 
-        self._config_management_detail = ConfigManagementDetail(self._strategy_card, self.bridge, self)
+        # Batch generation is a core Workbench destination. Keep this as a
+        # static import so release packaging can always discover the module.
+        from .batch_generation_detail import BatchGenerationDetail
+
+        self._batch_generation_detail = BatchGenerationDetail(self)
+        self._batch_generation_detail.set_work_mode(
+            self.bridge.current_work_mode_id()
+        )
 
         # Feature detail panes mapped to new capability group IDs
         self._table_chart_detail = TableChartDetailPane(self)
@@ -274,13 +280,9 @@ class WorkbenchPanel(BasePanel):
 
         self._quick_fill_detail = self._content_fill_detail
 
-        self._execution_history_detail = ExecutionHistoryDetailPane(self)
-
         detail_map = {
 
             "quick_execute": self._quick_execution_detail,
-
-            "config_management": self._config_management_detail,
 
             "table_chart": self._table_chart_detail,
 
@@ -297,6 +299,8 @@ class WorkbenchPanel(BasePanel):
             "quick_fill": self._quick_fill_detail,
 
         }
+        if self._batch_generation_detail is not None:
+            detail_map["batch_generate"] = self._batch_generation_detail
 
         self._details = DetailPaneController(
 
@@ -323,14 +327,25 @@ class WorkbenchPanel(BasePanel):
             pick_document_path=self._pick_document_path,
 
         )
+        self._document_scope = WorkbenchDocumentScopeController(
+            parent=self,
+            source_path=lambda: (
+                self._document_paths.selected_existing_document() or ""
+            ),
+            mode_id=self._current_work_mode_id,
+            scene=lambda: (
+                self._current_scene
+                or self._quick_execution_detail.current_scene()
+            ),
+            status_detail=self._quick_execution_detail,
+        )
 
         self._navigation = WorkbenchNavigationController(
 
             self._nav_rail,
 
             self._quick_execution_detail,
-
-            self._config_management_detail,
+            self._batch_generation_detail,
 
             card_definitions=self.CARD_DEFINITIONS,
 
@@ -347,10 +362,9 @@ class WorkbenchPanel(BasePanel):
             self._execution_adapter,
 
             self._quick_execution_detail,
+            self._batch_generation_detail,
 
-            self._execution_history_detail,
-
-            refresh_quick_execute_card=self._refresh_quick_execute_card,
+            refresh_navigation=self._refresh_fixed_cards,
 
             clear_execution_worker=self._clear_execution_worker,
 
@@ -372,7 +386,10 @@ class WorkbenchPanel(BasePanel):
 
             self._current_scene = self._quick_execution_detail.current_scene()
 
-            scene_entry = get_scene_entry(self._current_scene.scene_id)
+            scene_entry = get_scene_entry(
+                self._current_scene.scene_id,
+                mode_id=self._current_work_mode_id(),
+            )
 
             self.bridge.set_current_scene(
 
@@ -383,6 +400,8 @@ class WorkbenchPanel(BasePanel):
                 path=str(scene_entry.path) if scene_entry is not None else "",
 
                 source="library" if scene_entry is not None else "builtin",
+
+                source_type=scene_entry.source_type if scene_entry is not None else "builtin",
 
                 emit_signal=False,
 
@@ -398,9 +417,15 @@ class WorkbenchPanel(BasePanel):
 
             if template_id:
 
-                template_entry = get_template_entry(template_id)
+                template_entry = get_template_entry(
+                    template_id,
+                    mode_id=self._current_work_mode_id(),
+                )
 
-                self._current_template = load_template_from_library(template_id)
+                self._current_template = load_template_from_library(
+                    template_id,
+                    mode_id=self._current_work_mode_id(),
+                )
 
                 self.bridge.set_current_template(
 
@@ -412,23 +437,47 @@ class WorkbenchPanel(BasePanel):
 
                     source="library" if template_entry is not None else "builtin",
 
+                    source_type=(
+                        template_entry.source_type if template_entry is not None else "builtin"
+                    ),
+
                     emit_signal=False,
 
                 )
 
         self._quick_execution_detail.set_scene_context(self._current_scene)
 
-        self._config_management_detail.set_current_scene(self._current_scene)
-
         self._quick_execution_detail.set_template_context(self._current_template)
-
-        if self._current_template is not None:
-
-            self._config_management_detail.set_current_template(self._current_template)
+        current_document_path = str(
+            self.bridge.current_document_path() or ""
+        ).strip()
+        if current_document_path:
+            selected_document = self._document_paths.apply_loaded_document(
+                current_document_path
+            )
+            if selected_document:
+                self._document_scope.start_scan(selected_document)
 
         material_context = self.bridge.current_material_context()
         self._content_fill_detail.set_material_context(material_context, emit_signal=False)
         self._quick_execution_detail.set_material_context(material_context)
+        if hasattr(self.bridge, "current_material_preview_snapshot"):
+            self._quick_execution_detail.set_material_preview_snapshot(
+                self.bridge.current_material_preview_snapshot()
+            )
+        if self._batch_generation_detail is not None:
+            self._batch_generation_detail.set_source_document(
+                self.bridge.current_document_path()
+            )
+            self._batch_generation_detail.set_scene_context(self._current_scene)
+        self._quick_execution_detail.set_official_document_type_id(
+            self.bridge.current_official_document_type_id()
+        )
+        self._document_scope.recheck()
+        if self._batch_generation_detail is not None:
+            self._batch_generation_detail.set_material_batch_selection(
+                self.bridge.current_material_batch_selection()
+            )
 
     def _connect_signals(self) -> None:
 
@@ -436,13 +485,24 @@ class WorkbenchPanel(BasePanel):
 
         self.bridge.scene_changed.connect(self.on_scene_changed)
 
+        if hasattr(self.bridge, "work_mode_changed"):
+            self.bridge.work_mode_changed.connect(self._on_work_mode_changed)
+
         self.bridge.material_context_changed.connect(self._on_material_context_changed)
+        if hasattr(self.bridge, "material_preview_snapshot_changed"):
+            self.bridge.material_preview_snapshot_changed.connect(
+                self._on_material_preview_snapshot_changed
+            )
+        self.bridge.official_document_type_changed.connect(
+            self._on_official_document_type_changed
+        )
+        self.bridge.material_batch_selection_changed.connect(
+            self._on_material_batch_selection_changed
+        )
 
         self.bridge.document_loaded.connect(self._on_document_loaded)
 
         self.bridge.scene_dirty_changed.connect(self._on_scene_dirty_changed)
-
-        self.bridge.template_dirty_changed.connect(self._on_template_dirty_changed)
 
         self._nav_rail.card_selected.connect(self._on_card_selected)
 
@@ -452,25 +512,71 @@ class WorkbenchPanel(BasePanel):
 
         self._quick_execution_detail.material_repair_requested.connect(self._open_material_repair_target)
 
-        self._quick_execution_detail.issue_repair_requested.connect(self._open_issue_repair_target)
-
         self._quick_execution_detail.summary_changed.connect(self._on_quick_summary_changed)
 
         self._quick_execution_detail.binding_changed.connect(self._on_quick_binding_changed)
+        if self._batch_generation_detail is not None:
+            self._batch_generation_detail.binding_changed.connect(
+                self._on_quick_binding_changed
+            )
 
         self._quick_execution_detail.scene_config_changed.connect(self._on_quick_scene_config_changed)
+        self._quick_execution_detail.official_document_type_changed.connect(
+            self._sync_official_document_type_from_quick
+        )
 
         self._quick_execution_detail.execute_requested.connect(self._execute_requested)
+        if self._batch_generation_detail is not None:
+            self._batch_generation_detail.source_document_selected.connect(
+                self._on_batch_detail_document_selected
+            )
+            self._batch_generation_detail.execute_requested.connect(
+                self._start_batch_execution
+            )
+            self._batch_generation_detail.retry_requested.connect(
+                self._start_failed_batch_retry
+            )
+            self._batch_generation_detail.cancel_requested.connect(
+                self._cancel_execution
+            )
+            self._batch_generation_detail.summary_changed.connect(
+                self._refresh_batch_generate_card
+            )
 
         self._quick_execution_detail.cancel_requested.connect(self._cancel_execution)
 
-        self._quick_execution_detail.document_selected.connect(self._on_quick_detail_document_selected)
+        self._quick_execution_detail.object_preflight_cancel_requested.connect(
+            self._cancel_object_preflight_confirmation
+        )
 
-        self._config_management_detail.summary_changed.connect(self._refresh_config_management_card)
+        self._quick_execution_detail.document_selected.connect(self._on_quick_detail_document_selected)
+        self._quick_execution_detail.document_scope_review_requested.connect(
+            self._document_scope.review
+        )
 
         self._content_fill_detail.material_context_changed.connect(self._sync_material_context_from_detail)
+        self._quick_execution_detail.material_context_changed.connect(
+            self._sync_material_context_from_quick_detail
+        )
 
         self._nav_rail.select_card(self._nav_rail.selected_card_id() or "quick_execute")
+
+    def _current_work_mode_id(self) -> str:
+        if hasattr(self.bridge, "current_work_mode_id"):
+            return str(self.bridge.current_work_mode_id() or "").strip()
+        return "custom"
+
+    def _on_work_mode_changed(self, mode) -> None:
+        mode_id = str(getattr(mode, "mode_id", "") or "").strip() or self._current_work_mode_id()
+        self._document_scope.reset_decisions()
+        if hasattr(self._quick_execution_detail, "set_work_mode"):
+            self._quick_execution_detail.set_work_mode(mode_id)
+        if self._batch_generation_detail is not None:
+            self._batch_generation_detail.set_work_mode(mode_id)
+        self._quick_execution_detail.set_official_document_type_id(
+            self.bridge.current_official_document_type_id()
+        )
+        self._document_scope.recheck()
 
     def closeEvent(self, event) -> None:
 
@@ -478,6 +584,10 @@ class WorkbenchPanel(BasePanel):
 
             event.ignore()
 
+            return
+
+        if not self._document_scope.shutdown(timeout_ms=1000):
+            event.ignore()
             return
 
         super().closeEvent(event)
@@ -491,10 +601,6 @@ class WorkbenchPanel(BasePanel):
             strategy_state=self._strategy_state,
 
             execution_worker=self._execution_worker,
-
-            scene_dirty=self._scene_dirty,
-
-            template_dirty=self._template_dirty,
 
         )
 
@@ -510,17 +616,8 @@ class WorkbenchPanel(BasePanel):
 
         )
 
-    def _refresh_config_management_card(self) -> None:
-
-        self._navigation.refresh_config_management_card(
-
-            strategy_state=self._strategy_state,
-
-            scene_dirty=self._scene_dirty,
-
-            template_dirty=self._template_dirty,
-
-        )
+    def _refresh_batch_generate_card(self) -> None:
+        self._navigation.refresh_batch_generate_card()
 
     def _refresh_strategy_summary(self) -> None:
 
@@ -541,16 +638,29 @@ class WorkbenchPanel(BasePanel):
             strict_mode=self._strategy_state.strict_mode if self._strategy_state.source_type == "scene" else None,
 
         )
+        if self._batch_generation_detail is not None:
+            self._batch_generation_detail.set_strategy_context(
+                plan_label=(
+                    self._strategy_state.name
+                    if self._strategy_state.source_type == "scene"
+                    else self._strategy_state.scene_label
+                ),
+                template_label=self._strategy_state.template_label,
+                template_id=template_id,
+            )
 
     def _sync_strategy_state(self) -> None:
 
         self._strategy_state = self._strategy_adapter.build_summary(self._current_template, self._current_scene)
 
-        self._strategy_card.set_state(self._strategy_state)
-
     def _on_quick_detail_document_selected(self, file_path: str) -> None:
 
         self._clear_object_preflight_confirmation()
+        if not str(file_path or "").strip():
+            self._document_paths.clear_selection()
+            self.bridge.set_current_document_path("", emit_signal=False)
+            self._document_scope.clear()
+            return
 
         selected = self._document_paths.accept_detail_selection(file_path)
 
@@ -558,7 +668,14 @@ class WorkbenchPanel(BasePanel):
 
             return
 
+        if self._batch_generation_detail is not None:
+            self._batch_generation_detail.set_source_document(selected)
         self.bridge.set_current_document_path(selected)
+
+    def _on_batch_detail_document_selected(self, file_path: str) -> None:
+        """Publish a source chosen on the batch page through the shared bridge."""
+
+        self._on_quick_detail_document_selected(file_path)
 
     def _on_feature_toggled(self, _feature_id: str, _enabled: bool) -> None:
 
@@ -570,17 +687,39 @@ class WorkbenchPanel(BasePanel):
 
         self._refresh_quick_execute_card()
 
-        self._refresh_config_management_card()
-
     def _on_quick_binding_changed(self, scene: SceneWorkspace, template_id: str) -> None:
 
         self._clear_object_preflight_confirmation()
 
+        current_bridge_scene = self.bridge.current_scene()
+        current_scene_id = str(self.bridge.current_scene_id() or "").strip()
+        next_scene_id = str(getattr(scene, "scene_id", "") or "").strip()
+        if (
+            self.bridge.is_scene_dirty()
+            and current_bridge_scene is not None
+            and current_scene_id
+            and next_scene_id != current_scene_id
+        ):
+            self._quick_execution_detail.set_scene_context(current_bridge_scene)
+            if self._batch_generation_detail is not None:
+                self._batch_generation_detail.set_scene_context(
+                    current_bridge_scene
+                )
+            Toast.show_warning(
+                "\u5f53\u524d\u65b9\u6848\u6709\u672a\u4fdd\u5b58\u4fee\u6539\uff0c\u8bf7\u5148\u4fdd\u5b58\u6216\u6062\u590d\u540e\u518d\u5207\u6362\u3002"
+            )
+            return
+
+        if (
+            self.bridge.is_scene_dirty()
+            and current_bridge_scene is not None
+            and next_scene_id == current_scene_id
+        ):
+            scene = copy.deepcopy(current_bridge_scene)
+
         self._current_scene = scene
 
-        scene_entry = get_scene_entry(scene.scene_id)
-
-        self.bridge.clear_scene_dirty()
+        scene_entry = get_scene_entry(scene.scene_id, mode_id=self._current_work_mode_id())
 
         self.bridge.set_current_scene(
 
@@ -592,17 +731,33 @@ class WorkbenchPanel(BasePanel):
 
             source="library" if scene_entry is not None else "builtin",
 
+            source_type=scene_entry.source_type if scene_entry is not None else "builtin",
+
         )
 
         template_id = str(template_id or "").strip()
 
         if template_id:
 
-            template_entry = get_template_entry(template_id)
+            if (
+                self.bridge.current_template() is not None
+                and self.bridge.current_template_id() == template_id
+                and self.bridge.current_template_mode_id() == self._current_work_mode_id()
+            ):
+                self._current_template = self.bridge.current_template()
+                self._quick_execution_detail.set_template_context(self._current_template)
+                self._refresh_strategy_summary()
+                self._refresh_fixed_cards()
+                return
+
+            template_entry = get_template_entry(template_id, mode_id=self._current_work_mode_id())
 
             try:
 
-                template = load_template_from_library(template_id)
+                template = load_template_from_library(
+                    template_id,
+                    mode_id=self._current_work_mode_id(),
+                )
 
             except Exception as exc:
 
@@ -616,9 +771,6 @@ class WorkbenchPanel(BasePanel):
                 template = None
 
             if template is not None:
-
-                self.bridge.clear_template_dirty()
-
                 self.bridge.set_current_template(
 
                     template,
@@ -629,6 +781,10 @@ class WorkbenchPanel(BasePanel):
 
                     source="library" if template_entry is not None else "builtin",
 
+                    source_type=(
+                        template_entry.source_type if template_entry is not None else "builtin"
+                    ),
+
                 )
 
     def _on_quick_scene_config_changed(self, scene: SceneWorkspace) -> None:
@@ -637,7 +793,7 @@ class WorkbenchPanel(BasePanel):
 
         self._current_scene = scene
 
-        scene_entry = get_scene_entry(scene.scene_id)
+        scene_entry = get_scene_entry(scene.scene_id, mode_id=self._current_work_mode_id())
 
         self._ignore_own_scene_changed = True
         try:
@@ -651,6 +807,8 @@ class WorkbenchPanel(BasePanel):
 
                 source="library" if scene_entry is not None else "builtin",
 
+                source_type=scene_entry.source_type if scene_entry is not None else "builtin",
+
             )
         finally:
             self._ignore_own_scene_changed = False
@@ -658,6 +816,7 @@ class WorkbenchPanel(BasePanel):
         if not self.bridge.is_scene_dirty():
             self._skip_next_scene_dirty_recheck = True
         self.bridge.mark_scene_dirty()
+        self._document_scope.recheck()
 
     def _sync_dynamic_cards(self) -> None:
 
@@ -665,6 +824,12 @@ class WorkbenchPanel(BasePanel):
 
     def _open_feature_card(self, feature_id: str) -> None:
 
+        if (
+            feature_id in self._detail_map
+            and feature_id not in self._navigation_cards
+        ):
+            self._quick_execution_detail.set_feature_enabled(feature_id, True)
+            self._sync_dynamic_cards()
         self._navigation.open_feature_card(feature_id)
 
     def _emit_panel_navigation(
@@ -675,6 +840,7 @@ class WorkbenchPanel(BasePanel):
         issue_type: str = "",
         issue_key: str = "",
         issue_context: dict[str, str] | None = None,
+        return_card_id: str = "quick_execute",
     ) -> None:
         index = _panel_index(panel_id)
         if index >= 0:
@@ -690,10 +856,7 @@ class WorkbenchPanel(BasePanel):
             or context.get("issue_target_label")
             or ""
         ).strip()
-        if not issue_display_name and issue_type in {
-            "template_style_field",
-            "scene_style_field",
-        }:
+        if not issue_display_name and issue_type == "template_style_field":
             issue_display_name = field_display_context(
                 issue_key,
                 target_type=issue_type,
@@ -712,7 +875,7 @@ class WorkbenchPanel(BasePanel):
                 "field_id": issue_key,
                 "active_issue_id": active_issue_id,
                 "return_panel_id": "workbench",
-                "return_card_id": "quick_execute",
+                "return_card_id": str(return_card_id or "quick_execute"),
                 "payload": {
                     **context,
                     "issue_type": issue_type,
@@ -732,7 +895,7 @@ class WorkbenchPanel(BasePanel):
                 card_id=projection.card_id,
                 issue_type=projection.target_type,
                 issue_key=projection.target_key,
-                issue_context=self._quick_execution_detail.current_issue_navigation_context(),
+                return_card_id="quick_execute",
             )
             return True
         if projection.feature_card_id:
@@ -837,18 +1000,6 @@ class WorkbenchPanel(BasePanel):
         card_id = str(navigation_intent_value(intent, "card_id", "") or "").strip()
         if card_id:
             self._nav_rail.select_card(card_id)
-        active_issue_id = str(
-            navigation_intent_value(intent, "active_issue_id", "") or ""
-        ).strip()
-        payload = navigation_intent_value(intent, "payload", {}) or {}
-        if not active_issue_id and isinstance(payload, dict):
-            active_issue_id = str(
-                payload.get("active_issue_id")
-                or payload.get("issue_item_id")
-                or ""
-            ).strip()
-        if card_id == "quick_execute" and active_issue_id:
-            self._quick_execution_detail.set_active_issue(active_issue_id)
 
     def _on_card_selected(self, card_id: str) -> None:
 
@@ -860,11 +1011,16 @@ class WorkbenchPanel(BasePanel):
 
         self._clear_object_preflight_confirmation()
 
-        if self._document_paths.apply_loaded_document(file_path) is None:
+        selected_document = self._document_paths.apply_loaded_document(file_path)
+        if selected_document is None:
 
             return
 
+        if self._batch_generation_detail is not None:
+            self._batch_generation_detail.set_source_document(selected_document)
+        self._document_scope.start_scan(selected_document, force=True)
         self._refresh_quick_execute_card()
+        self._refresh_batch_generate_card()
 
     def on_template_changed(self, template: TemplateConfig) -> None:
 
@@ -873,10 +1029,6 @@ class WorkbenchPanel(BasePanel):
         self._current_template = template
 
         self._quick_execution_detail.set_template_context(template)
-
-        self._config_management_detail.set_current_template(template)
-
-        self.bridge.clear_template_dirty()
 
         self._refresh_strategy_summary()
 
@@ -888,20 +1040,19 @@ class WorkbenchPanel(BasePanel):
 
         self._current_scene = scene
 
-        self._config_management_detail.set_current_scene(scene)
-
         if getattr(self, "_ignore_own_scene_changed", False):
             return
 
         self._quick_execution_detail.set_scene_context(scene)
+        if self._batch_generation_detail is not None:
+            self._batch_generation_detail.set_scene_context(scene)
+        self._document_scope.recheck()
 
         self._refresh_strategy_summary()
 
         self._refresh_fixed_cards()
 
     def _on_scene_dirty_changed(self, dirty: bool) -> None:
-
-        self._scene_dirty = bool(dirty)
 
         if dirty:
             bridge_skip_recheck = (
@@ -918,24 +1069,41 @@ class WorkbenchPanel(BasePanel):
 
         self._refresh_fixed_cards()
 
-    def _on_template_dirty_changed(self, dirty: bool) -> None:
-
-        self._template_dirty = bool(dirty)
-
-        if dirty:
-            self._quick_execution_detail.recheck_current_context()
-
-        self._refresh_fixed_cards()
-
     def _on_material_context_changed(self, context) -> None:
 
         self._content_fill_detail.set_material_context(context, emit_signal=False)
-        self._quick_execution_detail.set_material_context(context)
+        if not getattr(self, "_syncing_quick_material_context", False):
+            self._quick_execution_detail.set_material_context(context)
+
+    def _on_material_preview_snapshot_changed(self, snapshot) -> None:
+        self._quick_execution_detail.set_material_preview_snapshot(snapshot)
+
+    def _on_official_document_type_changed(self, document_type_id: str) -> None:
+        self._clear_object_preflight_confirmation()
+        self._quick_execution_detail.set_official_document_type_id(document_type_id)
+        self._refresh_quick_execute_card()
+
+    def _sync_official_document_type_from_quick(self, document_type_id: str) -> None:
+        self._clear_object_preflight_confirmation()
+        self.bridge.set_current_official_document_type_id(document_type_id)
+
+    def _on_material_batch_selection_changed(self, selection) -> None:
+        if self._batch_generation_detail is not None:
+            self._batch_generation_detail.set_material_batch_selection(selection)
+            self._refresh_batch_generate_card()
 
     def _sync_material_context_from_detail(self, context) -> None:
 
         self._quick_execution_detail.set_material_context(context)
         self.bridge.set_current_material_context(context)
+
+    def _sync_material_context_from_quick_detail(self, context) -> None:
+        self._syncing_quick_material_context = True
+        try:
+            self._content_fill_detail.set_material_context(context, emit_signal=False)
+            self.bridge.set_current_material_context(context)
+        finally:
+            self._syncing_quick_material_context = False
 
     def _execute_requested(self) -> None:
 
@@ -945,33 +1113,54 @@ class WorkbenchPanel(BasePanel):
 
         self._execution.cancel_execution(self._execution_worker)
 
-    def _resolve_document_path_for_execution(self) -> str | None:
+    def _cancel_object_preflight_confirmation(self) -> None:
+        self._clear_object_preflight_confirmation()
+        self._quick_execution_detail.reset_execution_feedback()
+        self._refresh_quick_execute_card()
 
-        return self._document_paths.resolve_execution_document()
+    def _resolve_document_path_for_execution(self) -> str | None:
+        document_path = self._document_paths.resolve_execution_document()
+        if document_path and self._batch_generation_detail is not None:
+            self._batch_generation_detail.set_source_document(document_path)
+        if document_path and document_path != self.bridge.current_document_path():
+            self.bridge.set_current_document_path(document_path)
+        return document_path
 
     def _pick_document_path(self) -> str | None:
-
-        file_name, _selected = QFileDialog.getOpenFileName(
-
-            self,
-
-            "\u9009\u62e9\u6587\u6863",
-
-            "",
-
-            "Word Documents (*.docx);;All Files (*)",
-
-        )
-
-        cleaned = str(file_name or "").strip()
-
+        cleaned = str(
+            self._quick_execution_detail.pick_document_path() or ""
+        ).strip()
         return cleaned or None
 
     def _start_execution(self) -> None:
-
+        if self._execution_worker is not None:
+            return
+        set_feedback_target = getattr(self._execution, "set_feedback_target", None)
+        if callable(set_feedback_target):
+            set_feedback_target("single")
+        effective_mode_id = self._current_work_mode_id()
+        source_dependent_gate = scene_uses_exam_paper_surface(
+            self._current_scene,
+            mode_id=effective_mode_id,
+        )
+        material_gate = None
+        if not source_dependent_gate:
+            material_gate = self._quick_execution_detail.current_execution_gate_decision()
+            if not material_gate.can_run:
+                self._quick_execution_detail.recheck_current_context(force=True)
+                return
+        if self._resolve_document_path_for_execution() is None:
+            return
+        if not self._document_scope.ensure_confirmed():
+            return
         if not self._ensure_object_preflight_confirmed():
             return
-
+        if source_dependent_gate:
+            material_gate = self._quick_execution_detail.current_execution_gate_decision()
+            if not material_gate.can_run:
+                self._quick_execution_detail.recheck_current_context(force=True)
+                return
+        assert material_gate is not None
         build = self._execution_session.build_worker(
 
             template=self._current_template,
@@ -980,19 +1169,58 @@ class WorkbenchPanel(BasePanel):
 
             session_overrides=self._quick_execution_detail.runtime_template_overrides(),
 
-            material_context=self._content_fill_detail.material_context(),
+            # The bridge is the authoritative workbench material state.
+            # Quick execution and the legacy content-data editor both publish
+            # here; execution must not depend on whichever widget refreshed last.
+            material_context=self.bridge.current_material_context(),
+            document_type_id=(
+                self.bridge.current_official_document_type_id()
+                if effective_mode_id == "official"
+                else ""
+            ),
+            mode_id=effective_mode_id,
+            plan_id=self.bridge.current_scene_id(),
+            plan_path=self.bridge.current_scene_path(),
+            plan_source_type=self.bridge.current_scene_source_type(),
+            template_id=self.bridge.current_template_id(),
+            template_path=self.bridge.current_template_path(),
+            template_source_type=self.bridge.current_template_source_type(),
+            output_root=self._quick_execution_detail.custom_output_dir(),
+            material_gate_confirmed=material_gate.requires_confirmation,
+            expected_input_revision=(
+                self._confirmed_object_preflight_source_revision
+            ),
+            object_preflight_confirmation_digest=(
+                self._confirmed_object_preflight_digest
+            ),
+            document_structure_evidence=self._document_scope.evidence,
+            document_scope_decisions=self._document_scope.decisions,
 
         )
 
         self._start_worker_from_build(build)
 
     def _start_batch_execution(self) -> None:
+        if (
+            self._batch_generation_detail is None
+            or self._execution_worker is not None
+        ):
+            return
+        set_feedback_target = getattr(self._execution, "set_feedback_target", None)
+        if callable(set_feedback_target):
+            set_feedback_target("batch")
 
         selection = self.bridge.current_material_batch_selection()
+        self._batch_generation_detail.set_work_mode(self._current_work_mode_id())
+        self._batch_generation_detail.set_scene_context(self._current_scene)
+        self._batch_generation_detail.set_material_batch_selection(selection)
+        self._batch_generation_detail.set_runtime_template_overrides(
+            self._quick_execution_detail.runtime_template_overrides()
+        )
 
         if not selection.archive.profiles:
 
-            self._quick_execution_detail.reset_execution_feedback()
+            self._execution.reset_feedback()
 
             self.apply_execution_result(
 
@@ -1014,8 +1242,29 @@ class WorkbenchPanel(BasePanel):
 
             return
 
-        if not self._ensure_object_preflight_confirmed():
+        material_gate = (
+            self._batch_generation_detail.current_batch_execution_gate_decision()
+        )
+        if not material_gate.can_run or not self._batch_generation_detail.can_start_execution():
+            self._refresh_batch_generate_card()
             return
+
+        source_document_required = not (
+            str(selection.source_kind or "").strip() == "official_document_table"
+            and scene_uses_official_document_surface(
+                self._current_scene,
+                mode_id=self._current_work_mode_id(),
+            )
+        )
+        if source_document_required:
+            if self._resolve_document_path_for_execution() is None:
+                return
+            if not self._document_scope.ensure_confirmed():
+                return
+            if not self._ensure_object_preflight_confirmed():
+                return
+        else:
+            self._clear_object_preflight_confirmation()
 
         build = self._execution_session.build_batch_worker(
 
@@ -1027,13 +1276,160 @@ class WorkbenchPanel(BasePanel):
 
             profile_ids=selection.profile_ids,
 
-            base_output_dir=self._quick_execution_detail.custom_output_dir() or None,
+            base_output_dir=self._batch_generation_detail.output_dir() or None,
 
             output_dir_template=selection.output_dir_template,
 
-            session_overrides=self._quick_execution_detail.runtime_template_overrides(),
+            session_overrides=self._batch_generation_detail.runtime_template_overrides(),
 
             base_context=selection.base_context,
+
+            source_kind=selection.source_kind,
+
+            source_path=selection.source_path,
+
+            item_metadata=selection.item_metadata,
+            mode_id=self._current_work_mode_id(),
+            plan_id=self.bridge.current_scene_id(),
+            plan_path=self.bridge.current_scene_path(),
+            plan_source_type=self.bridge.current_scene_source_type(),
+            template_id=self.bridge.current_template_id(),
+            template_path=self.bridge.current_template_path(),
+            template_source_type=self.bridge.current_template_source_type(),
+            material_gate_confirmed=material_gate.requires_confirmation,
+            expected_input_revision=(
+                self._confirmed_object_preflight_source_revision
+            ),
+            object_preflight_confirmation_digest=(
+                self._confirmed_object_preflight_digest
+            ),
+            document_structure_evidence=self._document_scope.evidence,
+            document_scope_decisions=self._document_scope.decisions,
+
+        )
+
+        self._start_worker_from_build(build)
+
+    def _start_failed_batch_retry(self) -> None:
+        if (
+            self._batch_generation_detail is None
+            or self._execution_worker is not None
+        ):
+            return
+        set_feedback_target = getattr(self._execution, "set_feedback_target", None)
+        if callable(set_feedback_target):
+            set_feedback_target("batch")
+
+        source_selection = self.bridge.current_material_batch_selection()
+        self._batch_generation_detail.set_work_mode(self._current_work_mode_id())
+        self._batch_generation_detail.set_scene_context(self._current_scene)
+        self._batch_generation_detail.set_material_batch_selection(source_selection)
+        self._batch_generation_detail.set_runtime_template_overrides(
+            self._quick_execution_detail.runtime_template_overrides()
+        )
+        failed_profile_ids = (
+            self._batch_generation_detail.failed_batch_profile_ids()
+        )
+        batch_history_module = import_module(
+            "src.shared.engine.official_document_batch_history"
+        )
+        retry_selection = (
+            batch_history_module.build_official_document_batch_retry_selection(
+                source_selection,
+                failed_profile_ids,
+                retry_of_run_id=(
+                    self._batch_generation_detail.last_batch_run_id()
+                ),
+                attempt_number=(
+                    self._batch_generation_detail.next_batch_attempt_number()
+                ),
+            )
+        )
+
+        if not retry_selection.profile_ids:
+
+            self.apply_execution_result(
+
+                {
+                    "status": "failed",
+                    "output_path": "",
+                    "report_paths": [],
+                    "failed_count": 0,
+                    "error_text": "没有可重试的公文批次失败项",
+                }
+
+            )
+
+            return
+
+        issue_module = import_module(
+            "src.ui.adapters.workbench_material_issues"
+        )
+        retry_gate = issue_module.material_batch_readiness_gate_decision(
+            self._current_scene,
+            retry_selection,
+        )
+        if not retry_gate.can_run:
+            self.apply_execution_result(
+                {
+                    "status": "failed",
+                    "output_path": "",
+                    "report_paths": [],
+                    "failed_count": len(retry_selection.profile_ids),
+                    "error_text": "；".join(retry_gate.blocking_reasons),
+                }
+            )
+            return
+
+        source_document_required = not (
+            str(retry_selection.source_kind or "").strip()
+            == "official_document_table"
+            and scene_uses_official_document_surface(
+                self._current_scene,
+                mode_id=self._current_work_mode_id(),
+            )
+        )
+        if source_document_required:
+            if self._resolve_document_path_for_execution() is None:
+                return
+            if not self._document_scope.ensure_confirmed():
+                return
+            if not self._ensure_object_preflight_confirmed():
+                return
+        else:
+            self._clear_object_preflight_confirmation()
+
+        build = self._execution_session.build_batch_worker(
+
+            template=self._current_template,
+            scene=self._current_scene,
+            archive=retry_selection.archive,
+            profile_ids=retry_selection.profile_ids,
+            base_output_dir=self._batch_generation_detail.output_dir() or None,
+            output_dir_template=retry_selection.output_dir_template,
+            session_overrides=self._batch_generation_detail.runtime_template_overrides(),
+            base_context=retry_selection.base_context,
+            source_kind=retry_selection.source_kind,
+            source_path=retry_selection.source_path,
+            item_metadata=retry_selection.item_metadata,
+            retry_of_run_id=self._batch_generation_detail.last_batch_run_id(),
+            attempt_number=self._batch_generation_detail.next_batch_attempt_number(),
+            mode_id=self._current_work_mode_id(),
+            plan_id=self.bridge.current_scene_id(),
+            plan_path=self.bridge.current_scene_path(),
+            plan_source_type=self.bridge.current_scene_source_type(),
+            template_id=self.bridge.current_template_id(),
+            template_path=self.bridge.current_template_path(),
+            template_source_type=self.bridge.current_template_source_type(),
+            material_gate_confirmed=retry_gate.requires_confirmation,
+            expected_input_revision=(
+                self._confirmed_object_preflight_source_revision
+            ),
+            object_preflight_confirmation_digest=(
+                self._confirmed_object_preflight_digest
+            ),
+            document_structure_evidence=self._document_scope.evidence,
+            document_scope_decisions=self._document_scope.decisions,
 
         )
 
@@ -1045,6 +1441,24 @@ class WorkbenchPanel(BasePanel):
 
             return
 
+        if getattr(build, "error_text", ""):
+            self._execution.reset_feedback()
+            self.apply_execution_result(
+                {
+                    "status": "failed",
+                    "output_path": "",
+                    "report_paths": [],
+                    "failed_count": 0,
+                    "error_text": str(build.error_text),
+                    "execution_session": (
+                        build.session_snapshot.to_dict()
+                        if build.session_snapshot is not None
+                        else {}
+                    ),
+                }
+            )
+            return
+
         worker = build.worker
 
         if worker is None:
@@ -1053,7 +1467,7 @@ class WorkbenchPanel(BasePanel):
 
                 return
 
-            self._quick_execution_detail.reset_execution_feedback()
+            self._execution.reset_feedback()
 
             self.apply_execution_result(
 
@@ -1076,12 +1490,39 @@ class WorkbenchPanel(BasePanel):
             return
 
         self._execution_worker = worker
-
-        self._execution.prepare_worker(worker)
+        try:
+            self._execution.prepare_worker(worker)
+            self._execution_session.start_worker(worker)
+        except Exception as exc:
+            snapshot = getattr(build, "session_snapshot", None)
+            cleanup_issues = self._execution_session.discard_worker(
+                worker,
+                snapshot=snapshot,
+            )
+            error_parts = [
+                f"execution_worker_start_failed:{type(exc).__name__}:{exc}",
+                *cleanup_issues,
+            ]
+            self._execution.reset_feedback()
+            self.apply_execution_result(
+                {
+                    "status": "failed",
+                    "output_path": "",
+                    "report_paths": [],
+                    "failed_count": 0,
+                    "error_text": "; ".join(
+                        part for part in error_parts if str(part).strip()
+                    ),
+                    "execution_session": (
+                        snapshot.to_dict()
+                        if snapshot is not None
+                        else {}
+                    ),
+                }
+            )
+            return
 
         self._clear_object_preflight_confirmation()
-
-        self._execution_session.start_worker(worker)
 
     def _clear_execution_worker(self) -> None:
 
@@ -1093,36 +1534,63 @@ class WorkbenchPanel(BasePanel):
 
     def _ensure_object_preflight_confirmed(self) -> bool:
 
-        preview_payload = self._build_object_preflight_preview_payload()
+        doc_path = self._document_paths.selected_existing_document()
+        scene = self._current_scene or self._quick_execution_detail.current_scene()
+        pending_evidence = self._pending_object_preflight_evidence
+        if pending_evidence is not None and object_preflight_evidence_is_current(
+            pending_evidence,
+            scene,
+            doc_path,
+        ):
+            evidence = pending_evidence
+        else:
+            evidence = self._build_object_preflight_preview_evidence()
+        preview_payload = evidence.to_payload()
+        source_revision = evidence.source_revision
+        confirmation_key = evidence.canonical_key
+        confirmation_digest = evidence.evidence_digest
         findings_count = int(preview_payload.get("findings_count") or 0)
         module_skips_count = int(preview_payload.get("module_skips_count") or 0)
         if findings_count <= 0 and module_skips_count <= 0:
-            self._clear_object_preflight_confirmation()
+            self._pending_object_preflight_confirmation_key = ""
+            self._pending_object_preflight_evidence = None
+            self._confirmed_object_preflight_source_revision = source_revision
+            self._confirmed_object_preflight_digest = confirmation_digest
             return True
 
         result_state = self._execution_adapter.build_result_state(
-            status="success",
-            output_path="",
-            report_paths=[],
-            failed_count=0,
-            error_text="",
-            object_preflight=preview_payload,
+            terminal_payload={
+                "status": "success",
+                "output_path": "",
+                "report_paths": [],
+                "failed_count": 0,
+                "error_text": "",
+                "object_preflight": preview_payload,
+            },
         )
-        confirmation_key = self._object_preflight_confirmation_key(preview_payload)
         blocking_count = int(preview_payload.get("blocking_findings_count") or 0)
         blocked = bool(preview_payload.get("blocked"))
         if blocking_count > 0 and blocked:
-            self._quick_execution_detail.reset_execution_feedback()
+            self._execution.reset_feedback()
             self._quick_execution_detail.set_object_preflight_confirmation(
                 result_state,
                 blocked=True,
             )
             self._pending_object_preflight_confirmation_key = ""
+            self._pending_object_preflight_evidence = None
+            self._confirmed_object_preflight_source_revision = ""
+            self._confirmed_object_preflight_digest = ""
             self._refresh_quick_execute_card()
             return False
 
-        if self._pending_object_preflight_confirmation_key == confirmation_key:
+        if (
+            confirmation_key
+            and self._pending_object_preflight_confirmation_key == confirmation_key
+        ):
             self._pending_object_preflight_confirmation_key = ""
+            self._pending_object_preflight_evidence = None
+            self._confirmed_object_preflight_source_revision = source_revision
+            self._confirmed_object_preflight_digest = confirmation_digest
             return True
 
         self._quick_execution_detail.reset_execution_feedback()
@@ -1131,68 +1599,30 @@ class WorkbenchPanel(BasePanel):
             blocked=False,
         )
         self._pending_object_preflight_confirmation_key = confirmation_key
+        self._pending_object_preflight_evidence = (
+            evidence if isinstance(evidence, ObjectPreflightEvidence) else None
+        )
+        self._confirmed_object_preflight_source_revision = ""
+        self._confirmed_object_preflight_digest = ""
         self._refresh_quick_execute_card()
         return False
 
     def _build_object_preflight_preview_payload(self) -> dict[str, object]:
 
+        return self._build_object_preflight_preview_evidence().to_payload()
+
+    def _build_object_preflight_preview_evidence(self) -> ObjectPreflightEvidence:
+
         doc_path = self._document_paths.selected_existing_document()
         scene = self._current_scene or self._quick_execution_detail.current_scene()
-        compliance = getattr(scene, "compliance_profile", None)
-        policy = getattr(compliance, "object_preflight", None)
-        if not doc_path or policy is None or not bool(getattr(policy, "enabled", True)):
-            return {}
-
-        result = inspect_docx_package(doc_path, policy)
-        module_skips = object_preflight_module_skips(result.findings, policy)
-        failure_policy = str(getattr(compliance, "failure_policy", "") or "").strip()
-        blocked = bool(result.blocking_findings) and (
-            bool(getattr(scene, "strict_mode", True)) or failure_policy == "block"
-        )
-        return {
-            "enabled": True,
-            "source_path": str(doc_path or ""),
-            "preservation_mode": str(getattr(policy, "preservation_mode", "") or ""),
-            "scan_targets": _string_list(getattr(policy, "scan_targets", []) or []),
-            "block_on": _string_list(getattr(policy, "block_on", []) or []),
-            "skip_high_risk_modules": bool(
-                getattr(policy, "skip_high_risk_modules", True)
-            ),
-            "skip_modules_by_finding": {
-                str(kind): _string_list(modules)
-                for kind, modules in dict(
-                    getattr(policy, "skip_modules_by_finding", {}) or {}
-                ).items()
-            },
-            "findings_count": len(result.findings),
-            "findings": [asdict(finding) for finding in result.findings],
-            "blocking_findings_count": len(result.blocking_findings),
-            "blocked": blocked,
-            "module_skips_count": len(module_skips),
-            "module_skips": list(module_skips.values()),
-        }
-
-    def _object_preflight_confirmation_key(self, payload: dict[str, object]) -> str:
-
-        doc_path = str(payload.get("source_path") or "").strip()
-        if not doc_path:
-            doc_path = self._quick_execution_detail.document_path() or ""
-        if not doc_path:
-            doc_path = self._document_paths.cached_document_path
-        scene_id = str(getattr(self._current_scene, "scene_id", "") or "")
-        return json.dumps(
-            {
-                "doc_path": doc_path,
-                "scene_id": scene_id,
-                "object_preflight": payload,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
+        return build_object_preflight_evidence(scene, doc_path)
 
     def _clear_object_preflight_confirmation(self) -> None:
 
         self._pending_object_preflight_confirmation_key = ""
+        self._pending_object_preflight_evidence = None
+        self._confirmed_object_preflight_source_revision = ""
+        self._confirmed_object_preflight_digest = ""
 
     def _apply_theme(self) -> None:
 
@@ -1209,15 +1639,3 @@ class WorkbenchPanel(BasePanel):
             theme=get_theme(),
 
         )
-
-
-def _string_list(values) -> list[str]:
-
-    return [
-        str(item or "").strip()
-        for item in list(values or [])
-        if str(item or "").strip()
-    ]
-
-
-WorkbenchPanelV2 = WorkbenchPanel

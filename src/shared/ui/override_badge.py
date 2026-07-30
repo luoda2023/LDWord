@@ -8,7 +8,7 @@ from src.qt_api import QHBoxLayout, QLabel, QPushButton, QWidget, Signal, Qt
 
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.theme import bind_theme, get_theme
-from src.ui.icons.catalog import get_icon
+from src.shared.ui.icons.catalog import get_icon
 
 
 ORIGINAL_VALUE_PREFIX = "原值"

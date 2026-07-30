@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from src.qt_api import QCheckBox, QHBoxLayout, QPushButton, QWidget, Signal, Qt
 
-from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.button_style import apply_button_variant
 from src.shared.ui.selection_control_style import build_checkbox_stylesheet
 from src.shared.ui.theme import bind_theme, get_theme
 

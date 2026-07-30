@@ -4,7 +4,23 @@ Shared combo-box foundation with an anchored in-window popup panel.
 
 from __future__ import annotations
 
-from src.qt_api import QComboBox, QListView, QPoint, QRect, QColor, QEvent, QPainter, QPen, QSizePolicy, Signal, Qt
+from src.qt_api import (
+    QColor,
+    QComboBox,
+    QEvent,
+    QFont,
+    QListView,
+    QPainter,
+    QPoint,
+    QRect,
+    QRectF,
+    QSize,
+    QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    Signal,
+    Qt,
+)
 
 from src.shared.ui.combo_popup_panel import ComboPopupPanel
 from src.shared.ui.input_metrics import (
@@ -16,8 +32,130 @@ from src.shared.ui.input_metrics import (
     input_text_rect,
     sync_input_line_edit_geometry,
 )
+from src.shared.ui.paint_geometry import STROKE_ICON, stroke_pen
 from src.shared.ui.sizing import apply_size_class, resolved_control_height
 from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.typography_policy import TextRole, apply_text_role
+
+
+SOURCE_BADGE_TEXT_ROLE = int(Qt.UserRole) + 101
+SOURCE_BADGE_KIND_ROLE = int(Qt.UserRole) + 102
+SOURCE_BADGE_FONT_PX = 10
+CURRENT_BADGE_RIGHT_INSET = 8
+
+
+def _source_badge_colors(theme, badge_kind: str, *, enabled: bool) -> tuple[QColor, QColor]:
+    if badge_kind == "user":
+        fill = QColor(theme.primary)
+        fill.setAlpha(42 if enabled else 18)
+        text = QColor(theme.primary if enabled else theme.text_disabled)
+        return fill, text
+
+    fill = QColor(theme.text_secondary)
+    fill.setAlpha(32 if enabled else 14)
+    text = QColor(theme.text_secondary if enabled else theme.text_disabled)
+    return fill, text
+
+
+class _SourceBadgeItemDelegate(QStyledItemDelegate):
+    """Paint source-aware options as one selectable card with a trailing badge."""
+
+    _OUTER_X = 4
+    _OUTER_Y = 2
+    _CONTENT_X = 10
+    _BADGE_GAP = 10
+    _BADGE_PADDING_X = 7
+    _BADGE_HEIGHT = 20
+
+    def paint(self, painter, option, index) -> None:
+        badge_text = str(index.data(SOURCE_BADGE_TEXT_ROLE) or "").strip()
+        if not badge_text:
+            super().paint(painter, option, index)
+            return
+
+        theme = get_theme()
+        enabled = bool(index.flags() & Qt.ItemIsEnabled)
+        hovered = bool(option.state & QStyle.State_MouseOver)
+        selected = bool(option.state & QStyle.State_Selected)
+        card_rect = option.rect.adjusted(
+            self._OUTER_X,
+            self._OUTER_Y,
+            -self._OUTER_X,
+            -self._OUTER_Y,
+        )
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        if enabled and (hovered or selected):
+            painter.setBrush(QColor(theme.bg_selected if selected else theme.bg_hover))
+            painter.drawRoundedRect(card_rect, theme.radius_sm, theme.radius_sm)
+
+        badge_font = QFont(option.font)
+        badge_font.setPixelSize(SOURCE_BADGE_FONT_PX)
+        badge_metrics = painter.fontMetrics() if badge_font == painter.font() else None
+        painter.setFont(badge_font)
+        if badge_metrics is None:
+            badge_metrics = painter.fontMetrics()
+        badge_width = badge_metrics.horizontalAdvance(badge_text) + (self._BADGE_PADDING_X * 2)
+        badge_height = min(self._BADGE_HEIGHT, max(16, card_rect.height() - 8))
+        badge_rect = QRect(
+            max(card_rect.left() + self._CONTENT_X, card_rect.right() - badge_width - self._CONTENT_X + 1),
+            card_rect.top() + ((card_rect.height() - badge_height) // 2),
+            badge_width,
+            badge_height,
+        )
+
+        badge_kind = str(index.data(SOURCE_BADGE_KIND_ROLE) or "neutral").strip()
+        badge_fill, badge_color = _source_badge_colors(
+            theme,
+            badge_kind,
+            enabled=enabled,
+        )
+        painter.setBrush(badge_fill)
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(badge_rect, theme.radius_sm, theme.radius_sm)
+        painter.setPen(badge_color)
+        painter.drawText(badge_rect, Qt.AlignCenter, badge_text)
+
+        text = str(index.data(Qt.DisplayRole) or "")
+        text_rect = QRect(
+            card_rect.left() + self._CONTENT_X,
+            card_rect.top(),
+            max(
+                0,
+                badge_rect.left()
+                - self._BADGE_GAP
+                - card_rect.left()
+                - self._CONTENT_X,
+            ),
+            card_rect.height(),
+        )
+        painter.setFont(option.font)
+        painter.setPen(QColor(theme.text_primary if enabled else theme.text_disabled))
+        elided = painter.fontMetrics().elidedText(text, Qt.ElideRight, text_rect.width())
+        painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, elided)
+        painter.restore()
+
+    def sizeHint(self, option, index) -> QSize:
+        badge_text = str(index.data(SOURCE_BADGE_TEXT_ROLE) or "").strip()
+        if not badge_text:
+            return super().sizeHint(option, index)
+
+        base = super().sizeHint(option, index)
+        badge_font = QFont(option.font)
+        badge_font.setPixelSize(SOURCE_BADGE_FONT_PX)
+        badge_width = option.fontMetrics.horizontalAdvance(badge_text) + (self._BADGE_PADDING_X * 2)
+        text = str(index.data(Qt.DisplayRole) or "")
+        text_width = option.fontMetrics.horizontalAdvance(text)
+        width = (
+            (self._OUTER_X * 2)
+            + (self._CONTENT_X * 2)
+            + text_width
+            + self._BADGE_GAP
+            + badge_width
+        )
+        return QSize(max(base.width(), width), max(base.height(), self._BADGE_HEIGHT + 8))
 
 
 class StyledComboBox(QComboBox):
@@ -25,9 +163,11 @@ class StyledComboBox(QComboBox):
 
     _id_counter = 0
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, text_role: TextRole = TextRole.BODY):
         super().__init__(parent)
 
+        self._text_role = TextRole(text_role)
+        apply_text_role(self, self._text_role)
         self._style_initialized = False
         StyledComboBox._id_counter += 1
         combo_id = StyledComboBox._id_counter
@@ -43,6 +183,8 @@ class StyledComboBox(QComboBox):
         view.setFrameShape(QListView.NoFrame)
         view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        view.setMouseTracking(True)
+        view.setItemDelegate(_SourceBadgeItemDelegate(view))
         self.setView(view)
 
         self._popup_panel = ComboPopupPanel(
@@ -54,12 +196,18 @@ class StyledComboBox(QComboBox):
         self._popup_panel.item_activated.connect(self._on_popup_item_activated)
         self._popup_panel.dismissed.connect(self.update)
         self.destroyed.connect(self._popup_panel.deleteLater)
+        # The popup view is reparented into an in-window surface, so relying on
+        # QObject ancestry would make its font authority depend on popup chrome.
+        # Its delegate receives this same font through QStyleOptionViewItem.
+        view.setFont(self.font())
 
         self.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self._inline = False
+        self._titlebar_mode = False
         self._editor_widget = None
         self._syncing_editor_geometry = False
         self._display_text_override: str | None = None
+        self._outer_height_override: int | None = None
         apply_size_class(self, "md")
 
         self._style_initialized = True
@@ -84,6 +232,31 @@ class StyledComboBox(QComboBox):
             self.setMinimumContentsLength(0)
         self.setProperty("fullWidthMode", bool(enabled))
         self.updateGeometry()
+
+    def set_outer_height(self, height: int) -> None:
+        """Own an explicit final outer height for a component-specific rhythm."""
+
+        resolved_height = max(1, int(height))
+        self._outer_height_override = resolved_height
+        self.setMinimumHeight(resolved_height)
+        self.setMaximumHeight(resolved_height)
+        self._refresh_style()
+
+    def add_badged_item(
+        self,
+        text: str,
+        user_data=None,
+        *,
+        badge_text: str,
+        badge_kind: str = "neutral",
+    ) -> int:
+        """Add a real option whose source/category is rendered as a trailing badge."""
+
+        self.addItem(text, user_data)
+        index = self.count() - 1
+        self.setItemData(index, str(badge_text or "").strip(), SOURCE_BADGE_TEXT_ROLE)
+        self.setItemData(index, str(badge_kind or "neutral").strip(), SOURCE_BADGE_KIND_ROLE)
+        return index
 
     @staticmethod
     def build_popup_container_qss(popup_id: str, theme) -> str:
@@ -127,12 +300,17 @@ class StyledComboBox(QComboBox):
         """
 
     @staticmethod
-    def build_combo_stylesheet(object_name: str, theme) -> str:
+    def build_combo_stylesheet(
+        object_name: str,
+        theme,
+        *,
+        outer_height: int | None = None,
+    ) -> str:
         # QSS owns size hints and popup chrome; visible text geometry is
         # normalized in input_metrics so editable and static combos match.
-        height_sm = resolved_control_height(theme, "sm")
-        height_md = resolved_control_height(theme, "md")
-        height_lg = resolved_control_height(theme, "lg")
+        height_sm = int(outer_height or resolved_control_height(theme, "sm"))
+        height_md = int(outer_height or resolved_control_height(theme, "md"))
+        height_lg = int(outer_height or resolved_control_height(theme, "lg"))
         return f"""
             #{object_name} {{
                 background: {theme.bg_input};
@@ -141,8 +319,6 @@ class StyledComboBox(QComboBox):
                 border-radius: {theme.input_radius}px;
                 padding: {theme.input_padding_y}px {theme.input_padding_x}px;
                 padding-right: {theme.combo_arrow_zone_width}px;
-                font-size: {theme.font_size_md}px;
-                font-family: {theme.font_family};
                 selection-background-color: {theme.primary};
                 selection-color: {theme.text_on_primary};
             }}
@@ -192,7 +368,6 @@ class StyledComboBox(QComboBox):
                 min-height: {theme.control_height_md}px;
                 max-height: {theme.control_height_md}px;
                 color: {theme.text_secondary};
-                font-size: {theme.font_size_md}px;
             }}
             #{object_name}[inline="true"]:hover {{
                 color: {theme.primary};
@@ -208,6 +383,18 @@ class StyledComboBox(QComboBox):
             }}
             #{object_name}[inline="true"]::drop-down {{
                 width: 14px;
+            }}
+            #{object_name}[titlebarMode="true"] {{
+                background: transparent;
+                border: none;
+                padding: 0px;
+                padding-right: 0px;
+                min-height: 28px;
+                max-height: 28px;
+            }}
+            #{object_name}[titlebarMode="true"]::drop-down {{
+                border: none;
+                width: 26px;
             }}
         """
 
@@ -231,6 +418,7 @@ class StyledComboBox(QComboBox):
             line_edit,
             get_theme(),
             stylesheet=self.build_editor_stylesheet(get_theme()),
+            text_role=self._text_role,
         )
         if self._editor_widget is not line_edit:
             self._release_editor_filter()
@@ -380,14 +568,28 @@ class StyledComboBox(QComboBox):
         return QRect(x, y, width, height)
 
     def _on_popup_item_activated(self, row: int) -> None:
-        if 0 <= row < self.count():
-            self.setCurrentIndex(row)
+        if not 0 <= row < self.count():
+            return
+        model_index = self.model().index(row, self.modelColumn())
+        flags = model_index.flags()
+        if not (flags & Qt.ItemIsEnabled and flags & Qt.ItemIsSelectable):
+            return
+        self.setCurrentIndex(row)
         self.hidePopup()
 
     def _refresh_style(self) -> None:
         theme = get_theme()
 
-        self.setStyleSheet(self.build_combo_stylesheet(self.objectName(), theme))
+        font = apply_text_role(self, self._text_role)
+        self.view().setFont(font)
+
+        self.setStyleSheet(
+            self.build_combo_stylesheet(
+                self.objectName(),
+                theme,
+                outer_height=self._outer_height_override,
+            )
+        )
         self.view().setStyleSheet(self.build_popup_view_qss(self.view().objectName(), theme))
         self._popup_panel.setStyleSheet(self.build_popup_container_qss(self._popup_shell_name, theme))
         self._popup_panel.surface().setStyleSheet(
@@ -407,6 +609,15 @@ class StyledComboBox(QComboBox):
         self.updateGeometry()
         self.update()
 
+    def set_text_role(self, role: TextRole) -> None:
+        """Select a semantic font role for the control, editor, and popup."""
+
+        resolved_role = TextRole(role)
+        if resolved_role == self._text_role:
+            return
+        self._text_role = resolved_role
+        self._refresh_style()
+
     def set_inline(self, inline: bool = True) -> None:
         """Enable borderless inline mode — WPS-style unit selector."""
         self._inline = inline
@@ -417,9 +628,26 @@ class StyledComboBox(QComboBox):
             style.polish(self)
         self._refresh_style()
 
+    def set_titlebar_mode(self, enabled: bool = True) -> None:
+        """Render as a compact chrome selector for the custom title bar."""
+        self._titlebar_mode = bool(enabled)
+        self.setProperty("titlebarMode", "true" if self._titlebar_mode else "false")
+        if self._titlebar_mode:
+            self.setCursor(Qt.PointingHandCursor)
+        else:
+            self.unsetCursor()
+        style = self.style()
+        if style:
+            style.unpolish(self)
+            style.polish(self)
+        self._refresh_style()
+
     def paintEvent(self, event):
         if self._inline:
             self._paint_inline_combo()
+            return
+        if self._titlebar_mode:
+            self._paint_titlebar_combo()
             return
 
         theme = get_theme()
@@ -454,8 +682,44 @@ class StyledComboBox(QComboBox):
             return
         painter.setFont(self.font())
         painter.setPen(input_text_color(theme, enabled=self.isEnabled()))
-        elided = painter.fontMetrics().elidedText(text, Qt.ElideRight, rect.width())
-        painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, elided)
+        badge_text = ""
+        badge_kind = "neutral"
+        if self.currentIndex() >= 0 and self._display_text_override is None:
+            badge_text = str(self.currentData(SOURCE_BADGE_TEXT_ROLE) or "").strip()
+            badge_kind = str(self.currentData(SOURCE_BADGE_KIND_ROLE) or "neutral").strip()
+
+        text_rect = QRect(rect)
+        if badge_text:
+            badge_font = QFont(self.font())
+            badge_font.setPixelSize(SOURCE_BADGE_FONT_PX)
+            painter.setFont(badge_font)
+            badge_width = painter.fontMetrics().horizontalAdvance(badge_text) + 14
+            badge_height = min(20, max(16, rect.height() - 12))
+            badge_rect = QRect(
+                max(
+                    rect.left(),
+                    rect.right() - CURRENT_BADGE_RIGHT_INSET - badge_width + 1,
+                ),
+                rect.top() + ((rect.height() - badge_height) // 2),
+                badge_width,
+                badge_height,
+            )
+            badge_fill, badge_color = _source_badge_colors(
+                theme,
+                badge_kind,
+                enabled=self.isEnabled(),
+            )
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(badge_fill)
+            painter.drawRoundedRect(badge_rect, theme.radius_sm, theme.radius_sm)
+            painter.setPen(badge_color)
+            painter.drawText(badge_rect, Qt.AlignCenter, badge_text)
+            text_rect.setRight(max(text_rect.left(), badge_rect.left() - 9))
+
+        painter.setFont(self.font())
+        painter.setPen(input_text_color(theme, enabled=self.isEnabled()))
+        elided = painter.fontMetrics().elidedText(text, Qt.ElideRight, text_rect.width())
+        painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, elided)
 
     def _paint_inline_combo(self) -> None:
         theme = get_theme()
@@ -470,10 +734,61 @@ class StyledComboBox(QComboBox):
         arrow_color = QColor(theme.primary if active else theme.text_hint)
         if not self.isEnabled():
             arrow_color = QColor(theme.text_disabled)
-        painter.setPen(QPen(arrow_color, 1.5))
+        painter.setPen(stroke_pen(painter, arrow_color, STROKE_ICON))
         zone_x = self.width() - 10
         cy = self.height() // 2
         half = 3
         painter.drawLine(zone_x - half, cy - 1, zone_x, cy + half - 1)
         painter.drawLine(zone_x, cy + half - 1, zone_x + half, cy - 1)
+        painter.end()
+
+    def _paint_titlebar_combo(self) -> None:
+        theme = get_theme()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        width = max(0, self.width())
+        height = max(0, self.height())
+        expanded = self._popup_panel.isVisible()
+        focused = self.hasFocus()
+        hovered = self.underMouse()
+        radius = min(8.0, max(4.0, height / 2.0))
+
+        fill = QColor(theme.bg_card)
+        fill.setAlpha(245 if expanded else 180 if hovered or focused else 125)
+        if not self.isEnabled():
+            fill = QColor(theme.bg_hover)
+            fill.setAlpha(150)
+
+        border = QColor(theme.primary if expanded else theme.border_light)
+        border.setAlpha(180 if expanded else 150 if hovered or focused else 95)
+        border_width = 1.2 if expanded else 1.0
+        half_border = border_width / 2.0
+        rect = QRectF(
+            half_border,
+            half_border,
+            max(0.0, float(width) - border_width),
+            max(0.0, float(height) - border_width),
+        )
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(fill)
+        painter.drawRoundedRect(rect, radius, radius)
+        painter.setPen(stroke_pen(painter, border, border_width))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(rect, radius, radius)
+
+        if not self.isEditable():
+            text_rect = QRect(12, 0, max(0, width - 40), height)
+            self._paint_current_text(painter, text_rect, theme=theme)
+
+        arrow_color = QColor(theme.primary if expanded else theme.text_secondary)
+        if not self.isEnabled():
+            arrow_color = QColor(theme.text_disabled)
+        painter.setPen(stroke_pen(painter, arrow_color, STROKE_ICON))
+        zone_center_x = width - 18
+        zone_center_y = height // 2
+        half = 4
+        painter.drawLine(zone_center_x - half, zone_center_y - 2, zone_center_x, zone_center_y + 2)
+        painter.drawLine(zone_center_x, zone_center_y + 2, zone_center_x + half, zone_center_y - 2)
         painter.end()

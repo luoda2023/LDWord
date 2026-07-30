@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+from src.config.builtin_scenes import list_builtin_scene_resources
 from src.config.scene import SceneWorkspace
-from src.config.template import TemplateConfig
-from src.ui.panels.workbench.scene_presets import SCENE_METAS
-from src.ui.panels.scene_style_override_service import (
-    scene_style_variants_for_scene,
-    scene_uses_reference_format as _scene_uses_reference_format,
+from src.config.scene_surface_registry import (
+    scene_surface_for_scene,
+    scene_uses_exam_paper_surface,
 )
 
 
@@ -14,62 +13,32 @@ SCENE_SELECTOR_MY_GROUP = f"{SCENE_SELECTOR_GROUP_PREFIX}mine"
 SCENE_SELECTOR_BUILTIN_GROUP = f"{SCENE_SELECTOR_GROUP_PREFIX}builtin"
 
 
-def safe_scene_file_stem(value: str) -> str:
-    forbidden = '<>:"/\\|?*'
-    cleaned = "".join(ch if ch not in forbidden else "_" for ch in str(value or "").strip())
-    cleaned = cleaned.strip(" ._")
-    return cleaned or "scene"
-
-
 def is_scene_selector_group(value: object) -> bool:
     return str(value or "").strip().startswith(SCENE_SELECTOR_GROUP_PREFIX)
 
 
 def builtin_scene_id_set() -> set[str]:
-    return {str(meta.scene_id or "").strip() for meta in SCENE_METAS}
+    return {
+        scene_id
+        for _mode_id, scene_id, _path in list_builtin_scene_resources()
+    }
 
 
-def scene_is_exam(scene: SceneWorkspace | None) -> bool:
-    if scene is None:
-        return False
-    parts = (
-        getattr(scene, "scene_id", ""),
-        getattr(scene, "category", ""),
-        getattr(scene, "category_label", ""),
-        getattr(scene, "name", ""),
-        getattr(scene, "description", ""),
-    )
-    text = " ".join(str(part or "").lower() for part in parts)
-    return any(
-        token in text
-        for token in (
-            "exam",
-            "exam paper",
-            "test paper",
-            "test_paper",
-            "question paper",
-            "question_paper",
-            "试卷",
-            "考试",
-            "测验",
-            "试题",
-        )
-    )
-
-
-def scene_uses_reference_format(scene: SceneWorkspace | None) -> bool:
-    return _scene_uses_reference_format(scene)
-
-
-def generic_style_variants_for_scene(
+def scene_is_exam(
     scene: SceneWorkspace | None,
-    template: TemplateConfig | None = None,
-):
-    return scene_style_variants_for_scene(scene, template)
+    *,
+    mode_id: object = "",
+) -> bool:
+    return scene_uses_exam_paper_surface(scene, mode_id=mode_id)
 
 
-def scene_should_show_content_card(scene: SceneWorkspace | None) -> bool:
-    if scene is None or not scene_is_exam(scene):
+def scene_should_show_content_card(
+    scene: SceneWorkspace | None,
+    *,
+    mode_id: object = "",
+) -> bool:
+    surface = scene_surface_for_scene(scene, mode_id=mode_id)
+    if scene is None or not surface.hides_content_card_without_material_contract:
         return True
     return scene_has_material_content_contract(scene)
 

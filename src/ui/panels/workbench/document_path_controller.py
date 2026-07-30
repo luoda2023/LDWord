@@ -51,6 +51,10 @@ class WorkbenchDocumentPathController:
             return None
         return self._cache_and_sync(normalized)
 
+    def clear_selection(self) -> None:
+        self._cached_document_path = ""
+        self._sync_detail_path("")
+
     def apply_loaded_document(self, file_path: str) -> str | None:
         normalized = self._normalize_existing_path(file_path)
         if not normalized:

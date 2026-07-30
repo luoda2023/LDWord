@@ -9,7 +9,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .heading_numbering_panel import HeadingNumberingPanel
-    from .workbench_panel import WorkbenchPanel
+    from .workbench import WorkbenchPanel
 
 
 def __getattr__(name: str):
@@ -18,7 +18,7 @@ def __getattr__(name: str):
 
         return HeadingNumberingPanel
     if name == "WorkbenchPanel":
-        from .workbench_panel import WorkbenchPanel
+        from .workbench import WorkbenchPanel
 
         return WorkbenchPanel
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

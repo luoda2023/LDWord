@@ -45,6 +45,10 @@ class SpacingInput(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         self._spin = StyledSpinBox()
+        spin_policy = self._spin.sizePolicy()
+        spin_policy.setHorizontalPolicy(QSizePolicy.Ignored)
+        self._spin.setSizePolicy(spin_policy)
+        self._spin.setMinimumWidth(0)
         self._spin.setRange(min_val, max_val)
         self._spin.setSingleStep(step)
         self._spin.setDecimals(decimals)

@@ -20,11 +20,12 @@ from src.shared.ui.theme import (
     derive_theme_from_core,
     get_theme, set_theme, bind_theme,
 )
-from src.shared.ui.custom_themes import CustomThemeStore
+from src.shared.ui.custom_themes import CustomThemeStore, CustomThemeStoreError
 from src.shared.ui.divider import Divider
 from src.shared.ui.flow_layout import FlowLayout
 from src.shared.ui.input_metrics import build_framed_input_stylesheet
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
+from src.shared.ui.typography_policy import TextRole, apply_text_role
 from src.ui.base_panel import BasePanel
 
 # ── 预设注册表 ──────────────────────────────────────
@@ -255,7 +256,6 @@ class _CustomThemeCard(_ThemeSwatchCard):
         if self._hovered:
             p = QPainter(self)
             p.setRenderHint(QPainter.Antialiasing)
-            t = get_theme()
 
             btn_size = 18
             btn_x = self.width() - btn_size - 6
@@ -436,7 +436,6 @@ class _ThemeEditorDialog(QDialog):
         bind_theme(self, self._apply_theme)
 
     def _setup_ui(self):
-        t = get_theme()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(16)
@@ -446,6 +445,7 @@ class _ThemeEditorDialog(QDialog):
         name_label.setObjectName("editor_label")
         self._name_input = QLineEdit()
         self._name_input.setPlaceholderText("例如：我的蓝色主题")
+        apply_text_role(self._name_input, TextRole.BODY)
         from src.shared.ui.sizing import apply_size_class
         apply_size_class(self._name_input, "md")
         layout.addWidget(name_label)
@@ -547,8 +547,8 @@ class _ThemeEditorDialog(QDialog):
             border_radius=t.radius_sm,
             padding_x=10,
             padding_y=0,
-            font_size=13,
         )
+        apply_text_role(self._name_input, TextRole.BODY)
         self.setStyleSheet(f"""
             _ThemeEditorDialog {{
                 background: {t.bg_window};
@@ -558,7 +558,7 @@ class _ThemeEditorDialog(QDialog):
                 color: {t.text_primary}; background: transparent;
             }}
             #color_label {{
-                font-size: 13px; font-weight: 600;
+                font-size: 13px; font-weight: {t.font_weight_emphasis};
                 color: {t.text_primary}; background: transparent;
             }}
             #color_desc {{
@@ -632,6 +632,11 @@ class ThemePanel(BasePanel):
 
         self._custom_title = QLabel("自定义配色")
         outer.addWidget(self._custom_title)
+        self._custom_theme_error = QLabel("", self)
+        self._custom_theme_error.setObjectName("custom_theme_load_error")
+        self._custom_theme_error.setWordWrap(True)
+        self._custom_theme_error.setVisible(False)
+        outer.addWidget(self._custom_theme_error)
         outer.addSpacing(14)
 
         # ── 自定义主题区 ──
@@ -640,7 +645,16 @@ class ThemePanel(BasePanel):
 
         # 加载已保存的自定义主题
         self._store = CustomThemeStore()
-        self._store.load()
+        self._custom_theme_load_failed = False
+        try:
+            self._store.load()
+        except CustomThemeStoreError as exc:
+            self._custom_theme_load_failed = True
+            self._custom_theme_error.setText(
+                "自定义主题文件加载失败，已停止自定义主题写入以保护原文件。\n"
+                f"{exc}"
+            )
+            self._custom_theme_error.setVisible(True)
         self._custom_cards: dict[str, _CustomThemeCard] = {}
         for entry in self._store.entries:
             self._add_custom_card(entry.id, entry.name, entry.to_app_theme(), custom_container)
@@ -648,6 +662,9 @@ class ThemePanel(BasePanel):
         # "+" 新建卡片
         self._add_card = _AddThemeCard(custom_container)
         self._add_card.clicked.connect(self._on_add_clicked)
+        self._add_card.setEnabled(not self._custom_theme_load_failed)
+        if self._custom_theme_load_failed:
+            self._add_card.setToolTip("请先修复自定义主题 JSON 文件，再新建主题。")
         self._custom_flow.addWidget(self._add_card)
 
         outer.addWidget(custom_container)
@@ -691,8 +708,9 @@ class ThemePanel(BasePanel):
             if _themes_match(current, entry_theme):
                 set_theme(LIGHT)
 
-        self._store.delete(theme_id)
-        self._rebuild_custom_cards()
+        if self._store.delete(theme_id):
+            self._remove_custom_card(theme_id)
+            self._sync_selection()
 
     # ── 新建自定义主题 ──
 
@@ -701,41 +719,60 @@ class ThemePanel(BasePanel):
         if dlg.exec() == QDialog.Accepted:
             name, core = dlg.get_result()
             entry = self._store.add(name, core)
-            self._rebuild_custom_cards()
+            self._insert_custom_card_before_add(
+                entry.id,
+                entry.name,
+                entry.to_app_theme(),
+            )
             # 立即切换到新主题
             set_theme(entry.to_app_theme())
 
-    # ── 重建自定义卡片区 ──
+    # ── 自定义卡片增量变更 ──
 
-    def _rebuild_custom_cards(self) -> None:
-        """清除并重建自定义卡片区。"""
-        # 移除所有自定义卡片
-        for card in self._custom_cards.values():
-            self._custom_flow.removeWidget(card)
-            card.deleteLater()
-        self._custom_cards.clear()
+    def _insert_custom_card_before_add(
+        self,
+        theme_id: str,
+        name: str,
+        theme: AppTheme,
+    ) -> _CustomThemeCard:
+        """在末尾的“新建”卡前增量插入一张主题卡。
 
-        # 移除 "+" 卡片
-        self._custom_flow.removeWidget(self._add_card)
-
-        # 重新创建
+        已存在的卡片和“新建”卡都保留原对象，避免因全量重建导致
+        FlowLayout 再次换行和画面跳动。
+        """
         container = self._add_card.parentWidget()
-        for entry in self._store.entries:
-            self._add_custom_card(entry.id, entry.name, entry.to_app_theme(), container)
-
-        # "+" 卡片放回最后
+        self._custom_flow.removeWidget(self._add_card)
+        card = self._add_custom_card(theme_id, name, theme, container)
         self._custom_flow.addWidget(self._add_card)
-
-        self._sync_selection()
         container.updateGeometry()
+        return card
 
-    def _add_custom_card(self, theme_id: str, name: str, theme: AppTheme, parent: QWidget):
+    def _remove_custom_card(self, theme_id: str) -> bool:
+        """只移除指定主题卡，不触碰其他卡片对象。"""
+        card = self._custom_cards.pop(theme_id, None)
+        if card is None:
+            return False
+
+        self._custom_flow.removeWidget(card)
+        card.deleteLater()
+        container = self._add_card.parentWidget()
+        container.updateGeometry()
+        return True
+
+    def _add_custom_card(
+        self,
+        theme_id: str,
+        name: str,
+        theme: AppTheme,
+        parent: QWidget,
+    ) -> _CustomThemeCard:
         """创建一张自定义主题卡片并加入布局。"""
         card = _CustomThemeCard(theme_id, name, theme, parent)
         card.clicked.connect(self._on_custom_clicked)
         card.delete_clicked.connect(self._on_delete_clicked)
         self._custom_cards[theme_id] = card
         self._custom_flow.addWidget(card)
+        return card
 
     # ── 主题变化回调 ──
 
@@ -783,6 +820,10 @@ class ThemePanel(BasePanel):
         self._custom_title.setStyleSheet(
             f"font-size: 14px; font-weight: bold; color: {t.text_secondary}; "
             f"background: transparent;"
+        )
+        self._custom_theme_error.setStyleSheet(
+            f"font-size: {t.font_size_sm}px; color: {t.error}; "
+            f"background: transparent; padding: 6px 0;"
         )
         self._hint.setStyleSheet(
             f"font-size: {t.font_size_sm}px; color: {t.text_hint}; "

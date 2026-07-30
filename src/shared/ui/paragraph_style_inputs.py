@@ -57,7 +57,8 @@ class IndentInput(QWidget):
 
         self._spin = StyledSpinBox(self)
         self._spin.valueChanged.connect(self._on_spin_changed)
-        self._spin.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._spin.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self._spin.setMinimumWidth(0)
         layout.addWidget(self._spin, 1)
 
         self._unit_combo = StyledComboBox(self)

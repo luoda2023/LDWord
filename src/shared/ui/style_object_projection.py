@@ -1,4 +1,4 @@
-"""Unified projection for template, scene, and execution style objects."""
+"""Unified projection for template editing and execution style receipts."""
 
 from __future__ import annotations
 
@@ -26,8 +26,6 @@ class StyleObjectProjection:
         default_factory=lambda: StylePresentationEnvelope.from_object(None)
     )
     preview_projection: object | None = None
-    difference: object | None = None
-    policy: object | None = None
     receipt: StylePresentationEnvelope | None = None
     empty_preview_text: str = ""
 
@@ -62,8 +60,6 @@ class StyleObjectProjection:
         preview: StylePresentationEnvelope | object | None = None,
         source: object | None = None,
         preview_projection: object | None = None,
-        difference: object | None = None,
-        policy: object | None = None,
         receipt: StylePresentationEnvelope | object | None = None,
         empty_preview_text: str = "",
     ) -> "StyleObjectProjection":
@@ -84,8 +80,6 @@ class StyleObjectProjection:
                 else StylePresentationEnvelope.from_object(None)
             ),
             preview_projection=preview_projection,
-            difference=difference,
-            policy=policy,
             receipt=(
                 StylePresentationEnvelope.from_object(receipt)
                 if receipt is not None
@@ -116,8 +110,6 @@ class StyleObjectProjection:
                 getattr(projection, "preview", None)
             ),
             preview_projection=getattr(projection, "preview_projection", None),
-            difference=getattr(projection, "difference", None),
-            policy=getattr(projection, "policy", None),
             receipt=(
                 StylePresentationEnvelope.from_object(receipt)
                 if receipt is not None

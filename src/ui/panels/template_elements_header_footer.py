@@ -7,16 +7,13 @@ from typing import TYPE_CHECKING
 
 from src.config.template import TemplateConfig
 from src.config.header_footer_presets import (
+    USER_PRESET_DIR,
     configs_equal as header_footer_configs_equal,
-    delete_user_preset as delete_header_footer_user_preset,
     detect_matching_preset as detect_matching_header_footer_preset,
     get_preset_catalog as get_header_footer_preset_catalog,
     get_preset_config as get_header_footer_preset_config,
-    is_user_preset as is_user_header_footer_preset,
-    preset_label_exists as header_footer_preset_label_exists,
-    save_user_preset as save_header_footer_user_preset,
 )
-from src.qt_api import QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QWidget, Qt
+from src.qt_api import QDesktopServices, QHBoxLayout, QLabel, QLineEdit, QUrl, QWidget, Qt
 from src.shared.ui.card import Card
 from src.shared.ui.dashed_separator import DashedSeparator
 from src.shared.ui.form_action_row import FormActionButtonRow
@@ -202,9 +199,7 @@ class HeaderFooterDetailSection:
             "_scheme_note",
             "_scheme_actions",
             "_scheme_actions_row",
-            "_scheme_save_as_btn",
-            "_scheme_update_btn",
-            "_scheme_delete_btn",
+            "_scheme_open_folder_btn",
             "_normal_page_card",
             "_footer_card",
             "_page_number_card",
@@ -352,12 +347,12 @@ class HeaderFooterDetailSection:
         form.add_widget(self._scheme_row)
 
         self._scheme_actions = FormActionButtonRow(self._owner)
-        self._scheme_save_as_btn = self._scheme_actions.add_button("另存为方案", "secondary")
-        self._scheme_update_btn = self._scheme_actions.add_button("更新方案", "secondary")
-        self._scheme_delete_btn = self._scheme_actions.add_button("删除方案", "ghost-danger")
-        self._scheme_save_as_btn.clicked.connect(self._on_scheme_save_as_requested)
-        self._scheme_update_btn.clicked.connect(self._on_scheme_update_requested)
-        self._scheme_delete_btn.clicked.connect(self._on_scheme_delete_requested)
+        self._scheme_open_folder_btn = self._scheme_actions.add_button(
+            "打开方案文件夹", "secondary"
+        )
+        self._scheme_open_folder_btn.clicked.connect(
+            self._on_scheme_open_folder_requested
+        )
         self._scheme_actions_row = self._form_row("方案操作", self._scheme_actions, parent=form)
         form.add_widget(self._scheme_actions_row)
 
@@ -376,8 +371,13 @@ class HeaderFooterDetailSection:
             self._scheme_combo.clear()
             for key, entry in get_header_footer_preset_catalog().items():
                 label = str(entry.get("label", key))
-                suffix = "用户" if entry.get("source") == "user" else "内置"
-                self._scheme_combo.addItem(f"{label}（{suffix}）", key)
+                is_user = entry.get("source") == "user"
+                self._scheme_combo.add_badged_item(
+                    label,
+                    key,
+                    badge_text="自定" if is_user else "内置",
+                    badge_kind="user" if is_user else "builtin",
+                )
             if current_key:
                 self._scheme_combo.setCurrentIndex(self._find_scheme_index(str(current_key)))
             else:
@@ -406,19 +406,6 @@ class HeaderFooterDetailSection:
         if not entry:
             return ""
         return "用户" if entry.get("source") == "user" else "内置"
-
-    def _default_scheme_save_as_name(self) -> str:
-        active_label = self._scheme_entry_label(self._active_scheme_key)
-        label = active_label or "自定义页眉页脚方案"
-        if not header_footer_preset_label_exists(label):
-            return label
-        base = f"{label}副本"
-        candidate = base
-        suffix = 2
-        while header_footer_preset_label_exists(candidate):
-            candidate = f"{base} {suffix}"
-            suffix += 1
-        return candidate
 
     def _build_normal_page_form(self) -> None:
         self._normal_header_title_label = self._section_title("普通页页眉", self._normal_page_card)
@@ -1129,72 +1116,13 @@ class HeaderFooterDetailSection:
         return header_footer_configs_equal(current, preset)
 
     def _refresh_scheme_action_state(self, header_footer=None) -> None:
-        if not hasattr(self, "_scheme_save_as_btn"):
-            return
-        has_template = self._owner._current_template is not None
-        active_key = self._active_scheme_key
-        user_scheme = bool(active_key and is_user_header_footer_preset(active_key))
-        has_changes = bool(active_key and not self._scheme_matches_current(active_key, header_footer))
-        self._scheme_save_as_btn.setEnabled(has_template)
-        self._scheme_update_btn.setEnabled(has_template and user_scheme and has_changes)
-        self._scheme_delete_btn.setEnabled(has_template and user_scheme)
+        if hasattr(self, "_scheme_open_folder_btn"):
+            self._scheme_open_folder_btn.setEnabled(True)
 
-    def _on_scheme_save_as_requested(self) -> None:
-        config = self._current_header_footer_config()
-        if config is None:
-            return
-        text, ok = QInputDialog.getText(
-            self._owner,
-            "另存为页眉页脚方案",
-            "方案名称",
-            QLineEdit.Normal,
-            self._default_scheme_save_as_name(),
-        )
-        label = str(text or "").strip()
-        if not ok or not label:
-            return
-        try:
-            self._active_scheme_key = save_header_footer_user_preset(label, config)
-        except ValueError as exc:
-            Toast.show_warning(str(exc) or "页眉页脚方案名称已存在")
-            return
-        self._populate_scheme_combo()
-        self._sync_scheme_combo(config)
-        Toast.show_success("页眉页脚方案已保存")
-
-    def _on_scheme_update_requested(self) -> None:
-        config = self._current_header_footer_config()
-        if config is None:
-            return
-        active_key = self._active_scheme_key
-        if not active_key or not is_user_header_footer_preset(active_key):
-            return
-        if self._scheme_matches_current(active_key, config):
-            return
-        label = self._scheme_entry_label(active_key) or active_key.replace("user.", "")
-        save_header_footer_user_preset(label, config, preset_id=active_key)
-        self._populate_scheme_combo()
-        self._sync_scheme_combo(config)
-        Toast.show_success("页眉页脚方案已更新")
-
-    def _on_scheme_delete_requested(self) -> None:
-        active_key = self._active_scheme_key
-        if not active_key or not is_user_header_footer_preset(active_key):
-            return
-        answer = QMessageBox.question(
-            self._owner,
-            "删除页眉页脚方案",
-            "删除该用户页眉页脚方案？当前模板里的页眉页脚设置会保留为自定义配置。",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if answer != QMessageBox.Yes:
-            return
-        if delete_header_footer_user_preset(active_key):
-            self._active_scheme_key = None
-            self._populate_scheme_combo()
-            self._sync_scheme_combo(self._current_header_footer_config())
-            Toast.show_success("页眉页脚方案已删除")
+    def _on_scheme_open_folder_requested(self) -> None:
+        USER_PRESET_DIR.mkdir(parents=True, exist_ok=True)
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(USER_PRESET_DIR))):
+            Toast.show_error(f"无法打开页眉页脚方案文件夹: {USER_PRESET_DIR}")
 
     def _set_variant_control_values(
         self,
@@ -1471,7 +1399,6 @@ class HeaderFooterDetailSection:
         header_outputs = header_enabled and header_mode != "none"
         footer_outputs = footer_enabled and footer_mode != "none"
         exclusion_preset = str(self._exclusion_preset_combo.currentData() or "none")
-        exclusion_enabled = exclusion_preset != "none"
         exclusion_is_custom = exclusion_preset == "custom"
         self._page_toggle_group.hide()
         self._hide_cover_row.hide()

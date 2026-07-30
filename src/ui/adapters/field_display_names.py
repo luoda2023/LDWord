@@ -8,8 +8,6 @@ from src.config.style_field_descriptors import (
     style_field_label,
     style_field_layout_item_for_field,
 )
-from src.config.style_variant_semantics import STYLE_VARIANTS
-
 
 SECTION_LABELS: dict[str, str] = {
     "abstracts": "摘要",
@@ -136,10 +134,7 @@ def field_display_name(value: str, *, target_type: str = "") -> str:
     known = _input_source_label(key)
     if known:
         return known
-    known = _scene_scope_label(key)
-    if known:
-        return known
-    known = _scene_style_label(key)
+    known = _scene_document_scope_label(key)
     if known:
         return known
     known = _template_style_label(key)
@@ -223,35 +218,6 @@ def navigation_issue_hint(
     return field_display_name(issue_key, target_type=issue_type)
 
 
-def _scene_style_label(key: str) -> str:
-    target = _strip_prefix(key, "scene.section_styles.")
-    target = _strip_prefix(target, "section_styles.")
-    if target == key and not key.startswith("section_style."):
-        return ""
-    is_editor_field = target.startswith("section_style.")
-    if target.startswith("section_style."):
-        target = target.removeprefix("section_style.")
-    parts = [part for part in target.split(".") if part]
-    if len(parts) == 1:
-        if not is_editor_field:
-            variant_label = _style_variant_label(parts[0])
-            if variant_label:
-                return f"{variant_label}正文"
-        return _style_field_display_label(parts[0], style_field_label(parts[0]))
-    if len(parts) < 2:
-        return ""
-    variant_key, field_key = parts[0], parts[-1]
-    field_label = _style_field_display_label(field_key, style_field_label(field_key))
-    if not field_label:
-        return ""
-    if variant_key == "*":
-        return f"所有处理分区{field_label}"
-    variant_label = _style_variant_label(variant_key)
-    if not variant_label:
-        return ""
-    return f"{variant_label}正文{field_label}"
-
-
 def _template_style_label(key: str) -> str:
     target = _strip_prefix(key, "template.styles.")
     target = _strip_prefix(target, "styles.")
@@ -267,15 +233,12 @@ def _template_style_label(key: str) -> str:
     return f"{_style_label(style_key)}{field_label}"
 
 
-def _scene_scope_label(key: str) -> str:
-    target = _strip_prefix(key, "scene.format_scope.sections.")
-    target = _strip_prefix(target, "format_scope.sections.")
-    target = _strip_prefix(target, "sections.")
-    target = _strip_prefix(target, "scope.")
-    if target == key:
-        return ""
-    label = SECTION_LABELS.get(target, target)
-    return f"处理范围：{label}"
+def _scene_document_scope_label(key: str) -> str:
+    if key == "scene.document_scope.mode":
+        return "处理范围"
+    if key == "scene.document_scope.selected_roles":
+        return "指定区域"
+    return ""
 
 
 def _template_page_label(key: str) -> str:
@@ -308,13 +271,6 @@ def _style_field_display_label(key: str, label: str) -> str:
     if layout_item is not None and len(layout_item.field_ids) > 1:
         return layout_item.label
     return label
-
-
-def _style_variant_label(variant_key: str) -> str:
-    for variant in STYLE_VARIANTS:
-        if variant.key == variant_key:
-            return str(variant.label or "").strip()
-    return SECTION_LABELS.get(variant_key, variant_key)
 
 
 def _style_label(style_key: str) -> str:

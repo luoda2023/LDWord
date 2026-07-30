@@ -21,6 +21,7 @@ from src.ui.panels.assets.specs import (
     REQUIRED_FIELD_KEYS,
     SUPPORTED_IMAGE_SUFFIXES,
     AssetSlotSpec,
+    AssetGroupSpec,
     AssetsSectionSpec,
     AttachmentRoleSpec,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "SUPPORTED_IMAGE_SUFFIXES",
     "AssetCapabilityBoundary",
     "AssetSlotSpec",
+    "AssetGroupSpec",
     "AssetsSectionSpec",
     "AttachmentRoleSpec",
     "boundaries_by_decision",

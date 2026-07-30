@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from src.qt_api import QColor, QPainter, QPen, QSize, QSizePolicy, QWidget, Qt
+from src.qt_api import QColor, QPainter, QSize, QSizePolicy, QWidget, Qt
 
 from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.paint_geometry import stroke_pen
 
 
 class DashedSeparator(QWidget):
@@ -51,7 +52,14 @@ class DashedSeparator(QWidget):
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
-        pen = QPen(self._color, 1, Qt.CustomDashLine)
+        pen = stroke_pen(
+            painter,
+            self._color,
+            1.0,
+            cap=Qt.FlatCap,
+            join=Qt.BevelJoin,
+            style=Qt.CustomDashLine,
+        )
         pen.setDashPattern([5, 3])
         painter.setPen(pen)
 

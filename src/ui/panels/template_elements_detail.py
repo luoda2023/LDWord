@@ -31,7 +31,6 @@ from src.ui.panels.template_summary_projection import (
 )
 from src.ui.panels.template_elements_header_footer import (
     HeaderFooterDetailSection,
-    ensure_default_page_number_phases,
 )
 from src.ui.panels.template_elements_toc import (
     TOC_STYLE_KEYS,
@@ -210,7 +209,6 @@ class ElementsDetail(QWidget):
             self._refresh_summary()
             self._refresh_action_state()
             return
-        ensure_default_page_number_phases(template.header_footer)
         if not preserve_snapshot:
             self._snapshot = _ElementsSnapshot.from_template(template)
 
@@ -304,7 +302,7 @@ class ElementsDetail(QWidget):
 
     def _refresh_action_icons(self) -> None:
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
         except Exception:
             return
 
@@ -357,7 +355,7 @@ class ElementsDetail(QWidget):
             apply_button_variant(row.remove_btn, "ghost-danger")
 
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
 
             for icon_name, icon_label in self._header_icons:
                 icon_label.setPixmap(get_icon(icon_name, 18, theme.primary).pixmap(18, 18))

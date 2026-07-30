@@ -45,7 +45,6 @@ from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.layout_sync import refresh_layout_chain, refresh_layout_chain_later, updates_suspended
 from src.shared.ui.paragraph_style_inputs import IndentInput, SpecialIndentInput
 from src.shared.ui.size_combo import SizeCombo
-from src.shared.ui.sizing import normalize_form_control_heights, resolved_control_height
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.style_preview_utils import (
     preview_alignment_flags,
@@ -251,6 +250,8 @@ class TocDetailSection:
         self._selected_role_key = "toc_title"
         self._is_style_syncing = False
         self._toc_style_controls: dict[str, object] = {}
+        self._toc_role_items: dict[str, QListWidgetItem] = {}
+        self._toc_role_widgets: dict[str, QWidget] = {}
 
         self.structure_section = Card(parent=owner._editor_column)
         self._toc_section = self.structure_section
@@ -271,8 +272,6 @@ class TocDetailSection:
 
     def _export_compat_attributes(self) -> None:
         names = (
-            "_toc_enabled_toggle",
-            "_toc_enabled_row",
             "_toc_mode_combo",
             "_toc_mode_row",
             "_toc_depth_combo",
@@ -289,10 +288,6 @@ class TocDetailSection:
 
     def _build_toc_form(self) -> None:
         form = InspectorForm(parent=self.structure_section)
-
-        self._toc_enabled_toggle = ToggleSwitch(self._owner, checked=True)
-        self._toc_enabled_toggle.toggled_signal.connect(self._owner._on_structure_edited)
-        self._toc_enabled_row = self._form_row("启用目录", self._toc_enabled_toggle, parent=form)
 
         self._toc_mode_combo = StyledComboBox(self._owner)
         for value, label in TOC_MODE_OPTIONS:
@@ -314,8 +309,8 @@ class TocDetailSection:
 
         self._toc_structure_grid = TemplateFormGrid(
             [
-                [self._toc_enabled_row, self._toc_mode_row],
-                [self._toc_depth_row, self._toc_insert_row],
+                [self._toc_mode_row, self._toc_depth_row],
+                [self._toc_insert_row],
             ],
             parent=form,
             align_trailing_labels=False,
@@ -565,21 +560,54 @@ class TocDetailSection:
         if self._selected_role_key not in valid_keys:
             self._selected_role_key = specs[0].key
 
-        self._toc_style_role_list.blockSignals(True)
+        role_list = self._toc_style_role_list
+        role_list.blockSignals(True)
         try:
-            self._toc_style_role_list.clear()
-            selected_row = 0
+            for row in range(role_list.count() - 1, -1, -1):
+                item = role_list.item(row)
+                key = str(item.data(Qt.UserRole) or "")
+                if key in valid_keys:
+                    self._toc_role_items[key] = item
+                    widget = role_list.itemWidget(item)
+                    if widget is not None:
+                        self._toc_role_widgets[key] = widget
+                    continue
+                widget = role_list.itemWidget(item)
+                role_list.removeItemWidget(item)
+                role_list.takeItem(row)
+                self._toc_role_items.pop(key, None)
+                self._toc_role_widgets.pop(key, None)
+                if widget is not None:
+                    widget.setParent(None)
+                    widget.deleteLater()
+
             for index, spec in enumerate(specs):
-                item = QListWidgetItem()
+                item = self._toc_role_items.get(spec.key)
+                widget = self._toc_role_widgets.get(spec.key)
+                if item is None or role_list.row(item) < 0:
+                    item = QListWidgetItem()
+                    role_list.insertItem(index, item)
+                    widget = self._build_role_row(spec)
+                    role_list.setItemWidget(item, widget)
+                    self._toc_role_items[spec.key] = item
+                    self._toc_role_widgets[spec.key] = widget
+                else:
+                    current_row = role_list.row(item)
+                    if current_row != index:
+                        role_list.removeItemWidget(item)
+                        role_list.takeItem(current_row)
+                        role_list.insertItem(index, item)
+                        if widget is not None:
+                            role_list.setItemWidget(item, widget)
                 item.setData(Qt.UserRole, spec.key)
                 item.setSizeHint(QSize(230, 62))
-                self._toc_style_role_list.addItem(item)
-                self._toc_style_role_list.setItemWidget(item, self._build_role_row(spec))
-                if spec.key == self._selected_role_key:
-                    selected_row = index
-            self._toc_style_role_list.setCurrentRow(selected_row)
+                if widget is not None:
+                    self._sync_role_row(widget, spec)
+
+            selected_item = self._toc_role_items[self._selected_role_key]
+            role_list.setCurrentItem(selected_item)
         finally:
-            self._toc_style_role_list.blockSignals(False)
+            role_list.blockSignals(False)
         self._sync_selected_style()
 
     def _style_brief(self, role_key: str) -> str:
@@ -589,6 +617,7 @@ class TocDetailSection:
 
     def _build_role_row(self, spec: _TocRoleSpec) -> QWidget:
         widget = QWidget(self._toc_style_role_list)
+        widget.setProperty("roleKey", spec.key)
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(10, 6, 10, 6)
         layout.setSpacing(3)
@@ -613,6 +642,18 @@ class TocDetailSection:
         meta.setWordWrap(True)
         layout.addWidget(meta)
         return widget
+
+    def _sync_role_row(self, widget: QWidget, spec: _TocRoleSpec) -> None:
+        widget.setProperty("roleKey", spec.key)
+        title = widget.findChild(QLabel, "toc_list_txt")
+        if title is not None:
+            title.setText(spec.label)
+        word_style = widget.findChild(QLabel, "toc_list_lv")
+        if word_style is not None:
+            word_style.setText(spec.word_style)
+        meta = widget.findChild(QLabel, "toc_preview_meta")
+        if meta is not None:
+            meta.setText(self._style_brief(spec.key))
 
     def _effective_style(self, role_key: str) -> StyleConfig:
         template = self._current_template
@@ -781,28 +822,19 @@ class TocDetailSection:
     def set_template(self, template: TemplateConfig) -> None:
         self._current_template = template
         toc = template.toc
-        self._toc_enabled_toggle.setChecked(toc.enabled)
         _set_combo_by_data(self._toc_mode_combo, toc.mode)
         _set_combo_by_data(self._toc_depth_combo, toc.max_level)
         _set_combo_by_data(self._toc_insert_combo, toc.insert_position)
         self._rebuild_role_list()
 
     def apply_to(self, toc) -> None:
-        toc.enabled = self._toc_enabled_toggle.isChecked()
         toc.mode = str(self._toc_mode_combo.currentData() or "word_native")
         toc.max_level = int(self._toc_depth_combo.currentData() or 3)
         toc.insert_position = str(self._toc_insert_combo.currentData() or "auto")
 
     def sync_dependent_state(self) -> None:
         with updates_suspended(self._owner._editor_column):
-            toc_enabled = self._toc_enabled_toggle.isChecked()
-            self._toc_mode_row.setEnabled(toc_enabled)
-            self._toc_depth_row.setEnabled(toc_enabled)
-            self._toc_insert_row.setEnabled(toc_enabled)
-            self.styles_section.setVisible(toc_enabled)
-            self.styles_section.setEnabled(toc_enabled)
-            if toc_enabled:
-                self._rebuild_role_list()
+            self._rebuild_role_list()
             refresh_layout_chain(self._owner._editor_column)
         refresh_layout_chain_later(self._owner._editor_column)
 
@@ -887,12 +919,6 @@ class TocDetailSection:
             }}
             """
         )
-        normalize_form_control_heights(
-            self.styles_section,
-            resolved_control_height(theme, "md"),
-            marker="/* toc-style-form-control-height */",
-        )
-
     def _current_toc_depth(self) -> int:
         return max(1, min(int(self._toc_depth_combo.currentData() or 3), 6))
 

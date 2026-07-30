@@ -4,10 +4,21 @@ Shared file drop zone primitive.
 
 from __future__ import annotations
 
-from src.qt_api import QFileDialog, QComboBox, QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget, Signal, Qt
+from src.qt_api import (
+    QFileDialog,
+    QComboBox,
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+    Signal,
+    Qt,
+)
 
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.input_style import build_text_input_stylesheet
+from src.shared.ui.path_drop import PathAcceptancePolicy, attach_path_drop
 from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import bind_theme, get_theme
 
@@ -21,15 +32,15 @@ class FileDropZone(QWidget):
         self,
         *,
         dialog_title: str = "\u9009\u62e9\u6587\u4ef6",
-        file_filter: str = "\u6240\u6709\u6587\u4ef6 (*)",
         start_dir: str = "",
+        policy: PathAcceptancePolicy | None = None,
         parent=None,
     ):
         super().__init__(parent)
         self._file_path = ""
         self._dialog_title = str(dialog_title or "\u9009\u62e9\u6587\u4ef6")
-        self._file_filter = str(file_filter or "\u6240\u6709\u6587\u4ef6 (*)")
         self._start_dir = str(start_dir or "")
+        self._policy = policy or PathAcceptancePolicy()
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -56,6 +67,13 @@ class FileDropZone(QWidget):
         self._recent_combo.currentTextChanged.connect(self._on_recent_selected)
         self._layout.addWidget(self._recent_combo)
 
+        self._drop_controller = attach_path_drop(
+            parent=self,
+            surface=self,
+            policy=self._policy,
+            on_paths=lambda paths: self.set_file(paths[0]),
+        )
+
         self._apply_theme()
         bind_theme(self, self._apply_theme)
 
@@ -74,16 +92,20 @@ class FileDropZone(QWidget):
             self,
             self._dialog_title,
             self._start_dir,
-            self._file_filter,
+            self._policy.dialog_filter,
         )
         file_path = str(file_path or "").strip()
         if not file_path:
+            return
+        if not self._drop_controller.accepts_path(file_path):
             return
         self.set_file(file_path)
 
     def _on_recent_selected(self, value: str) -> None:
         file_path = str(value or "").strip()
         if not file_path:
+            return
+        if not self._drop_controller.accepts_path(file_path):
             return
         self.set_file(file_path)
 

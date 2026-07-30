@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
+from src.config.materials import IMAGE_EXTENSIONS
 from src.qt_api import QPixmap, QSize, Qt
+from src.shared.ui.path_drop import PathAcceptancePolicy
 from src.ui.panels.assets.fields import _asset_role_label
-from src.ui.panels.assets.specs import SUPPORTED_IMAGE_SUFFIXES
+
+
+def _image_file_dialog_filter() -> str:
+    return _image_path_policy().dialog_filter
+
+
+def _image_path_policy() -> PathAcceptancePolicy:
+    return PathAcceptancePolicy(
+        path_kind="file",
+        suffixes=tuple(sorted(IMAGE_EXTENSIONS)),
+        dialog_label="图片文件",
+        include_all_files=False,
+    )
 
 
 def _load_scaled_pixmap(path: str, size: QSize) -> QPixmap | None:
@@ -49,21 +61,10 @@ def _asset_role_min_short_side(role: str) -> int:
     }.get(str(role or ""), 300)
 
 
-def _first_image_path_from_mime(mime) -> str:
-    if mime is None or not getattr(mime, "hasUrls", lambda: False)():
-        return ""
-    for url in mime.urls():
-        if not url.isLocalFile():
-            continue
-        path = str(url.toLocalFile())
-        if Path(path).suffix.lower() in SUPPORTED_IMAGE_SUFFIXES:
-            return path
-    return ""
-
-
 __all__ = [
     "_load_scaled_pixmap",
+    "_image_file_dialog_filter",
+    "_image_path_policy",
     "_image_quality_text",
     "_asset_role_min_short_side",
-    "_first_image_path_from_mime",
 ]

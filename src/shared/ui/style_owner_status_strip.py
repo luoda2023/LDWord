@@ -100,8 +100,6 @@ class StyleOwnerStatusStrip(QWidget):
 def _fallback_scope_label(owner_kind: str) -> str:
     if owner_kind == "template_body_style":
         return "模板全局"
-    if owner_kind == "scene_section_style":
-        return "仅当前场景"
     return "-"
 
 

@@ -33,7 +33,7 @@ class WorkbenchStrategyAdapter:
             scene_description = self._normalize_text(scene.description)
             scene_category = self._normalize_text(scene.category_label)
             state.name = scene_name or "未命名策略"
-            state.scene_label = scene_description or scene_category or "通用场景"
+            state.scene_label = scene_description or scene_category or "通用方案"
             state.strict_mode = scene.strict_mode
             state.enabled_module_count = enabled_count
             state.source_type = "scene"

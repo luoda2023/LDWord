@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from src.qt_api import QLabel, QPushButton
-from src.shared.ui.button_style import apply_button_variant
+from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.sizing import apply_size_class
+from src.shared.ui.theme import get_theme
 from src.shared.ui.surface_card import SurfaceCard
 
 
@@ -19,6 +21,9 @@ class QuickFillCard(SurfaceCard):
         self._advanced_mapping_btn.setObjectName("wb_quick_card_action_secondary")
         apply_button_variant(self._quick_setup_btn, "secondary")
         apply_button_variant(self._advanced_mapping_btn, "ghost-primary")
+        for button in (self._quick_setup_btn, self._advanced_mapping_btn):
+            apply_size_class(button, "md")
+            button.setStyleSheet(build_button_stylesheet(get_theme()))
         self.add_widget(self._source_summary)
         self.add_widget(self._entity_summary)
         self.add_widget(self._quick_setup_btn)

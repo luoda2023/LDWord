@@ -14,7 +14,7 @@ from src.shared.ui.dialog_style import (
 )
 from src.shared.ui.dialogs import LOG_PATH_PREFIX, OK_TEXT
 from src.shared.ui.theme import get_theme
-from src.ui.icons.catalog import get_icon
+from src.shared.ui.icons.catalog import get_icon
 
 
 class ErrorDialog(BaseDialog):

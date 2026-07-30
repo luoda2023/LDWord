@@ -12,7 +12,10 @@ from src.qt_api import (
 )
 
 from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.typography import Typography
+from src.shared.ui.icons.catalog import get_icon
 
 
 class EmptyState(QWidget):
@@ -22,14 +25,14 @@ class EmptyState(QWidget):
 
         # 基础用法
         empty = EmptyState(
-            icon="📄",
+            icon="file-text",
             title="暂无文档",
             description="拖入文档开始排版"
         )
 
         # 带操作按钮
         empty = EmptyState(
-            icon="📁",
+            icon="folder-open",
             title="文件夹为空",
             description="点击下方按钮添加文件",
             action_text="添加文件"
@@ -51,7 +54,7 @@ class EmptyState(QWidget):
         """初始化空状态控件。
 
         Args:
-            icon: 图标（可以是 emoji 或文字）
+            icon: ``src.shared.ui.icons.catalog`` 中登记的图标名称
             title: 标题
             description: 描述文字
             action_text: 操作按钮文字
@@ -75,10 +78,11 @@ class EmptyState(QWidget):
         layout.setAlignment(Qt.AlignCenter)
 
         # 图标
-        if self._icon:
-            self._icon_label = QLabel(self._icon)
-            self._icon_label.setAlignment(Qt.AlignCenter)
-            layout.addWidget(self._icon_label, 0, Qt.AlignCenter)
+        self._icon_label = QLabel()
+        self._icon_label.setFixedSize(72, 72)
+        self._icon_label.setAlignment(Qt.AlignCenter)
+        self._icon_label.setVisible(bool(self._icon))
+        layout.addWidget(self._icon_label, 0, Qt.AlignCenter)
 
         # 标题
         if self._title:
@@ -105,7 +109,7 @@ class EmptyState(QWidget):
         t = get_theme()
 
         self.setStyleSheet(
-            f"""
+            """
             EmptyState {{
                 background: transparent;
             }}
@@ -113,12 +117,13 @@ class EmptyState(QWidget):
         )
 
         # 图标样式
-        if self._icon and hasattr(self, "_icon_label"):
+        if self._icon:
+            self._icon_label.setPixmap(
+                get_icon(self._icon, 56, t.text_hint).pixmap(56, 56)
+            )
             self._icon_label.setStyleSheet(
-                f"""
+                """
                 QLabel {{
-                    font-size: 64px;
-                    color: {t.text_hint};
                     background: transparent;
                     border: none;
                 }}
@@ -127,32 +132,15 @@ class EmptyState(QWidget):
 
         # 操作按钮样式
         if self._action_text and hasattr(self, "_action_btn"):
-            self._action_btn.setStyleSheet(
-                f"""
-                QPushButton {{
-                    background: {t.primary};
-                    color: {t.text_on_primary};
-                    border: none;
-                    border-radius: {t.button_radius}px;
-                    padding: {t.button_padding_y}px {t.button_padding_x}px;
-                    font-size: {t.font_size_md}px;
-                    font-weight: {t.button_font_weight};
-                    min-height: {t.button_height_md}px;
-                }}
-                QPushButton:hover {{
-                    background: {t.primary_hover};
-                }}
-                QPushButton:pressed {{
-                    background: {t.primary_pressed};
-                }}
-                """
-            )
+            apply_button_variant(self._action_btn, "primary")
+            apply_size_class(self._action_btn, "md")
+            self._action_btn.setStyleSheet(build_button_stylesheet(t))
 
     def set_icon(self, icon: str) -> None:
         """设置图标"""
         self._icon = icon
-        if hasattr(self, "_icon_label"):
-            self._icon_label.setText(icon)
+        self._icon_label.setVisible(bool(icon))
+        self._apply_theme()
 
     def set_title(self, title: str) -> None:
         """设置标题"""

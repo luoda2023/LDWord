@@ -10,7 +10,7 @@ class StrategyCard(SurfaceCard):
     _SOURCE_TYPE_LABELS = {
         "default": "默认",
         "template": "模板",
-        "scene": "场景",
+        "scene": "方案",
     }
 
     def __init__(self, parent=None):
@@ -41,7 +41,7 @@ class StrategyCard(SurfaceCard):
     def set_state(self, state: StrategySummaryState) -> None:
         self._name_value.setText(f"策略: {state.name}")
         self._template_value.setText(f"模板: {state.template_label}")
-        self._scene_value.setText(f"场景: {state.scene_label}")
+        self._scene_value.setText(f"方案: {state.scene_label}")
         self._modules_value.setText(f"模块数: {state.enabled_module_count}")
         source_text = self._SOURCE_TYPE_LABELS.get(state.source_type, "自定义")
         self._source_value.setText(f"来源: {source_text}")

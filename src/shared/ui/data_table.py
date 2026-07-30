@@ -8,7 +8,6 @@ from src.qt_api import (
     QHeaderView,
     QTableWidget,
     QTableWidgetItem,
-    QWidget,
     Qt,
     Signal,
 )
@@ -92,7 +91,7 @@ class DataTable(QTableWidget):
                 padding: 8px;
                 border: none;
                 border-bottom: 1px solid {t.border};
-                font-weight: 600;
+                font-weight: {t.font_weight_emphasis};
             }}
             QHeaderView::section:hover {{
                 background: {t.bg_hover};

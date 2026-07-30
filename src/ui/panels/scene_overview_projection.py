@@ -10,17 +10,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections.abc import Sequence
 
+from src.config.default_delivery_identity import project_default_delivery_identity
 from src.config.scene import ExamPaperConfig, SceneWorkspace, coerce_exam_paper_config
 from src.config.template import TemplateConfig
 from src.shared.engine.exam_paper_style import (
     exam_blank_style_label,
     resolve_exam_blank_style,
 )
-from src.ui.panels.scene_summary_projection import (
+from src.config.scene_surface_registry import (
+    scene_uses_exam_paper_surface,
+    scene_uses_official_document_surface,
+)
+from src.ui.panels.scene_product_summary_projection import (
     build_input_profile_summary_items,
-    build_scene_overview_summary_items,
+    build_product_scene_overview_summary_items,
     material_schema_display_name,
-    scene_application_boundary_display_name,
+    scene_document_scope_display_name,
 )
 from src.ui.panels.style_source_projection import (
     StyleSourceProjection,
@@ -141,8 +146,6 @@ def build_scene_overview_spec(
     input_item = summary.get("input_profile")
     risk_item = summary.get("object_preflight")
     output_item = summary.get("delivery")
-    coverage_item = summary.get("coverage_pack")
-    manual_item = _actionable_manual_item(summary)
     style_source = build_style_source_projection(
         scene,
         template=template,
@@ -272,7 +275,7 @@ def build_scene_key_setting_rows(
             label="资料包",
             summary=_material_package_summary(scene),
             target_card_id="scn_content",
-            icon_name="inbox",
+            icon_name="package",
             status=_material_package_status(scene),
             action_label="设置",
         ),
@@ -281,16 +284,7 @@ def build_scene_key_setting_rows(
             label="处理范围",
             summary=_scope_setting_summary(scene),
             target_card_id="scn_rules",
-            icon_name="map-pin",
-            action_label="设置",
-        ),
-        SceneOverviewRowSpec(
-            key="style_source",
-            label="套用模板",
-            summary=_style_setting_summary(style_source),
-            target_card_id="scn_rules",
-            icon_name="type-outline",
-            status=style_source.status_label,
+            icon_name="scan-text",
             action_label="设置",
         ),
     ]
@@ -313,11 +307,13 @@ def build_scene_key_setting_rows(
                 label="交付结果",
                 summary=_delivery_setting_summary(scene, output_summary),
                 target_card_id="scn_output",
-                icon_name="package-check",
+                icon_name="file-output",
                 status="特殊交付",
                 action_label="设置",
             )
         )
+    if scene_uses_official_document_surface(scene):
+        rows = [row for row in rows if row.key != "scope"]
     return tuple(rows)
 
 
@@ -352,24 +348,23 @@ def _scene_uses_reference_format(scene: SceneWorkspace) -> bool:
 
 def _reference_format_summary(scene: SceneWorkspace) -> str:
     ref = scene.reference_style
-    mode = "独立条目样式" if scene.section_styles.get("references_body") is not None else "跟随正文"
     return (
-        f"{mode}，悬挂缩进 {ref.hanging_indent_cm:g}cm，"
+        f"悬挂缩进 {ref.hanging_indent_cm:g}cm，"
         f"段后 {ref.space_after_pt:g}{getattr(ref, 'space_after_unit', 'pt')}"
     )
 
 
 def _build_exam_key_setting_rows(scene: SceneWorkspace) -> tuple[SceneOverviewRowSpec, ...]:
     config = _exam_config(scene)
-    blank_style = resolve_exam_blank_style(config, config.blank_style_id)
+    blank_style = resolve_exam_blank_style(config, scene.master_id)
     return (
         SceneOverviewRowSpec(
             key="exam_blank_style",
-            label="试卷母版",
-            summary=_exam_blank_style_summary(config),
+            label="当前方案",
+            summary=_exam_blank_style_summary(config, scene.master_id),
             target_card_id="scn_exam_paper",
-            icon_name="file-text",
-            status="内置母版" if blank_style.readonly else "可修改",
+            icon_name="layers",
+            status="内置卷面" if blank_style.readonly else "可修改",
             action_label="设置",
         ),
         SceneOverviewRowSpec(
@@ -407,7 +402,7 @@ def _build_exam_run_preview_steps() -> tuple[SceneRunStepSpec, ...]:
         SceneRunStepSpec(
             key="exam_style",
             title="套入试卷样式",
-            detail="使用试卷母版装配页面",
+            detail="使用试卷卷面装配页面",
             icon_name="file-text",
         ),
         SceneRunStepSpec(
@@ -423,9 +418,9 @@ def _exam_config(scene: SceneWorkspace) -> ExamPaperConfig:
     return coerce_exam_paper_config(getattr(scene, "exam_paper", None))
 
 
-def _exam_blank_style_summary(config: ExamPaperConfig) -> str:
-    label = exam_blank_style_label(config.blank_style_id, config)
-    return f"{label}；标题区、考试信息栏、页眉页脚和密封线由试卷母版决定"
+def _exam_blank_style_summary(config: ExamPaperConfig, master_id: str) -> str:
+    label = exam_blank_style_label(master_id, config)
+    return f"{label}；标题区、考试信息栏、页眉页脚和密封线由试卷卷面决定"
 
 
 def _exam_runtime_fields_summary(config: ExamPaperConfig) -> str:
@@ -443,7 +438,7 @@ def _exam_runtime_fields_summary(config: ExamPaperConfig) -> str:
     return f"工作台填写：{fields}"
 
 def _scope_setting_summary(scene: SceneWorkspace) -> str:
-    return scene_application_boundary_display_name(scene)
+    return scene_document_scope_display_name(scene)
 
 
 def build_scene_risk_notices(
@@ -531,7 +526,7 @@ def build_scene_evidence_links(
     for key, label in (
         ("parameter_ownership", "参数归属"),
         ("control_contract", "格式控件一致性"),
-        ("coverage_pack", "场景覆盖"),
+        ("coverage_pack", "方案覆盖"),
         ("product_readiness", "可用度说明"),
         ("sample_fixture_coverage", "样本文档"),
         ("request_cell_coverage", "常见说法"),
@@ -571,33 +566,14 @@ def first_screen_forbidden_terms(spec: SceneOverviewSpec) -> tuple[str, ...]:
 
 
 def _summary_item_map(scene: SceneWorkspace) -> dict[str, object]:
-    return {item.key: item for item in build_scene_overview_summary_items(scene)}
+    return {
+        item.key: item
+        for item in build_product_scene_overview_summary_items(scene)
+    }
 
 
 def _is_exam_scene(scene: SceneWorkspace) -> bool:
-    parts = (
-        getattr(scene, "scene_id", ""),
-        getattr(scene, "category", ""),
-        getattr(scene, "category_label", ""),
-        getattr(scene, "name", ""),
-        getattr(scene, "description", ""),
-    )
-    text = " ".join(str(part or "").lower() for part in parts)
-    return any(
-        token in text
-        for token in (
-            "exam",
-            "exam paper",
-            "test paper",
-            "test_paper",
-            "question paper",
-            "question_paper",
-            "试卷",
-            "考试",
-            "测验",
-            "试题",
-        )
-    )
+    return scene_uses_exam_paper_surface(scene)
 
 
 def _input_setting_summary(scene: SceneWorkspace, input_item: object | None) -> str:
@@ -664,26 +640,14 @@ def _manual_setting_summary(item: object | None) -> str:
     return f"请确认：{_shorten_sentence(detail, max_chars=54)}"
 
 
-def _style_setting_summary(style_source: StyleSourceProjection) -> str:
-    template = str(getattr(style_source, "template_label", "") or "").strip() or "当前模板"
-    section_count = int(getattr(style_source, "independent_section_count", 0) or 0)
-    if section_count <= 0:
-        return f"使用{template}，无格式例外"
-    labels = tuple(getattr(style_source, "independent_section_labels", ()) or ())
-    if labels:
-        preview = "、".join(labels[:2])
-        suffix = "等" if len(labels) > 2 else ""
-        return f"使用{template}，{preview}{suffix}有格式例外"
-    return f"使用{template}，{section_count} 个格式例外"
-
-
 def _should_show_delivery_row(scene: SceneWorkspace) -> bool:
     presets = list(getattr(scene, "delivery_presets", ()) or ())
+    identity = project_default_delivery_identity(scene)
+    if not identity.is_ok:
+        return True
     if len(presets) > 1:
         return True
-    default = _default_delivery_preset(scene)
-    if default is None:
-        return False
+    default = identity.preset
     artifacts = getattr(default, "artifacts", None)
     if bool(getattr(default, "include_structured_intermediate", False)):
         return True
@@ -698,7 +662,12 @@ def _should_show_delivery_row(scene: SceneWorkspace) -> bool:
 
 def _delivery_setting_summary(scene: SceneWorkspace, fallback: str) -> str:
     presets = list(getattr(scene, "delivery_presets", ()) or ())
-    default = _default_delivery_preset(scene)
+    identity = project_default_delivery_identity(scene)
+    if identity.status == "invalid":
+        return f"默认交付引用无效：{identity.requested_id}"
+    if identity.status == "missing":
+        return "未设置默认交付版本"
+    default = identity.preset
     labels = [_delivery_preset_label(preset) for preset in presets]
     if len(labels) > 1:
         preview = "、".join(labels[:2])
@@ -729,8 +698,8 @@ def _task_suitable_for(
     template_label: str,
 ) -> str:
     input_value = _item_value(summary.get("input_profile"), "Word 文档")
-    coverage = _item_value(summary.get("coverage_pack"), "当前场景")
-    if coverage and coverage != "当前场景":
+    coverage = _item_value(summary.get("coverage_pack"), "当前方案")
+    if coverage and coverage != "当前方案":
         return f"适合{coverage}：把 {input_value} 按“{template_label}”处理成可交付文档。"
     return f"把 {input_value} 按“{template_label}”处理成可交付文档。"
 
@@ -744,7 +713,7 @@ def _task_boundary_note(summary: dict[str, object], risk_item: object | None) ->
 
 def _template_label_from_scene(scene: SceneWorkspace) -> str:
     return (
-        str(scene.template_id or scene.default_template_id or "").strip()
+        str(scene.template_id or "").strip()
         or "当前模板"
     )
 
@@ -762,17 +731,6 @@ def _material_schema_names(scene: SceneWorkspace) -> tuple[str, ...]:
     return tuple(
         material_schema_display_name(schema_id)
         for schema_id in dict.fromkeys(schema_ids)
-    )
-
-
-def _default_delivery_preset(scene: SceneWorkspace):
-    presets = list(getattr(scene, "delivery_presets", ()) or ())
-    if not presets:
-        return None
-    default_id = str(getattr(scene, "default_delivery_preset_id", "") or "").strip()
-    return next(
-        (preset for preset in presets if str(getattr(preset, "preset_id", "") or "") == default_id),
-        presets[0],
     )
 
 
@@ -839,6 +797,8 @@ def _item_value(item: object | None, fallback: str) -> str:
     if item is None:
         return fallback
     value = str(getattr(item, "value", "") or "").strip()
+    if value.startswith("无效引用："):
+        return value
     return _clean_first_screen_text(value or fallback)
 
 
@@ -932,7 +892,7 @@ def _clean_first_screen_text(text: str) -> str:
         "preset_final_schema": "最终资料规则",
         "proxy": "借用样本",
         "fixture": "证据样本",
-        "pack": "场景",
+        "pack": "方案",
         "OOXML 对象": "Word 对象",
         "OOXML": "Word 对象",
         "contract": "一致性规则",
@@ -956,7 +916,7 @@ def _clean_first_screen_text(text: str) -> str:
         "custom_basic": "基础格式",
         "quick_formatting": "快速格式清理",
         "template ": "模板 ",
-        "scene ": "场景 ",
+        "scene ": "方案 ",
         "material ": "资料 ",
         "output ": "输出 ",
         "plugin ": "插件 ",

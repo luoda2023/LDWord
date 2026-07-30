@@ -7,6 +7,7 @@ from src.shared.ui.navigation_card import NavigationCard
 from src.shared.ui.template_summary_card import TemplateSummaryCard
 from src.shared.ui.theme import get_theme
 from src.ui.panels.assets import ASSETS_SECTION_SPECS
+from src.ui.panels.assets.specs import ASSETS_RUNTIME_SECTION_SPECS
 
 
 class SectionShellPresenterMixin:
@@ -15,9 +16,11 @@ class SectionShellPresenterMixin:
     def _build_section_navigation(self) -> None:
         specs_by_id = {spec.section_id: spec for spec in ASSETS_SECTION_SPECS}
         navigation_groups: tuple[tuple[str, tuple[str, ...]], ...] = (
-            ("", ("generate", "io")),
-            ("鐠у嫭鏋￠崙鍡楊槵", ("fields", "images", "preview", "batch")),
-            ("閺囨潙顦跨拋鍓х枂", ("advanced",)),
+            ("", ("generate",)),
+            (
+                "资料准备",
+                ("fields", "content", "timeline", "images", "attachments"),
+            ),
         )
         for group_title, section_ids in navigation_groups:
             if group_title:
@@ -35,7 +38,7 @@ class SectionShellPresenterMixin:
                 self._section_nav.add_card(section_id, card)
 
     def _build_section_pages(self) -> None:
-        for spec in ASSETS_SECTION_SPECS:
+        for spec in ASSETS_RUNTIME_SECTION_SPECS:
             content = QWidget(self._detail_stack)
             content.setObjectName(f"assets_section_content_{spec.section_id}")
             content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -51,7 +54,14 @@ class SectionShellPresenterMixin:
                 parent=content,
             )
             summary_card.setObjectName(f"assets_section_summary_{spec.section_id}")
-            if spec.section_id != "generate":
+            if spec.section_id not in {
+                "generate",
+                "fields",
+                "content",
+                "timeline",
+                "images",
+                "attachments",
+            }:
                 layout.addWidget(summary_card)
             else:
                 summary_card.hide()
@@ -72,18 +82,36 @@ class SectionShellPresenterMixin:
         self._card_section_ids = {
             self._generate_card: "generate",
             self._archive_card: "generate",
-            self._import_export_card: "io",
             self._profile_card: "fields",
+            self._content_card: "content",
+            self._timeline_card: "timeline",
+            self._image_rules_card: "images",
             self._image_card: "images",
+            self._attachment_card: "attachments",
             self._preview_card: "preview",
             self._profile_list_card: "batch",
-            self._advanced_card: "advanced",
         }
 
     def _connect_signals(self) -> None:
         self.bridge.material_context_changed.connect(self._on_material_context_changed)
         self.bridge.document_loaded.connect(self._on_document_loaded)
+        if hasattr(self.bridge, "execution_target_changed"):
+            self.bridge.execution_target_changed.connect(
+                self._on_execution_target_changed
+            )
         self.bridge.scene_changed.connect(self._on_scene_changed)
+        if hasattr(self.bridge, "work_mode_changed"):
+            self.bridge.work_mode_changed.connect(
+                self._on_material_package_work_mode_changed
+            )
+        watcher = getattr(self, "_material_package_library_watcher", None)
+        if watcher is not None:
+            watcher.directoryChanged.connect(
+                self._on_material_package_library_path_changed
+            )
+            watcher.fileChanged.connect(
+                self._on_material_package_library_path_changed
+            )
         self.bridge.template_changed.connect(lambda *_: self._refresh_summary())
         self.bridge.material_repair_target_requested.connect(
             self._on_material_repair_target_requested
@@ -110,6 +138,10 @@ class SectionShellPresenterMixin:
             self._scroll_content = self._section_contents[section_id]
             self._detail_geometry.set_active_widget(page)
             self._sync_current_section_geometry()
+            # Every section shares the same scroll area.  A section switch
+            # must not inherit the previous page's offset, otherwise the new
+            # page opens with its header and first controls clipped.
+            self._detail_scroll.verticalScrollBar().setValue(0)
         finally:
             self._detail_shell.setUpdatesEnabled(True)
             self._detail_scroll.setUpdatesEnabled(True)

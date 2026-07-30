@@ -6,10 +6,10 @@ status_indicator — 状态标记控件
 
 from __future__ import annotations
 
-from src.qt_api import QBrush, QColor, QFont, QPainter, QRectF, QSize, QWidget, Qt
+from src.qt_api import QBrush, QColor, QPainter, QRectF, QSize, QWidget, Qt
 
 from src.shared.ui.theme import get_theme, bind_theme
-from src.ui.icons.catalog import get_icon
+from src.shared.ui.icons.catalog import get_icon
 
 
 class StatusIndicator(QWidget):
@@ -74,7 +74,6 @@ class StatusIndicator(QWidget):
             "running": t.primary, "pending": t.border,
         }
         color = QColor(color_map.get(self._status, t.border))
-        icon = self.STATUS_ICONS.get(self._status, "")
 
         rect = QRectF(1, 1, self._size - 2, self._size - 2)
 

@@ -91,7 +91,4 @@ class DetailPaneController(QObject):
         return detail
 
 
-WorkbenchDetailController = DetailPaneController
-
-
-__all__ = ["DetailPaneController", "WorkbenchDetailController"]
+__all__ = ["DetailPaneController"]

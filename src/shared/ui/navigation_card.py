@@ -20,6 +20,8 @@ from src.qt_api import (
 from src.shared.ui.badge import Badge
 from src.shared.ui.card import Card
 from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
+from src.shared.ui.tooltip import set_global_tooltip
+from src.shared.ui.typography_policy import TextRole, apply_text_role
 
 
 class NavigationCard(Card):
@@ -78,9 +80,11 @@ class NavigationCard(Card):
         self._title = QLabel(title)
         self._title.setObjectName("nav_card_title")
         self._title.setAutoFillBackground(False)
+        apply_text_role(self._title, TextRole.NAVIGATION_TITLE)
         self._subtitle = QLabel("")
         self._subtitle.setObjectName("nav_card_subtitle")
         self._subtitle.setAutoFillBackground(False)
+        apply_text_role(self._subtitle, TextRole.CAPTION)
         self._subtitle.setWordWrap(False)
         self._subtitle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
@@ -173,8 +177,6 @@ class NavigationCard(Card):
                 background: transparent;
                 border: none;
                 padding: 0px;
-                font-size: {t.font_size_md}px;
-                font-weight: {t.font_weight_emphasis if self._selected else t.font_weight_normal};
                 color: {title_color};
             }}
             """
@@ -188,7 +190,6 @@ class NavigationCard(Card):
                 background: transparent;
                 border: none;
                 padding: 0px;
-                font-size: {t.font_size_sm}px;
                 color: {sub_color};
             }}
             """
@@ -206,7 +207,7 @@ class NavigationCard(Card):
 
         self._icon_container.show()
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
             # Selected → white icon; Normal → theme icon color
             color = get_theme().text_on_primary if self._selected else get_theme().icon_primary
             icon = get_icon(self._icon_name, size=self._ICON_RENDER_SIZE, color=color)
@@ -236,6 +237,14 @@ class NavigationCard(Card):
 
     def set_selected(self, selected: bool) -> None:
         self._selected = bool(selected)
+        apply_text_role(
+            self._title,
+            (
+                TextRole.NAVIGATION_TITLE_ACTIVE
+                if self._selected
+                else TextRole.NAVIGATION_TITLE
+            ),
+        )
         self._render_icon()
         self._apply_navigation_theme()
 
@@ -259,19 +268,30 @@ class NavigationCard(Card):
 
     def set_subtitle(self, text: str) -> None:
         self._full_subtitle = str(text or "").strip()
-        self._subtitle.setToolTip(self._full_subtitle)
         self._subtitle.setVisible(bool(self._full_subtitle))
         self._update_elided_subtitle()
 
     def _update_elided_subtitle(self) -> None:
         if not self._full_subtitle:
             self._subtitle.setText("")
+            set_global_tooltip(
+                self._subtitle,
+                "",
+                placement="right",
+                role="nav",
+            )
             return
         metrics = self._subtitle.fontMetrics()
         # Leave room for icon, padding, and spacing (approx 80px)
         available = max(10, self.width() - 80) if self.width() > 80 else max(10, self._subtitle.width())
         elided = metrics.elidedText(self._full_subtitle, Qt.ElideMiddle, available)
         self._subtitle.setText(elided)
+        set_global_tooltip(
+            self._subtitle,
+            self._full_subtitle if elided != self._full_subtitle else "",
+            placement="right",
+            role="nav",
+        )
 
     def set_badge(self, text: str, variant: str = "neutral") -> None:
         self._badge.set_text(text)

@@ -28,7 +28,10 @@ def apply_detail_summary_action_button(
         build_button_stylesheet(
             theme,
             selector="QPushButton",
-            min_height=28,
+            # This header owns a 34 px compact action rhythm.  Pass the final
+            # outer height explicitly; shared button metrics no longer rely on
+            # padding and borders to inflate a content-height token.
+            min_height=34,
             padding_x=12,
             padding_y=3,
             font_size=theme.font_size_sm,
@@ -85,6 +88,17 @@ class DetailSummaryCard(Card):
     def add_action(self, widget) -> None:
         self.header.add_action(widget)
 
+    def insert_body_widget(self, widget, *, index: int = 1) -> None:
+        """Insert visible content between the header and summary grid."""
+        bounded_index = max(1, min(int(index), self._content_layout.count()))
+        self._content_layout.insertWidget(bounded_index, widget)
+        self.refresh_body_layout()
+
+    def refresh_body_layout(self) -> None:
+        """Recalculate height after projected body content changes."""
+        self._sync_content_height_limit()
+        self._queue_content_height_sync()
+
     def set_summary_items(self, items: Sequence[SummaryGridItem]) -> None:
         normalized_items = tuple(items)
         self.summary_grid.setVisible(bool(normalized_items))
@@ -103,7 +117,7 @@ class DetailSummaryCard(Card):
         self._queue_content_height_sync()
 
     def _queue_content_height_sync(self) -> None:
-        if self._content_height_sync_queued:
+        if not self.isVisible() or self._content_height_sync_queued:
             return
         self._content_height_sync_queued = True
         QTimer.singleShot(0, self._run_queued_content_height_sync)
@@ -137,7 +151,7 @@ class DetailSummaryCard(Card):
 
         parent = self.parentWidget()
         parent_layout = parent.layout() if parent is not None else None
-        if parent_layout is None:
+        if parent_layout is None or not self.isVisible():
             return
 
         self._syncing_content_height_limit = True

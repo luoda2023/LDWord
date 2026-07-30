@@ -15,8 +15,7 @@ def build_dialog_message_stylesheet(theme: AppTheme) -> str:
     return (
         f"color: {theme.text_secondary}; "
         f"font-size: {theme.font_size_md}px; "
-        f"font-weight: 400; "
-        f"font-family: {theme.font_family};"
+        f"font-weight: {theme.font_weight_normal}; "
         f"line-height: 1.5;"
     )
 
@@ -43,4 +42,4 @@ def build_dialog_detail_stylesheet(
 
 
 def build_dialog_path_label_stylesheet(theme: AppTheme) -> str:
-    return f"color: {theme.text_hint}; font-size: {theme.font_size_sm}px; font-family: {theme.font_family};"
+    return f"color: {theme.text_hint}; font-size: {theme.font_size_sm}px;"

@@ -1,32 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from collections.abc import Mapping
 import json
 from pathlib import Path
 
-from src.config.control_contract_registry import (
-    ControlContractAuditResult,
-    audit_control_contract_registry,
-    get_control_contract,
-    resolve_control_contract_evidence_locations,
-)
-from src.config.scene_parameter_ownership import (
-    ParameterOwnershipAuditResult,
-    audit_scene_parameter_ownership,
-)
-from src.config.style_difference_projection import (
-    StyleDifferenceProjection,
-    StyleDifferenceSummaryProjection,
-    build_style_difference_summary_projection,
-)
-from src.config.style_field_descriptors import (
-    canonical_paragraph_style_field_id,
-    scene_style_navigation_target_from_field_id,
+from src.services.execution_result_contract import (
+    normalize_path_list,
+    normalize_path_map,
+    normalize_terminal_payload,
+    plain_payload,
 )
 from src.shared.ui.style_presentation_envelope import StylePresentationEnvelope
 
 from src.ui.panels.workbench.state import (
-    ArtifactItemState,
     ExecutionProgressState,
     ExecutionResultState,
     ReadinessState,
@@ -39,36 +25,9 @@ from src.ui.adapters.workbench_artifact_items import (
     _build_artifact_items,
     _planned_output_preflight_items,
     _split_issue_detail_text,
-    workbench_artifact_display_items,
-)
-from src.ui.adapters.workbench_boundary_issues import (
-    coverage_boundary_issue_items,
-    sample_fixture_issue_items,
 )
 from src.ui.adapters.workbench_issue_models import (
-    ISSUE_ACTION_GROUP_VALUES,
-    ISSUE_STATUS_VALUES,
-    ISSUE_TERMINAL_STATUS_VALUES,
-    MaterialReadinessIssueGroups,
-    WorkbenchIssueActionVisualProjection,
-    WorkbenchIssueEvidenceLineProjection,
     WorkbenchIssueItem,
-    WorkbenchIssueQueueSummary,
-)
-from src.ui.adapters.workbench_material_issues import (
-    material_asset_comparison_issue_items,
-    material_readiness_issue_groups,
-    material_readiness_issue_items,
-    material_readiness_reasons,
-    material_schema_readiness_reasons,
-)
-from src.ui.adapters.workbench_issue_projection import (
-    workbench_issue_action_visual,
-    workbench_issue_display_text,
-    workbench_issue_evidence_actions,
-    workbench_issue_evidence_body_text,
-    workbench_issue_evidence_lines,
-    workbench_issue_source_note_label,
 )
 
 
@@ -118,314 +77,170 @@ class WorkbenchExecutionAdapter:
     def build_result_state(
         self,
         *,
-        status: str,
-        output_path: str,
-        report_paths: list[str],
-        failed_count: int,
-        error_text: str,
-        output_paths: dict[str, str] | None = None,
-        compare_paths: dict[str, str] | None = None,
-        intermediate_paths: dict[str, str] | None = None,
-        material_manifest_paths: dict[str, str] | None = None,
-        material_package_paths: dict[str, str] | None = None,
-        scene_sample_manifest_paths: dict[str, str] | None = None,
-        output_target_preflight: dict[str, object] | None = None,
-        diagnostics_count: int = 0,
-        diagnostics_summary: str = "",
-        style_source: dict[str, object] | None = None,
-        style_source_summary: str = "",
-        object_preflight: dict[str, object] | None = None,
-        material_field_consistency: dict[str, object] | None = None,
-        batch_isolation: dict[str, object] | None = None,
-        question_figure_repair_queue: dict[str, object] | None = None,
-        diagnostics_items: list[dict] | None = None,
-        batch_issue_items: list[dict] | None = None,
+        terminal_payload: Mapping[str, object],
     ) -> ExecutionResultState:
-        summary_map = {
-            "success": "本次执行已完成",
-            "partial_success": f"执行完成，但有 {failed_count} 个模块未成功",
-            "failed": "执行失败",
-            "cancelled": "已取消",
-        }
-        if status not in summary_map:
-            raise ValueError(f"Unknown execution status: {status!r}")
+        """Project one canonical terminal payload into immutable UI state."""
 
-        object_preflight_payload = _dict_payload(object_preflight)
-        style_source_payload = _dict_payload(style_source)
-        field_consistency = _dict_payload(material_field_consistency)
-        batch_isolation_payload = _dict_payload(batch_isolation)
-        question_figure_repair_queue_payload = _dict_payload(question_figure_repair_queue)
-        style_source_envelope = _style_source_receipt_envelope(
-            style_source_payload,
-            fallback=style_source_summary,
-        )
-        style_difference_summary = _style_difference_summary_projection(
-            style_source_payload
-        )
-        return ExecutionResultState(
-            status=status,
-            summary=summary_map[status],
-            error_text=error_text,
-            style_source=style_source_payload,
-            style_source_summary=style_source_envelope.receipt_summary(
-                title_fallback="样式来源"
-            ),
-            style_source_envelope=style_source_envelope,
-            style_difference_summary=style_difference_summary,
-            output_path=output_path,
-            output_paths=_string_path_map(output_paths),
-            compare_paths=_string_path_map(compare_paths),
-            report_paths=list(report_paths),
-            intermediate_paths=_string_path_map(intermediate_paths),
-            material_manifest_paths=_string_path_map(material_manifest_paths),
-            material_package_paths=_string_path_map(material_package_paths),
-            scene_sample_manifest_paths=_string_path_map(scene_sample_manifest_paths),
-            failed_count=failed_count,
-            diagnostics_count=diagnostics_count,
-            diagnostics_summary=diagnostics_summary,
-            object_preflight=object_preflight_payload,
-            object_preflight_summary=_object_preflight_summary(object_preflight_payload),
-            object_preflight_details=_object_preflight_detail_lines(
-                object_preflight_payload
-            ),
-            material_field_consistency=field_consistency,
-            material_field_consistency_summary=_material_field_consistency_summary(
-                field_consistency
-            ),
-            batch_isolation=batch_isolation_payload,
-            batch_isolation_summary=_batch_isolation_summary(batch_isolation_payload),
-            batch_isolation_details=_batch_isolation_detail_lines(batch_isolation_payload),
-            question_figure_repair_queue=question_figure_repair_queue_payload,
-            artifact_items=_build_artifact_items(
-                output_path=output_path,
-                output_paths=_string_path_map(output_paths),
-                compare_paths=_string_path_map(compare_paths),
-                report_paths=list(report_paths),
-                intermediate_paths=_string_path_map(intermediate_paths),
-                material_manifest_paths=_string_path_map(material_manifest_paths),
-                material_package_paths=_string_path_map(material_package_paths),
-                scene_sample_manifest_paths=_string_path_map(scene_sample_manifest_paths),
-                output_target_preflight=output_target_preflight,
-                question_figure_repair_queue=question_figure_repair_queue_payload,
-            ),
-            issue_items=[
-                *output_target_preflight_issue_items(output_target_preflight),
-                *execution_diagnostic_issue_items(diagnostics_items),
-                *batch_execution_issue_items(batch_issue_items),
-                *question_figure_repair_queue_issue_items(
-                    question_figure_repair_queue_payload
-                ),
-                *question_figure_transaction_task_issue_items(
-                    question_figure_repair_queue_payload
-                ),
-            ],
+        return _execution_result_state_from_terminal(
+            _copy_terminal_payload(terminal_payload)
         )
 
     def build_recent_run_state(
         self,
         result_state: ExecutionResultState,
     ) -> RecentRunState:
-        report_label = ", ".join(result_state.report_paths)
+        terminal_payload = _copy_terminal_payload(
+            result_state.terminal_payload
+        )
+        output_path = str(terminal_payload.get("output_path") or "")
+        output_paths = _terminal_dict_projection(
+            terminal_payload,
+            "output_paths",
+        )
+        compare_paths = _terminal_dict_projection(
+            terminal_payload,
+            "compare_paths",
+        )
+        report_paths = _terminal_string_list(terminal_payload, "report_paths")
+        intermediate_paths = _terminal_dict_projection(
+            terminal_payload,
+            "intermediate_paths",
+        )
+        material_manifest_paths = _terminal_dict_projection(
+            terminal_payload,
+            "material_manifest_paths",
+        )
+        material_package_paths = _terminal_dict_projection(
+            terminal_payload,
+            "material_package_paths",
+        )
+        scene_sample_manifest_paths = _terminal_dict_projection(
+            terminal_payload,
+            "scene_sample_manifest_paths",
+        )
+        execution_session = _terminal_dict_projection(
+            terminal_payload,
+            "execution_session",
+        )
+        attachment_bundles = _terminal_dict_projection(
+            terminal_payload,
+            "attachment_bundles",
+        )
+        material_dependency_usage = _terminal_dict_projection(
+            terminal_payload,
+            "material_dependency_usage",
+        )
+        style_source = _terminal_dict_projection(
+            terminal_payload,
+            "style_source",
+        )
+        object_preflight = _terminal_dict_projection(
+            terminal_payload,
+            "object_preflight",
+        )
+        material_field_consistency = _terminal_dict_projection(
+            terminal_payload,
+            "material_field_consistency",
+        )
+        batch_isolation = _terminal_dict_projection(
+            terminal_payload,
+            "batch_isolation",
+        )
+        question_figure_repair_queue = _terminal_dict_projection(
+            terminal_payload,
+            "question_figure_repair_queue",
+        )
+        style_source_envelope = _style_source_receipt_envelope(style_source)
+        artifact_items = _build_artifact_items(
+            output_path=output_path,
+            output_paths=_string_path_map(output_paths),
+            compare_paths=_string_path_map(compare_paths),
+            report_paths=report_paths,
+            intermediate_paths=_string_path_map(intermediate_paths),
+            material_manifest_paths=_string_path_map(material_manifest_paths),
+            material_package_paths=_string_path_map(material_package_paths),
+            scene_sample_manifest_paths=_string_path_map(
+                scene_sample_manifest_paths
+            ),
+            output_target_preflight=_terminal_dict_projection(
+                terminal_payload,
+                "output_target_preflight",
+            ),
+            question_figure_repair_queue=question_figure_repair_queue,
+            official_document_assembly=_terminal_dict_projection(
+                terminal_payload,
+                "official_document_assembly",
+            ),
+        )
+        report_label = ", ".join(report_paths)
         return RecentRunState(
-            status=result_state.status,
+            status=str(terminal_payload.get("status") or result_state.status),
             title="最近结果",
             summary=result_state.summary,
+            terminal_payload=terminal_payload,
+            execution_session=execution_session,
             output_label=_artifact_label(
-                result_state.output_paths,
-                result_state.output_path,
+                output_paths,
+                output_path,
                 delivery_preset_labels=True,
             ),
             compare_label=_artifact_label(
-                result_state.compare_paths,
+                compare_paths,
                 delivery_preset_labels=True,
             ),
             report_label=report_label,
             intermediate_label=_artifact_label(
-                result_state.intermediate_paths,
+                intermediate_paths,
                 delivery_preset_labels=True,
             ),
-            material_manifest_label=_artifact_label(result_state.material_manifest_paths),
-            material_package_label=_artifact_label(result_state.material_package_paths),
+            material_manifest_label=_artifact_label(material_manifest_paths),
+            material_package_label=_artifact_label(material_package_paths),
+            attachment_bundles=attachment_bundles,
+            attachment_bundle_summary=_attachment_bundle_summary(
+                attachment_bundles
+            ),
+            material_dependency_usage=material_dependency_usage,
+            material_dependency_summary=_material_dependency_summary(
+                material_dependency_usage
+            ),
             scene_sample_manifest_label=_artifact_label(
-                result_state.scene_sample_manifest_paths
+                scene_sample_manifest_paths
             ),
-            artifact_label=_artifact_browser_label(result_state.artifact_items),
-            artifact_items=list(result_state.artifact_items),
-            error_summary=result_state.error_text,
-            diagnostics_count=result_state.diagnostics_count,
-            diagnostics_summary=result_state.diagnostics_summary,
-            style_source=dict(result_state.style_source),
-            style_source_summary=result_state.style_source_summary,
-            style_source_envelope=result_state.style_source_envelope,
-            style_difference_summary=result_state.style_difference_summary,
-            object_preflight=dict(result_state.object_preflight),
-            object_preflight_summary=result_state.object_preflight_summary,
-            object_preflight_details=list(result_state.object_preflight_details),
-            material_field_consistency=dict(result_state.material_field_consistency),
-            material_field_consistency_summary=result_state.material_field_consistency_summary,
-            batch_isolation=dict(result_state.batch_isolation),
-            batch_isolation_summary=result_state.batch_isolation_summary,
-            batch_isolation_details=list(result_state.batch_isolation_details),
-            question_figure_repair_queue=dict(result_state.question_figure_repair_queue),
-        )
-
-
-def summarize_workbench_issue_queue(
-    items: list[WorkbenchIssueItem] | tuple[WorkbenchIssueItem, ...],
-    *,
-    category: str = "",
-    action_group: str = "",
-) -> WorkbenchIssueQueueSummary:
-    """Return counts and visible items for a filterable Workbench issue queue."""
-
-    queue_items = [
-        item for item in list(items or []) if isinstance(item, WorkbenchIssueItem)
-    ]
-    normalized_category = str(category or "").strip()
-    normalized_action_group = str(action_group or "").strip()
-    if normalized_action_group not in ISSUE_ACTION_GROUP_VALUES:
-        normalized_action_group = ""
-    visible_items = tuple(
-        item
-        for item in queue_items
-        if not normalized_category or item.category == normalized_category
-        if not normalized_action_group
-        or workbench_issue_action_group(item) == normalized_action_group
-    )
-    return WorkbenchIssueQueueSummary(
-        total_count=len(queue_items),
-        visible_count=len(visible_items),
-        blocking_count=sum(1 for item in queue_items if item.blocking),
-        actionable_count=sum(1 for item in visible_items if _issue_repair_target_key(item)),
-        active_category=normalized_category,
-        active_action_group=normalized_action_group,
-        category_counts=_count_issue_values(item.category for item in queue_items),
-        severity_counts=_count_issue_values(item.severity for item in queue_items),
-        status_counts=_count_issue_values(_issue_status(item) for item in queue_items),
-        owner_counts=_count_issue_values(_issue_owner(item) for item in queue_items),
-        action_group_counts=_count_issue_action_values(
-            workbench_issue_action_group(item) for item in queue_items
-        ),
-        visible_action_group_counts=_count_issue_action_values(
-            workbench_issue_action_group(item) for item in visible_items
-        ),
-        repair_target_counts=_count_issue_values(
-            _issue_repair_target_key(item) for item in visible_items
-        ),
-        visible_items=visible_items,
-    )
-
-
-def workbench_issue_action_group(item: WorkbenchIssueItem) -> str:
-    """Return the user-action bucket for a Workbench issue."""
-
-    if not isinstance(item, WorkbenchIssueItem):
-        return "view_only"
-    if _issue_status(item) in ISSUE_TERMINAL_STATUS_VALUES:
-        return "view_only"
-    severity = str(getattr(item, "severity", "") or "").strip().lower()
-    if bool(getattr(item, "blocking", False)) or severity in {
-        "error",
-        "fatal",
-        "critical",
-    }:
-        return "handle_first"
-    if _issue_repair_target_key(item):
-        return "confirm"
-    return "view_only"
-
-
-def workbench_issue_action_visual_for_item(
-    item: WorkbenchIssueItem,
-) -> WorkbenchIssueActionVisualProjection:
-    """Return visual action semantics for a concrete Workbench issue."""
-
-    if not isinstance(item, WorkbenchIssueItem):
-        return workbench_issue_action_visual("view_only")
-    return workbench_issue_action_visual(
-        workbench_issue_action_group(item),
-        status=_issue_status(item),
-    )
-
-
-def workbench_issue_action_target(item: WorkbenchIssueItem) -> tuple[str, str]:
-    """Return the routable UI action target for a Workbench issue."""
-
-    if not isinstance(item, WorkbenchIssueItem):
-        return ("", "")
-    target_type = str(item.repair_target_type or "").strip()
-    target_key = str(item.repair_target_key or "").strip()
-    if not target_type:
-        return ("", "")
-    profile_id = _issue_repair_context_value(item, "profile_id")
-    profile_name = _issue_repair_context_value(item, "profile_name")
-    candidate_json = _issue_repair_context_value(item, "repair_candidate_json")
-    if (
-        (profile_id or profile_name)
-        and item.category == "question_figure_repair_queue"
-        and target_type == "question_figure_item"
-        and candidate_json
-    ):
-        candidate = _json_object(candidate_json)
-        if (
-            bool(candidate.get("confirmation_apply_supported"))
-            and _clean_text(candidate.get("confirmation_status")) == "ready"
-        ):
-            return (
-                "profile_question_figure_repair_candidate",
-                json.dumps(
-                    {
-                        "profile_id": profile_id,
-                        "profile_name": profile_name,
-                        "target_key": target_key,
-                        "candidate": candidate,
-                    },
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-            )
-        conflict_candidate = _question_figure_conflict_selection_candidate(candidate)
-        if conflict_candidate:
-            return (
-                "profile_question_figure_repair_conflict_selection",
-                json.dumps(
-                    {
-                        "profile_id": profile_id,
-                        "profile_name": profile_name,
-                        "target_key": target_key,
-                        "candidate": conflict_candidate,
-                    },
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-            )
-    if (profile_id or profile_name) and target_type in {
-        "field",
-        "asset",
-        "schema",
-        "question_figure_item",
-    }:
-        return (
-            f"profile_{target_type}",
-            json.dumps(
-                {
-                    "profile_id": profile_id,
-                    "profile_name": profile_name,
-                    "target_key": target_key,
-                },
-                ensure_ascii=False,
-                separators=(",", ":"),
+            artifact_label=_artifact_browser_label(artifact_items),
+            artifact_items=artifact_items,
+            error_summary=str(terminal_payload.get("error_text") or ""),
+            diagnostics_count=max(
+                0,
+                _safe_int(terminal_payload.get("diagnostics_count")),
             ),
+            diagnostics_summary=str(
+                terminal_payload.get("diagnostics_summary") or ""
+            ),
+            style_source=style_source,
+            style_source_summary=style_source_envelope.receipt_summary(
+                title_fallback="鏍峰紡鏉ユ簮"
+            ),
+            style_source_envelope=style_source_envelope,
+            object_preflight=object_preflight,
+            object_preflight_summary=_object_preflight_summary(
+                object_preflight
+            ),
+            object_preflight_details=_object_preflight_detail_lines(
+                object_preflight
+            ),
+            material_field_consistency=material_field_consistency,
+            material_field_consistency_summary=(
+                _material_field_consistency_summary(
+                    material_field_consistency
+                )
+            ),
+            batch_isolation=batch_isolation,
+            batch_isolation_summary=_batch_isolation_summary(batch_isolation),
+            batch_isolation_details=_batch_isolation_detail_lines(
+                batch_isolation
+            ),
+            question_figure_repair_queue=question_figure_repair_queue,
         )
-    if target_type == "question_figure_batch_apply_transaction_task_summary":
-        payload = _json_object(target_key)
-        if not payload:
-            payload = {"target_key": target_key} if target_key else {}
-        return (
-            target_type,
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        )
-    return (target_type, target_key)
 
 
 def _batch_issue_parameter_paths(payload: dict[str, object]) -> tuple[str, ...]:
@@ -459,220 +274,21 @@ def _infer_scene_field_repair_target(
         candidates.insert(0, fallback_key)
 
     for path in candidates:
-        target = _normalize_scene_scope_field_path(path)
+        target = _normalize_scene_document_scope_field_path(path)
         if target:
-            return ("scene_scope_field", target)
-
-    for path in candidates:
-        target = _normalize_scene_style_field_path(path)
-        if target:
-            return ("scene_style_field", target)
+            return ("scene_document_scope_field", target)
 
     return ("", "")
 
 
-def _normalize_scene_scope_field_path(path: str) -> str:
+def _normalize_scene_document_scope_field_path(path: str) -> str:
     target = _clean_text(path)
-    for prefix in ("scene.format_scope.sections.", "format_scope.sections."):
-        if target.startswith(prefix):
-            zone = target[len(prefix):].split(".", 1)[0]
-            return f"format_scope.sections.{zone}" if zone else ""
-    if target.startswith("sections."):
-        zone = target[len("sections."):].split(".", 1)[0]
-        return f"format_scope.sections.{zone}" if zone else ""
+    if target in {
+        "scene.document_scope.mode",
+        "scene.document_scope.selected_roles",
+    }:
+        return target
     return ""
-
-
-def _normalize_scene_style_field_path(path: str) -> str:
-    target = _clean_text(path)
-    variant_key, editor_field = scene_style_navigation_target_from_field_id(target)
-    if variant_key:
-        if not editor_field:
-            return f"scene.section_styles.{variant_key}"
-        canonical = canonical_paragraph_style_field_id(editor_field)
-        return f"scene.section_styles.{variant_key}.{canonical or editor_field}"
-    for prefix in ("scene.section_styles.", "section_styles."):
-        if target.startswith(prefix):
-            tail = target[len(prefix):]
-            return f"scene.section_styles.{tail}" if tail else ""
-    return ""
-
-
-def _question_figure_conflict_selection_candidate(
-    candidate: dict[str, object],
-) -> dict[str, object]:
-    if not isinstance(candidate, dict):
-        return {}
-    if _clean_text(candidate.get("confirmation_status")) != "conflict":
-        return {}
-    if _clean_text(candidate.get("confirmation_action")) != (
-        "resolve_question_figure_replacement_conflict"
-    ):
-        return {}
-    if not bool(candidate.get("conflict_resolution_select_supported")):
-        return {}
-    queue_id = _clean_text(candidate.get("queue_id"))
-    conflict_group_id = _clean_text(candidate.get("conflict_group_id"))
-    replacement_path = _clean_text(candidate.get("replacement_source_path"))
-    if not queue_id or not conflict_group_id or not replacement_path:
-        return {}
-    conflict_queue_ids = [
-        queue_id_value
-        for queue_id_value in _clean_list(candidate.get("conflict_candidate_queue_ids"))
-        if queue_id_value
-    ]
-    if queue_id not in conflict_queue_ids:
-        conflict_queue_ids.insert(0, queue_id)
-    rejected_queue_ids = [
-        queue_id_value
-        for queue_id_value in conflict_queue_ids
-        if queue_id_value != queue_id
-    ]
-    blockers = [
-        blocker
-        for blocker in _clean_list(candidate.get("apply_blockers"))
-        if blocker != "candidate_conflict_same_repair_target"
-    ]
-    resolved = dict(candidate)
-    resolved["confirmation_action"] = "confirm_question_figure_replacement"
-    resolved["confirmation_apply_supported"] = True
-    resolved["confirmation_status"] = "ready"
-    resolved["conflict_resolution_status"] = "selected"
-    resolved["conflict_resolution_action"] = (
-        "select_question_figure_replacement_conflict_candidate"
-    )
-    resolved["conflict_selected_queue_id"] = queue_id
-    resolved["conflict_resolution_group_id"] = conflict_group_id
-    resolved["conflict_resolution_candidate_queue_ids"] = conflict_queue_ids
-    resolved["conflict_resolution_rejected_queue_ids"] = rejected_queue_ids
-    resolved["conflict_resolution_by"] = "workbench_issue_action"
-    resolved["conflict_resolution_note"] = "selected from Workbench issue queue"
-    resolved["apply_blockers"] = blockers
-    return resolved
-
-
-def update_workbench_issue_status(
-    items: list[WorkbenchIssueItem] | tuple[WorkbenchIssueItem, ...],
-    issue_id: str,
-    status: str,
-) -> list[WorkbenchIssueItem]:
-    """Return a copy of issue items with one issue status updated."""
-
-    normalized_id = str(issue_id or "").strip()
-    normalized_status = str(status or "").strip()
-    queue_items = [
-        item for item in list(items or []) if isinstance(item, WorkbenchIssueItem)
-    ]
-    if not normalized_id or normalized_status not in ISSUE_STATUS_VALUES:
-        return queue_items
-    return [
-        replace(item, status=normalized_status)
-        if item.issue_id == normalized_id
-        else item
-        for item in queue_items
-    ]
-
-
-def object_preflight_issue_items(
-    object_preflight: dict[str, object] | None,
-) -> list[WorkbenchIssueItem]:
-    """Return structured Workbench issue items for object preflight payloads."""
-
-    payload = _dict_payload(object_preflight)
-    if not payload or payload.get("enabled") is False:
-        return []
-
-    findings_count = _safe_int(payload.get("findings_count"))
-    module_skips_count = _safe_int(payload.get("module_skips_count"))
-    if findings_count <= 0 and module_skips_count <= 0:
-        return []
-
-    blocking_count = _safe_int(payload.get("blocking_findings_count"))
-    source_notes = _object_preflight_source_notes(payload)
-    findings = [
-        finding
-        for finding in list(payload.get("findings") or [])
-        if isinstance(finding, dict)
-    ]
-    module_skips = [
-        module_skip
-        for module_skip in list(payload.get("module_skips") or [])
-        if isinstance(module_skip, dict)
-    ]
-    items: list[WorkbenchIssueItem] = []
-    matched_skip_indexes: set[int] = set()
-
-    for index, finding in enumerate(findings, start=1):
-        kind = _clean_text(finding.get("kind")) or "risk"
-        severity = _clean_text(finding.get("severity")) or "warning"
-        location = _clean_text(finding.get("location"))
-        message = _clean_text(finding.get("message"))
-        finding_line = _object_preflight_finding_line(finding)
-        related_skip_lines, related_indexes = _object_preflight_related_skip_lines(
-            finding,
-            module_skips,
-        )
-        matched_skip_indexes.update(related_indexes)
-        summary = message or location or kind
-        if location and message:
-            summary = f"{location}: {message}"
-        items.append(
-            WorkbenchIssueItem(
-                issue_id=f"object_preflight.finding.{index}.{_issue_token(kind)}",
-                category="object_preflight",
-                severity=severity,
-                title=f"对象风险：{kind}",
-                summary=summary,
-                details=tuple(
-                    line for line in [finding_line, *related_skip_lines] if line
-                ),
-                source_notes=source_notes,
-                repair_target_type="object_preflight",
-                repair_target_key=_object_preflight_finding_target_key(finding, index),
-                blocking=severity == "error",
-            )
-        )
-
-    for index, module_skip in enumerate(module_skips, start=1):
-        if (index - 1) in matched_skip_indexes:
-            continue
-        skip_line = _object_preflight_skip_line(module_skip)
-        if not skip_line:
-            continue
-        module_name = _clean_text(module_skip.get("module_name"))
-        items.append(
-            WorkbenchIssueItem(
-                issue_id=f"object_preflight.skip.{index}.{_issue_token(module_name or 'module')}",
-                category="object_preflight",
-                severity="warning",
-                title="对象预检跳过模块",
-                summary=skip_line.replace("跳过模块 ", "", 1),
-                details=(skip_line,),
-                source_notes=source_notes,
-                repair_target_type="object_preflight",
-                repair_target_key=_object_preflight_skip_target_key(module_skip, index),
-                blocking=blocking_count > 0 and not items,
-            )
-        )
-
-    if items:
-        return items
-
-    summary = _object_preflight_summary(payload)
-    return [
-        WorkbenchIssueItem(
-            issue_id="object_preflight.risk",
-            category="object_preflight",
-            severity="error" if blocking_count > 0 else "warning",
-            title="对象预检风险",
-            summary=summary.replace("对象预检：", "", 1) if summary else "",
-            details=tuple(_object_preflight_detail_lines(payload)),
-            source_notes=source_notes,
-            repair_target_type="object_preflight",
-            repair_target_key="summary",
-            blocking=blocking_count > 0,
-        )
-    ]
 
 
 def output_target_preflight_issue_items(
@@ -733,7 +349,7 @@ def execution_diagnostic_issue_items(
             repair_target_type = explicit_target_type
             repair_target_key = explicit_target_key
 
-        if repair_target_type not in {"scene_scope_field", "scene_style_field"}:
+        if repair_target_type != "scene_document_scope_field":
             continue
 
         rule_name = _clean_text(payload.get("rule_name")) or "diagnostic"
@@ -744,14 +360,8 @@ def execution_diagnostic_issue_items(
         severity = _clean_text(payload.get("severity") or payload.get("level"))
         if not severity:
             severity = "error" if payload.get("success") is False else "warning"
-        category = (
-            "scene_scope" if repair_target_type == "scene_scope_field" else "scene_style"
-        )
-        title = (
-            "场景处理范围需要确认"
-            if repair_target_type == "scene_scope_field"
-            else "场景样式需要确认"
-        )
+        category = "scene_document_scope"
+        title = "方案处理范围需要确认"
         details = [
             f"规则：{rule_name}" if rule_name else "",
             f"类型：{change_type}" if change_type else "",
@@ -1148,119 +758,168 @@ def question_figure_transaction_task_issue_items(
     ]
 
 
-def parameter_ownership_issue_items(scene) -> list[WorkbenchIssueItem]:
-    """Return Workbench issues for scene parameter ownership audit gaps."""
-
-    audit = audit_scene_parameter_ownership(scene.__class__)
-    if audit.is_clean:
-        return []
-    details = _parameter_ownership_detail_lines(audit)
-    return [
-        WorkbenchIssueItem(
-            issue_id="scene.parameter_ownership.audit",
-            category="parameter_ownership",
-            severity="warning",
-            title="参数归属缺口",
-            summary=f"{len(details)} 类缺口",
-            details=tuple(details),
-            source_notes=("scene_parameter_ownership registry",),
-            repair_target_type="parameter_ownership",
-            repair_target_key="registry",
-            blocking=False,
-            owner="scene",
-        )
-    ]
-
-
-def control_contract_issue_items(
-    audit: ControlContractAuditResult | None = None,
-) -> list[WorkbenchIssueItem]:
-    """Return Workbench issues for UI control contract audit gaps."""
-
-    audit_result = audit if audit is not None else audit_control_contract_registry()
-    if audit_result.is_clean:
-        return []
-    items: list[WorkbenchIssueItem] = []
-    for contract_id in audit_result.missing_required_contracts:
-        items.append(
-            _control_contract_issue(
-                issue_id=f"ui.control_contract.required.{_issue_token(contract_id)}",
-                title="控件契约缺失",
-                summary=contract_id,
-                detail=f"缺少必审控件契约：{contract_id}",
-                repair_target_key=contract_id,
-            )
-        )
-    for contract_id, owner_layer in audit_result.invalid_owner_layers:
-        items.append(
-            _control_contract_issue(
-                issue_id=f"ui.control_contract.owner.{_issue_token(contract_id)}",
-                title="控件归属层非法",
-                summary=f"{contract_id}: {owner_layer}",
-                detail=f"非法控件归属层：{contract_id}:{owner_layer}",
-                repair_target_key=contract_id,
-            )
-        )
-    for contract_id, paired_id in audit_result.missing_paired_contracts:
-        items.append(
-            _control_contract_issue(
-                issue_id=(
-                    "ui.control_contract.pair."
-                    f"{_issue_token(contract_id)}.{_issue_token(paired_id)}"
-                ),
-                title="配对控件缺失",
-                summary=f"{contract_id} -> {paired_id}",
-                detail=f"配对控件缺失：{contract_id}->{paired_id}",
-                repair_target_key=contract_id,
-            )
-        )
-    for contract_id, source_path in audit_result.missing_evidence_files:
-        items.append(
-            _control_contract_issue(
-                issue_id=(
-                    "ui.control_contract.evidence_file."
-                    f"{_issue_token(contract_id)}.{_issue_token(source_path)}"
-                ),
-                title="控件证据文件缺失",
-                summary=f"{contract_id}: {source_path}",
-                detail=f"证据文件缺失：{contract_id}:{source_path}",
-                repair_target_key=contract_id,
-            )
-        )
-    for contract_id, source_path, marker in audit_result.missing_evidence_markers:
-        items.append(
-            _control_contract_issue(
-                issue_id=(
-                    "ui.control_contract.evidence_marker."
-                    f"{_issue_token(contract_id)}.{_issue_token(marker)}"
-                ),
-                title="控件证据 marker 缺失",
-                summary=f"{contract_id}: {marker}",
-                detail=f"证据 marker 缺失：{contract_id}:{source_path}#{marker}",
-                repair_target_key=contract_id,
-            )
-        )
-    if items:
-        return items
-    details = _control_contract_detail_lines(audit_result)
-    return [
-        _control_contract_issue(
-            issue_id="ui.control_contract.audit",
-            title="控件契约缺口",
-            summary="存在控件契约缺口",
-            detail="；".join(details),
-            repair_target_key="registry",
-        )
-    ]
+def _execution_result_state_from_terminal(
+    payload: dict[str, object],
+) -> ExecutionResultState:
+    status, summary, failed_count, artifact_failure_count = (
+        _terminal_result_summary(payload)
+    )
+    paths = _terminal_result_paths(payload)
+    domains = _terminal_result_domains(payload)
+    diagnostics_items = _terminal_mapping_list(payload, "diagnostics_items")
+    batch_issue_items = _terminal_mapping_list(payload, "batch_issue_items")
+    style_source = domains["style_source"]
+    style_source_envelope = _style_source_receipt_envelope(style_source, fallback="")
+    question_queue = domains["question_figure_repair_queue"]
+    object_preflight = domains["object_preflight"]
+    field_consistency = domains["material_field_consistency"]
+    batch_isolation = domains["batch_isolation"]
+    return ExecutionResultState(
+        status=status,
+        summary=summary,
+        error_text=str(payload.get("error_text") or ""),
+        terminal_payload=payload,
+        execution_session=domains["execution_session"],
+        style_source=style_source,
+        style_source_summary=style_source_envelope.receipt_summary(
+            title_fallback="样式来源"
+        ),
+        style_source_envelope=style_source_envelope,
+        output_path=paths["output_path"],
+        output_paths=paths["output_paths"],
+        compare_paths=paths["compare_paths"],
+        report_paths=paths["report_paths"],
+        intermediate_paths=paths["intermediate_paths"],
+        material_manifest_paths=paths["material_manifest_paths"],
+        material_package_paths=paths["material_package_paths"],
+        material_package_receipt=domains["material_package_receipt"],
+        material_package_receipts=domains["material_package_receipts"],
+        attachment_bundles=domains["attachment_bundles"],
+        attachment_bundle_summary=_attachment_bundle_summary(
+            domains["attachment_bundles"]
+        ),
+        material_dependency_usage=domains["material_dependency_usage"],
+        material_dependency_summary=_material_dependency_summary(
+            domains["material_dependency_usage"]
+        ),
+        scene_sample_manifest_paths=paths["scene_sample_manifest_paths"],
+        failed_count=failed_count,
+        artifact_failure_count=artifact_failure_count,
+        diagnostics_count=max(0, _safe_int(payload.get("diagnostics_count"))),
+        diagnostics_summary=str(payload.get("diagnostics_summary") or ""),
+        object_preflight=object_preflight,
+        object_preflight_summary=_object_preflight_summary(object_preflight),
+        object_preflight_details=_object_preflight_detail_lines(object_preflight),
+        material_field_consistency=field_consistency,
+        material_field_consistency_summary=_material_field_consistency_summary(
+            field_consistency
+        ),
+        batch_isolation=batch_isolation,
+        batch_isolation_summary=_batch_isolation_summary(batch_isolation),
+        batch_isolation_details=_batch_isolation_detail_lines(batch_isolation),
+        question_figure_repair_queue=question_queue,
+        artifact_items=_build_artifact_items(
+            output_path=paths["output_path"],
+            output_paths=paths["output_paths"],
+            compare_paths=paths["compare_paths"],
+            report_paths=paths["report_paths"],
+            intermediate_paths=paths["intermediate_paths"],
+            material_manifest_paths=paths["material_manifest_paths"],
+            material_package_paths=paths["material_package_paths"],
+            scene_sample_manifest_paths=paths["scene_sample_manifest_paths"],
+            output_target_preflight=domains["output_target_preflight"],
+            question_figure_repair_queue=question_queue,
+            official_document_assembly=domains["official_document_assembly"],
+        ),
+        issue_items=[
+            *output_target_preflight_issue_items(domains["output_target_preflight"]),
+            *execution_diagnostic_issue_items(diagnostics_items),
+            *batch_execution_issue_items(batch_issue_items),
+            *question_figure_repair_queue_issue_items(question_queue),
+            *question_figure_transaction_task_issue_items(question_queue),
+        ],
+    )
 
 
-def _unique_texts(values: list[str]) -> list[str]:
-    result: list[str] = []
-    for value in values:
-        normalized = str(value or "").strip()
-        if normalized and normalized not in result:
-            result.append(normalized)
-    return result
+def _terminal_result_summary(
+    payload: Mapping[str, object],
+) -> tuple[str, str, int, int]:
+    status = str(payload.get("status") or "")
+    failed_count = max(0, _safe_int(payload.get("failed_count")))
+    artifact_failure_count = max(
+        0,
+        _safe_int(payload.get("artifact_failure_count")),
+    )
+    if artifact_failure_count and failed_count:
+        partial_summary = (
+            f"执行完成，但有 {failed_count} 个业务项未成功，"
+            f"另有 {artifact_failure_count} 个辅助产物失败"
+        )
+    elif artifact_failure_count:
+        partial_summary = (
+            f"核心执行已完成，但有 {artifact_failure_count} 个辅助产物失败"
+        )
+    else:
+        partial_summary = f"执行完成，但有 {failed_count} 个模块未成功"
+    summaries = {
+        "success": "本次执行已完成",
+        "partial_success": partial_summary,
+        "failed": "执行失败",
+        "cancelled": "已取消",
+    }
+    if status not in summaries:
+        raise ValueError(f"Unknown execution status: {status!r}")
+    return status, summaries[status], failed_count, artifact_failure_count
+
+
+def _terminal_result_paths(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "output_path": str(payload.get("output_path") or ""),
+        "output_paths": _string_path_map(
+            _terminal_dict_projection(payload, "output_paths")
+        ),
+        "compare_paths": _string_path_map(
+            _terminal_dict_projection(payload, "compare_paths")
+        ),
+        "report_paths": _terminal_string_list(payload, "report_paths"),
+        "intermediate_paths": _string_path_map(
+            _terminal_dict_projection(payload, "intermediate_paths")
+        ),
+        "material_manifest_paths": _string_path_map(
+            _terminal_dict_projection(payload, "material_manifest_paths")
+        ),
+        "material_package_paths": _string_path_map(
+            _terminal_dict_projection(payload, "material_package_paths")
+        ),
+        "scene_sample_manifest_paths": _string_path_map(
+            _terminal_dict_projection(payload, "scene_sample_manifest_paths")
+        ),
+    }
+
+
+def _terminal_result_domains(
+    payload: Mapping[str, object],
+) -> dict[str, dict[str, object]]:
+    fields = (
+        "output_target_preflight",
+        "official_document_assembly",
+        "object_preflight",
+        "style_source",
+        "material_field_consistency",
+        "batch_isolation",
+        "question_figure_repair_queue",
+        "attachment_bundles",
+        "material_dependency_usage",
+        "execution_session",
+        "material_package_receipt",
+        "material_package_receipts",
+    )
+    return {
+        field_name: _terminal_dict_projection(payload, field_name)
+        for field_name in fields
+    }
 
 
 def _clean_reason_list(reasons: list[str] | None) -> list[str]:
@@ -1271,228 +930,74 @@ def _clean_reason_list(reasons: list[str] | None) -> list[str]:
     ]
 
 
-def _count_issue_values(values) -> tuple[tuple[str, int], ...]:
-    counts: dict[str, int] = {}
-    order: list[str] = []
-    for value in values:
-        normalized = str(value or "").strip()
-        if not normalized:
-            continue
-        if normalized not in counts:
-            counts[normalized] = 0
-            order.append(normalized)
-        counts[normalized] += 1
-    return tuple((key, counts[key]) for key in order)
-
-
-def _count_issue_action_values(values) -> tuple[tuple[str, int], ...]:
-    counts: dict[str, int] = {}
-    for value in values:
-        normalized = str(value or "").strip()
-        if not normalized:
-            continue
-        counts[normalized] = counts.get(normalized, 0) + 1
-    return tuple(
-        sorted(
-            counts.items(),
-            key=lambda item: (
-                workbench_issue_action_visual(item[0]).rank,
-                item[0],
-            ),
-        )
-    )
-
-
-def _issue_repair_target_key(item: WorkbenchIssueItem) -> str:
-    target_type = str(item.repair_target_type or "").strip()
-    target_key = str(item.repair_target_key or "").strip()
-    if target_type and target_key:
-        return f"{target_type}:{target_key}"
-    if target_type:
-        return target_type
-    return ""
-
-
-def _issue_repair_context_value(item: WorkbenchIssueItem, key: str) -> str:
-    normalized_key = str(key or "").strip()
-    for context_key, context_value in tuple(getattr(item, "repair_context", ()) or ()):
-        if str(context_key or "").strip() == normalized_key:
-            return str(context_value or "").strip()
-    return ""
-
-
-def _issue_status(item: WorkbenchIssueItem) -> str:
-    status = str(getattr(item, "status", "") or "").strip()
-    return status or "open"
-
-
-def _issue_owner(item: WorkbenchIssueItem) -> str:
-    owner = str(getattr(item, "owner", "") or "").strip()
-    if owner:
-        return owner
-    target_type = str(getattr(item, "repair_target_type", "") or "").strip()
-    category = str(getattr(item, "category", "") or "").strip()
-    if target_type in {"field", "asset", "schema"} or category.startswith("material_"):
-        return "workbench"
-    if target_type.startswith("template_") or category.startswith("template_"):
-        return "template"
-    if target_type in {"object_preflight", "output_target"}:
-        return "scene"
-    if target_type == "parameter_ownership" or category == "parameter_ownership":
-        return "scene"
-    if target_type == "control_contract" or category == "control_contract":
-        return "scene"
-    if target_type == "sample_fixture" or category == "sample_fixture":
-        return "scene"
-    if target_type == "coverage_boundary" or category == "plugin_boundary":
-        return "plugin"
-    return "workbench"
-
-
-def _parameter_ownership_detail_lines(
-    audit: ParameterOwnershipAuditResult,
-) -> list[str]:
-    lines: list[str] = []
-    if audit.missing_top_level_paths:
-        lines.append("缺少顶层字段归属：" + ", ".join(audit.missing_top_level_paths))
-    if audit.missing_required_paths:
-        lines.append("缺少必审路径：" + ", ".join(audit.missing_required_paths))
-    if audit.unknown_spec_paths:
-        lines.append("未知 registry 路径：" + ", ".join(audit.unknown_spec_paths))
-    if audit.invalid_owner_layers:
-        invalid = ", ".join(
-            f"{path}:{owner}" for path, owner in audit.invalid_owner_layers
-        )
-        lines.append("非法归属层：" + invalid)
-    return lines
-
-
-def _control_contract_issue(
-    *,
-    issue_id: str,
-    title: str,
-    summary: str,
-    detail: str,
-    repair_target_key: str,
-) -> WorkbenchIssueItem:
-    return WorkbenchIssueItem(
-        issue_id=issue_id,
-        category="control_contract",
-        severity="warning",
-        title=title,
-        summary=summary,
-        details=tuple(_control_contract_issue_detail_lines(repair_target_key, detail)),
-        source_notes=("control_contract_registry",),
-        repair_target_type="control_contract",
-        repair_target_key=repair_target_key or "registry",
-        blocking=False,
-        owner="scene",
-    )
-
-
-def _control_contract_issue_detail_lines(
-    contract_id: str,
-    primary_detail: str,
-) -> list[str]:
-    lines = [str(primary_detail or "").strip()] if str(primary_detail or "").strip() else []
-    normalized_id = str(contract_id or "").strip()
-    if not normalized_id or normalized_id == "registry":
-        return lines
-    try:
-        contract = get_control_contract(normalized_id)
-    except KeyError:
-        lines.append("契约：" + normalized_id)
-        return lines
-
-    lines.extend(
-        [
-            f"契约：{contract.canonical_label} ({contract.contract_id})",
-            "规范控件：" + contract.canonical_control,
-            "归属层：" + contract.owner_layer,
-        ]
-    )
-    if contract.parameter_paths:
-        lines.append("参数路径：" + ", ".join(contract.parameter_paths))
-    surfaces = [
-        ("模板表面", contract.template_surface),
-        ("场景表面", contract.scene_surface),
-        ("工作台表面", contract.workbench_surface),
-    ]
-    for label, value in surfaces:
-        cleaned = str(value or "").strip()
-        if cleaned:
-            lines.append(f"{label}：{cleaned}")
-    evidence_lines = [
-        _control_contract_evidence_location_line(location)
-        for location in resolve_control_contract_evidence_locations(contract.contract_id)
-    ]
-    if evidence_lines:
-        lines.extend(evidence_lines)
-    else:
-        for evidence in contract.evidence:
-            source_path = str(evidence.source_path or "").strip()
-            if source_path:
-                lines.append("证据：" + source_path)
-    if contract.notes:
-        lines.append("说明：" + contract.notes)
-    return lines
-
-
-def _control_contract_evidence_location_line(location) -> str:
-    line_number = int(getattr(location, "line_number", 0) or 0)
-    source_path = str(getattr(location, "source_path", "") or "").strip()
-    marker = str(getattr(location, "marker", "") or "").strip()
-    suffix = f":{line_number}" if line_number > 0 else ":0"
-    if source_path and marker:
-        return f"证据：{source_path}{suffix}#{marker}"
-    if source_path:
-        return f"证据：{source_path}{suffix}"
-    return "证据：-"
-
-
-def _control_contract_detail_lines(
-    audit: ControlContractAuditResult,
-) -> list[str]:
-    lines: list[str] = []
-    if audit.missing_required_contracts:
-        lines.append("缺少必审控件契约：" + ", ".join(audit.missing_required_contracts))
-    if audit.invalid_owner_layers:
-        invalid = ", ".join(
-            f"{contract_id}:{owner_layer}"
-            for contract_id, owner_layer in audit.invalid_owner_layers
-        )
-        lines.append("非法控件归属层：" + invalid)
-    if audit.missing_paired_contracts:
-        missing_pairs = ", ".join(
-            f"{contract_id}->{paired_id}"
-            for contract_id, paired_id in audit.missing_paired_contracts
-        )
-        lines.append("配对控件缺失：" + missing_pairs)
-    if audit.missing_evidence_files:
-        missing_files = ", ".join(
-            f"{contract_id}:{source_path}"
-            for contract_id, source_path in audit.missing_evidence_files
-        )
-        lines.append("证据文件缺失：" + missing_files)
-    if audit.missing_evidence_markers:
-        missing_markers = ", ".join(
-            f"{contract_id}:{source_path}#{marker}"
-            for contract_id, source_path, marker in audit.missing_evidence_markers
-        )
-        lines.append("证据 marker 缺失：" + missing_markers)
-    return lines
-
-
 def _dict_payload(value: dict[str, object] | None) -> dict[str, object]:
     return dict(value) if isinstance(value, dict) else {}
 
 
-def _json_object(value: str) -> dict[str, object]:
-    try:
-        payload = json.loads(str(value or ""))
-    except (TypeError, ValueError):
+def _copy_terminal_payload(
+    value: Mapping[str, object],
+) -> dict[str, object]:
+    return normalize_terminal_payload(value)
+
+
+def _terminal_dict_projection(
+    payload: Mapping[str, object],
+    field_name: str,
+) -> dict[str, object]:
+    if field_name not in payload or payload.get(field_name) is None:
         return {}
-    return dict(payload) if isinstance(payload, dict) else {}
+    value = payload.get(field_name)
+    if not isinstance(value, Mapping):
+        raise TypeError(
+            f"Terminal payload field {field_name!r} must be a mapping or null"
+        )
+    if field_name in {
+        "output_paths",
+        "compare_paths",
+        "intermediate_paths",
+        "material_manifest_paths",
+        "material_package_paths",
+        "scene_sample_manifest_paths",
+    }:
+        return normalize_path_map(value, field_name=field_name)
+    projected = plain_payload(value)
+    return projected if isinstance(projected, dict) else {}
+
+
+def _terminal_mapping_list(
+    payload: Mapping[str, object],
+    field_name: str,
+) -> list[dict[str, object]]:
+    if field_name not in payload or payload.get(field_name) is None:
+        return []
+    value = payload.get(field_name)
+    if not isinstance(value, (list, tuple)):
+        raise TypeError(
+            f"Terminal payload field {field_name!r} must be a list, tuple, or null"
+        )
+    projected = plain_payload(value)
+    if not isinstance(projected, list):
+        raise TypeError(
+            f"Terminal payload field {field_name!r} did not normalize to a list"
+        )
+    items: list[dict[str, object]] = []
+    for index, item in enumerate(projected):
+        if not isinstance(item, dict):
+            raise TypeError(
+                f"Terminal payload field {field_name!r} item {index} "
+                "must be a mapping"
+            )
+        items.append(item)
+    return items
+
+
+def _terminal_string_list(
+    payload: Mapping[str, object],
+    field_name: str,
+) -> list[str]:
+    if field_name not in payload or payload.get(field_name) is None:
+        return []
+    return normalize_path_list(payload.get(field_name), field_name=field_name)
 
 
 def _string_path_map(value: dict[str, str] | None) -> dict[str, str]:
@@ -1505,17 +1010,6 @@ def _string_path_map(value: dict[str, str] | None) -> dict[str, str]:
     }
 
 
-def _style_source_receipt_summary(
-    value: dict[str, object],
-    *,
-    fallback: str = "",
-) -> str:
-    return _style_source_receipt_envelope(
-        value,
-        fallback=fallback,
-    ).receipt_summary(title_fallback="样式来源")
-
-
 def _style_source_receipt_envelope(
     value: dict[str, object],
     *,
@@ -1524,116 +1018,6 @@ def _style_source_receipt_envelope(
     return StylePresentationEnvelope.from_execution_result(
         value,
         fallback=fallback,
-    )
-
-
-def _style_difference_summary_projection(
-    value: dict[str, object],
-) -> StyleDifferenceSummaryProjection | None:
-    direct = value.get("difference_summary") or value.get("style_difference_summary")
-    if isinstance(direct, StyleDifferenceSummaryProjection):
-        return direct
-    if isinstance(direct, dict):
-        return _style_difference_summary_from_payload(direct)
-
-    projections = tuple(
-        projection
-        for projection in (
-            _style_difference_projection_from_payload(item)
-            for item in _list_values(
-                value.get("sections") or value.get("section_differences")
-            )
-        )
-        if projection is not None
-    )
-    return build_style_difference_summary_projection(projections)
-
-
-def _style_difference_summary_from_payload(
-    value: dict[str, object],
-) -> StyleDifferenceSummaryProjection | None:
-    template_status = _clean_text(value.get("template_status")) or "模板基线"
-    current_status = _clean_text(value.get("current_status"))
-    difference_status = _clean_text(value.get("difference_status"))
-    detail = _clean_text(value.get("detail"))
-    section_count = _safe_int(value.get("section_count"))
-    changed_section_count = _safe_int(value.get("changed_section_count"))
-    pending_section_count = _safe_int(value.get("pending_section_count"))
-    if not any(
-        (
-            current_status,
-            difference_status,
-            detail,
-            section_count,
-            changed_section_count,
-            pending_section_count,
-        )
-    ):
-        return None
-    return StyleDifferenceSummaryProjection(
-        template_status=template_status,
-        current_status=current_status,
-        difference_status=difference_status,
-        detail=detail,
-        variant=_clean_text(value.get("variant")) or "info",
-        section_count=section_count,
-        changed_section_count=changed_section_count,
-        pending_section_count=pending_section_count,
-    )
-
-
-def _style_difference_projection_from_payload(
-    value: object,
-) -> StyleDifferenceProjection | None:
-    if isinstance(value, StyleDifferenceProjection):
-        return value
-    if not isinstance(value, dict):
-        return None
-
-    changed_labels = _clean_list(value.get("changed_labels"))
-    changed_count = _safe_int(value.get("changed_count"))
-    if not changed_labels and changed_count > 0:
-        changed_labels = (f"{changed_count} 项字段",)
-
-    scope_label = (
-        _clean_text(value.get("scope_label"))
-        or _clean_text(value.get("label"))
-        or _clean_text(value.get("section_label"))
-        or _clean_text(value.get("variant_key"))
-    )
-    variant_key = _clean_text(value.get("variant_key")) or scope_label
-    overridden = _safe_bool(
-        value.get("overridden"),
-        default=bool(changed_labels or _clean_text(value.get("difference_status"))),
-    )
-    follows_template = _safe_bool(value.get("follows_template"), default=not overridden)
-    section_enabled = _safe_bool(value.get("section_enabled"), default=True)
-    template_available = _safe_bool(value.get("template_available"), default=True)
-    current_status = _clean_text(value.get("current_status")) or (
-        "独立样式" if overridden else "跟随模板"
-    )
-    difference_status = _clean_text(value.get("difference_status")) or (
-        f"已调整 {len(changed_labels)} 项" if changed_labels else "无差异"
-    )
-
-    if not any((scope_label, changed_labels, overridden, difference_status)):
-        return None
-    return StyleDifferenceProjection(
-        variant_key=variant_key,
-        scope_label=scope_label or "分区",
-        section_enabled=section_enabled,
-        overridden=overridden,
-        follows_template=follows_template,
-        template_available=template_available,
-        changed_labels=changed_labels,
-        compact_label=_clean_text(value.get("compact_label")),
-        detail_label=_clean_text(value.get("detail_label")),
-        status_label=_clean_text(value.get("status")),
-        template_status=_clean_text(value.get("template_status")) or "模板基线",
-        current_status=current_status,
-        difference_status=difference_status,
-        detail=_clean_text(value.get("detail")),
-        variant=_clean_text(value.get("variant")) or ("warning" if overridden else "info"),
     )
 
 
@@ -1726,77 +1110,6 @@ def _object_preflight_skip_line(module_skip: dict[str, object]) -> str:
     return head
 
 
-def _object_preflight_source_notes(value: dict[str, object]) -> tuple[str, ...]:
-    notes: list[str] = []
-    preservation_mode = _clean_text(value.get("preservation_mode"))
-    if preservation_mode:
-        notes.append("保护模式：" + preservation_mode)
-    scan_targets = [
-        cleaned
-        for cleaned in (_clean_text(item) for item in _list_values(value.get("scan_targets")))
-        if cleaned
-    ]
-    if scan_targets:
-        notes.append("扫描对象：" + ", ".join(scan_targets))
-    return tuple(notes)
-
-
-def _object_preflight_related_skip_lines(
-    finding: dict[str, object],
-    module_skips: list[dict[str, object]],
-) -> tuple[list[str], set[int]]:
-    finding_kind = _clean_text(finding.get("kind"))
-    if not finding_kind:
-        return [], set()
-    lines: list[str] = []
-    indexes: set[int] = set()
-    for index, module_skip in enumerate(module_skips):
-        finding_kinds = {
-            cleaned
-            for cleaned in (
-                _clean_text(item)
-                for item in _list_values(module_skip.get("finding_kinds"))
-            )
-            if cleaned
-        }
-        if finding_kind not in finding_kinds:
-            continue
-        line = _object_preflight_skip_line(module_skip)
-        if line:
-            lines.append(line)
-            indexes.add(index)
-    return lines, indexes
-
-
-def _object_preflight_finding_target_key(
-    finding: dict[str, object],
-    index: int,
-) -> str:
-    kind = _clean_text(finding.get("kind"))
-    location = _clean_text(finding.get("location"))
-    if kind and location:
-        return f"{kind}@{location}"
-    return kind or location or f"finding-{index}"
-
-
-def _object_preflight_skip_target_key(
-    module_skip: dict[str, object],
-    index: int,
-) -> str:
-    module_name = _clean_text(module_skip.get("module_name"))
-    finding_kinds = [
-        cleaned
-        for cleaned in (
-            _clean_text(item)
-            for item in _list_values(module_skip.get("finding_kinds"))
-        )
-        if cleaned
-    ]
-    if module_name and finding_kinds:
-        return f"skip:{module_name}<-{'/'.join(finding_kinds)}"
-    return f"skip:{module_name or index}"
-
-
 def _issue_token(value: str) -> str:
     token = "".join(
         char if char.isalnum() or char in {"-", "_"} else "_"
@@ -1822,6 +1135,34 @@ def _material_field_consistency_summary(value: dict[str, object]) -> str:
     if status in {"ok", "not_applicable"} or field_count > 0:
         return f"字段一致性：{label} · 通过"
     return f"字段一致性：{label} · {status}"
+
+
+def _material_dependency_summary(value: dict[str, object]) -> str:
+    if not value or not str(value.get("index_id") or ""):
+        return ""
+    fields = len(list(value.get("fields") or []))
+    images = len(list(value.get("images") or []))
+    consumers = len(list(value.get("consumers") or []))
+    occurrences = _safe_int(value.get("occurrence_count"))
+    return (
+        f"资料联动：字段 {fields} · 图片 {images} · "
+        f"消费文件 {consumers} · 出现 {occurrences} 次"
+    )
+
+
+def _attachment_bundle_summary(value: dict[str, object]) -> str:
+    if not value or str(value.get("status") or "not_run") == "not_run":
+        return ""
+    status = str(value.get("status") or "unknown")
+    succeeded = _safe_int(value.get("succeeded_binding_count"))
+    failed = _safe_int(value.get("failed_binding_count"))
+    files = _safe_int(value.get("file_count"))
+    fields = _safe_int(value.get("field_replacement_count"))
+    images = _safe_int(value.get("image_job_count"))
+    return (
+        f"附件包：{status} · 成功 {succeeded} · 失败 {failed} · "
+        f"文件 {files} · 字段替换 {fields} · 图片 {images}"
+    )
 
 
 def _batch_isolation_summary(value: dict[str, object]) -> str:

@@ -181,7 +181,7 @@ class CalendarMonth(QWidget):
         self._next_btn.setStyleSheet(nav_s)
         self._title_lbl.setStyleSheet(
             f"color:{t.text_primary};font-size:{t.font_size_md}px;"
-            f"font-weight:600;background:transparent;border:none;"
+            f"font-weight:{t.font_weight_emphasis};background:transparent;border:none;"
         )
         self._render()
 

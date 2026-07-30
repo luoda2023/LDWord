@@ -1,4 +1,4 @@
-"""Reusable style-management block for template and scene style panes."""
+"""Reusable style-management block for template editing and run receipts."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from src.qt_api import QSizePolicy, QVBoxLayout, QWidget, Signal
 from src.shared.ui.style_editing_section import StyleEditingSection
 from src.shared.ui.style_object_projection import StyleObjectProjection
 from src.shared.ui.style_owner_toolbar import StyleOwnerOption
-from src.shared.ui.style_policy_control_deck import style_policy_control_protocol
 from src.shared.ui.summary_grid import SummaryGridItem
 from src.shared.ui.template_summary_card import DetailSummaryCard
 from src.shared.ui.layout_sync import refresh_layout_chain, refresh_layout_chain_later
@@ -37,8 +36,6 @@ class StyleManagementContentPlan:
     mode: str = "custom"
     source: bool = True
     scope: bool = True
-    rules: bool = False
-    difference: bool = False
     editor: bool = True
     preview: bool = True
     receipt: bool = False
@@ -49,8 +46,6 @@ class StyleManagementContentPlan:
             for name, enabled in (
                 ("source", self.source),
                 ("scope", self.scope),
-                ("rules", self.rules),
-                ("difference", self.difference),
                 ("editor", self.editor),
                 ("preview", self.preview),
                 ("receipt", self.receipt),
@@ -59,9 +54,7 @@ class StyleManagementContentPlan:
         )
 
     def slots(self) -> tuple[str, ...]:
-        """Return user-facing semantic slots, with policy as the public rule name."""
-
-        return tuple("policy" if name == "rules" else name for name in self.sections())
+        return self.sections()
 
     def encoded(self) -> str:
         return "|".join(self.sections())
@@ -69,17 +62,11 @@ class StyleManagementContentPlan:
     def encoded_slots(self) -> str:
         return "|".join(self.slots())
 
-    @property
-    def policy(self) -> bool:
-        return self.rules
-
     def with_effective_slots(
         self,
         *,
         source: bool | None = None,
         scope: bool | None = None,
-        rules: bool | None = None,
-        difference: bool | None = None,
         preview: bool | None = None,
         receipt: bool | None = None,
     ) -> "StyleManagementContentPlan":
@@ -87,8 +74,6 @@ class StyleManagementContentPlan:
             mode=self.mode,
             source=self.source if source is None else bool(source),
             scope=self.scope if scope is None else bool(scope),
-            rules=self.rules if rules is None else bool(rules),
-            difference=self.difference if difference is None else bool(difference),
             editor=self.editor,
             preview=self.preview if preview is None else bool(preview),
             receipt=self.receipt if receipt is None else bool(receipt),
@@ -107,26 +92,6 @@ STYLE_MANAGEMENT_CONTRACTS: dict[str, StyleManagementContract] = {
         show_preview=False,
         collapse_surface_when_readonly=False,
     ),
-    "scene_section_rules": StyleManagementContract(
-        mode="scene_section_rules",
-        show_owner_toolbar=True,
-        owner_title="编辑样式",
-        selector_label="编辑分区",
-        action_label="恢复模板",
-        show_owner_status=True,
-        show_preview=True,
-        collapse_surface_when_readonly=True,
-    ),
-    "template_overview_preview": StyleManagementContract(
-        mode="template_overview_preview",
-        show_owner_toolbar=False,
-        owner_title="样式预览",
-        selector_label="",
-        action_label="",
-        show_owner_status=False,
-        show_preview=False,
-        collapse_surface_when_readonly=True,
-    ),
     "execution_receipt_review": StyleManagementContract(
         mode="execution_receipt_review",
         show_owner_toolbar=False,
@@ -135,26 +100,6 @@ STYLE_MANAGEMENT_CONTRACTS: dict[str, StyleManagementContract] = {
         action_label="",
         show_owner_status=False,
         show_preview=False,
-        collapse_surface_when_readonly=True,
-    ),
-    "execution_prereview": StyleManagementContract(
-        mode="execution_prereview",
-        show_owner_toolbar=False,
-        owner_title="执行前复核",
-        selector_label="",
-        action_label="",
-        show_owner_status=False,
-        show_preview=False,
-        collapse_surface_when_readonly=True,
-    ),
-    "readonly_review": StyleManagementContract(
-        mode="readonly_review",
-        show_owner_toolbar=False,
-        owner_title="样式复核",
-        selector_label="复核对象",
-        action_label="",
-        show_owner_status=True,
-        show_preview=True,
         collapse_surface_when_readonly=True,
     ),
 }
@@ -166,60 +111,16 @@ STYLE_MANAGEMENT_CONTENT_PLANS: dict[str, StyleManagementContentPlan] = {
         mode="template_baseline_edit",
         source=True,
         scope=True,
-        rules=False,
-        difference=False,
         editor=True,
         preview=False,
-        receipt=False,
-    ),
-    "scene_section_rules": StyleManagementContentPlan(
-        mode="scene_section_rules",
-        source=True,
-        scope=True,
-        rules=True,
-        difference=True,
-        editor=True,
-        preview=True,
-        receipt=False,
-    ),
-    "template_overview_preview": StyleManagementContentPlan(
-        mode="template_overview_preview",
-        source=False,
-        scope=False,
-        rules=False,
-        difference=False,
-        editor=False,
-        preview=True,
         receipt=False,
     ),
     "execution_receipt_review": StyleManagementContentPlan(
         mode="execution_receipt_review",
         source=False,
         scope=False,
-        rules=False,
-        difference=False,
         editor=False,
         preview=False,
-        receipt=True,
-    ),
-    "execution_prereview": StyleManagementContentPlan(
-        mode="execution_prereview",
-        source=True,
-        scope=True,
-        rules=False,
-        difference=True,
-        editor=False,
-        preview=False,
-        receipt=False,
-    ),
-    "readonly_review": StyleManagementContentPlan(
-        mode="readonly_review",
-        source=True,
-        scope=True,
-        rules=False,
-        difference=False,
-        editor=False,
-        preview=True,
         receipt=True,
     ),
 }
@@ -278,11 +179,8 @@ class StyleManagementBlock(QWidget):
         summary_columns: int = 12,
         source_slot: QWidget | None = None,
         scope_slot: QWidget | None = None,
-        rule_control: QWidget | None = None,
-        difference_slot: QWidget | None = None,
         preview_slot: QWidget | None = None,
         receipt_slot: QWidget | None = None,
-        management_widgets: Sequence[QWidget] = (),
         owner_options: Sequence[StyleOwnerOption] = (),
         show_owner_toolbar: bool | None = None,
         owner_title: str | None = None,
@@ -350,20 +248,12 @@ class StyleManagementBlock(QWidget):
         self._content_plan = base_content_plan.with_effective_slots(
             source=bool(base_content_plan.source or source_slot is not None),
             scope=bool(base_content_plan.scope or scope_slot is not None),
-            rules=bool(base_content_plan.rules or rule_control is not None),
-            difference=bool(base_content_plan.difference or difference_slot is not None),
             preview=bool(effective_show_preview or preview_slot is not None),
             receipt=bool(base_content_plan.receipt or receipt_slot is not None),
         )
-        self._legacy_management_widgets = tuple(management_widgets)
         self._show_summary = bool(show_summary)
         self._collapse_surface_when_readonly = effective_collapse_surface
         self._editor_enabled = bool(self._content_plan.editor)
-        self._rule_control_protocol = style_policy_control_protocol(rule_control)
-        if rule_control is not None and self._rule_control_protocol == "unsupported":
-            raise TypeError(
-                "rule_control must implement apply_projection(...)."
-            )
         self._preview_slot_protocol = style_preview_slot_protocol(preview_slot)
         if preview_slot is not None and self._preview_slot_protocol == "unsupported":
             raise TypeError(
@@ -392,8 +282,6 @@ class StyleManagementBlock(QWidget):
         self._set_summary_items(tuple(summary_items))
         self._source_slot = source_slot
         self._scope_slot = scope_slot
-        self._rule_control = rule_control
-        self._difference_slot = difference_slot
         self._preview_slot = preview_slot
         self._receipt_slot = receipt_slot
         self._sync_content_plan_properties()
@@ -402,24 +290,11 @@ class StyleManagementBlock(QWidget):
         if scope_slot is not source_slot:
             self._add_slot_widget(scope_slot)
 
-        if rule_control is not None:
-            self._card.add_widget(rule_control)
-
-        if (
-            difference_slot is not None
-            and difference_slot is not rule_control
-            and not self._slot_is_descendant_of(difference_slot, rule_control)
-        ):
-            self._card.add_widget(difference_slot)
-
         if preview_slot is not None:
             self._card.add_widget(preview_slot)
 
         if receipt_slot is not None:
             self._card.add_widget(receipt_slot)
-
-        for widget in self._legacy_management_widgets:
-            self._card.add_widget(widget)
 
         self._editing_section = StyleEditingSection(
             self,
@@ -477,14 +352,6 @@ class StyleManagementBlock(QWidget):
         return self._scope_slot
 
     @property
-    def rule_control(self) -> QWidget | None:
-        return self._rule_control
-
-    @property
-    def difference_slot(self) -> QWidget | None:
-        return self._difference_slot
-
-    @property
     def preview_slot(self) -> QWidget | None:
         return self._preview_slot
 
@@ -501,10 +368,6 @@ class StyleManagementBlock(QWidget):
     @property
     def receipt_slot(self) -> QWidget | None:
         return self._receipt_slot
-
-    @property
-    def legacy_management_widgets(self) -> tuple[QWidget, ...]:
-        return self._legacy_management_widgets
 
     @property
     def contract(self) -> StyleManagementContract:
@@ -615,14 +478,6 @@ class StyleManagementBlock(QWidget):
             self.apply_owner_state(style_object.owner_state)
         if style_object.source is not None:
             self._apply_slot_projection(self._source_slot, style_object.source)
-        if self._difference_slot is not None:
-            self._apply_slot_method(
-                self._difference_slot,
-                "apply_projection",
-                style_object.difference,
-            )
-        if style_object.policy is not None:
-            self._apply_rule_control_projection(style_object.policy)
         if (
             style_object.preview_projection is not None
             or not style_object.preview.is_empty()
@@ -693,14 +548,6 @@ class StyleManagementBlock(QWidget):
             method = getattr(self._preview_slot, "apply_envelope")
             method(envelope)
 
-    def _apply_rule_control_projection(self, projection) -> None:
-        if self._rule_control is None:
-            return
-        self._rule_control_protocol = style_policy_control_protocol(self._rule_control)
-        self._sync_content_plan_properties()
-        if self._rule_control_protocol == "policy_projection":
-            self._rule_control.apply_projection(projection)
-
     def _set_editor_surface_visible(self, visible: bool) -> None:
         editor_visible = bool(self._editor_enabled and visible)
         self._editing_section.style_surface.setVisible(editor_visible)
@@ -719,42 +566,11 @@ class StyleManagementBlock(QWidget):
             ),
         )
 
-    @staticmethod
-    def _slot_is_descendant_of(widget: QWidget | None, ancestor: QWidget | None) -> bool:
-        if widget is None or ancestor is None:
-            return False
-        current = widget.parentWidget()
-        while current is not None:
-            if current is ancestor:
-                return True
-            current = current.parentWidget()
-        return False
-
     def _sync_content_plan_properties(self) -> None:
         self.setProperty("style_management_content_plan", self._content_plan.encoded())
         self.setProperty(
             "style_management_slot_plan",
             self._content_plan.encoded_slots(),
-        )
-        self.setProperty(
-            "style_management_has_legacy_widgets",
-            bool(self._legacy_management_widgets),
-        )
-        self.setProperty(
-            "style_management_rule_control_protocol",
-            self._rule_control_protocol,
-        )
-        self.setProperty(
-            "style_management_rule_control_ready",
-            self._rule_control_protocol == "policy_projection",
-        )
-        self.setProperty(
-            "style_management_policy_control_protocol",
-            self._rule_control_protocol,
-        )
-        self.setProperty(
-            "style_management_policy_control_ready",
-            self._rule_control_protocol == "policy_projection",
         )
         self.setProperty(
             "style_management_preview_slot_protocol",
@@ -778,21 +594,16 @@ class StyleManagementBlock(QWidget):
         for slot_name in (
             "source",
             "scope",
-            "policy",
-            "difference",
             "preview",
             "receipt",
         ):
-            slot_attr = "_rule_control" if slot_name == "policy" else f"_{slot_name}_slot"
             self.setProperty(
                 f"style_management_has_{slot_name}_slot",
-                getattr(self, slot_attr, None) is not None,
+                getattr(self, f"_{slot_name}_slot", None) is not None,
             )
         for section in (
             "source",
             "scope",
-            "rules",
-            "difference",
             "editor",
             "preview",
             "receipt",
@@ -801,10 +612,6 @@ class StyleManagementBlock(QWidget):
                 f"style_management_has_{section}",
                 section in self._content_plan.sections(),
             )
-        self.setProperty(
-            "style_management_has_policy",
-            "policy" in self._content_plan.slots(),
-        )
 
 
 __all__ = [

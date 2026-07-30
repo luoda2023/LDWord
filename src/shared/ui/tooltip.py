@@ -6,17 +6,12 @@ from dataclasses import dataclass
 
 from src.qt_api import (
     QApplication,
-    QColor,
-    QEasingCurve,
     QEvent,
     QFrame,
-    QGraphicsDropShadowEffect,
-    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QObject,
     QPoint,
-    QPropertyAnimation,
     QRect,
     QSize,
     QTimer,
@@ -26,6 +21,7 @@ from src.qt_api import (
 )
 
 from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.typography_policy import TextRole, apply_text_role
 
 
 TOOLTIP_PLACEMENT_PROPERTY = "_alavette_tooltip_placement"
@@ -38,35 +34,7 @@ NAV_DELAY_MS = 80
 DEFAULT_GAP = 4
 SCREEN_MARGIN = 8
 OUTER_MARGIN = 4
-
-
-def _qcolor_from_theme_shadow(value: str, fallback: str) -> QColor:
-    color = QColor(value)
-    if color.isValid():
-        return color
-
-    normalized = str(value or "").strip().lower()
-    if normalized.startswith("rgba(") and normalized.endswith(")"):
-        parts = [part.strip() for part in normalized[5:-1].split(",")]
-        if len(parts) == 4:
-            try:
-                red, green, blue = (int(float(channel)) for channel in parts[:3])
-                raw_alpha = float(parts[3])
-                alpha = int(raw_alpha * 255) if raw_alpha <= 1 else int(raw_alpha)
-                return QColor(
-                    max(0, min(255, red)),
-                    max(0, min(255, green)),
-                    max(0, min(255, blue)),
-                    max(0, min(255, alpha)),
-                )
-            except ValueError:
-                pass
-
-    fallback_color = QColor(fallback)
-    if not fallback_color.isValid():
-        fallback_color = QColor(0, 0, 0)
-    fallback_color.setAlpha(28)
-    return fallback_color
+MAX_CONTENT_WIDTH = 360
 
 
 @dataclass(frozen=True)
@@ -97,6 +65,13 @@ def set_global_tooltip(
         widget.setProperty(TOOLTIP_DELAY_PROPERTY, None)
     else:
         widget.setProperty(TOOLTIP_DELAY_PROPERTY, int(max(0, delay_ms)))
+    return widget
+
+
+def disable_global_tooltip(widget: QWidget) -> QWidget:
+    """Explicitly opt a widget into the native platform tooltip path."""
+
+    widget.setProperty(TOOLTIP_ENABLED_PROPERTY, False)
     return widget
 
 
@@ -164,18 +139,10 @@ class TooltipPopup(QWidget):
 
         self._label = QLabel()
         self._label.setObjectName("global_tooltip_label")
+        self._label.setTextFormat(Qt.PlainText)
         self._label.setWordWrap(False)
+        apply_text_role(self._label, TextRole.CAPTION)
         surface_layout.addWidget(self._label)
-
-        self._shadow = QGraphicsDropShadowEffect(self._surface)
-        self._surface.setGraphicsEffect(self._shadow)
-
-        self._opacity = QGraphicsOpacityEffect(self)
-        self._opacity.setOpacity(0.0)
-        self.setGraphicsEffect(self._opacity)
-
-        self._fade = QPropertyAnimation(self._opacity, b"opacity", self)
-        self._fade.setEasingCurve(QEasingCurve.OutCubic)
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
@@ -183,22 +150,19 @@ class TooltipPopup(QWidget):
 
     def show_text(self, text: str, anchor: QWidget, placement: str) -> None:
         self._apply_theme()
-        self._label.setText(str(text).replace("\r", " ").replace("\n", " "))
+        normalized = str(text).replace("\r\n", "\n").replace("\r", "\n")
+        self._label.setText(normalized)
+        metrics = self._label.fontMetrics()
+        longest_line = max(normalized.split("\n") or [""], key=metrics.horizontalAdvance)
+        natural_width = metrics.horizontalAdvance(longest_line) + 2
+        self._label.setWordWrap(natural_width > MAX_CONTENT_WIDTH)
+        self._label.setFixedWidth(max(1, min(MAX_CONTENT_WIDTH, natural_width)))
         self.adjustSize()
         self.move(tooltip_position_for(anchor, self.size(), placement=placement))
         self.show()
         self.raise_()
 
-        t = get_theme()
-        self._fade.stop()
-        self._fade.setDuration(max(40, min(140, int(t.anim_duration_fast))))
-        self._fade.setStartValue(0.0)
-        self._fade.setEndValue(1.0)
-        self._fade.start()
-
     def hide_popup(self) -> None:
-        self._fade.stop()
-        self._opacity.setOpacity(0.0)
         self.hide()
 
     def reposition(self, anchor: QWidget, placement: str) -> None:
@@ -207,6 +171,7 @@ class TooltipPopup(QWidget):
 
     def _apply_theme(self) -> None:
         t = get_theme()
+        apply_text_role(self._label, TextRole.CAPTION)
         tooltip_bg = t.bg_tooltip
         tooltip_border = t.border
         tooltip_text = t.text_on_tooltip
@@ -221,14 +186,9 @@ class TooltipPopup(QWidget):
                 background: transparent;
                 border: none;
                 color: {tooltip_text};
-                font-size: {t.font_size_sm}px;
-                font-weight: {t.font_weight_medium};
             }}
             """
         )
-        self._shadow.setBlurRadius(max(6, min(12, int(t.shadow_blur_sm))))
-        self._shadow.setOffset(0, 2)
-        self._shadow.setColor(_qcolor_from_theme_shadow(t.shadow_color, t.bg_tooltip))
 
 
 class GlobalTooltipController(QObject):
@@ -250,7 +210,7 @@ class GlobalTooltipController(QObject):
         return self._popup
 
     def options_for(self, widget: QWidget) -> TooltipOptions | None:
-        if widget.property(TOOLTIP_ENABLED_PROPERTY) is not True:
+        if widget.property(TOOLTIP_ENABLED_PROPERTY) is False:
             return None
 
         text = str(widget.toolTip() or "").strip()
@@ -267,7 +227,10 @@ class GlobalTooltipController(QObject):
         return TooltipOptions(text=text, placement=placement, role=role, delay_ms=max(0, delay_ms))
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        event_type = event.type()
+        try:
+            event_type = event.type()
+        except RuntimeError:
+            return False
 
         if event_type == QEvent.ToolTip and isinstance(obj, QWidget):
             if self.options_for(obj) is not None:
@@ -334,8 +297,12 @@ def _placement_order(placement: str) -> list[str]:
     normalized = placement if placement in {"right", "left", "top", "bottom"} else "auto"
     if normalized == "auto":
         return ["right", "bottom", "left", "top"]
-    fallbacks = [p for p in ("right", "bottom", "left", "top") if p != normalized]
-    return [normalized, *fallbacks]
+    return {
+        "right": ["right", "left", "top", "bottom"],
+        "left": ["left", "right", "top", "bottom"],
+        "top": ["top", "bottom", "right", "left"],
+        "bottom": ["bottom", "top", "right", "left"],
+    }[normalized]
 
 
 def _raw_position(anchor_rect: QRect, popup_size: QSize, placement: str, gap: int) -> QPoint:
@@ -357,6 +324,7 @@ __all__ = [
     "GlobalTooltipController",
     "TooltipOptions",
     "TooltipPopup",
+    "disable_global_tooltip",
     "install_global_tooltip",
     "set_global_tooltip",
     "tooltip_position_for",

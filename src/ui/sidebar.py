@@ -12,8 +12,8 @@ from src.qt_api import QButtonGroup, QPushButton, QSize, QVBoxLayout, QWidget, S
 
 from src.shared.ui.theme import get_theme, bind_theme
 from src.shared.ui.tooltip import set_global_tooltip
-from src.ui.icons.catalog import get_icon, SIDEBAR_ICONS
-from src.ui.panel_registry import MAIN_SPECS, BOTTOM_SPECS
+from src.shared.ui.icons.catalog import get_icon
+from src.ui.panel_specs import PANEL_SPECS, PanelSpec
 
 if TYPE_CHECKING:
     from src.ui.bridge import PanelBridge
@@ -24,9 +24,10 @@ class _NavButton(QPushButton):
 
     ICON_SIZE = 20
 
-    def __init__(self, nav_id: str, tooltip: str, parent=None):
+    def __init__(self, nav_id: str, tooltip: str, icon_name: str, parent=None):
         super().__init__(parent)
         self.nav_id = nav_id
+        self._icon_name = icon_name
         self._active = False
         set_global_tooltip(self, tooltip, placement="right", role="nav", delay_ms=80)
         self.setCheckable(True)
@@ -37,8 +38,7 @@ class _NavButton(QPushButton):
         active = self._active
         t = get_theme()
         icon_color = t.icon_accent if active else t.text_sidebar
-        lucide_name = SIDEBAR_ICONS.get(self.nav_id, "settings")
-        self.setIcon(get_icon(lucide_name, self.ICON_SIZE, icon_color))
+        self.setIcon(get_icon(self._icon_name, self.ICON_SIZE, icon_color))
         self.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
 
         bg = t.bg_sidebar_active if active else "transparent"
@@ -71,9 +71,16 @@ class Sidebar(QWidget):
 
     WIDTH = 48
 
-    def __init__(self, bridge: PanelBridge, parent=None):
+    def __init__(
+        self,
+        bridge: PanelBridge,
+        parent=None,
+        *,
+        panel_specs: tuple[PanelSpec, ...] = PANEL_SPECS,
+    ):
         super().__init__(parent)
         self.bridge = bridge
+        self._panel_specs = tuple(panel_specs)
         self._active_index: int = 0
         self.setFixedWidth(self.WIDTH)
         self.setObjectName("sidebar")
@@ -83,30 +90,34 @@ class Sidebar(QWidget):
         layout.setContentsMargins(4, 8, 4, 8)
         layout.setSpacing(4)
 
-        self._buttons: list[_NavButton] = []
+        self._buttons: list[_NavButton | None] = [None] * len(self._panel_specs)
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
 
-        for i, spec in enumerate(MAIN_SPECS):
-            btn = _NavButton(spec.id, spec.title)
+        for i, spec in enumerate(self._panel_specs):
+            if spec.group != "main":
+                continue
+            btn = _NavButton(spec.id, spec.title, spec.icon)
             self._group.addButton(btn, i)
-            self._buttons.append(btn)
+            self._buttons[i] = btn
             layout.addWidget(btn, 0, Qt.AlignHCenter)
 
         layout.addStretch()
 
-        for i, spec in enumerate(BOTTOM_SPECS):
-            idx = len(MAIN_SPECS) + i
-            btn = _NavButton(spec.id, spec.title)
+        for idx, spec in enumerate(self._panel_specs):
+            if spec.group != "bottom":
+                continue
+            btn = _NavButton(spec.id, spec.title, spec.icon)
             self._group.addButton(btn, idx)
-            self._buttons.append(btn)
+            self._buttons[idx] = btn
             layout.addWidget(btn, 0, Qt.AlignHCenter)
 
         self._group.idClicked.connect(self._on_clicked)
 
-        if self._buttons:
-            self._buttons[0].setChecked(True)
-            self._buttons[0].set_active(True)
+        first_button = next((button for button in self._buttons if button), None)
+        if first_button is not None:
+            first_button.setChecked(True)
+            first_button.set_active(True)
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
@@ -116,9 +127,9 @@ class Sidebar(QWidget):
         self._active_index = idx
         # 只更新变化的两按钮，不全量重建
         if old != idx:
-            if 0 <= old < len(self._buttons):
+            if 0 <= old < len(self._buttons) and self._buttons[old] is not None:
                 self._buttons[old].set_active(False)
-            if 0 <= idx < len(self._buttons):
+            if 0 <= idx < len(self._buttons) and self._buttons[idx] is not None:
                 self._buttons[idx].set_active(True)
         self.panel_selected.emit(idx)
 
@@ -131,10 +142,11 @@ class Sidebar(QWidget):
             }}
         """)
         for btn in self._buttons:
-            btn.apply_theme()
+            if btn is not None:
+                btn.apply_theme()
 
     def select(self, index: int) -> None:
         """外部切换选中项。"""
-        if 0 <= index < len(self._buttons):
+        if 0 <= index < len(self._buttons) and self._buttons[index] is not None:
             self._buttons[index].setChecked(True)
             self._on_clicked(index)

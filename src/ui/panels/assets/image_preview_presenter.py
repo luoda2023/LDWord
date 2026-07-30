@@ -1,41 +1,31 @@
-"""Presenter mixin for full-image preview dialog behavior."""
+"""Assets-panel adapter for the shared image preview framework."""
 
 from __future__ import annotations
 
+import copy
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from src.qt_api import (
-    QComboBox,
-    QDialog,
-    QHBoxLayout,
-    QLabel,
-    QPixmap,
-    QPushButton,
-    QScrollArea,
-    QSize,
-    Qt,
-    QVBoxLayout,
-    QWidget,
-)
+from src.qt_api import QSize
 from src.services.material_assets import (
     question_figure_items,
     question_figure_payload_matches_item,
     question_figure_target_label,
 )
-from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
-from src.shared.ui.input_style import build_text_input_stylesheet
-from src.shared.ui.sizing import apply_size_class
-from src.shared.ui.theme import get_theme
+from src.shared.ui.preview_dialog import (
+    ImagePreviewDialog,
+    PreviewItem,
+    load_preview_pixmap,
+)
 from src.ui.panels.assets.fields import _asset_role_label
-from src.ui.panels.assets.image_helpers import _image_quality_text, _load_scaled_pixmap
+from src.ui.panels.assets.image_helpers import _image_quality_text
 from src.ui.panels.assets.items import _normalized_asset_item_payloads
 
 
 class ImagePreviewPresenterMixin:
-    """Coordinate the local full-image preview dialog and compare actions."""
+    """Keep asset business context outside the reusable preview widget."""
 
     def _set_current_image_preview_path(
         self,
@@ -73,17 +63,15 @@ class ImagePreviewPresenterMixin:
                 reference = str(option.get("reference", "") or "").strip()
                 if not reference:
                     continue
-                label = str(option.get("label", "") or "").strip()
                 display = str(option.get("display_name", "") or "").strip()
                 normalized_options.append(
                     {
-                        "label": label
+                        "label": str(option.get("label", "") or "").strip()
                         or display
                         or Path(reference).name,
                         "reference": reference,
                         "source": str(option.get("source", "") or "").strip(),
-                        "display_name": display
-                        or Path(reference).name,
+                        "display_name": display or Path(reference).name,
                         "kind_label": str(option.get("kind_label", "") or "").strip()
                         or "题图对比",
                     }
@@ -91,8 +79,7 @@ class ImagePreviewPresenterMixin:
             if not normalized_options and compare_reference:
                 normalized_options.append(
                     {
-                        "label": compare_display_name
-                        or Path(compare_reference).name,
+                        "label": compare_display_name or Path(compare_reference).name,
                         "reference": str(compare_reference or "").strip(),
                         "source": str(compare_source or "").strip(),
                         "display_name": compare_display_name
@@ -105,104 +92,30 @@ class ImagePreviewPresenterMixin:
             self._current_image_preview_question_figure_row = -1
         elif question_figure_row is not None:
             self._current_image_preview_question_figure_row = int(question_figure_row)
-        button = getattr(self, "_full_image_preview_btn", None)
-        if button is not None:
-            button.setEnabled(bool(self._current_image_preview_path))
 
     def _set_image_preview(self, path: str, *, role: str = "") -> None:
-        if not hasattr(self, "_image_preview_label"):
-            return
-        pixmap = _load_scaled_pixmap(path, QSize(260, 180))
-        if pixmap is None:
+        candidate = Path(str(path or "").strip())
+        if not candidate.is_file():
             self._set_current_image_preview_path("")
-            self._image_preview_label.clear()
-            self._image_preview_label.setText("当前材料位还没有选择图片。")
             if hasattr(self, "_image_assets_status_label"):
                 self._image_assets_status_label.setText("当前材料位还没有选择图片。")
             return
-        self._set_current_image_preview_path(path)
-        self._image_preview_label.setText("")
-        self._image_preview_label.setPixmap(pixmap)
+        self._set_current_image_preview_path(str(candidate))
         if hasattr(self, "_image_assets_status_label"):
             role_text = _asset_role_label(role, self._asset_slot_specs) if role else "图片"
             self._image_assets_status_label.setText(
-                f"正在查看{role_text}：{Path(path).name} · {_image_quality_text(path, role=role)}"
+                f"正在查看{role_text}：{candidate.name} · "
+                f"{_image_quality_text(str(candidate), role=role)}"
             )
-
-    def _configure_full_image_preview_tool_button(
-        self,
-        button: QPushButton,
-        icon_name: str,
-        tooltip: str,
-    ) -> None:
-        self._configure_asset_icon_button(button, icon_name, tooltip)
-        theme = get_theme()
-        try:
-            from src.ui.icons.catalog import get_icon
-
-            button.setIcon(get_icon(icon_name, 16, theme.icon_primary))
-        except Exception:
-            button.setIcon(button.icon())
-        apply_button_variant(button, "secondary")
-        button.setStyleSheet(build_button_stylesheet(theme))
-
-    def _refresh_full_image_preview_zoom_label(self) -> None:
-        label = getattr(self, "_full_image_preview_zoom_label", None)
-        if label is None:
-            return
-        label.setText(f"{round(self._full_image_preview_zoom * 100):d}%")
-
-    def _refresh_full_image_preview_pixmap(self) -> None:
-        original = getattr(self, "_full_image_preview_original_pixmap", None)
-        label = getattr(self, "_full_image_preview_label", None)
-        if original is None or original.isNull() or label is None:
-            return
-        width = max(1, round(original.width() * self._full_image_preview_zoom))
-        height = max(1, round(original.height() * self._full_image_preview_zoom))
-        if width == original.width() and height == original.height():
-            scaled = original
-        else:
-            scaled = original.scaled(
-                QSize(width, height),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
-        label.setPixmap(scaled)
-        label.resize(scaled.size())
-        self._refresh_full_image_preview_zoom_label()
-
-    def _set_full_image_preview_zoom(self, zoom: float) -> None:
-        self._full_image_preview_zoom = min(max(float(zoom), 0.1), 4.0)
-        self._refresh_full_image_preview_pixmap()
-
-    def _zoom_full_image_preview(self, factor: float) -> None:
-        self._set_full_image_preview_zoom(self._full_image_preview_zoom * factor)
-
-    def _reset_full_image_preview_zoom(self) -> None:
-        self._set_full_image_preview_zoom(1.0)
-
-    def _fit_full_image_preview_to_window(self) -> None:
-        original = getattr(self, "_full_image_preview_original_pixmap", None)
-        scroll = getattr(self, "_full_image_preview_scroll", None)
-        if original is None or original.isNull() or scroll is None:
-            return
-        viewport_size = scroll.viewport().size()
-        available_width = max(1, viewport_size.width() - 8)
-        available_height = max(1, viewport_size.height() - 8)
-        scale = min(
-            available_width / max(1, original.width()),
-            available_height / max(1, original.height()),
-            1.0,
-        )
-        self._set_full_image_preview_zoom(scale)
 
     def _selected_full_image_preview_compare_option(self) -> dict[str, str]:
+        dialog = getattr(self, "_image_preview_dialog", None)
+        item = dialog.selected_compare_item if dialog is not None else None
+        if item is not None:
+            return {str(key): str(value) for key, value in item.metadata.items()}
         options = list(getattr(self, "_current_image_preview_compare_options", []) or [])
-        combo = getattr(self, "_full_image_preview_compare_combo", None)
-        if options and combo is not None:
-            index = combo.currentIndex()
-            if 0 <= index < len(options):
-                return dict(options[index])
+        if options:
+            return dict(options[0])
         reference = str(
             getattr(self, "_current_image_preview_compare_reference", "") or ""
         ).strip()
@@ -214,50 +127,10 @@ class ImagePreviewPresenterMixin:
                 getattr(self, "_current_image_preview_compare_source", "") or ""
             ).strip(),
             "display_name": str(
-                getattr(self, "_current_image_preview_compare_display_name", "")
-                or ""
+                getattr(self, "_current_image_preview_compare_display_name", "") or ""
             ).strip(),
             "kind_label": "缩略图对比",
         }
-
-    def _open_full_image_preview_compare(self) -> bool:
-        option = self._selected_full_image_preview_compare_option()
-        reference = str(option.get("reference", "") or "").strip()
-        if not reference:
-            if hasattr(self, "_image_assets_status_label"):
-                self._image_assets_status_label.setText("当前预览没有可对比的缩略图。")
-            return False
-        source = str(option.get("source", "") or "").strip()
-        display_name = (
-            str(option.get("display_name", "") or "").strip()
-            or Path(reference).name
-        )
-        kind_label = str(option.get("kind_label", "") or "").strip() or "题图对比"
-        compare_path = reference
-        if not Path(compare_path).is_file():
-            if hasattr(self, "_image_assets_status_label"):
-                self._image_assets_status_label.setText("缩略图对比文件不存在。")
-            return False
-        pixmap = QPixmap(compare_path)
-        if pixmap.isNull():
-            if hasattr(self, "_image_assets_status_label"):
-                self._image_assets_status_label.setText("缩略图对比图片无法打开。")
-            return False
-        title = getattr(self, "_full_image_preview_compare_title", None)
-        if title is not None:
-            title.setText(
-                f"对比：{display_name} · {pixmap.width()} × {pixmap.height()} px"
-            )
-        label = getattr(self, "_full_image_preview_compare_label", None)
-        if label is not None:
-            label.setPixmap(pixmap)
-            label.resize(pixmap.size())
-        panel = getattr(self, "_full_image_preview_compare_panel", None)
-        if panel is not None:
-            panel.setVisible(True)
-        if hasattr(self, "_image_assets_status_label"):
-            self._image_assets_status_label.setText(f"已打开{kind_label}：{display_name}")
-        return True
 
     def _current_full_image_preview_region_payload(
         self,
@@ -265,40 +138,21 @@ class ImagePreviewPresenterMixin:
         reference: str,
         display_name: str,
         kind_label: str,
+        view_region: Mapping[str, object] | None = None,
+        compare_size: QSize | None = None,
     ) -> dict[str, object]:
-        original = getattr(self, "_full_image_preview_original_pixmap", None)
-        scroll = getattr(self, "_full_image_preview_scroll", None)
-        zoom = max(float(getattr(self, "_full_image_preview_zoom", 1.0) or 1.0), 0.01)
-        image_width = original.width() if original is not None and not original.isNull() else 0
-        image_height = original.height() if original is not None and not original.isNull() else 0
-        viewport_x = 0
-        viewport_y = 0
-        viewport_width = image_width
-        viewport_height = image_height
-        if scroll is not None:
-            viewport = scroll.viewport().size()
-            viewport_x = round(scroll.horizontalScrollBar().value() / zoom)
-            viewport_y = round(scroll.verticalScrollBar().value() / zoom)
-            viewport_width = round(viewport.width() / zoom)
-            viewport_height = round(viewport.height() / zoom)
-        if image_width > 0:
-            viewport_x = min(max(0, viewport_x), max(0, image_width - 1))
-            viewport_width = max(1, min(viewport_width, image_width - viewport_x))
-        if image_height > 0:
-            viewport_y = min(max(0, viewport_y), max(0, image_height - 1))
-            viewport_height = max(1, min(viewport_height, image_height - viewport_y))
-        compare_label = getattr(self, "_full_image_preview_compare_label", None)
-        compare_pixmap = compare_label.pixmap() if compare_label is not None else None
-        compare_width = (
-            compare_pixmap.width()
-            if compare_pixmap is not None and not compare_pixmap.isNull()
-            else 0
-        )
-        compare_height = (
-            compare_pixmap.height()
-            if compare_pixmap is not None and not compare_pixmap.isNull()
-            else 0
-        )
+        dialog = getattr(self, "_image_preview_dialog", None)
+        if view_region is None and dialog is not None:
+            view_region = dialog.viewport.current_region()
+        view = dict(view_region or {})
+        image_width = int(view.get("image_width") or 0)
+        image_height = int(view.get("image_height") or 0)
+        if (not image_width or not image_height) and dialog is not None:
+            natural = dialog.content.natural_size
+            image_width, image_height = natural.width(), natural.height()
+        if compare_size is None and dialog is not None:
+            compare_size = dialog.comparison_size()
+        compare_size = QSize(compare_size or QSize())
         return {
             "schema_version": 1,
             "type": "current_view",
@@ -313,18 +167,18 @@ class ImagePreviewPresenterMixin:
                 "height": image_height,
             },
             "view": {
-                "x": viewport_x,
-                "y": viewport_y,
-                "width": viewport_width,
-                "height": viewport_height,
-                "zoom": round(zoom, 4),
+                "x": int(view.get("x") or 0),
+                "y": int(view.get("y") or 0),
+                "width": int(view.get("width") or image_width),
+                "height": int(view.get("height") or image_height),
+                "zoom": round(float(view.get("zoom") or 1.0), 4),
             },
             "compare": {
                 "reference": str(reference or ""),
                 "display_name": str(display_name or ""),
                 "kind_label": str(kind_label or ""),
-                "width": compare_width,
-                "height": compare_height,
+                "width": compare_size.width(),
+                "height": compare_size.height(),
             },
         }
 
@@ -348,8 +202,16 @@ class ImagePreviewPresenterMixin:
             pieces.append(f"image={image.get('width')}x{image.get('height')}")
         return "current_view(" + ", ".join(pieces) + ")"
 
-    def _mark_current_full_image_preview_compare_issue(self) -> bool:
-        option = self._selected_full_image_preview_compare_option()
+    def _mark_current_full_image_preview_compare_issue(
+        self,
+        compare_item: PreviewItem | None = None,
+        view_region: Mapping[str, object] | None = None,
+    ) -> bool:
+        option = (
+            {str(key): str(value) for key, value in compare_item.metadata.items()}
+            if compare_item is not None
+            else self._selected_full_image_preview_compare_option()
+        )
         reference = str(option.get("reference", "") or "").strip()
         if not reference:
             if hasattr(self, "_image_assets_status_label"):
@@ -366,18 +228,16 @@ class ImagePreviewPresenterMixin:
             return False
         target = question_items[row]
         payloads = _normalized_asset_item_payloads(self._asset_item_payloads)
-        display_name = (
-            str(option.get("display_name", "") or "").strip()
-            or Path(reference).name
-        )
+        display_name = str(option.get("display_name", "") or "").strip() or Path(reference).name
         kind_label = str(option.get("kind_label", "") or "").strip() or "题图对比"
-        marked_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         region = self._current_full_image_preview_region_payload(
             reference=reference,
             display_name=display_name,
             kind_label=kind_label,
+            view_region=view_region,
         )
         region_summary = self._current_full_image_preview_region_summary(region)
+        marked_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         updated = False
         for payload in payloads:
             if not question_figure_payload_matches_item(payload, target):
@@ -396,14 +256,11 @@ class ImagePreviewPresenterMixin:
                     "comparison_issue_kind": kind_label,
                     "comparison_issue_marked_at": marked_at,
                     "comparison_issue_summary": (
-                        f"{question_figure_target_label(target)} "
-                        f"{kind_label}: {display_name}"
+                        f"{question_figure_target_label(target)} {kind_label}: {display_name}"
                     ),
                     "comparison_issue_region_type": "current_view",
                     "comparison_issue_region_json": json.dumps(
-                        region,
-                        ensure_ascii=False,
-                        sort_keys=True,
+                        region, ensure_ascii=False, sort_keys=True
                     ),
                     "comparison_issue_region_summary": region_summary,
                 }
@@ -413,19 +270,22 @@ class ImagePreviewPresenterMixin:
             break
         if not updated:
             if hasattr(self, "_image_assets_status_label"):
-                self._image_assets_status_label.setText("当前题图不是结构化题图条目，暂不能标注。")
+                self._image_assets_status_label.setText(
+                    "当前题图不是结构化题图条目，暂不能标注。"
+                )
             return False
+        previous_payloads = copy.deepcopy(self._asset_item_payloads)
         self._asset_item_payloads = payloads
-        self._persist_current_profile_editor()
+        if not self._persist_current_profile_editor():
+            self._asset_item_payloads = previous_payloads
+            return False
         self._refresh_summary()
         table = getattr(self, "_question_figure_items_table", None)
         if table is not None and row < table.rowCount():
             table.setCurrentCell(row, 0)
             table.selectRow(row)
         if hasattr(self, "_image_assets_status_label"):
-            self._image_assets_status_label.setText(
-                f"已标记对比问题：{display_name}"
-            )
+            self._image_assets_status_label.setText(f"已标记对比问题：{display_name}")
         return True
 
     def _open_current_image_preview_dialog(self) -> bool:
@@ -435,175 +295,56 @@ class ImagePreviewPresenterMixin:
             if hasattr(self, "_image_assets_status_label"):
                 self._image_assets_status_label.setText("当前没有可打开的大图预览。")
             return False
-        pixmap = QPixmap(path)
-        if pixmap.isNull():
-            self._set_current_image_preview_path("")
-            if hasattr(self, "_image_assets_status_label"):
-                self._image_assets_status_label.setText("当前预览图片无法打开。")
-            return False
         display_name = (
             str(getattr(self, "_current_image_preview_display_name", "") or "").strip()
             or Path(path).name
         )
-        existing = getattr(self, "_full_image_preview_dialog", None)
+        item = PreviewItem.from_path(path, display_name=display_name)
+        pixmap, _format, error = load_preview_pixmap(item)
+        if pixmap.isNull():
+            if hasattr(self, "_image_assets_status_label"):
+                self._image_assets_status_label.setText(
+                    f"当前预览图片无法打开：{error or '未知格式'}"
+                )
+            return False
+        compare_items = tuple(
+            PreviewItem.from_path(
+                option["reference"],
+                display_name=option.get("display_name", ""),
+                label=option.get("label", ""),
+                metadata=option,
+            )
+            for option in getattr(self, "_current_image_preview_compare_options", []) or []
+            if option.get("reference")
+        )
+        existing = getattr(self, "_image_preview_dialog", None)
         if existing is not None:
             existing.close()
-        dialog = QDialog(self)
+        dialog = ImagePreviewDialog(
+            (item,),
+            compare_items=compare_items,
+            allow_issue_marking=bool(compare_items),
+            title="图片资料预览",
+            parent=self,
+        )
         dialog.setObjectName("asset_full_image_preview_dialog")
-        dialog.setWindowTitle(f"大图预览 - {display_name}")
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
-        meta_label = QLabel(
-            f"{display_name} · {pixmap.width()} × {pixmap.height()} px",
-            dialog,
-        )
-        meta_label.setObjectName("asset_full_image_preview_meta")
-        scroll = QScrollArea(dialog)
-        scroll.setObjectName("asset_full_image_preview_scroll")
-        scroll.setWidgetResizable(False)
-        image_label = QLabel(scroll)
-        image_label.setObjectName("asset_full_image_preview_image")
-        image_label.setAlignment(Qt.AlignCenter)
-        image_label.setPixmap(pixmap)
-        image_label.resize(pixmap.size())
-        scroll.setWidget(image_label)
-        toolbar = QWidget(dialog)
-        toolbar.setObjectName("asset_full_image_preview_toolbar")
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(8)
-        zoom_out_btn = QPushButton(toolbar)
-        zoom_out_btn.setObjectName("asset_full_image_preview_zoom_out")
-        self._configure_full_image_preview_tool_button(
-            zoom_out_btn,
-            "minus",
-            "缩小",
-        )
-        zoom_out_btn.clicked.connect(lambda *_args: self._zoom_full_image_preview(0.8))
-        zoom_in_btn = QPushButton(toolbar)
-        zoom_in_btn.setObjectName("asset_full_image_preview_zoom_in")
-        self._configure_full_image_preview_tool_button(
-            zoom_in_btn,
-            "plus",
-            "放大",
-        )
-        zoom_in_btn.clicked.connect(lambda *_args: self._zoom_full_image_preview(1.25))
-        zoom_reset_btn = QPushButton(toolbar)
-        zoom_reset_btn.setObjectName("asset_full_image_preview_zoom_reset")
-        self._configure_full_image_preview_tool_button(
-            zoom_reset_btn,
-            "square",
-            "原始尺寸",
-        )
-        zoom_reset_btn.clicked.connect(self._reset_full_image_preview_zoom)
-        fit_btn = QPushButton(toolbar)
-        fit_btn.setObjectName("asset_full_image_preview_fit")
-        self._configure_full_image_preview_tool_button(
-            fit_btn,
-            "scan",
-            "适应窗口",
-        )
-        fit_btn.clicked.connect(self._fit_full_image_preview_to_window)
-        compare_options = list(
-            getattr(self, "_current_image_preview_compare_options", []) or []
-        )
-        compare_combo = QComboBox(toolbar)
-        compare_combo.setObjectName("asset_full_image_preview_compare_combo")
-        compare_combo.setMinimumWidth(180)
-        apply_size_class(compare_combo, "md")
-        compare_combo.setStyleSheet(
-            build_text_input_stylesheet(get_theme(), selector="QComboBox")
-        )
-        for option in compare_options:
-            compare_combo.addItem(str(option.get("label", "") or "题图对比"))
-        compare_combo.setEnabled(bool(compare_options))
-        compare_btn = QPushButton(toolbar)
-        compare_btn.setObjectName("asset_full_image_preview_compare")
-        self._configure_full_image_preview_tool_button(
-            compare_btn,
-            "copy",
-            "对比缩略图",
-        )
-        compare_btn.setEnabled(bool(compare_options))
-        compare_btn.clicked.connect(self._open_full_image_preview_compare)
-        mark_issue_btn = QPushButton(toolbar)
-        mark_issue_btn.setObjectName("asset_full_image_preview_mark_issue")
-        self._configure_full_image_preview_tool_button(
-            mark_issue_btn,
-            "circle-alert",
-            "标记对比问题",
-        )
-        mark_issue_btn.setEnabled(bool(compare_options))
-        mark_issue_btn.clicked.connect(
+        dialog.issue_requested.connect(
             self._mark_current_full_image_preview_compare_issue
         )
-        zoom_label = QLabel("100%", toolbar)
-        zoom_label.setObjectName("asset_full_image_preview_zoom_label")
-        zoom_label.setAlignment(Qt.AlignCenter)
-        zoom_label.setMinimumWidth(54)
-        toolbar_layout.addWidget(zoom_out_btn)
-        toolbar_layout.addWidget(zoom_label)
-        toolbar_layout.addWidget(zoom_in_btn)
-        toolbar_layout.addWidget(zoom_reset_btn)
-        toolbar_layout.addWidget(fit_btn)
-        toolbar_layout.addWidget(compare_combo)
-        toolbar_layout.addWidget(compare_btn)
-        toolbar_layout.addWidget(mark_issue_btn)
-        toolbar_layout.addStretch(1)
-        preview_container = QWidget(dialog)
-        preview_container.setObjectName("asset_full_image_preview_container")
-        preview_layout = QHBoxLayout(preview_container)
-        preview_layout.setContentsMargins(0, 0, 0, 0)
-        preview_layout.setSpacing(10)
-        preview_layout.addWidget(scroll, 2)
-        compare_panel = QWidget(preview_container)
-        compare_panel.setObjectName("asset_full_image_preview_compare_panel")
-        compare_panel.setVisible(False)
-        compare_layout = QVBoxLayout(compare_panel)
-        compare_layout.setContentsMargins(0, 0, 0, 0)
-        compare_layout.setSpacing(6)
-        compare_title = QLabel("对比缩略图", compare_panel)
-        compare_title.setObjectName("asset_full_image_preview_compare_title")
-        compare_scroll = QScrollArea(compare_panel)
-        compare_scroll.setObjectName("asset_full_image_preview_compare_scroll")
-        compare_scroll.setWidgetResizable(False)
-        compare_label = QLabel(compare_scroll)
-        compare_label.setObjectName("asset_full_image_preview_compare_image")
-        compare_label.setAlignment(Qt.AlignCenter)
-        compare_scroll.setWidget(compare_label)
-        compare_layout.addWidget(compare_title)
-        compare_layout.addWidget(compare_scroll)
-        preview_layout.addWidget(compare_panel, 1)
-        layout.addWidget(meta_label)
-        layout.addWidget(toolbar)
-        layout.addWidget(preview_container)
-        dialog.resize(
-            min(max(pixmap.width() + 48, 520), 1080),
-            min(max(pixmap.height() + 132, 400), 760),
+        dialog.finished.connect(
+            lambda *_args, current=dialog: self._clear_image_preview_dialog(current)
         )
-        self._full_image_preview_dialog = dialog
-        self._full_image_preview_label = image_label
-        self._full_image_preview_scroll = scroll
-        self._full_image_preview_original_pixmap = pixmap
-        self._full_image_preview_zoom = 1.0
-        self._full_image_preview_zoom_label = zoom_label
-        self._full_image_preview_zoom_out_btn = zoom_out_btn
-        self._full_image_preview_zoom_in_btn = zoom_in_btn
-        self._full_image_preview_zoom_reset_btn = zoom_reset_btn
-        self._full_image_preview_fit_btn = fit_btn
-        self._full_image_preview_compare_btn = compare_btn
-        self._full_image_preview_mark_issue_btn = mark_issue_btn
-        self._full_image_preview_compare_combo = compare_combo
-        self._full_image_preview_compare_panel = compare_panel
-        self._full_image_preview_compare_scroll = compare_scroll
-        self._full_image_preview_compare_label = compare_label
-        self._full_image_preview_compare_title = compare_title
-        self._refresh_full_image_preview_zoom_label()
+        self._image_preview_dialog = dialog
         dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
         if hasattr(self, "_image_assets_status_label"):
-            self._image_assets_status_label.setText(f"已打开大图预览：{display_name}")
+            self._image_assets_status_label.setText(f"已打开图片预览：{display_name}")
         return True
+
+    def _clear_image_preview_dialog(self, dialog: ImagePreviewDialog) -> None:
+        if getattr(self, "_image_preview_dialog", None) is dialog:
+            self._image_preview_dialog = None
 
 
 __all__ = ["ImagePreviewPresenterMixin"]

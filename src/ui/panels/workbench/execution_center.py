@@ -11,7 +11,6 @@ from src.qt_api import (
     Signal,
 )
 
-from src.shared.ui.style_difference_summary_slot import StyleDifferenceSummarySlot
 from src.shared.ui.style_receipt_slot_frame import StyleReceiptSlotFrame
 from src.shared.ui.style_management_block import StyleManagementBlock
 from src.ui.panels.style_object_projection_builders import (
@@ -72,18 +71,12 @@ class ExecutionCenter(QWidget):
             object_name_prefix="wb_execution_style_receipt",
         )
         self._style_receipt_row = self._style_receipt_slot.receipt_row
-        self._style_difference_slot = StyleDifferenceSummarySlot(
-            self,
-            object_name_prefix="wb_execution_style_difference",
-        )
-        self._style_difference_slot.setVisible(False)
         self._style_receipt_block = StyleManagementBlock(
             self,
             title="样式回执",
             icon_name="type-outline",
             object_name_prefix="wb_execution_style_receipt",
             mode="execution_receipt_review",
-            difference_slot=self._style_difference_slot,
             receipt_slot=self._style_receipt_slot,
         )
         self._style_receipt_block.setVisible(False)
@@ -154,10 +147,8 @@ class ExecutionCenter(QWidget):
         style_projection = build_execution_style_projection(
             style_source_envelope=state.style_source_envelope,
             style_source_summary=state.style_source_summary,
-            difference=state.style_difference_summary,
         )
         self._style_receipt_block.apply_style_object_projection(style_projection)
-        self._style_difference_slot.setVisible(style_projection.difference is not None)
         self._sync_style_receipt_block_visible()
         if state.object_preflight_summary:
             object_preflight_text = state.object_preflight_summary
@@ -169,6 +160,10 @@ class ExecutionCenter(QWidget):
             summary_text = f"{summary_text}\n\n{object_preflight_text}"
         if state.material_field_consistency_summary:
             summary_text = f"{summary_text}\n\n{state.material_field_consistency_summary}"
+        if state.attachment_bundle_summary:
+            summary_text = f"{summary_text}\n\n{state.attachment_bundle_summary}"
+        if state.material_dependency_summary:
+            summary_text = f"{summary_text}\n\n{state.material_dependency_summary}"
         if state.batch_isolation_summary:
             batch_text = state.batch_isolation_summary
             if state.batch_isolation_details:
@@ -185,7 +180,6 @@ class ExecutionCenter(QWidget):
     def _sync_style_receipt_block_visible(self) -> None:
         self._style_receipt_block.setVisible(
             self._style_receipt_slot.has_receipt()
-            or not self._style_difference_slot.isHidden()
         )
         self._style_receipt_block.updateGeometry()
 

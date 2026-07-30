@@ -3,15 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .scene_presets import (
+from src.config.scene_presets import (
     LEGACY_FEATURE_GROUP_MAP,
     UI_CAPABILITY_GROUPS,
 )
 
-
-# ---------------------------------------------------------------------------
-# Legacy-compatible feature definition (now backed by UICapabilityGroup)
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
 class QuickExecutionFeatureDefinition:
@@ -28,7 +24,6 @@ class QuickExecutionStatusViewModel:
     tone: str
 
 
-# Build feature definitions from real UI capability groups.
 _FEATURE_SNAPSHOT_OVERRIDES: dict[str, dict[str, str]] = {
     "table_chart": {
         "subtitle": "标题层级 / 目录联动",
@@ -95,16 +90,18 @@ def build_navigation_snapshot(
     elif last_result_status in {"success", "partial_success"}:
         badge_text = "最近完成"
         badge_variant = "success"
-    elif last_result_status in {"failed", "cancelled"}:
+    elif last_result_status == "cancelled":
+        badge_text = "已取消"
+        badge_variant = "neutral"
+    elif last_result_status == "failed":
         badge_text = "最近异常"
         badge_variant = "warning"
+    elif not document_path:
+        badge_text = "待补充"
+        badge_variant = "warning"
     else:
-        if not document_path:
-            badge_text = "待补充"
-            badge_variant = "warning"
-        else:
-            badge_text = f"{enabled_count} 项增强" if enabled_count else "就绪"
-            badge_variant = "success"
+        badge_text = f"{enabled_count} 项增强" if enabled_count else "就绪"
+        badge_variant = "success"
     return {
         "subtitle": f"{file_name} · {strategy_label}",
         "badge_text": badge_text,

@@ -9,7 +9,6 @@ from src.config.style_semantics import (
     line_spacing_display_label,
     normalize_line_spacing_type,
     resolve_line_spacing_value,
-    resolve_style_paragraph_spacing,
     resolve_style_special_indent,
 )
 from src.config.style_variant_semantics import get_effective_style, is_variant_overridden
@@ -430,28 +429,20 @@ def _footer_summary_detail(header_footer) -> str:
 
 
 def _toc_summary_value(toc) -> str:
-    if not toc.enabled:
-        return "目录关闭"
     mode_label = TOC_MODE_LABELS.get(toc.mode, toc.mode or "Word 自动目录")
     return f"{mode_label} / {int(toc.max_level or 3)} 级"
 
 
 def _toc_summary_detail(toc) -> str:
-    if not toc.enabled:
-        return "不插入或更新目录"
     insert_label = TOC_INSERT_LABELS.get(str(toc.insert_position or "auto"), str(toc.insert_position or "auto"))
     return f"插入位置 {insert_label}"
 
 
 def _toc_style_tile(cfg: TemplateConfig) -> TemplateSummaryTileSpec:
-    if not cfg.toc.enabled:
-        value = "目录关闭"
-        detail = "样式暂不输出"
-    else:
-        title_style = _toc_role_style(cfg, "toc_title")
-        entry_style = _toc_role_style(cfg, "toc_level1")
-        value = f"标题 {_size_text(title_style)} / 条目 {_size_text(entry_style)}"
-        detail = _style_summary_detail(entry_style)
+    title_style = _toc_role_style(cfg, "toc_title")
+    entry_style = _toc_role_style(cfg, "toc_level1")
+    value = f"标题 {_size_text(title_style)} / 条目 {_size_text(entry_style)}"
+    detail = _style_summary_detail(entry_style)
     return TemplateSummaryTileSpec(
         key="toc_style",
         label="目录样式",
@@ -958,11 +949,9 @@ def _header_footer_nav_summary(cfg: TemplateConfig) -> str:
 
 
 def _toc_nav_summary(cfg: TemplateConfig) -> str:
-    parts = ["目录开启" if cfg.toc.enabled else "目录关闭"]
-    if cfg.toc.enabled:
-        parts.append(TOC_MODE_LABELS.get(cfg.toc.mode, cfg.toc.mode or "Word 自动目录"))
-        parts.append(f"{cfg.toc.max_level}级")
-        parts.append(TOC_INSERT_LABELS.get(str(cfg.toc.insert_position or "auto"), str(cfg.toc.insert_position or "auto")))
+    parts = [TOC_MODE_LABELS.get(cfg.toc.mode, cfg.toc.mode or "Word 自动目录")]
+    parts.append(f"{cfg.toc.max_level}级")
+    parts.append(TOC_INSERT_LABELS.get(str(cfg.toc.insert_position or "auto"), str(cfg.toc.insert_position or "auto")))
     return " / ".join(parts)
 
 
@@ -988,6 +977,84 @@ def _caption_nav_summary(cfg: TemplateConfig) -> str:
             "缺失时自动补齐" if caption.auto_insert else "缺失时不补齐",
             "Word 可更新编号" if caption.format_inserted else "固定文本编号",
         ]
+    )
+
+
+def _formula_nav_summary(cfg: TemplateConfig) -> str:
+    formula = cfg.formula_table
+    numbering = cfg.equation_numbering
+    return " / ".join(
+        [
+            str(formula.formula_font_name or "跟随原文"),
+            f"{float(formula.formula_font_size_pt or 0):g} 磅",
+            str(numbering.numbering_format or "global"),
+        ]
+    )
+
+
+def _formula_tiles(cfg: TemplateConfig) -> tuple[TemplateSummaryTileSpec, ...]:
+    formula = cfg.formula_table
+    style = cfg.formula_style
+    return (
+        TemplateSummaryTileSpec(
+            key="formula_typography",
+            label="公式字体",
+            value=f"{formula.formula_font_name or '-'} / {formula.formula_font_size_pt:g} 磅",
+            detail=f"编号 {formula.number_font_name or '-'} / {formula.number_font_size_pt:g} 磅",
+            icon_name="sigma",
+            preferred_span=4,
+        ),
+        TemplateSummaryTileSpec(
+            key="formula_layout",
+            label="对齐与间距",
+            value=f"块{ALIGNMENT_LABELS.get(formula.block_alignment, formula.block_alignment)} / 编号{ALIGNMENT_LABELS.get(formula.number_alignment, formula.number_alignment)}",
+            detail=(
+                f"行距 {formula.formula_line_spacing:g} 倍  "
+                f"段前 {format_spacing_value(formula.formula_space_before_pt, formula.formula_space_before_unit)}  "
+                f"段后 {format_spacing_value(formula.formula_space_after_pt, formula.formula_space_after_unit)}"
+            ),
+            icon_name="sliders-horizontal",
+            preferred_span=4,
+        ),
+        TemplateSummaryTileSpec(
+            key="formula_numbering",
+            label="公式编号",
+            value=str(cfg.equation_numbering.numbering_format or "global"),
+            detail=(
+                f"统一字体 {'是' if style.unify_font else '否'}  "
+                f"统一字号 {'是' if style.unify_size else '否'}  "
+                f"统一间距 {'是' if style.unify_spacing else '否'}"
+            ),
+            icon_name="list-ordered",
+            preferred_span=4,
+        ),
+    )
+
+
+def _other_nav_summary(cfg: TemplateConfig) -> str:
+    watermark = cfg.watermark
+    return (
+        f"水印：{watermark.text or '已启用'}"
+        if watermark.enabled
+        else "无水印"
+    )
+
+
+def _other_tiles(cfg: TemplateConfig) -> tuple[TemplateSummaryTileSpec, ...]:
+    watermark = cfg.watermark
+    return (
+        TemplateSummaryTileSpec(
+            key="watermark",
+            label="文字水印",
+            value=(watermark.text or "已启用") if watermark.enabled else "未启用",
+            detail=(
+                f"{watermark.color} / {watermark.rotation}° / {watermark.font_size} 磅"
+                if watermark.enabled
+                else "执行时不添加文字水印"
+            ),
+            icon_name="whole-word",
+            preferred_span=12,
+        ),
     )
 
 
@@ -1047,6 +1114,28 @@ def _spec_data(cfg: TemplateConfig) -> dict[str, TemplateDetailSummarySpec]:
             field_names=("toc", "styles"),
             tiles=_toc_tiles(cfg),
         ),
+        "tpl_caption": TemplateDetailSummarySpec(
+            detail_card_id="tpl_caption",
+            title="题注",
+            icon_name="waves-arrow-down",
+            nav_label="题注",
+            nav_summary=_caption_nav_summary(cfg),
+            field_names=("caption", "styles"),
+            tiles=_caption_tiles(cfg),
+        ),
+        # Retained as internal editors for a future mode-specific surface.
+        # They are intentionally absent from DETAIL_ORDER and the public
+        # template feature registry, so the general workbench cannot expose
+        # them accidentally.
+        "tpl_formula": TemplateDetailSummarySpec(
+            detail_card_id="tpl_formula",
+            title="公式",
+            icon_name="sigma",
+            nav_label="公式",
+            nav_summary=_formula_nav_summary(cfg),
+            field_names=("formula_table", "formula_style", "equation_numbering"),
+            tiles=_formula_tiles(cfg),
+        ),
         "tpl_reference": TemplateDetailSummarySpec(
             detail_card_id="tpl_reference",
             title="参考文献",
@@ -1056,14 +1145,14 @@ def _spec_data(cfg: TemplateConfig) -> dict[str, TemplateDetailSummarySpec]:
             field_names=("reference_style", "styles"),
             tiles=_reference_tiles(cfg),
         ),
-        "tpl_caption": TemplateDetailSummarySpec(
-            detail_card_id="tpl_caption",
-            title="题注",
-            icon_name="waves-arrow-down",
-            nav_label="题注",
-            nav_summary=_caption_nav_summary(cfg),
-            field_names=("caption", "styles"),
-            tiles=_caption_tiles(cfg),
+        "tpl_other": TemplateDetailSummarySpec(
+            detail_card_id="tpl_other",
+            title="文字水印",
+            icon_name="settings",
+            nav_label="水印",
+            nav_summary=_other_nav_summary(cfg),
+            field_names=("watermark",),
+            tiles=_other_tiles(cfg),
         ),
     }
 

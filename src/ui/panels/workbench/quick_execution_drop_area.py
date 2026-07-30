@@ -7,14 +7,17 @@ from src.qt_api import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSize,
     Qt,
     QVBoxLayout,
     QWidget,
     Signal,
 )
 from src.shared.ui.button_style import apply_button_variant
+from src.shared.ui.path_drop import PathAcceptancePolicy, attach_path_drop
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
+from src.shared.ui.icons.catalog import get_icon
 
 
 class QuickExecutionDropArea(RoundedSurfaceFrame):
@@ -25,12 +28,23 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.setAcceptDrops(True)
         self.setMinimumHeight(70)
         self.setAutoFillBackground(False)
         self.setObjectName("wb_v2_drop_area")
         self._file_path = ""
         self._hovering = False
+        self._accepted_suffixes = (".docx",)
+        self._idle_icon_text = "W"
+        self._idle_title = "拖拽文件至此处"
+        self._idle_suffix = "支持格式：.docx"
+        self._idle_hint = "或点击右侧按钮从本地选择"
+        self._hover_title = "松开以加载文件"
+        self._hover_hint = "文件将被立即载入"
+        self._dialog_title = "选择文档"
+        self._policy = PathAcceptancePolicy(
+            suffixes=self._accepted_suffixes,
+            dialog_label="Word 文档",
+        )
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(1, 1, 1, 1)
@@ -93,8 +107,10 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         self._change_btn.setObjectName("wb_v2_drop_change")
         self._change_btn.clicked.connect(self._pick_file)
 
-        self._clear_btn = QPushButton("✕", self._selected_container)
+        self._clear_btn = QPushButton(parent=self._selected_container)
         self._clear_btn.setFixedSize(28, 28)
+        self._clear_btn.setIconSize(QSize(14, 14))
+        self._clear_btn.setAccessibleName("移除已选文件")
         self._clear_btn.setCursor(Qt.PointingHandCursor)
         self._clear_btn.setObjectName("wb_v2_drop_clear")
         self._clear_btn.clicked.connect(self.clear)
@@ -109,31 +125,24 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         self._layout.addWidget(self._idle_container)
         self._layout.addWidget(self._selected_container)
 
+        self._drop_controller = attach_path_drop(
+            parent=self,
+            surface=self,
+            policy=self._policy,
+            on_paths=self._on_paths_dropped,
+        )
+        self._drop_controller.hover_changed.connect(self._on_drop_hover_changed)
+
         self._apply_theme()
         bind_theme(self, self._apply_theme)
 
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            for url in event.mimeData().urls():
-                if url.toLocalFile().lower().endswith(".docx"):
-                    event.acceptProposedAction()
-                    self._hovering = True
-                    self._refresh_style()
-                    return
-        event.ignore()
+    def _on_paths_dropped(self, paths: object) -> None:
+        candidates = tuple(paths or ())
+        if candidates:
+            self.set_file(str(candidates[0]))
 
-    def dragLeaveEvent(self, event):
-        self._hovering = False
-        self._refresh_style()
-        super().dragLeaveEvent(event)
-
-    def dropEvent(self, event):
-        self._hovering = False
-        for url in event.mimeData().urls():
-            path = url.toLocalFile()
-            if path.lower().endswith(".docx"):
-                self.set_file(path)
-                return
+    def _on_drop_hover_changed(self, hovering: bool) -> None:
+        self._hovering = bool(hovering)
         self._refresh_style()
 
     def file_path(self) -> str:
@@ -142,6 +151,7 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
     def set_file(self, path: str) -> None:
         self._file_path = str(path or "")
         file_path = Path(self._file_path)
+        self._file_icon.setText(self._icon_text_for_path(file_path))
         metrics = self._file_name_label.fontMetrics()
         max_width = max(200, self.width() - 120)
 
@@ -164,6 +174,38 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         self._idle_container.show()
         self._refresh_style()
         self.file_cleared.emit()
+
+    def configure_file_acceptance(
+        self,
+        *,
+        suffixes: tuple[str, ...] | list[str],
+        idle_title: str,
+        idle_suffix: str,
+        dialog_title: str,
+        dialog_label: str,
+        icon_text: str = "W",
+        idle_hint: str = "或点击右侧按钮从本地选择",
+        hover_title: str = "松开以加载文件",
+        hover_hint: str = "文件将被立即载入",
+    ) -> None:
+        self._policy = PathAcceptancePolicy(
+            path_kind="file",
+            suffixes=tuple(suffixes) or (".docx",),
+            dialog_label=dialog_label,
+        )
+        self._accepted_suffixes = self._policy.suffixes
+        self._drop_controller.set_policy(self._policy)
+        self._idle_icon_text = str(icon_text or "W")[:2]
+        self._idle_title = str(idle_title or "拖拽文件至此处")
+        self._idle_suffix = str(idle_suffix or "")
+        self._idle_hint = str(idle_hint or "或点击右侧按钮从本地选择")
+        self._hover_title = str(hover_title or "松开以加载文件")
+        self._hover_hint = str(hover_hint or "文件将被立即载入")
+        self._dialog_title = str(dialog_title or "选择文档")
+        self._idle_icon.setText(self._idle_icon_text)
+        if self._file_path:
+            self._file_icon.setText(self._icon_text_for_path(Path(self._file_path)))
+        self._refresh_style()
 
     def _apply_theme(self) -> None:
         theme = get_theme()
@@ -197,13 +239,12 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
             f"font-size: {theme.font_size_sm}px; color: {theme.text_hint}; background: transparent;"
         )
         apply_button_variant(self._change_btn, "secondary")
+        self._clear_btn.setIcon(get_icon("x", 14, theme.text_secondary))
         self._clear_btn.setStyleSheet(
             f"""
             QPushButton#wb_v2_drop_clear {{
                 background: transparent;
                 border: none;
-                color: {theme.text_hint};
-                font-size: 14px;
                 border-radius: 14px;
             }}
             QPushButton#wb_v2_drop_clear:hover {{
@@ -227,15 +268,15 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         elif self._hovering:
             surface_bg = theme_rgba(theme.primary, 0.06)
             border_color = theme.primary
-            self._hint_title.setText(self._build_title_text("松开以加载文件"))
-            self._hint_label.setText("文件将被立即载入")
+            self._hint_title.setText(self._build_title_text(self._hover_title))
+            self._hint_label.setText(self._hover_hint)
         else:
             surface_bg = theme.bg_card
             border_color = theme.border
             self._hint_title.setText(
-                self._build_title_text("拖拽文件至此处", "支持格式：.docx")
+                self._build_title_text(self._idle_title, self._idle_suffix)
             )
-            self._hint_label.setText("或点击右侧按钮从本地选择")
+            self._hint_label.setText(self._idle_hint)
 
         self.configure_surface(
             background=surface_bg,
@@ -246,15 +287,34 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         self.update()
 
     def _pick_file(self) -> None:
+        self.pick_file()
+
+    def pick_file(self) -> str:
+        """Choose one file using the active scene policy and return its path."""
         file_path, _selected = QFileDialog.getOpenFileName(
             self,
-            "选择文档",
+            self._dialog_title,
             "",
-            "Word Documents (*.docx);;All Files (*)",
+            self._policy.dialog_filter,
         )
         cleaned = str(file_path or "").strip()
-        if cleaned:
+        if cleaned and self._path_is_accepted(cleaned):
             self.set_file(cleaned)
+            return cleaned
+        return ""
+
+    def _path_is_accepted(self, path: str) -> bool:
+        return self._drop_controller.accepts_path(path)
+
+    def _icon_text_for_path(self, path: Path) -> str:
+        suffix = path.suffix.lower()
+        if suffix in {".md", ".markdown"}:
+            return "M"
+        if suffix == ".json":
+            return "J"
+        if suffix == ".docx":
+            return "W"
+        return self._idle_icon_text or "W"
 
 
 __all__ = ["QuickExecutionDropArea"]

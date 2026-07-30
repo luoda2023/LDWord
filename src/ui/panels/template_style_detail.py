@@ -6,7 +6,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 
 from src.config.style_semantics import (
-    format_spacing_value,
     line_spacing_display_label,
     normalize_line_spacing_type,
     resolve_line_spacing_value,
@@ -268,13 +267,19 @@ class StyleDetail(QWidget):
             styles["body"] = StyleConfig()
         return styles["body"]
 
+    def _style_for_display(self) -> StyleConfig | None:
+        if self._current_template is None:
+            return None
+        styles = self._current_template.styles
+        return styles.get("body") or styles.get("normal") or StyleConfig()
+
     def _sync_from_template(self) -> None:
         self._is_syncing = True
         try:
             self._style_management_block.apply_style_object_projection(
                 build_template_body_style_projection(
                     self._current_template,
-                    self._editable_style(),
+                    self._style_for_display(),
                     scene=self._current_scene,
                 )
             )
@@ -314,7 +319,7 @@ class StyleDetail(QWidget):
         self._style_management_block.apply_style_object_projection(
             build_template_body_style_projection(
                 self._current_template,
-                self._editable_style(),
+                self._style_for_display(),
                 scene=self._current_scene,
             )
         )
@@ -334,7 +339,7 @@ class StyleDetail(QWidget):
 
     def _refresh_action_icons(self) -> None:
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
         except Exception:
             return
 
@@ -382,7 +387,7 @@ class StyleDetail(QWidget):
         apply_template_summary_action_button(self._save_btn, "primary")
 
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
 
             for icon_name, label in self._header_icons:
                 label.setPixmap(get_icon(icon_name, 18, theme.primary).pixmap(18, 18))

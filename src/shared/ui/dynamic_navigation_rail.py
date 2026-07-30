@@ -172,6 +172,27 @@ class DynamicNavigationRail(QWidget):
                 first_key = next(iter(self._cards))
                 self.select_card(first_key)
 
+    def place_cards_after(
+        self,
+        anchor: QWidget,
+        card_ids: list[str] | tuple[str, ...],
+    ) -> None:
+        """Reorder existing cards after ``anchor`` without recreating them."""
+
+        anchor_index = self._layout.indexOf(anchor)
+        if anchor_index < 0:
+            raise ValueError("anchor must belong to the navigation rail layout")
+        target_index = anchor_index + 1
+        for card_id in card_ids:
+            card = self._cards.get(card_id)
+            if card is None:
+                continue
+            current_index = self._layout.indexOf(card)
+            if current_index != target_index:
+                self._layout.removeWidget(card)
+                self._layout.insertWidget(target_index, card)
+            target_index += 1
+
     def select_card(self, card_id: str) -> None:
         if card_id not in self._cards:
             return

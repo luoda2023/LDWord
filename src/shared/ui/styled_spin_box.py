@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.qt_api import QDoubleSpinBox, QEvent, QPainter, Qt
+from src.qt_api import QDoubleSpinBox, QEvent, QPainter, QSize, Qt
 
 from src.shared.ui.input_metrics import (
     build_input_editor_stylesheet,
@@ -11,8 +11,13 @@ from src.shared.ui.input_metrics import (
     draw_spin_chevrons,
     sync_input_line_edit_geometry,
 )
-from src.shared.ui.sizing import apply_size_class, resolved_control_height
+from src.shared.ui.sizing import (
+    apply_size_class,
+    resolved_control_height,
+    widget_size_class,
+)
 from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.typography_policy import TextRole, apply_text_role
 
 
 class StyledSpinBox(QDoubleSpinBox):
@@ -30,8 +35,10 @@ class StyledSpinBox(QDoubleSpinBox):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._editor_widget = None
         self._syncing_editor_geometry = False
+        self._outer_height_override: int | None = None
 
         apply_size_class(self, "md")
+        apply_text_role(self, TextRole.BODY)
         self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         self._style_initialized = True
@@ -44,12 +51,42 @@ class StyledSpinBox(QDoubleSpinBox):
         if getattr(self, "_style_initialized", False) and self.objectName() != previous_name:
             self._refresh_style()
 
+    def set_outer_height(self, height: int) -> None:
+        """Own an explicit final outer height for a component-specific rhythm."""
+
+        resolved_height = max(1, int(height))
+        self._outer_height_override = resolved_height
+        self.setMinimumHeight(resolved_height)
+        self.setMaximumHeight(resolved_height)
+        self._refresh_style()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        base = super().sizeHint()
+        return QSize(
+            base.width(),
+            self._outer_height_override
+            or resolved_control_height(get_theme(), widget_size_class(self)),
+        )
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        base = super().minimumSizeHint()
+        return QSize(
+            base.width(),
+            self._outer_height_override
+            or resolved_control_height(get_theme(), widget_size_class(self)),
+        )
+
     @staticmethod
-    def build_spin_stylesheet(object_name: str, theme) -> str:
+    def build_spin_stylesheet(
+        object_name: str,
+        theme,
+        *,
+        outer_height: int | None = None,
+    ) -> str:
         """Generate QSS that hides native buttons and applies themed colours."""
-        height_sm = resolved_control_height(theme, "sm")
-        height_md = resolved_control_height(theme, "md")
-        height_lg = resolved_control_height(theme, "lg")
+        height_sm = int(outer_height or resolved_control_height(theme, "sm"))
+        height_md = int(outer_height or resolved_control_height(theme, "md"))
+        height_lg = int(outer_height or resolved_control_height(theme, "lg"))
         return f"""
             #{object_name} {{
                 background: {theme.bg_input};
@@ -58,8 +95,6 @@ class StyledSpinBox(QDoubleSpinBox):
                 border-radius: {theme.input_radius}px;
                 padding: {theme.input_padding_y}px {theme.input_padding_x}px;
                 padding-right: {theme.spin_button_width}px;
-                font-size: {theme.font_size_md}px;
-                font-family: {theme.font_family};
                 selection-background-color: {theme.primary};
                 selection-color: {theme.text_on_primary};
             }}
@@ -183,7 +218,14 @@ class StyledSpinBox(QDoubleSpinBox):
 
     def _refresh_style(self) -> None:
         theme = get_theme()
-        self.setStyleSheet(self.build_spin_stylesheet(self.objectName(), theme))
+        apply_text_role(self, TextRole.BODY)
+        self.setStyleSheet(
+            self.build_spin_stylesheet(
+                self.objectName(),
+                theme,
+                outer_height=self._outer_height_override,
+            )
+        )
         self._configure_editor()
         self.updateGeometry()
         self.update()

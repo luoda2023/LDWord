@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from src.qt_api import QBrush, QColor, QPainter, QPen, QRectF, Qt
+from src.qt_api import QBrush, QColor, QPainter, QRectF, Qt
+from src.shared.ui.paint_geometry import stroke_pen
 
 
 def draw_focus_ring(painter: QPainter, rect: QRectF, *, color, width: float) -> None:
     painter.save()
     pen_color = color if isinstance(color, QColor) else QColor(color)
-    painter.setPen(QPen(pen_color, width))
+    painter.setPen(stroke_pen(painter, pen_color, width))
     painter.setBrush(Qt.NoBrush)
     painter.drawEllipse(rect)
     painter.restore()
@@ -23,7 +24,7 @@ def draw_radio_indicator(
     dot_diameter: float = 0.0,
 ) -> None:
     painter.save()
-    painter.setPen(QPen(QColor(ring_color), ring_width))
+    painter.setPen(stroke_pen(painter, QColor(ring_color), ring_width))
     painter.setBrush(QBrush(QColor(bg_color)))
     painter.drawEllipse(outer_rect)
     if dot_color and dot_diameter > 0:

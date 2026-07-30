@@ -37,6 +37,10 @@ def template_form_row(
 ) -> FormRow:
     """Build a template-detail row with the compact left-label baseline."""
 
+    full_width_mode = getattr(widget, "set_full_width_mode", None)
+    if callable(full_width_mode):
+        full_width_mode(True)
+
     row = FormRow(
         label,
         widget,
@@ -244,12 +248,14 @@ class TemplateFormGrid(QWidget):
         align_trailing_labels: bool | None = None,
         show_row_separators: bool = False,
         stack_slack: int = 0,
+        coordinated_responsive: bool = True,
     ):
         super().__init__(parent)
         self._rows = [tuple(row) for row in rows if row]
         self._column_gap = _resolve_column_gap(column_gap)
         self._stacked_spacing = stacked_spacing
         self._stack_slack = max(0, int(stack_slack))
+        self._coordinated_responsive = bool(coordinated_responsive)
         self._align_trailing_labels = (
             self._column_gap >= standard_form_column_gap()
             if align_trailing_labels is None
@@ -273,6 +279,7 @@ class TemplateFormGrid(QWidget):
                 stacked_spacing=self._stacked_spacing,
                 stretches=self._stretches_for_row(row),
                 stack_slack=self._stack_slack,
+                minimum_breakpoint=True,
             )
             self._pair_rows.append(pair_row)
             self._layout.addWidget(pair_row)
@@ -284,6 +291,15 @@ class TemplateFormGrid(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         bind_theme(self, self._apply_theme)
         self._apply_theme()
+        self._sync_responsive_mode()
+
+    def resizeEvent(self, event) -> None:
+        self._sync_responsive_mode()
+        super().resizeEvent(event)
+
+    def showEvent(self, event) -> None:
+        self._sync_responsive_mode()
+        super().showEvent(event)
 
     def _normalize_columns(self) -> None:
         column_count = max((len(row) for row in self._rows), default=0)
@@ -307,6 +323,43 @@ class TemplateFormGrid(QWidget):
 
     def refresh_template_form_alignment(self) -> None:
         self._apply_trailing_label_alignment()
+        self._sync_responsive_mode()
+
+    def _sync_responsive_mode(self) -> None:
+        if not self._coordinated_responsive:
+            for row in self._pair_rows:
+                row.set_forced_stacked(None)
+            return
+
+        responsive_rows = [
+            row for row in self._pair_rows if row.visible_widget_count() > 1
+        ]
+        for row in self._pair_rows:
+            if row not in responsive_rows:
+                row.set_forced_stacked(None)
+        if not responsive_rows:
+            return
+        available_width = max(0, self.width())
+        stacked = self._coordinated_stacked_for_width(
+            available_width,
+            responsive_rows=responsive_rows,
+        )
+        for row in responsive_rows:
+            row.set_forced_stacked(stacked)
+
+    def _coordinated_stacked_for_width(
+        self,
+        width: int,
+        *,
+        responsive_rows: Sequence[AdaptivePairRow] | None = None,
+    ) -> bool:
+        rows = list(responsive_rows) if responsive_rows is not None else [
+            row for row in self._pair_rows if row.visible_widget_count() > 1
+        ]
+        if not rows:
+            return False
+        breakpoint = max(row.responsive_breakpoint() for row in rows)
+        return max(0, int(width or 0)) < breakpoint
 
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
         return self._rows_size(minimum=False)
@@ -320,7 +373,26 @@ class TemplateFormGrid(QWidget):
     def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt API contract
         margins = self._layout.contentsMargins()
         available_width = max(0, int(width or 0) - margins.left() - margins.right())
-        row_heights = [row.heightForWidth(available_width) for row in self._pair_rows]
+        responsive_rows = [
+            row for row in self._pair_rows if row.visible_widget_count() > 1
+        ]
+        coordinated_stacked = (
+            self._coordinated_stacked_for_width(
+                available_width,
+                responsive_rows=responsive_rows,
+            )
+            if self._coordinated_responsive and responsive_rows
+            else None
+        )
+        row_heights = [
+            row.height_for_width(
+                available_width,
+                stacked=(
+                    coordinated_stacked if row in responsive_rows else None
+                ),
+            )
+            for row in self._pair_rows
+        ]
         separator_heights = [separator.sizeHint().height() for separator in self._separators]
         spacing = self._layout.spacing() * max(
             0,

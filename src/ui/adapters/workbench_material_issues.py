@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from src.config.material_batch import (
+    MaterialBatchSelection,
+    build_material_batch_items,
+)
 from src.config.material_context import MaterialExecutionContext
 from src.config.material_schema_registry import (
     evaluate_material_requirements,
@@ -11,6 +15,15 @@ from src.config.material_schema_registry import (
     resolve_material_schema_ids,
 )
 from src.config.materials import AssetItem
+from src.services.production_runtime.material_preflight import (
+    asset_cached_path as _asset_cached_path,
+)
+from src.ui.adapters.workbench_execution_gate import (
+    ExecutionGateAction,
+    ExecutionGateDecision,
+    decide_execution_gate,
+    decide_execution_gate_for_policy,
+)
 from src.ui.adapters.workbench_issue_models import (
     MaterialReadinessIssueGroups,
     WorkbenchIssueItem,
@@ -18,7 +31,7 @@ from src.ui.adapters.workbench_issue_models import (
 
 
 def material_schema_readiness_reasons(scene) -> list[str]:
-    """Return run-blocking material schema problems visible before execution."""
+    """Return material schema problems visible before execution."""
 
     missing_ids = _missing_scene_material_schema_ids(scene)
     if not missing_ids:
@@ -42,20 +55,23 @@ def material_readiness_issue_items(
     """Return structured Workbench issue items for material readiness."""
 
     groups = material_readiness_issue_groups(scene, material_context)
+    gate_decision = _material_readiness_gate_decision(scene, groups)
+    blocking = not gate_decision.can_run
+    severity = "error" if blocking else "warning"
     items: list[WorkbenchIssueItem] = []
     if groups.field_keys:
         items.append(
             WorkbenchIssueItem(
                 issue_id="material.fields.missing",
                 category="material_field",
-                severity="warning",
+                severity=severity,
                 title="资料字段缺失",
                 summary=", ".join(groups.field_keys),
                 details=tuple("字段：" + key for key in groups.field_keys),
                 source_notes=groups.source_notes,
                 repair_target_type="field",
                 repair_target_key=groups.field_keys[0],
-                blocking=True,
+                blocking=blocking,
             )
         )
     if groups.asset_roles:
@@ -63,14 +79,14 @@ def material_readiness_issue_items(
             WorkbenchIssueItem(
                 issue_id="material.assets.missing",
                 category="material_asset",
-                severity="warning",
+                severity=severity,
                 title="资料资产缺失",
                 summary=", ".join(groups.asset_roles),
                 details=tuple("资产：" + role for role in groups.asset_roles),
                 source_notes=groups.source_notes,
                 repair_target_type="asset",
                 repair_target_key=groups.asset_roles[0],
-                blocking=True,
+                blocking=blocking,
             )
         )
     if groups.schema_ids:
@@ -84,17 +100,127 @@ def material_readiness_issue_items(
             WorkbenchIssueItem(
                 issue_id="material.schema.unregistered",
                 category="material_schema",
-                severity="error",
+                severity=severity,
                 title="资料 Schema 未注册",
                 summary=", ".join(groups.schema_ids),
                 details=tuple(details),
                 source_notes=groups.source_notes,
                 repair_target_type="schema",
                 repair_target_key=groups.schema_ids[0],
-                blocking=True,
+                blocking=blocking,
+            )
+        )
+    if groups.incompatible_schema_ids:
+        items.append(
+            WorkbenchIssueItem(
+                issue_id="material.schema.incompatible",
+                category="material_schema",
+                severity=severity,
+                title="资料包 Schema 不兼容",
+                summary=", ".join(groups.incompatible_schema_ids),
+                details=(
+                    "请切换到与当前方案匹配的资料包，或新建当前方案资料包。",
+                ),
+                source_notes=groups.source_notes,
+                repair_target_type="material_package",
+                repair_target_key=groups.incompatible_schema_ids[0],
+                blocking=blocking,
             )
         )
     return items
+
+
+def material_readiness_gate_decision(
+    scene,
+    material_context: MaterialExecutionContext | None = None,
+) -> ExecutionGateDecision:
+    """Return the authoritative warn/block decision for material readiness."""
+
+    groups = material_readiness_issue_groups(scene, material_context)
+    return _material_readiness_gate_decision(scene, groups)
+
+
+def material_batch_readiness_gate_decision(
+    scene,
+    selection: MaterialBatchSelection | None,
+) -> ExecutionGateDecision:
+    """Aggregate the authoritative material gate for every selected profile.
+
+    Batch execution must not infer readiness from the profile currently shown
+    in the editor.  Each selected profile owns a distinct execution context,
+    so this projection builds those contexts and preserves their profile
+    identity in every reason.
+    """
+
+    if not isinstance(selection, MaterialBatchSelection):
+        return ExecutionGateDecision()
+    selected_ids = [
+        str(profile_id or "").strip()
+        for profile_id in selection.profile_ids
+        if str(profile_id or "").strip()
+    ]
+    if not selected_ids:
+        return ExecutionGateDecision()
+
+    items = build_material_batch_items(
+        selection.archive,
+        profile_ids=selected_ids,
+        # Readiness does not own output naming.  A safe fixed template avoids
+        # coupling this material gate to a user output-template error, which is
+        # validated by the batch/output preflight instead.
+        output_dir_template="{profile_id}",
+        base_context=selection.base_context,
+    )
+    warnings: list[str] = []
+    blockers: list[str] = []
+    confirmations: list[str] = []
+    primary_action: ExecutionGateAction | None = None
+    for item in items:
+        decision = material_readiness_gate_decision(scene, item.context)
+        label = str(item.profile_name or item.profile_id or "资料项").strip()
+        warnings.extend(f"{label}：{reason}" for reason in decision.warning_reasons)
+        blockers.extend(f"{label}：{reason}" for reason in decision.blocking_reasons)
+        confirmations.extend(
+            f"{label}：{reason}" for reason in decision.confirmation_reasons
+        )
+        if primary_action is None and decision.primary_action is not None:
+            primary_action = decision.primary_action
+    return decide_execution_gate(
+        warning_reasons=warnings,
+        blocking_reasons=blockers,
+        confirmation_reasons=confirmations,
+        primary_action=primary_action,
+    )
+
+
+def _material_readiness_gate_decision(
+    scene,
+    groups: MaterialReadinessIssueGroups,
+) -> ExecutionGateDecision:
+    profile = getattr(scene, "input_source_profile", None)
+    return decide_execution_gate_for_policy(
+        groups.to_reasons(),
+        failure_policy=getattr(profile, "failure_policy", "warn"),
+        primary_action=_material_gate_action(groups),
+    )
+
+
+def _material_gate_action(
+    groups: MaterialReadinessIssueGroups,
+) -> ExecutionGateAction | None:
+    if groups.incompatible_schema_ids:
+        return ExecutionGateAction(
+            "更换资料包",
+            "material_package",
+            groups.incompatible_schema_ids[0],
+        )
+    if groups.field_keys:
+        return ExecutionGateAction("补充资料", "field", groups.field_keys[0])
+    if groups.asset_roles:
+        return ExecutionGateAction("补充资料", "asset", groups.asset_roles[0])
+    if groups.schema_ids:
+        return ExecutionGateAction("修复资料配置", "schema", groups.schema_ids[0])
+    return None
 
 
 def material_asset_comparison_issue_items(
@@ -224,14 +350,26 @@ def material_readiness_issue_groups(
         if isinstance(material_context, MaterialExecutionContext)
         else MaterialExecutionContext()
     )
+    incompatible_schema_ids = _incompatible_context_schema_ids(
+        schema_ids,
+        context,
+    )
     schema_id = schema_ids[0] if schema_ids else ""
     check = evaluate_material_requirements(
         schema_id=schema_id,
         schema_ids=schema_ids,
-        entity_data=getattr(context, "entity_data", {}) or {},
+        entity_data=context.resolved_entity_data(),
         asset_roles=_material_context_asset_roles(context),
         extra_required_fields=extra_fields,
         extra_required_asset_roles=extra_roles,
+    )
+    removed_fields = {
+        str(key)
+        for key, scope in dict(getattr(context, "field_scopes", {}) or {}).items()
+        if str(scope) == "removed"
+    }
+    missing_field_keys = tuple(
+        key for key in check.missing_field_keys if key not in removed_fields
     )
     missing_asset_roles = _unique_texts(
         [
@@ -245,7 +383,8 @@ def material_readiness_issue_groups(
     )
     issue_groups = MaterialReadinessIssueGroups(
         schema_ids=missing_schema_ids,
-        field_keys=tuple(check.missing_field_keys),
+        incompatible_schema_ids=incompatible_schema_ids,
+        field_keys=missing_field_keys,
         asset_roles=tuple(missing_asset_roles),
         source_notes=_material_source_notes(
             missing_schema_ids=missing_schema_ids,
@@ -254,7 +393,17 @@ def material_readiness_issue_groups(
             extra_fields=extra_fields,
             extra_roles=extra_roles,
             material_context=context,
-            include_context=bool(check.missing_field_keys or missing_asset_roles),
+            include_context=bool(
+                incompatible_schema_ids
+                or missing_field_keys
+                or missing_asset_roles
+            ),
+            package_schema_ids=tuple(
+                getattr(context, "material_schema_ids", ()) or ()
+            ),
+            package_schema_missing=(
+                incompatible_schema_ids == ("未声明",)
+            ),
             recommendation_schema_id=(
                 schema_recommendation.schema_id if schema_recommendation is not None else ""
             ),
@@ -296,6 +445,39 @@ def _material_context_asset_roles(context: MaterialExecutionContext) -> list[str
     )
 
 
+def _incompatible_context_schema_ids(
+    scene_schema_ids: tuple[str, ...],
+    context: MaterialExecutionContext,
+) -> tuple[str, ...]:
+    """Return package schemas which cannot be used by the active scene."""
+
+    expected = {
+        str(schema_id or "").strip()
+        for schema_id in scene_schema_ids
+        if str(schema_id or "").strip()
+    }
+    if not expected:
+        return ()
+    package_schema_ids = tuple(
+        dict.fromkeys(
+            str(schema_id or "").strip()
+            for schema_id in tuple(context.material_schema_ids or ())
+            if str(schema_id or "").strip()
+        )
+    )
+    if not package_schema_ids:
+        owns_package_identity = bool(
+            str(context.package_id or "").strip()
+            or str(context.archive_id or "").strip()
+        )
+        return ("未声明",) if owns_package_identity else ()
+    return tuple(
+        schema_id
+        for schema_id in package_schema_ids
+        if schema_id not in expected
+    )
+
+
 def _asset_metadata(item: object) -> dict[str, str]:
     metadata = getattr(item, "metadata", {})
     if not isinstance(metadata, dict):
@@ -312,29 +494,6 @@ def _asset_render_path(item: AssetItem) -> str:
     if raw_path:
         return raw_path
     return _asset_cached_path(_asset_metadata(item))
-
-
-def _asset_cached_path(metadata: dict[str, str]) -> str:
-    for key in (
-        "cache_path",
-        "cachePath",
-        "cached_path",
-        "cachedPath",
-        "local_path",
-        "localPath",
-        "local_cache_path",
-        "localCachePath",
-        "resolved_path",
-        "resolvedPath",
-        "download_path",
-        "downloadPath",
-        "asset_path",
-        "assetPath",
-    ):
-        value = str(metadata.get(key) or "").strip()
-        if value:
-            return value
-    return ""
 
 
 def _looks_like_remote_asset_path(value: object) -> bool:
@@ -401,6 +560,8 @@ def _material_source_notes(
     extra_roles: list[str] | None = None,
     material_context: MaterialExecutionContext | None = None,
     include_context: bool = False,
+    package_schema_ids: tuple[str, ...] = (),
+    package_schema_missing: bool = False,
     recommendation_schema_id: str = "",
 ) -> tuple[str, ...]:
     notes: list[str] = []
@@ -419,10 +580,10 @@ def _material_source_notes(
         notes.append("Schema：" + ", ".join(schema_notes))
     normalized_fields = _unique_texts(list(extra_fields or []))
     if normalized_fields:
-        notes.append("场景字段：" + ", ".join(normalized_fields))
+        notes.append("方案字段：" + ", ".join(normalized_fields))
     normalized_roles = _unique_texts(list(extra_roles or []))
     if normalized_roles:
-        notes.append("场景资产：" + ", ".join(normalized_roles))
+        notes.append("方案资产：" + ", ".join(normalized_roles))
     if include_context:
         context = (
             material_context
@@ -434,6 +595,11 @@ def _material_source_notes(
             notes.append("当前资料：" + profile_label)
         elif context.is_empty():
             notes.append("当前资料：未配置")
+    normalized_package_schema_ids = _unique_texts(list(package_schema_ids))
+    if normalized_package_schema_ids:
+        notes.append("资料包 Schema：" + ", ".join(normalized_package_schema_ids))
+    elif package_schema_missing:
+        notes.append("资料包 Schema：未声明")
     return tuple(_unique_texts(notes))
 
 

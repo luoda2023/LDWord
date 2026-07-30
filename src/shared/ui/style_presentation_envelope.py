@@ -7,15 +7,12 @@ from dataclasses import dataclass
 
 
 STYLE_PRESENTATION_KIND_SECTION_PARAGRAPH = "section_paragraph"
-STYLE_PRESENTATION_KIND_TEMPLATE_PAGE = "template_page"
 STYLE_PRESENTATION_KIND_EXECUTION_RECEIPT = "execution_receipt"
 
 STYLE_PRESENTATION_TITLE_PREVIEW = "样式预览"
 STYLE_PRESENTATION_TITLE_SOURCE = "样式来源"
-STYLE_PRESENTATION_SOURCE_TEMPLATE_BASELINE = "模板基线"
 STYLE_PRESENTATION_SOURCE_CURRENT_RUN = "本次使用"
-STYLE_PRESENTATION_ACTION_ADJUST_SECTION = "调例外"
-STYLE_PRESENTATION_TEMPLATE_FALLBACK = "当前模板"
+STYLE_PRESENTATION_ACTION_ADJUST_SECTION = "调整样式"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,33 +103,6 @@ class StylePresentationEnvelope:
         )
 
     @classmethod
-    def from_template_page(
-        cls,
-        *,
-        template_label: str = "",
-        summary: str = "",
-        detail: str = "",
-        action_label: str = "",
-        title: str = STYLE_PRESENTATION_TITLE_PREVIEW,
-        source_label: str = STYLE_PRESENTATION_SOURCE_TEMPLATE_BASELINE,
-    ) -> "StylePresentationEnvelope":
-        """Build shared metadata for a template page preview."""
-
-        clean_template = _clean(template_label)
-        clean_detail = _clean(detail)
-        if not clean_detail and clean_template:
-            clean_detail = f"{STYLE_PRESENTATION_TEMPLATE_FALLBACK}：{clean_template}"
-
-        return cls(
-            kind=STYLE_PRESENTATION_KIND_TEMPLATE_PAGE,
-            title=title,
-            source_label=source_label,
-            summary=summary,
-            detail=clean_detail,
-            action_label=action_label,
-        )
-
-    @classmethod
     def from_execution_result(
         cls,
         style_source,
@@ -159,20 +129,13 @@ class StylePresentationEnvelope:
                 summary=summary,
             )
 
-        template_label = (
-            _source_value(style_source, "template_label")
-            or STYLE_PRESENTATION_TEMPLATE_FALLBACK
-        )
-        section_status = _normalize_section_status_copy(
-            _source_value(style_source, "section_status")
-        )
-        if section_status:
+        template_label = _source_value(style_source, "template_label")
+        if template_label:
             return cls(
                 kind=STYLE_PRESENTATION_KIND_EXECUTION_RECEIPT,
                 title=title,
                 source_label=STYLE_PRESENTATION_SOURCE_CURRENT_RUN,
-                summary=f"本次按模板“{template_label}”处理",
-                detail=_sentence(section_status),
+                summary=f"本次使用模板“{template_label}”。",
             )
 
         return cls.from_summary(
@@ -251,27 +214,8 @@ def _source_value(source, name: str) -> str:
     return _attr(source, name, "")
 
 
-def _normalize_section_status_copy(value: str) -> str:
-    text = _clean(value)
-    return (
-        text.replace("个分区独立设置", "个格式例外")
-        .replace("分区独立设置", "格式例外")
-        .replace("个分区已调整", "个格式例外已调整")
-        .replace("分区已调整", "格式例外已调整")
-    )
-
-
 def _clean(value) -> str:
     return " ".join(str(value or "").split())
-
-
-def _sentence(value) -> str:
-    text = _clean(value)
-    if not text:
-        return ""
-    if text[-1] in "。.!！?？":
-        return text
-    return f"{text}。"
 
 
 def _strip_leading_title(value: str, title: str) -> str:
@@ -293,10 +237,7 @@ __all__ = [
     "STYLE_PRESENTATION_ACTION_ADJUST_SECTION",
     "STYLE_PRESENTATION_KIND_EXECUTION_RECEIPT",
     "STYLE_PRESENTATION_KIND_SECTION_PARAGRAPH",
-    "STYLE_PRESENTATION_KIND_TEMPLATE_PAGE",
     "STYLE_PRESENTATION_SOURCE_CURRENT_RUN",
-    "STYLE_PRESENTATION_SOURCE_TEMPLATE_BASELINE",
-    "STYLE_PRESENTATION_TEMPLATE_FALLBACK",
     "STYLE_PRESENTATION_TITLE_PREVIEW",
     "STYLE_PRESENTATION_TITLE_SOURCE",
     "StylePresentationEnvelope",

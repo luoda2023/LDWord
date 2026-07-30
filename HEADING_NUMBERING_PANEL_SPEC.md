@@ -81,7 +81,7 @@
 
 ### 持久化策略
 
-- **唯一真相源** = `level_bindings` (thesis.yaml)
+- **唯一真相源** = 当前模式 canonical template JSON 中的 `heading_numbering.level_bindings`（例如 `config_library/templates/thesis/builtin/thesis_gbt.json`）
 - **不存** `active_preset` — UI 启动时比对推断
 - config 层零 UI 污染
 
@@ -166,5 +166,5 @@
 | `src/modules/structure/heading_numbering.py` | 引擎稳定, 79 测试 |
 | `src/config/template.py` | 不加 UI 字段 |
 | `src/modules/basic/paragraph_style.py` | max_levels 已实现 |
-| `defaults/thesis.yaml` | 模板不变 |
+| `config_library/templates/thesis/builtin/thesis_gbt.json` | canonical 模板资源；面板只编辑加载后的配置，不直接改写内置文件 |
 | `src/shared/ui/theme.py` | 现有 token 够用 |

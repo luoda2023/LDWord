@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import copy
 import csv
+from datetime import date, datetime
 import json
 from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
 
 from src.config.entity import EntityProfile
+from src.config.materials import ASSET_ROLE_ALIASES, resolve_asset_role_alias
 from src.ui.panels.assets.fields import (
-    _field_alias_for_token,
     _field_sources_from_imported_keys,
-    _normalize_required_field_keys,
     _normalized_field_aliases,
     _normalized_field_sources,
     _normalized_import_key,
@@ -85,7 +86,9 @@ def _load_batch_profiles_from_json(path: Path) -> list[EntityProfile]:
 
 def _load_batch_csv_rows(path: Path) -> list[Mapping[str, Any]]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        return list(csv.DictReader(handle))
+        reader = csv.DictReader(handle)
+        _validate_unique_table_headers(reader.fieldnames or [])
+        return list(reader)
 
 
 def _load_batch_excel_rows(path: Path) -> list[Mapping[str, Any]]:
@@ -96,22 +99,55 @@ def _load_batch_excel_rows(path: Path) -> list[Mapping[str, Any]]:
 
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
-        sheet = workbook.active
-        raw_rows = list(sheet.iter_rows(values_only=True))
+        primary_sheet = workbook.active
+        rows = _excel_table_rows(primary_sheet)
+        shared_values: dict[str, Any] = {}
+        for sheet in workbook.worksheets:
+            if sheet is primary_sheet:
+                continue
+            auxiliary_rows = _excel_table_rows(sheet)
+            if len(auxiliary_rows) != 1:
+                continue
+            for key, value in auxiliary_rows[0].items():
+                if _cell_text(value):
+                    shared_values[key] = value
     finally:
         workbook.close()
+    if not shared_values:
+        return rows
+    return [
+        {
+            **row,
+            **{
+                key: value
+                for key, value in shared_values.items()
+                if not _cell_text(row.get(key))
+            },
+        }
+        for row in rows
+    ]
 
+
+def _excel_table_rows(sheet) -> list[dict[str, Any]]:
+    """Read one header table without assigning cross-sheet business meaning.
+
+    A secondary sheet is considered shared input only by the caller when this
+    helper returns exactly one data row.  Multi-row sheets are intentionally
+    left independent instead of creating an implicit Cartesian product.
+    """
+
+    raw_rows = list(sheet.iter_rows(values_only=True))
     if not raw_rows:
         return []
-
     headers = [str(value or "").strip() for value in raw_rows[0]]
+    _validate_unique_table_headers(headers)
     rows: list[dict[str, Any]] = []
     for raw_row in raw_rows[1:]:
-        row: dict[str, Any] = {}
-        for index, header in enumerate(headers):
-            if not header:
-                continue
-            row[header] = raw_row[index] if index < len(raw_row) else None
+        row = {
+            header: raw_row[index] if index < len(raw_row) else None
+            for index, header in enumerate(headers)
+            if header
+        }
         if _row_has_values(row):
             rows.append(row)
     return rows
@@ -130,27 +166,43 @@ def _profile_from_mapping(raw_profile: Mapping[str, Any], *, index: int) -> Enti
     profile_id = _row_value(raw_profile, _PROFILE_ID_ALIASES)
     profile_name = _row_value(raw_profile, _PROFILE_NAME_ALIASES)
     assets_dir = _row_value(raw_profile, _ASSETS_DIR_ALIASES)
-    required_fields = _mapping_value(raw_profile, "required_fields")
-    normalized_required_fields = _normalize_required_field_keys(
-        list(required_fields)
-        if isinstance(required_fields, list)
-        else [str(required_fields or "")]
-    )
-
     fields = _mapping_value(raw_profile, "fields")
     normalized_fields = _normalized_profile_fields(fields if isinstance(fields, Mapping) else {})
     normalized_fields.update(_row_fields(raw_profile))
+    declared_field_keys = [
+        field_key
+        for key in (fields.keys() if isinstance(fields, Mapping) else ())
+        if (field_key := _direct_material_field_key(key))
+    ]
+    declared_field_keys = list(
+        dict.fromkeys((*declared_field_keys, *_row_field_keys(raw_profile)))
+    )
 
     field_sources = _mapping_value(raw_profile, "field_sources")
     normalized_field_sources = _normalized_field_sources(field_sources if isinstance(field_sources, Mapping) else {})
     if not normalized_field_sources:
-        normalized_field_sources = _field_sources_from_imported_keys(normalized_fields, set(normalized_fields))
+        normalized_field_sources = _field_sources_from_imported_keys(
+            set(declared_field_keys) or set(normalized_fields),
+        )
     field_aliases = _mapping_value(raw_profile, "field_aliases")
     normalized_field_aliases = _normalized_field_aliases(field_aliases if isinstance(field_aliases, Mapping) else {})
+    timeline_plans = _mapping_value(raw_profile, "timeline_plans")
+    normalized_timeline_plans = (
+        copy.deepcopy(dict(timeline_plans))
+        if isinstance(timeline_plans, Mapping)
+        else {}
+    )
 
     asset_paths = _mapping_value(raw_profile, "asset_paths")
     normalized_asset_paths = _normalized_asset_paths(asset_paths if isinstance(asset_paths, Mapping) else {})
     normalized_asset_paths.update(_row_asset_paths(raw_profile))
+    asset_bindings = _mapping_value(raw_profile, "asset_bindings")
+    normalized_asset_bindings = (
+        copy.deepcopy(dict(asset_bindings))
+        if isinstance(asset_bindings, Mapping)
+        else {}
+    )
+    normalized_asset_bindings.update(_row_asset_bindings(raw_profile))
     asset_metadata = _mapping_value(raw_profile, "asset_metadata")
     normalized_asset_metadata = _normalized_asset_metadata(
         asset_metadata if isinstance(asset_metadata, Mapping) else {}
@@ -169,6 +221,45 @@ def _profile_from_mapping(raw_profile: Mapping[str, Any], *, index: int) -> Enti
         ),
         *_row_asset_item_payloads(raw_profile),
     ]
+    asset_token_specs = _mapping_value(raw_profile, "asset_token_specs")
+    normalized_asset_token_specs = (
+        list(asset_token_specs)
+        if isinstance(asset_token_specs, Sequence)
+        and not isinstance(asset_token_specs, (str, bytes))
+        else []
+    )
+    image_material_rules = _mapping_value(raw_profile, "image_material_rules")
+    normalized_image_material_rules = (
+        copy.deepcopy(dict(image_material_rules))
+        if isinstance(image_material_rules, Mapping)
+        else {}
+    )
+    content_bindings = _mapping_value(raw_profile, "content_bindings")
+    normalized_content_bindings = (
+        copy.deepcopy(dict(content_bindings))
+        if isinstance(content_bindings, Mapping)
+        else {}
+    )
+    content_rules = _mapping_value(raw_profile, "content_rules")
+    normalized_content_rules = (
+        copy.deepcopy(list(content_rules))
+        if isinstance(content_rules, Sequence)
+        and not isinstance(content_rules, (str, bytes))
+        else []
+    )
+    attachment_bindings = _mapping_value(raw_profile, "attachment_bindings")
+    normalized_attachment_bindings = (
+        copy.deepcopy(dict(attachment_bindings))
+        if isinstance(attachment_bindings, Mapping)
+        else {}
+    )
+    attachment_role_specs = _mapping_value(raw_profile, "attachment_role_specs")
+    normalized_attachment_role_specs = (
+        copy.deepcopy(list(attachment_role_specs))
+        if isinstance(attachment_role_specs, Sequence)
+        and not isinstance(attachment_role_specs, (str, bytes))
+        else []
+    )
 
     if not profile_name:
         profile_name = normalized_fields.get("company_name") or f"第 {index} 份"
@@ -178,43 +269,77 @@ def _profile_from_mapping(raw_profile: Mapping[str, Any], *, index: int) -> Enti
         profile_name=profile_name,
         fields=normalized_fields,
         assets_dir=assets_dir,
-        required_fields=normalized_required_fields,
+        timeline_plans=normalized_timeline_plans,
+        declared_field_keys=declared_field_keys,
         field_sources=normalized_field_sources,
         field_aliases=normalized_field_aliases,
         asset_paths=normalized_asset_paths,
+        asset_bindings=normalized_asset_bindings,
         asset_metadata=normalized_asset_metadata,
+        asset_token_specs=normalized_asset_token_specs,
         asset_items=normalized_asset_items,
         asset_item_history=[],
+        image_material_rules=normalized_image_material_rules,
+        content_bindings=normalized_content_bindings,
+        content_rules=normalized_content_rules,
+        attachment_role_specs=normalized_attachment_role_specs,
+        attachment_bindings=normalized_attachment_bindings,
     )
 
 
 def _row_fields(row: Mapping[str, Any]) -> dict[str, str]:
     fields: dict[str, str] = {}
     for raw_key, raw_value in row.items():
-        key = str(raw_key or "").strip()
+        key = _row_field_key(raw_key)
         value = _cell_text(raw_value)
         if not key or not value:
             continue
-        if (
-            _is_profile_meta_key(key)
-            or _asset_role_for_import_key(key)
-            or _asset_metadata_role_for_import_key(key)[0]
-            or _repeated_asset_item_key(key)
-        ):
-            continue
-        if _normalized_import_key(key) in {
-            "fields",
-            "requiredfields",
-            "fieldsources",
-            "fieldaliases",
-            "assetpaths",
-            "assetmetadata",
-            "assetitems",
-        }:
-            continue
-        field_key = _field_alias_for_token(key) or key
-        fields[field_key] = value
+        fields[key] = value
     return fields
+
+
+def _row_field_keys(row: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return imported material columns even when a row has no value."""
+
+    return tuple(
+        dict.fromkeys(
+            key
+        for raw_key in row
+        if (key := _row_field_key(raw_key))
+        )
+    )
+
+
+def _row_field_key(raw_key: object) -> str:
+    key = str(raw_key or "").strip()
+    if not key:
+        return ""
+    if (
+        _is_profile_meta_key(key)
+        or _asset_role_for_import_key(key)
+        or _asset_metadata_role_for_import_key(key)[0]
+        or _repeated_asset_item_key(key)
+        or _asset_binding_role_for_import_key(key)
+    ):
+        return ""
+    if _normalized_import_key(key) in {
+        "fields",
+        "requiredfields",
+        "fieldsources",
+        "fieldaliases",
+        "assetpaths",
+        "assetmetadata",
+        "assetitems",
+        "assetbindings",
+        "assettokenspecs",
+        "attachmentrolespecs",
+        "imagematerialrules",
+        "contentbindings",
+        "contentrules",
+        "attachmentbindings",
+    }:
+        return ""
+    return _direct_material_field_key(key)
 
 
 def _row_asset_paths(row: Mapping[str, Any]) -> dict[str, str]:
@@ -225,6 +350,26 @@ def _row_asset_paths(row: Mapping[str, Any]) -> dict[str, str]:
         if role and value:
             asset_paths[role] = value
     return asset_paths
+
+
+def _row_asset_bindings(row: Mapping[str, Any]) -> dict[str, dict[str, object]]:
+    bindings: dict[str, dict[str, object]] = {}
+    for raw_key, raw_value in row.items():
+        role = _asset_binding_role_for_import_key(str(raw_key or ""))
+        value = _cell_text(raw_value)
+        if role and value:
+            bindings[role] = {
+                "role": role,
+                "cardinality": "multiple",
+                "source_kind": "directory",
+                "source_path": value,
+                "recursive": True,
+                "order_policy": "natural_path",
+                "naming_template": "{role}_{sequence:03d}",
+                "min_items": 0,
+                "max_items": None,
+            }
+    return bindings
 
 
 def _row_asset_metadata(row: Mapping[str, Any]) -> dict[str, dict[str, str]]:
@@ -372,8 +517,31 @@ def _normalized_profile_fields(fields: Mapping[str, Any]) -> dict[str, str]:
         value = _cell_text(raw_value)
         if not key or not value:
             continue
-        normalized[_field_alias_for_token(key) or key] = value
+        normalized[_direct_material_field_key(key)] = value
     return normalized
+
+
+def _direct_material_field_key(value: object) -> str:
+    key = str(value or "").strip()
+    if key.startswith("{{") and key.endswith("}}"):
+        key = key[2:-2].strip()
+    return key
+
+
+def _validate_unique_table_headers(headers: Sequence[object]) -> None:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for raw_header in headers:
+        key = _direct_material_field_key(raw_header)
+        if not key:
+            continue
+        if key in seen and key not in duplicates:
+            duplicates.append(key)
+        seen.add(key)
+    if duplicates:
+        raise ValueError(
+            "资料表存在重复字段，无法导入：" + "、".join(duplicates)
+        )
 
 
 def _normalized_asset_paths(asset_paths: Mapping[str, Any]) -> dict[str, str]:
@@ -407,6 +575,12 @@ def _row_has_values(row: Mapping[str, Any]) -> bool:
 def _cell_text(value: Any) -> str:
     if value is None:
         return ""
+    if isinstance(value, datetime):
+        if value.time().isoformat() == "00:00:00":
+            return value.date().isoformat()
+        return value.isoformat(sep=" ")
+    if isinstance(value, date):
+        return value.isoformat()
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value).strip()
@@ -414,7 +588,12 @@ def _cell_text(value: Any) -> str:
 
 def _is_profile_meta_key(key: str) -> bool:
     normalized = _normalized_import_key(key)
-    return normalized in _PROFILE_ID_ALIASES | _PROFILE_NAME_ALIASES | _ASSETS_DIR_ALIASES
+    return normalized in (
+        _PROFILE_ID_ALIASES
+        | _PROFILE_NAME_ALIASES
+        | _ASSETS_DIR_ALIASES
+        | {"timelineplans", "timelineplan"}
+    )
 
 
 def _asset_role_for_import_key(key: str) -> str:
@@ -423,7 +602,17 @@ def _asset_role_for_import_key(key: str) -> str:
         normalized = normalized[:-4]
     if normalized.endswith("文件"):
         normalized = normalized[:-2]
-    return _ASSET_IMPORT_ALIASES.get(normalized, "")
+    return resolve_asset_role_alias(normalized)
+
+
+def _asset_binding_role_for_import_key(key: str) -> str:
+    normalized = _normalized_import_key(key)
+    for suffix in ("folder", "directory", "dir", "文件夹", "目录"):
+        if not normalized.endswith(suffix):
+            continue
+        base = normalized[: -len(suffix)]
+        return resolve_asset_role_alias(base)
+    return ""
 
 
 def _asset_metadata_role_for_import_key(key: str) -> tuple[str, str]:
@@ -432,7 +621,7 @@ def _asset_metadata_role_for_import_key(key: str) -> tuple[str, str]:
         if not normalized.endswith(suffix):
             continue
         base = normalized[: -len(suffix)]
-        role = _asset_role_for_import_key(base) or _ASSET_IMPORT_ALIASES.get(base, "")
+        role = _asset_role_for_import_key(base) or resolve_asset_role_alias(base)
         if role:
             return role, meta_key
     return "", ""
@@ -440,8 +629,6 @@ def _asset_metadata_role_for_import_key(key: str) -> tuple[str, str]:
 
 _PROFILE_ID_ALIASES = {
     "profileid",
-    "id",
-    "编号",
     "资料编号",
     "这一份编号",
 }
@@ -449,12 +636,9 @@ _PROFILE_ID_ALIASES = {
 
 _PROFILE_NAME_ALIASES = {
     "profilename",
-    "name",
-    "名称",
     "这一份名称",
     "生成对象",
     "生成对象名称",
-    "角色",
 }
 
 
@@ -468,45 +652,13 @@ _ASSETS_DIR_ALIASES = {
 }
 
 
-_ASSET_IMPORT_ALIASES = {
-    "logo": "logo",
-    "标志": "logo",
-    "品牌标志": "logo",
-    "seal": "seal",
-    "公章": "seal",
-    "印章": "seal",
-    "legal_signature": "legal_signature",
-    "legalsignature": "legal_signature",
-    "法人签名": "legal_signature",
-    "法定代表人签名": "legal_signature",
-    "agent_signature": "agent_signature",
-    "agentsignature": "agent_signature",
-    "授权代表签名": "agent_signature",
-    "委托代理人签名": "agent_signature",
-    "qualification": "qualification",
-    "资质": "qualification",
-    "资质证书": "qualification",
-    "qrcode": "qrcode",
-    "二维码": "qrcode",
-    "cover": "cover",
-    "封面": "cover",
-    "封面图": "cover",
-    "questionfigure": "question_figure",
-    "questionimage": "question_figure",
-    "questionasset": "question_figure",
-    "题目图片": "question_figure",
-    "试题图片": "question_figure",
-    "题图": "question_figure",
-}
+_ASSET_IMPORT_ALIASES = ASSET_ROLE_ALIASES
 
 
-_QUESTION_FIGURE_IMPORT_BASES = (
-    "questionfigure",
-    "questionimage",
-    "questionasset",
-    "题目图片",
-    "试题图片",
-    "题图",
+_QUESTION_FIGURE_IMPORT_BASES = tuple(
+    alias
+    for alias, role in ASSET_ROLE_ALIASES.items()
+    if role == "question_figure"
 )
 
 
@@ -581,7 +733,9 @@ __all__ = [
     '_profiles_from_table_rows',
     '_profile_from_mapping',
     '_row_fields',
+    '_row_field_keys',
     '_row_asset_paths',
+    '_row_asset_bindings',
     '_row_asset_metadata',
     '_row_asset_item_payloads',
     '_repeated_asset_item_key',
@@ -594,6 +748,9 @@ __all__ = [
     '_question_figure_import_sort_key',
     '_normalized_profile_fields',
     '_normalized_asset_paths',
+    '_asset_binding_role_for_import_key',
+    '_direct_material_field_key',
+    '_validate_unique_table_headers',
     '_row_value',
     '_mapping_value',
     '_row_has_values',

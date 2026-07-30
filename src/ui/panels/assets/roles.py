@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from src.config.material_schema_registry import get_material_schema, resolve_material_schema_ids
+from src.services.material_attachments import attachment_extensions_for_types
+from src.shared.engine.material_token_contract import (
+    MaterialTokenNamespace,
+    material_token,
+)
+from src.shared.ui.path_drop import PathAcceptancePolicy
 from src.ui.panels.assets.fields import (
     _asset_role_label,
     _field_alias_for_token,
@@ -27,12 +33,18 @@ def _asset_slot_role_for_token(token: str, slot_specs: tuple[AssetSlotSpec, ...]
 
 
 def _asset_slot_target_for_role(role: str) -> str:
-    return "{{" + str(role or "").strip() + "}}"
+    return material_token(MaterialTokenNamespace.IMAGE, str(role or "").strip())
 
 
-def _accepted_types_include_attachment(accepted_types: tuple[str, ...] | list[str]) -> bool:
-    normalized = {str(item or "").strip().lower() for item in accepted_types or ()}
-    return bool(normalized - {"image"})
+def _material_role_is_attachment(role_spec: object) -> bool:
+    """Return the schema-owned material domain without format inference."""
+
+    return (
+        str(getattr(role_spec, "material_domain", "") or "")
+        .strip()
+        .casefold()
+        == "attachment"
+    )
 
 
 def _material_schema_ids_from_profile(profile) -> tuple[str, ...]:
@@ -61,19 +73,30 @@ def _schema_role_accepts_attachment(schema, role: str) -> bool:
     for role_spec in getattr(schema, "asset_roles", ()):
         current_role = str(getattr(role_spec, "role", "") or "").strip().lower().replace(" ", "_")
         if current_role == normalized_role:
-            return _accepted_types_include_attachment(getattr(role_spec, "accepted_types", ("image",)))
+            return _material_role_is_attachment(role_spec)
     return False
 
 
-def _attachment_file_filter(accepted_types: tuple[str, ...] | list[str]) -> str:
-    normalized = {str(item or "").strip().lower() for item in accepted_types or ()}
-    filters: list[str] = []
-    if "image" in normalized:
-        filters.append("Image Files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)")
-    if "pdf" in normalized:
-        filters.append("PDF Files (*.pdf)")
-    filters.append("All Files (*)")
-    return ";;".join(filters)
+def _attachment_path_policy(spec: AttachmentRoleSpec) -> PathAcceptancePolicy:
+    cardinality = str(spec.cardinality or "single").strip().casefold()
+    source_kind = str(spec.source_kind or "single_file").strip().casefold()
+    is_directory = source_kind in {"directory", "directory_package"}
+    return PathAcceptancePolicy(
+        path_kind="directory" if is_directory else "file",
+        suffixes=(
+            ()
+            if is_directory
+            else attachment_extensions_for_types(spec.accepted_types)
+        ),
+        cardinality=(
+            "single"
+            if is_directory
+            else ("multiple" if cardinality == "multiple" else "single")
+        ),
+        max_paths=(1 if is_directory else spec.max_items),
+        dialog_label=spec.label or "附件",
+        include_all_files=False,
+    )
 
 
 def _asset_slot_supports_alt_text(role: str) -> bool:
@@ -101,12 +124,12 @@ def _missing_placeholder_label(
 __all__ = [
     '_asset_slot_role_for_token',
     '_asset_slot_target_for_role',
-    '_accepted_types_include_attachment',
+    '_material_role_is_attachment',
     '_material_schema_ids_from_profile',
     '_material_schemas_from_ids',
     '_schemas_role_accept_attachment',
     '_schema_role_accepts_attachment',
-    '_attachment_file_filter',
+    '_attachment_path_policy',
     '_asset_slot_supports_alt_text',
     '_missing_placeholder_label',
 ]

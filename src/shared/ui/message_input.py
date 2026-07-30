@@ -7,7 +7,6 @@ from src.qt_api import (
     QHBoxLayout,
     QPushButton,
     QTextEdit,
-    QVBoxLayout,
     QWidget,
     Qt,
     Signal,
@@ -33,12 +32,14 @@ class MessageInput(QWidget):
     """
 
     message_sent = Signal(str)  # 消息发送信号
+    text_changed = Signal(str)  # 草稿持久化等场景使用
 
     def __init__(
         self,
         *,
         placeholder: str = "",
         send_button_text: str = "发送",
+        send_on_enter: bool = False,
         parent=None,
     ):
         """初始化消息输入控件。
@@ -51,6 +52,7 @@ class MessageInput(QWidget):
         super().__init__(parent)
         self._placeholder = placeholder
         self._send_button_text = send_button_text
+        self._send_on_enter = bool(send_on_enter)
 
         self._setup_ui()
         self._apply_theme()
@@ -68,6 +70,9 @@ class MessageInput(QWidget):
         self._text_edit.setMaximumHeight(120)
         self._text_edit.setMinimumHeight(40)
         self._text_edit.installEventFilter(self)
+        self._text_edit.textChanged.connect(
+            lambda: self.text_changed.emit(self._text_edit.toPlainText())
+        )
         layout.addWidget(self._text_edit, 1)
 
         # 发送按钮
@@ -126,9 +131,14 @@ class MessageInput(QWidget):
     def eventFilter(self, obj, event) -> bool:
         """事件过滤器，处理 Ctrl+Enter 发送"""
         if obj == self._text_edit and event.type() == QEvent.KeyPress:
-            if (
-                event.key() == Qt.Key_Return
-                and event.modifiers() == Qt.ControlModifier
+            is_return = event.key() in {Qt.Key_Return, Qt.Key_Enter}
+            modifiers = event.modifiers()
+            if is_return and (
+                modifiers == Qt.ControlModifier
+                or (
+                    self._send_on_enter
+                    and modifiers in {Qt.NoModifier, Qt.KeypadModifier}
+                )
             ):
                 self._on_send()
                 return True

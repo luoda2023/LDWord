@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import calendar
 import warnings
-from datetime import date, datetime
+from datetime import date
 
 from src.qt_api import (
     QGridLayout,
@@ -117,10 +117,7 @@ class DatePicker(QWidget):
             f"{self._view_year} 年 {self._view_month} 月"
         )
 
-        # calendar.monthcalendar 返回 [[周一..周日], ...], 0 表示不属于本月
-        # 我们要日历从周日开始，先获取 Mon-first 然后旋转
-        weeks_mon = calendar.monthcalendar(self._view_year, self._view_month)
-        # 转成 Sun-first
+        # Build a fixed six-week, Sunday-first grid.
         days: list[int] = []
         first_weekday = date(self._view_year, self._view_month, 1).weekday()  # 0=Mon
         first_col = (first_weekday + 1) % 7          # 0=Sun
@@ -212,7 +209,7 @@ class DatePicker(QWidget):
         self._next_month_btn.setStyleSheet(nav_style)
         self._month_label.setStyleSheet(
             f"color:{t.text_primary};font-size:{t.font_size_md}px;"
-            f"font-weight:600;background:transparent;border:none;"
+            f"font-weight:{t.font_weight_emphasis};background:transparent;border:none;"
         )
         self._refresh_calendar()
 

@@ -31,6 +31,8 @@ from dataclasses import dataclass, asdict
 from typing import Any
 import warnings
 
+from src.shared.ui.typography_policy import DEFAULT_TYPOGRAPHY, UI_FONT_FAMILY_QSS
+
 try:
     from src.qt_api import QApplication, QEvent, QObject, QTimer, Signal
     _HAS_QT = True
@@ -155,8 +157,19 @@ class AppTheme:
     button_radius: int = 6
     button_padding_x: int = 14
     button_padding_y: int = 4
+    # Interactive control heights are final QWidget outer heights. QSS
+    # builders subtract padding and borders when emitting min/max-height.
     button_height_md: int = 32
     button_font_weight: int = 700
+
+    # Compact, repeatable token-row actions shared by material fields,
+    # timelines, single-image slots, and multi-image folder slots.
+    compact_action_size: int = 30
+    compact_action_icon_size: int = 15
+    compact_action_gap: int = 4
+    token_row_min_height: int = 56
+    token_row_padding_y: int = 8
+    token_row_column_gap: int = 12
 
     input_radius: int = 6
     input_padding_x: int = 8
@@ -329,19 +342,24 @@ class AppTheme:
     shadow_offset_y_lg: int = 16         # 弹窗 Y 偏移
 
     # ━━ 字体 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    font_family: str = "'Microsoft YaHei', 'Microsoft YaHei UI', 'Segoe UI Variable', 'Segoe UI', 'Inter', '-apple-system', 'BlinkMacSystemFont', sans-serif"
+    # Compatibility QSS projection. New ordinary widgets should inherit the
+    # QApplication font supplied by typography_policy.
+    font_family: str = UI_FONT_FAMILY_QSS
 
-    font_size_xs: int = 11               # 角标、徽标
-    font_size_sm: int = 12               # 辅助文字、脚注
-    font_size_md: int = 13               # 正文（基准）
-    font_size_lg: int = 15               # 副标题、强调
-    font_size_xl: int = 16               # 卡片标题、对话框标题
-    font_size_xxl: int = 20              # 页面标题
+    # Compatibility aliases derive from the typography registry. New widgets
+    # should use semantic TextRole values instead of choosing an alias by size.
+    font_size_xs: int = DEFAULT_TYPOGRAPHY.micro_px
+    font_size_sm: int = DEFAULT_TYPOGRAPHY.caption_px
+    font_size_md: int = DEFAULT_TYPOGRAPHY.body_px
+    font_size_lg: int = DEFAULT_TYPOGRAPHY.subtitle_px
+    font_size_xl: int = DEFAULT_TYPOGRAPHY.title_px
+    font_size_xxl: int = DEFAULT_TYPOGRAPHY.page_title_px
 
-    font_weight_normal: int = 400
-    font_weight_medium: int = 500
-    font_weight_emphasis: int = 700
-    font_weight_bold: int = 700
+    font_weight_normal: int = DEFAULT_TYPOGRAPHY.regular_weight
+    # Microsoft YaHei has no Medium face; keep the semantic role on Regular.
+    font_weight_medium: int = 400
+    font_weight_emphasis: int = DEFAULT_TYPOGRAPHY.emphasis_weight
+    font_weight_bold: int = DEFAULT_TYPOGRAPHY.emphasis_weight
 
     # ━━ 间距 (px) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     spacing_xs: int = 4
@@ -357,9 +375,9 @@ class AppTheme:
     master_detail_detail_spacing: int = 0
 
     # ━━ 控件高度 (px) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    control_height_sm: int = 24          # 紧凑型（表格内、工具栏）
-    control_height_md: int = 30          # 默认（输入框、按钮）
-    control_height_lg: int = 36          # 大号（主操作按钮）
+    control_height_sm: int = 26          # 紧凑型最终外框（表格内、工具栏）
+    control_height_md: int = 32          # 默认最终外框（输入框、按钮）
+    control_height_lg: int = 38          # 大号最终外框（主操作按钮）
 
     # ━━ 动画时长 (ms) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     anim_duration_fast: int = 100        # 微交互（hover、toggle）
@@ -1333,9 +1351,9 @@ def derive_theme_from_core(
 
     def _shift_lightness(color: str, delta: float) -> str:
         r, g, b = _hex_to_rgb(color)
-        h, l, s = rgb_to_hls(r / 255, g / 255, b / 255)
-        l = max(0, min(1, l + delta))
-        r2, g2, b2 = hls_to_rgb(h, l, s)
+        hue, lightness, saturation = rgb_to_hls(r / 255, g / 255, b / 255)
+        lightness = max(0, min(1, lightness + delta))
+        r2, g2, b2 = hls_to_rgb(hue, lightness, saturation)
         return _rgb_to_hex(int(r2 * 255), int(g2 * 255), int(b2 * 255))
 
     def _luminance(color: str) -> float:

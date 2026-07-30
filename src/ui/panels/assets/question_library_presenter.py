@@ -226,19 +226,22 @@ class QuestionFigureLibraryPresenterMixin:
                 "\u5f53\u524d\u9898\u56fe\u4e0d\u662f\u7ed3\u6784\u5316\u7d20\u6750\u6761\u76ee\uff0c\u6682\u65f6\u4e0d\u80fd\u7f16\u8f91"
             )
             return False
+        snapshot = self._capture_question_figure_mutation_snapshot()
+        if snapshot is None:
+            return False
+        profile = self._selected_profile()
         self._asset_item_payloads = list(result.get("payloads") or [])
         history_record = result.get("history_record")
         if history_record:
-            profile = self._selected_profile()
             profile.asset_item_history = [
                 *normalized_asset_item_history_records(profile.asset_item_history),
                 dict(history_record),
             ]
-        self._persist_current_profile_editor()
+        if not self._publish_question_figure_mutation(snapshot):
+            return False
         self._refresh_summary()
         if row_index < table.rowCount():
             table.selectRow(row_index)
-        self._sync_material_batch_selection()
         self._question_figure_library_status_label.setText(
             "\u9898\u56fe\u7d20\u6750\u4fe1\u606f\u5df2\u4fdd\u5b58"
         )

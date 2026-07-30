@@ -574,7 +574,7 @@ class PageSetupDetail(QWidget):
 
     def _refresh_action_icons(self) -> None:
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
         except Exception:
             return
 
@@ -617,7 +617,7 @@ class PageSetupDetail(QWidget):
         apply_template_summary_action_button(self._save_btn, "primary")
 
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
 
             for icon_name, label in self._header_icons:
                 label.setPixmap(get_icon(icon_name, 18, theme.primary).pixmap(18, 18))

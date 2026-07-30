@@ -19,6 +19,7 @@ from src.qt_api import (
 )
 
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.keyed_widget_list import KeyedWidgetListController
 from src.shared.ui.theme import bind_theme, get_theme
 
 
@@ -43,6 +44,22 @@ class EvidenceLineItem:
         return self.label
 
 
+@dataclass(frozen=True, slots=True)
+class _KeyedEvidenceLine:
+    """Internal model carrying the stable identity of an evidence row."""
+
+    key: tuple[object, ...]
+    item: EvidenceLineItem
+
+
+@dataclass(frozen=True, slots=True)
+class _KeyedEvidenceAction:
+    """Internal model carrying the stable identity of an action button."""
+
+    key: tuple[object, ...]
+    item: EvidenceLineItem
+
+
 class EvidenceActionBar(QWidget):
     """Compact action row for evidence-related navigation and artifacts."""
 
@@ -52,18 +69,30 @@ class EvidenceActionBar(QWidget):
         super().__init__(parent)
         self._items: list[EvidenceLineItem] = []
         self._buttons: dict[str, QPushButton] = {}
+        self._button_items: dict[QPushButton, EvidenceLineItem] = {}
         self.setObjectName("shared_evidence_action_bar")
 
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(8)
         self._layout.addStretch(1)
+        self._button_controller = KeyedWidgetListController[
+            _KeyedEvidenceAction,
+            tuple[object, ...],
+        ](
+            layout=self._layout,
+            create_widget=self._create_button,
+            update_widget=self._update_button,
+            dispose_widget=self._dispose_button,
+            key=lambda entry: entry.key,
+            start_index=0,
+        )
         self.setVisible(False)
 
     def set_actions(self, items: Iterable[EvidenceLineItem]) -> None:
         actions = [item for item in items if item.has_action()]
         self._items = _dedupe_evidence_actions(actions)
-        self._rebuild()
+        self._reconcile_buttons()
         self.setVisible(bool(self._items))
 
     def clear(self) -> None:
@@ -78,39 +107,59 @@ class EvidenceActionBar(QWidget):
     def button_for_action_type(self, action_type: str) -> QPushButton | None:
         return self._buttons.get(str(action_type or "").strip())
 
-    def _rebuild(self) -> None:
+    def _reconcile_buttons(self) -> None:
         self._buttons.clear()
-        while self._layout.count() > 1:
-            item = self._layout.takeAt(0)
-            widget = item.widget() if item is not None else None
-            if widget is not None:
-                widget.setParent(None)
-                widget.deleteLater()
+        entries = _keyed_evidence_actions(self._items)
+        self._button_controller.reconcile(entries)
+        for entry, widget in zip(entries, self._button_controller.widgets()):
+            if not isinstance(widget, QPushButton):
+                raise TypeError("evidence action controller received an unexpected widget")
+            self._buttons.setdefault(entry.item.action_type, widget)
 
-        for line in self._items:
-            button = QPushButton(line.action_label or _default_evidence_action_label(line), self)
-            button.setObjectName(f"shared_evidence_action_btn_{line.action_type}")
-            button.setCursor(Qt.PointingHandCursor)
-            button.setIconSize(QSize(16, 16))
-            button.setToolTip(f"{button.text()}：{line.action_value}")
-            button.setStyleSheet(
-                build_button_stylesheet(
-                    get_theme(),
-                    selector="QPushButton",
-                    min_height=28,
-                    padding_x=12,
-                    padding_y=3,
-                    font_size=get_theme().font_size_sm,
-                )
+    def _create_button(self, entry: _KeyedEvidenceAction) -> QWidget:
+        button = QPushButton("", self)
+        button.setCursor(Qt.PointingHandCursor)
+        button.setIconSize(QSize(16, 16))
+        button.clicked.connect(
+            lambda _checked=False, target=button: self._emit_button_action(target)
+        )
+        apply_button_variant(button, "secondary")
+        return button
+
+    def _update_button(
+        self,
+        widget: QWidget,
+        entry: _KeyedEvidenceAction,
+        _index: int,
+    ) -> None:
+        if not isinstance(widget, QPushButton):
+            raise TypeError("evidence action controller received an unexpected widget")
+        line = entry.item
+        self._button_items[widget] = line
+        widget.setObjectName(f"shared_evidence_action_btn_{line.action_type}")
+        widget.setText(line.action_label or _default_evidence_action_label(line))
+        widget.setToolTip(f"{widget.text()}：{line.action_value}")
+        widget.setStyleSheet(
+            build_button_stylesheet(
+                get_theme(),
+                selector="QPushButton",
+                min_height=28,
+                padding_x=12,
+                padding_y=3,
+                font_size=get_theme().font_size_sm,
             )
-            apply_button_variant(button, "secondary")
-            button.clicked.connect(
-                lambda _checked=False, action=line.action_type, value=line.action_value: (
-                    self.action_requested.emit(action, value)
-                )
-            )
-            self._layout.insertWidget(max(0, self._layout.count() - 1), button, 0)
-            self._buttons.setdefault(line.action_type, button)
+        )
+
+    def _dispose_button(self, widget: QWidget) -> None:
+        if isinstance(widget, QPushButton):
+            self._button_items.pop(widget, None)
+        widget.setParent(None)
+        widget.deleteLater()
+
+    def _emit_button_action(self, button: QPushButton) -> None:
+        line = self._button_items.get(button)
+        if line is not None and line.has_action():
+            self.action_requested.emit(line.action_type, line.action_value)
 
 
 class EvidenceLineList(QWidget):
@@ -129,6 +178,15 @@ class EvidenceLineList(QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(4)
+        self._row_controller = KeyedWidgetListController[
+            _KeyedEvidenceLine,
+            tuple[object, ...],
+        ](
+            layout=self._layout,
+            create_widget=self._create_row,
+            update_widget=self._update_row,
+            key=lambda entry: entry.key,
+        )
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
@@ -136,7 +194,8 @@ class EvidenceLineList(QWidget):
 
     def set_items(self, items: Iterable[EvidenceLineItem]) -> None:
         self._items = [item for item in items if item.label or item.text]
-        self._rebuild()
+        self._row_controller.reconcile(_keyed_evidence_lines(self._items))
+        self._rows = list(self._row_controller.widgets())
         self.setVisible(bool(self._items))
 
     def clear(self) -> None:
@@ -151,24 +210,24 @@ class EvidenceLineList(QWidget):
     def text_at(self, index: int) -> str:
         return self._items[index].display_text()
 
-    def _rebuild(self) -> None:
-        self._rows.clear()
-        while self._layout.count():
-            item = self._layout.takeAt(0)
-            widget = item.widget() if item is not None else None
-            if widget is not None:
-                widget.setParent(None)
-                widget.deleteLater()
+    def _create_row(self, entry: _KeyedEvidenceLine) -> QWidget:
+        row = _EvidenceLineRow(
+            entry.item,
+            show_action=self._show_inline_actions,
+            parent=self,
+        )
+        row.action_requested.connect(self.action_requested.emit)
+        return row
 
-        for line in self._items:
-            row = _EvidenceLineRow(
-                line,
-                show_action=self._show_inline_actions,
-                parent=self,
-            )
-            row.action_requested.connect(self.action_requested.emit)
-            self._layout.addWidget(row)
-            self._rows.append(row)
+    @staticmethod
+    def _update_row(
+        widget: QWidget,
+        entry: _KeyedEvidenceLine,
+        _index: int,
+    ) -> None:
+        if not isinstance(widget, _EvidenceLineRow):
+            raise TypeError("evidence row controller received an unexpected widget")
+        widget.set_item(entry.item)
 
     def _apply_theme(self) -> None:
         self.setStyleSheet("background: transparent;")
@@ -186,6 +245,8 @@ class _EvidenceLineRow(QFrame):
     ) -> None:
         super().__init__(parent)
         self._item = item
+        self._show_action = bool(show_action)
+        self._action_btn: QPushButton | None = None
         self.setObjectName("shared_evidence_line_row")
         self.setFrameShape(QFrame.NoFrame)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
@@ -207,25 +268,42 @@ class _EvidenceLineRow(QFrame):
         self._body.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self._body, 1)
 
-        if show_action and item.has_action():
+        if self._show_action:
             self._action_btn = QPushButton(
-                item.action_label or _default_evidence_action_label(item),
+                "",
                 self,
             )
             self._action_btn.setObjectName("shared_evidence_line_action")
             self._action_btn.setCursor(Qt.PointingHandCursor)
-            self._action_btn.setToolTip(f"{self._action_btn.text()}：{item.action_value}")
-            self._action_btn.clicked.connect(
-                lambda _checked=False: self.action_requested.emit(
-                    item.action_type,
-                    item.action_value,
-                )
-            )
+            self._action_btn.clicked.connect(self._emit_action_requested)
             apply_button_variant(self._action_btn, "ghost-primary")
             layout.addWidget(self._action_btn, 0)
 
-        self._apply_theme()
+        self.set_item(item)
         bind_theme(self, self._apply_theme)
+
+    def set_item(self, item: EvidenceLineItem) -> None:
+        """Update row content without replacing the row widget."""
+
+        self._item = item
+        self._label.setText(item.label)
+        self._body.setText(item.text)
+        if self._action_btn is not None:
+            has_action = item.has_action()
+            action_label = item.action_label or _default_evidence_action_label(item)
+            self._action_btn.setText(action_label if has_action else "")
+            self._action_btn.setToolTip(
+                f"{action_label}：{item.action_value}" if has_action else ""
+            )
+            self._action_btn.setVisible(has_action)
+        self._apply_theme()
+
+    def _emit_action_requested(self, _checked: bool = False) -> None:
+        if self._item.has_action():
+            self.action_requested.emit(
+                self._item.action_type,
+                self._item.action_value,
+            )
 
     def _apply_theme(self) -> None:
         t = get_theme()
@@ -271,6 +349,69 @@ def _dedupe_evidence_actions(
         seen.add(key)
         result.append(item)
     return result
+
+
+def _keyed_evidence_actions(
+    items: Iterable[EvidenceLineItem],
+) -> list[_KeyedEvidenceAction]:
+    """Attach stable logical-slot keys to action buttons.
+
+    ``action_value`` is deliberately treated as mutable payload.  A navigation
+    button can therefore keep its QWidget identity when the target changes and
+    will emit the latest target on its next click.
+    """
+
+    occurrences: dict[tuple[object, ...], int] = {}
+    keyed: list[_KeyedEvidenceAction] = []
+    for item in items:
+        base_key: tuple[object, ...] = (
+            "action-button",
+            item.kind,
+            item.action_type,
+        )
+        occurrence = occurrences.get(base_key, 0)
+        occurrences[base_key] = occurrence + 1
+        keyed.append(
+            _KeyedEvidenceAction(
+                key=(*base_key, occurrence),
+                item=item,
+            )
+        )
+    return keyed
+
+
+def _keyed_evidence_lines(
+    items: Iterable[EvidenceLineItem],
+) -> list[_KeyedEvidenceLine]:
+    """Attach deterministic keys while allowing repeated evidence categories.
+
+    Evidence actions use their target as semantic identity.  Plain display rows
+    use kind and label, so changing only the displayed value updates the live
+    row instead of replacing it.  The occurrence suffix keeps repeated rows
+    valid and deterministic even when callers do not provide unique models.
+    """
+
+    occurrences: dict[tuple[object, ...], int] = {}
+    keyed: list[_KeyedEvidenceLine] = []
+    for item in items:
+        if item.has_action():
+            base_key: tuple[object, ...] = (
+                "action",
+                item.kind,
+                item.action_type,
+                item.action_value,
+            )
+        else:
+            base_key = ("line", item.kind, item.label)
+        occurrence = occurrences.get(base_key, 0)
+        occurrences[base_key] = occurrence + 1
+        keyed.append(
+            _KeyedEvidenceLine(
+                key=(*base_key, occurrence),
+                item=item,
+            )
+        )
+    return keyed
 
 
 def _default_evidence_action_label(item: EvidenceLineItem) -> str:

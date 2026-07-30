@@ -7,35 +7,27 @@ Sidebar 和 MainWindow 都从 PANEL_SPECS 读取导航配置，
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from importlib import import_module
 
-
-@dataclass(frozen=True)
-class PanelSpec:
-    """面板规格定义。"""
-    id: str
-    title: str
-    icon: str           # Lucide icon name in SIDEBAR_ICONS
-    group: str = "main"  # "main" | "bottom"
-    transitional: bool = False  # 过渡性入口，终态会替换
-
-
-PANEL_SPECS: tuple[PanelSpec, ...] = (
-    PanelSpec(id="workbench",   title="工作台",   icon="layout-dashboard"),
-    PanelSpec(id="scene",       title="场景配置", icon="target"),
-    PanelSpec(id="template",    title="模板管理", icon="file-text"),
-    PanelSpec(id="pipeline",    title="流水线",   icon="git-branch", transitional=True),
-    PanelSpec(id="assets",      title="资料包",   icon="package"),
-    PanelSpec(id="theme",       title="主题",     icon="palette",  group="bottom"),
-    PanelSpec(id="preferences", title="偏好设置", icon="settings",  group="bottom"),
+from src.ui.panel_specs import (
+    BOTTOM_SPECS as BOTTOM_SPECS,
+    MAIN_SPECS as MAIN_SPECS,
+    OPTIONAL_PANEL_SPECS as OPTIONAL_PANEL_SPECS,
+    PANEL_SPECS as PANEL_SPECS,
+    PanelSpec as PanelSpec,
 )
 
-MAIN_SPECS = tuple(s for s in PANEL_SPECS if s.group == "main")
-BOTTOM_SPECS = tuple(s for s in PANEL_SPECS if s.group == "bottom")
 
-
-def create_panel(panel_id: str, bridge):
+def create_panel(
+    panel_id: str,
+    bridge,
+    *,
+    include_optional_features: bool | None = None,
+):
     """Return a real panel instance when that panel has landed."""
+    # Kept only for compatibility with older integration callers. Core product
+    # capabilities must not disappear when optional specialist panels are off.
+    del include_optional_features
     if panel_id == "workbench":
         from src.ui.panels.workbench import WorkbenchPanel
 
@@ -49,11 +41,21 @@ def create_panel(panel_id: str, bridge):
 
         return TemplatePanel(bridge)
     if panel_id == "assets":
-        from src.ui.panels.assets_panel import AssetsPanel
+        panel_module = import_module("src.ui.panels.assets_panel")
+        return panel_module.AssetsPanel(bridge)
+    if panel_id == "assistant":
+        from src.assistant.ui.assistant_panel import AssistantPanel
 
-        return AssetsPanel(bridge)
+        # A global first-level destination with its own Design-compatible
+        # conversation sidebar. The right context rail stays out of this shell;
+        # context is represented once by Form's bridge and task surfaces.
+        return AssistantPanel(bridge, first_level=True)
     if panel_id == "theme":
         from src.ui.panels.theme_panel import ThemePanel
 
         return ThemePanel(bridge)
+    if panel_id == "preferences":
+        from src.ui.panels.preferences_panel import PreferencesPanel
+
+        return PreferencesPanel(bridge)
     return None

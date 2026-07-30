@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from src.qt_api import (
     QHBoxLayout,
-    QLabel,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -144,6 +143,17 @@ class Drawer(QWidget):
                 item.widget().setParent(None)
         self._body_layout.addWidget(widget)
 
+    def take_body(self) -> QWidget | None:
+        """Detach and return the current body without deleting it."""
+
+        item = self._body_layout.takeAt(0)
+        if item is None:
+            return None
+        widget = item.widget()
+        if widget is not None:
+            widget.setParent(None)
+        return widget
+
     def set_title(self, title: str) -> None:
         self._title = title
         self._title_lbl.setText(title)
@@ -151,7 +161,9 @@ class Drawer(QWidget):
     def open(self) -> None:
         """打开抽屉（相对父窗口全屏展开）"""
         if self.parent():
-            self.setGeometry(self.parent().rect())
+            geometry = self.parent().rect()
+            geometry.moveTopLeft(self.parent().mapToGlobal(geometry.topLeft()))
+            self.setGeometry(geometry)
         self.show()
         self.raise_()
 

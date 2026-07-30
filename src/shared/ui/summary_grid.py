@@ -8,7 +8,6 @@ from typing import Literal, Sequence
 from src.qt_api import (
     QColor,
     QFont,
-    QGraphicsDropShadowEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -255,9 +254,6 @@ class _ModuleSummaryTile(QWidget):
         self.setMinimumHeight(self.TILE_MIN_HEIGHT)
         self.setAttribute(Qt.WA_StyledBackground, True)
 
-        self._shadow = QGraphicsDropShadowEffect(self)
-        self.setGraphicsEffect(self._shadow)
-
         layout = QHBoxLayout(self)
         self._layout = layout
 
@@ -317,13 +313,6 @@ class _ModuleSummaryTile(QWidget):
         t = get_theme()
         item = self._item
 
-        variant_value = {
-            "neutral": t.text_primary,
-            "info": t.primary,
-            "success": t.success,
-            "warning": t.warning,
-            "error": t.error,
-        }
         variant_icon = {
             "neutral": t.primary,
             "info": t.primary,
@@ -361,9 +350,6 @@ class _ModuleSummaryTile(QWidget):
             }}
             """
         )
-        self._shadow.setBlurRadius(t.shadow_blur_sm)
-        self._shadow.setColor(QColor(0, 0, 0, t.module_summary_shadow_alpha))
-        self._shadow.setOffset(0, t.module_summary_shadow_offset_y)
 
         _apply_font(self._label, pixel_size=t.module_summary_title_font_size, weight=t.font_weight_emphasis)
         _apply_font(self._value, pixel_size=t.font_size_md, weight=t.font_weight_normal)
@@ -392,7 +378,7 @@ class _ModuleSummaryTile(QWidget):
 
         if item.icon_name:
             try:
-                from src.ui.icons.catalog import get_icon
+                from src.shared.ui.icons.catalog import get_icon
 
                 self._icon_container.setPixmap(
                     get_icon(item.icon_name, icon_size, icon_color).pixmap(
@@ -438,13 +424,32 @@ class SummaryGrid(QWidget):
         bind_theme(self, self._apply_theme)
 
     def set_items(self, items: Sequence[SummaryGridItem]) -> None:
+        next_items = list(items)
+        self._validate_unique_keys(next_items)
+        if (
+            next_items == self._items
+            and self._effective_columns() == self._render_columns
+        ):
+            return
+
         parent = self.parentWidget()
         with updates_suspended(parent, self):
-            self._items = list(items)
-            self._rebuild()
+            layout_changed = self._layout_signature(next_items) != self._layout_signature(
+                self._items
+            )
+            self._items = next_items
+            self._reconcile_tiles(
+                relayout=layout_changed
+                or self._effective_columns() != self._render_columns
+            )
             self.updateGeometry()
             self._sync_parent_summary_height()
-        refresh_layout_chain(parent or self, passes=2)
+        # Hidden detail panes still need their local item/size-hint cache, but
+        # propagating a layout refresh through hidden ancestors only causes
+        # unrelated visible pages to remeasure.  Their showEvent will commit
+        # the parent chain when they become visible.
+        if self.isVisible():
+            refresh_layout_chain(parent or self, passes=2)
 
     def items(self) -> list[SummaryGridItem]:
         return list(self._items)
@@ -463,14 +468,55 @@ class SummaryGrid(QWidget):
             return ""
         return tile.item.tooltip or _item_tooltip(tile.item)
 
-    def _rebuild(self) -> None:
-        while self._layout.count():
-            child = self._layout.takeAt(0)
-            widget = child.widget()
-            if widget is not None:
-                widget.deleteLater()
+    @staticmethod
+    def _validate_unique_keys(items: Sequence[SummaryGridItem]) -> None:
+        seen: set[str] = set()
+        duplicate_keys: list[str] = []
+        for item in items:
+            if item.key in seen and item.key not in duplicate_keys:
+                duplicate_keys.append(item.key)
+            seen.add(item.key)
+        if duplicate_keys:
+            duplicates = ", ".join(repr(key) for key in duplicate_keys)
+            raise ValueError(
+                f"SummaryGrid item keys must be unique; duplicates: {duplicates}"
+            )
 
-        self._tiles.clear()
+    @staticmethod
+    def _layout_signature(
+        items: Sequence[SummaryGridItem],
+    ) -> tuple[tuple[str, int], ...]:
+        return tuple((item.key, item.column_span) for item in items)
+
+    def _reconcile_tiles(self, *, relayout: bool) -> None:
+        previous_tiles = self._tiles
+        next_tiles: dict[str, _SummaryTile | _ModuleSummaryTile] = {}
+
+        for item in self._items:
+            tile = previous_tiles.get(item.key)
+            if tile is None:
+                tile = self._build_tile(item)
+            elif tile.item != item:
+                tile.set_item(item)
+            next_tiles[item.key] = tile
+
+        removed_tiles = [
+            tile for key, tile in previous_tiles.items() if key not in next_tiles
+        ]
+        self._tiles = next_tiles
+
+        if relayout:
+            self._relayout_tiles()
+
+        for tile in removed_tiles:
+            self._layout.removeWidget(tile)
+            tile.hide()
+            tile.deleteLater()
+
+    def _relayout_tiles(self) -> None:
+        while self._layout.count():
+            self._layout.takeAt(0)
+
         self._render_columns = self._effective_columns()
         for column in range(self._columns):
             self._layout.setColumnStretch(column, 1 if column < self._render_columns else 0)
@@ -484,8 +530,7 @@ class SummaryGrid(QWidget):
                 row += 1
                 column = 0
 
-            tile = self._build_tile(item)
-            self._tiles[item.key] = tile
+            tile = self._tiles[item.key]
             self._layout.addWidget(tile, row, column, 1, span)
             max_row = max(max_row, row)
 
@@ -621,12 +666,12 @@ class SummaryGrid(QWidget):
 
     def resizeEvent(self, event) -> None:
         next_columns = self._effective_columns()
-        rebuilt = False
+        relaid_out = False
         if next_columns != self._render_columns:
-            self._rebuild()
-            rebuilt = True
+            self._relayout_tiles()
+            relaid_out = True
         super().resizeEvent(event)
-        if rebuilt:
+        if relaid_out:
             self.updateGeometry()
             self._sync_parent_summary_height()
 

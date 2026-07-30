@@ -13,6 +13,10 @@ from src.services.material_assets import (
 )
 from src.shared.ui.card import Card
 from src.shared.ui.theme import get_theme
+from src.shared.engine.material_token_contract import (
+    MaterialTokenKind,
+    try_parse_material_token,
+)
 from src.ui.adapters.field_display_names import navigation_issue_hint
 from src.ui.bridge import navigation_intent_value
 from src.ui.panels.assets.fields import _asset_role_label, _placeholder_key
@@ -27,8 +31,7 @@ class MaterialRepairNavigationMixin:
         if self.focus_material_repair_target(target_type, target_key):
             return
         if target_type == "custom":
-            self._show_missing_target(self._fields_edit, self._profile_card)
-            self._fields_edit.setFocus()
+            self._add_unknown_placeholder_field(target_key)
             return
         preview_target = self._preview_table if getattr(self, "_preview_table", None) is not None else self._preview_label
         self._show_missing_target(preview_target, self._preview_card)
@@ -38,7 +41,13 @@ class MaterialRepairNavigationMixin:
         target_type = str(target_type or "").strip()
         target_key = str(target_key or "").strip()
         if target_type == "field":
-            widget = self._field_inputs.get(target_key)
+            widget = (
+                self._field_inputs.get(target_key)
+                or self._official_fixed_field_inputs.get(target_key)
+                or self._official_floating_field_previews.get(target_key)
+                or self._official_field_rows.get(target_key)
+                or self._template_field_inputs.get(target_key)
+            )
             if widget is not None:
                 self._show_missing_target(widget, self._profile_card)
                 widget.setFocus()
@@ -50,6 +59,8 @@ class MaterialRepairNavigationMixin:
             if self._focus_attachment_role(target_key):
                 return True
             return False
+        if target_type == "content":
+            return self._focus_content_material(target_key)
         if target_type == "question_figure_item":
             return self._focus_question_figure_item(target_key)
         return False
@@ -59,6 +70,13 @@ class MaterialRepairNavigationMixin:
         payload = navigation_intent_value(intent, "payload", {}) or {}
         if not isinstance(payload, dict):
             payload = {}
+        section_id = str(
+            navigation_intent_value(intent, "card_id", "")
+            or payload.get("section_id")
+            or ""
+        ).strip()
+        if section_id:
+            self._select_section(section_id)
         target_type = str(
             navigation_intent_value(intent, "issue_id", "")
             or payload.get("issue_type")
@@ -71,7 +89,12 @@ class MaterialRepairNavigationMixin:
             or payload.get("repair_target_key")
             or ""
         ).strip()
-        if target_type in {"field", "asset", "question_figure_item"} and target_key:
+        if target_type in {
+            "field",
+            "asset",
+            "content",
+            "question_figure_item",
+        } and target_key:
             self.focus_material_repair_target(target_type, target_key)
 
     def _set_return_navigation_intent(self, intent) -> None:
@@ -139,7 +162,12 @@ class MaterialRepairNavigationMixin:
         target_key: str,
     ) -> bool:
         selected = self._select_profile_for_repair(profile_id, profile_name)
-        if target_type in {"field", "asset", "question_figure_item"} and target_key:
+        if target_type in {
+            "field",
+            "asset",
+            "content",
+            "question_figure_item",
+        } and target_key:
             if self.focus_material_repair_target(target_type, target_key):
                 return True
         if selected:
@@ -229,24 +257,27 @@ class MaterialRepairNavigationMixin:
 
     def _next_missing_target(self) -> tuple[str, str]:
         state = self._current_preview_state()
-        for key in state["missing_required_fields"]:
-            return ("field", key)
-        if not state["fields"]:
-            default_required = self._default_required_field_keys()
-            if default_required:
-                return ("field", default_required[0])
         for role in state["missing_asset_roles"]:
             return ("asset", role)
         for token in state["unmatched_placeholders"]:
-            field_widget = self._field_inputs.get(token)
+            ref = try_parse_material_token(str(token))
+            if ref is not None and ref.kind is MaterialTokenKind.CONTENT:
+                return ("content", ref.identifier)
+            if ref is not None and ref.kind is MaterialTokenKind.ATTACHMENT:
+                return ("attachments", ref.identifier)
+            field_key = self._placeholder_field_key(token)
+            field_widget = (
+                self._field_inputs.get(token)
+                or self._official_fixed_field_inputs.get(field_key)
+                or self._official_floating_field_previews.get(field_key)
+                or self._official_field_rows.get(field_key)
+                or self._template_field_inputs.get(field_key)
+            )
             if field_widget is not None:
                 return ("field", token)
             role = _asset_slot_role_for_token(token, self._asset_slot_specs)
             if role:
                 return ("asset", role)
-            attachment_role = self._attachment_role_for_token(token)
-            if attachment_role:
-                return ("asset", attachment_role)
         if state["unmatched_placeholders"]:
             return ("custom", state["unmatched_placeholders"][0])
         return ("preview", "")
@@ -268,7 +299,7 @@ class MaterialRepairNavigationMixin:
         if button is None:
             return False
         target_widget = self._attachment_role_rows.get(role, button)
-        self._show_missing_target(target_widget, self._image_card)
+        self._show_missing_target(target_widget, self._attachment_card)
         button.setFocus()
         status = self._attachment_role_status_labels.get(role)
         spec = self._attachment_role_spec(role)
@@ -355,6 +386,10 @@ class MaterialRepairNavigationMixin:
             self._select_section(section_id)
 
     def _select_section(self, section_id: str) -> None:
+        section_id = {"preview": "generate"}.get(
+            section_id,
+            section_id,
+        )
         if section_id not in self._section_pages:
             return
         previous = self._active_section_id

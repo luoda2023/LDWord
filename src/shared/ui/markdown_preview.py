@@ -5,11 +5,9 @@ from __future__ import annotations
 import re
 
 from src.qt_api import (
-    QScrollArea,
     QTextEdit,
     QVBoxLayout,
     QWidget,
-    Qt,
 )
 
 from src.shared.ui.theme import bind_theme, get_theme
@@ -100,7 +98,7 @@ class MarkdownPreview(QWidget):
                 sizes = {1: "24", 2: "20", 3: "16", 4: "14", 5: "13", 6: "12"}
                 sz = sizes.get(level, "14")
                 html_lines.append(
-                    f'<p style="font-size:{sz}px;font-weight:600;'
+                    f'<p style="font-size:{sz}px;font-weight:{t.font_weight_emphasis};'
                     f'color:{t.text_primary};margin:8px 0 4px 0;">'
                     f'{self._inline(m.group(2))}</p>'
                 )

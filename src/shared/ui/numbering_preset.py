@@ -8,7 +8,6 @@ from src.qt_api import Signal
 
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.sizing import apply_size_class
-from src.shared.ui.theme import get_theme
 
 _PRESETS = {
     "arabic_dot": "1. / 1.1 / 1.1.1",

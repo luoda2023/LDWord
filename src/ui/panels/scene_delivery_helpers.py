@@ -10,6 +10,7 @@ from string import Formatter
 from src.config.delivery_preset_display import delivery_preset_display_name
 from src.config.feature_configs import OutputConfig
 from src.config.library import get_template_entry
+from src.config.work_mode import work_mode_for_scene_id
 from src.config.scene import ContentVisibilityRule, SceneWorkspace
 from src.config.scene_family_application import (
     apply_planned_scene_family_defaults,
@@ -24,7 +25,7 @@ from src.ui.adapters.content_visibility_display import (
     content_visibility_selector_label,
     content_visibility_selector_tooltip,
 )
-from src.ui.panels.scene_summary_projection import FAMILY_DISPLAY_LABELS
+from src.ui.panels.scene_product_summary_projection import FAMILY_DISPLAY_LABELS
 
 
 def _format_visibility_rules(rules) -> str:
@@ -76,7 +77,7 @@ def _split_visibility_rule_line(line: str) -> tuple[str, str]:
 
 def _normalize_visibility_action(value: str) -> str:
     normalized = str(value or "remove").strip().lower()
-    return normalized if normalized in {"remove", "hide", "exclude"} else "remove"
+    return normalized
 
 
 _DELIVERY_TEMPLATE_VARIABLES = (
@@ -110,8 +111,6 @@ _VISIBILITY_MARKER_INPUT_RE = re.compile(
 )
 _VISIBILITY_ACTION_OPTIONS = {
     "remove": "删除块",
-    "hide": "隐藏块",
-    "exclude": "排除块",
 }
 _DELIVERY_PRESET_TEMPLATE_SPECS = (
     {
@@ -173,6 +172,7 @@ _DELIVERY_PRESET_TEMPLATE_MAP = {
 }
 _DELIVERY_PRESET_TEMPLATE_ARTIFACTS = (
     ("final_docx", "最终 Word", True),
+    ("review_pdf", "审阅 PDF", False),
     ("compare_docx", "对比 Word", False),
     ("report_json", "报告 JSON", True),
     ("report_markdown", "报告 Markdown", True),
@@ -258,13 +258,13 @@ def _compact_delivery_preview_labels(
 
 def _scene_family_delivery_preview_tooltip(scene: SceneWorkspace | None) -> str:
     if scene is None:
-        return "暂无场景，无法应用推荐交付版本。"
+        return "暂无方案，无法应用推荐交付版本。"
     if not has_planned_scene_family_application(scene):
-        return "当前场景类型暂无自动推荐交付版本。"
+        return "当前方案类型暂无自动推荐交付版本。"
     preview = copy.deepcopy(scene)
     result = apply_planned_scene_family_defaults(preview)
     if not result.applied:
-        return "当前场景类型暂无自动推荐交付版本。"
+        return "当前方案类型暂无自动推荐交付版本。"
     family_label = FAMILY_DISPLAY_LABELS.get(
         result.family_id,
         str(result.family_id or "").replace("_", " "),
@@ -278,8 +278,8 @@ def _scene_family_delivery_preview_tooltip(scene: SceneWorkspace | None) -> str:
         for preset_id in result.updated_presets
     ]
     lines = [
-        "按当前场景类型补齐推荐交付版本。",
-        f"场景类型：{family_label}",
+        "按当前方案类型补齐推荐交付版本。",
+        f"方案类型：{family_label}",
     ]
     added_text = _compact_delivery_preview_labels(added_labels)
     if added_text:
@@ -303,6 +303,7 @@ def _apply_delivery_preset_template_artifacts(
     spec: dict[str, object],
 ) -> OutputConfig:
     artifacts.final_docx = bool(spec.get("final_docx", True))
+    artifacts.review_pdf = bool(spec.get("review_pdf", False))
     artifacts.compare_docx = bool(spec.get("compare_docx", False))
     artifacts.compare_text = artifacts.compare_docx
     artifacts.compare_formatting = artifacts.compare_docx
@@ -640,12 +641,13 @@ def _build_target_template_summary_item(preset, scene: SceneWorkspace | None) ->
     target_id = str(getattr(preset, "target_template_id", "") or "").strip()
     current_id = _scene_current_template_id(scene)
     compatible_ids = set(_scene_compatible_template_ids(scene))
+    mode_id = _mode_id_for_scene(scene)
     if not target_id:
         return SummaryGridItem(
             key="delivery_target_template",
             label="目标模板",
             value="当前模板",
-            detail=_template_label_with_id(current_id) if current_id else "跟随当前场景模板",
+            detail=_template_label_with_id(current_id, mode_id=mode_id) if current_id else "跟随当前方案模板",
             variant="info",
         )
     if target_id in compatible_ids:
@@ -653,16 +655,16 @@ def _build_target_template_summary_item(preset, scene: SceneWorkspace | None) ->
             key="delivery_target_template",
             label="目标模板",
             value="兼容模板",
-            detail=_template_label_with_id(target_id),
+            detail=_template_label_with_id(target_id, mode_id=mode_id),
             variant="success",
         )
-    entry = get_template_entry(target_id)
+    entry = get_template_entry(target_id, mode_id=mode_id)
     if entry is not None:
         return SummaryGridItem(
             key="delivery_target_template",
             label="目标模板",
             value="非兼容",
-            detail=f"{entry.name} ({target_id}) 不在当前场景兼容列表",
+            detail=f"{entry.name} ({target_id}) 不在当前方案兼容列表",
             variant="warning",
         )
     return SummaryGridItem(
@@ -677,59 +679,53 @@ def _build_target_template_summary_item(preset, scene: SceneWorkspace | None) ->
 def _scene_current_template_id(scene: SceneWorkspace | None) -> str:
     if scene is None:
         return ""
-    for value in (
-        getattr(scene, "template_id", ""),
-        getattr(scene, "default_template_id", ""),
-        *list(getattr(scene, "compatible_template_ids", []) or []),
-    ):
-        normalized = str(value or "").strip()
-        if normalized:
-            return normalized
-    return ""
+    return str(getattr(scene, "template_id", "") or "").strip()
 
 
 def _scene_compatible_template_ids(scene: SceneWorkspace | None) -> list[str]:
     ids: list[str] = []
     if scene is None:
         return ids
-    for value in (
-        getattr(scene, "template_id", ""),
-        getattr(scene, "default_template_id", ""),
-        *list(getattr(scene, "compatible_template_ids", []) or []),
-    ):
+    for value in list(getattr(scene, "compatible_template_ids", []) or []):
         normalized = str(value or "").strip()
         if normalized and normalized not in ids:
             ids.append(normalized)
     return ids
 
 
-def _template_label_with_id(template_id: str) -> str:
+def _template_label_with_id(template_id: str, *, mode_id: str | None = None) -> str:
     normalized = str(template_id or "").strip()
     if not normalized:
         return ""
-    entry = get_template_entry(normalized)
+    entry = get_template_entry(normalized, mode_id=mode_id)
     if entry is None:
         return normalized
     return f"{entry.name} ({normalized})"
 
 
-def _template_display_label(template_id: str) -> str:
+def _template_display_label(template_id: str, *, mode_id: str | None = None) -> str:
     normalized = str(template_id or "").strip()
     if not normalized:
         return ""
-    entry = get_template_entry(normalized)
+    entry = get_template_entry(normalized, mode_id=mode_id)
     return entry.name if entry is not None else normalized
 
 
-def _template_option_tooltip(template_id: str) -> str:
+def _template_option_tooltip(template_id: str, *, mode_id: str | None = None) -> str:
     normalized = str(template_id or "").strip()
     if not normalized:
-        return "留空时使用当前场景模板"
-    entry = get_template_entry(normalized)
+        return "留空时使用当前方案模板"
+    entry = get_template_entry(normalized, mode_id=mode_id)
     lines = [f"模板 ID：{normalized}"]
     if entry is not None:
         lines.insert(0, f"模板名称：{entry.name}")
     return "\n".join(lines)
+
+
+def _mode_id_for_scene(scene: SceneWorkspace | None) -> str:
+    if scene is None:
+        return "custom"
+    return work_mode_for_scene_id(str(getattr(scene, "scene_id", "") or "")).mode_id
 
 
 def _validate_visibility_rule_text(text: str) -> list[str]:
@@ -747,7 +743,7 @@ def _validate_visibility_rule_text(text: str) -> list[str]:
             continue
         if not _VISIBILITY_SELECTOR_RE.match(selector):
             issues.append(f"第 {line_no} 行内容块名只能包含字母数字、_、-、.")
-        if action not in {"remove", "hide", "exclude"}:
+        if action != "remove":
             issues.append(f"第 {line_no} 行未知处理动作: {action or '空'}")
         key = selector.lower()
         if key in seen:

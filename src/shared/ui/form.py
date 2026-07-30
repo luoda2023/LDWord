@@ -15,6 +15,8 @@ from src.qt_api import (
 )
 
 from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.divider import Divider
 from src.shared.ui.inline_alert import InlineAlert
 
@@ -128,7 +130,7 @@ class Form(QWidget):
         lbl = QLabel(lbl_text)
         lbl.setStyleSheet(
             f"color:{t.text_primary};font-size:{t.font_size_md}px;"
-            f"font-weight:500;background:transparent;border:none;"
+            f"font-weight:{t.font_weight_medium};background:transparent;border:none;"
         )
         field_l.addWidget(lbl)
 
@@ -168,35 +170,17 @@ class Form(QWidget):
             cancel_btn = QPushButton(cancel_text)
             cancel_btn.setCursor(Qt.PointingHandCursor)
             cancel_btn.clicked.connect(self.cancelled.emit)
-            cancel_btn.setStyleSheet(
-                f"""
-                QPushButton {{
-                    background:{t.bg_card}; color:{t.text_primary};
-                    border:1px solid {t.border}; border-radius:{t.button_radius}px;
-                    padding:{t.button_padding_y}px {t.button_padding_x}px;
-                    font-size:{t.font_size_md}px; min-height:{t.button_height_md}px;
-                }}
-                QPushButton:hover {{ background:{t.bg_hover}; }}
-                """
-            )
+            apply_button_variant(cancel_btn, "secondary")
+            apply_size_class(cancel_btn, "md")
+            cancel_btn.setStyleSheet(build_button_stylesheet(t))
             self._btn_row.addWidget(cancel_btn)
 
         submit_btn = QPushButton(text)
         submit_btn.setCursor(Qt.PointingHandCursor)
         submit_btn.clicked.connect(self._on_submit)
-        submit_btn.setStyleSheet(
-            f"""
-            QPushButton {{
-                background:{t.primary}; color:{t.text_on_primary};
-                border:none; border-radius:{t.button_radius}px;
-                padding:{t.button_padding_y}px {t.button_padding_x}px;
-                font-size:{t.font_size_md}px; font-weight:{t.button_font_weight};
-                min-height:{t.button_height_md}px;
-            }}
-            QPushButton:hover {{ background:{t.primary_hover}; }}
-            QPushButton:pressed {{ background:{t.primary_pressed}; }}
-            """
-        )
+        apply_button_variant(submit_btn, "primary")
+        apply_size_class(submit_btn, "md")
+        submit_btn.setStyleSheet(build_button_stylesheet(t))
         self._btn_row.addWidget(submit_btn)
         self._layout.addLayout(self._btn_row)
         return self

@@ -9,11 +9,13 @@ from src.qt_api import (
     QVBoxLayout,
     QWidget,
     Qt,
-    Signal,
 )
 
 from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.typography import Typography
+from src.shared.ui.icons.catalog import get_icon
 
 
 class Result(QWidget):
@@ -56,16 +58,8 @@ class Result(QWidget):
         layout.setSpacing(16)
         layout.setAlignment(Qt.AlignCenter)
 
-        icon_map = {
-            "success": "✓",
-            "error": "✕",
-            "warning": "⚠",
-            "info": "ℹ",
-        }
-        icon_char = icon_map.get(self._status, icon_map["info"])
-
         # 大图标
-        self._icon_lbl = QLabel(icon_char)
+        self._icon_lbl = QLabel()
         self._icon_lbl.setAlignment(Qt.AlignCenter)
         self._icon_lbl.setFixedSize(72, 72)
         layout.addWidget(self._icon_lbl, 0, Qt.AlignCenter)
@@ -104,11 +98,17 @@ class Result(QWidget):
         }
         color = icon_color_map.get(self._status, t.info)
         bg = bg_color_map.get(self._status, t.info_bg)
+        icon_name = {
+            "success": "circle-check",
+            "error": "circle-x",
+            "warning": "alert-triangle",
+            "info": "info",
+        }.get(self._status, "info")
+        self._icon_lbl.setPixmap(get_icon(icon_name, 36, color).pixmap(36, 36))
 
         self._icon_lbl.setStyleSheet(
             f"""
             QLabel {{
-                color: {color}; font-size: 36px; font-weight: bold;
                 background: {bg};
                 border-radius: 36px;
                 border: none;
@@ -128,10 +128,9 @@ class Result(QWidget):
         callback=None,
     ) -> QPushButton:
         """添加操作按钮"""
-        t = get_theme()
         btn = QPushButton(text)
         btn.setCursor(Qt.PointingHandCursor)
-        btn.setMinimumHeight(t.button_height_md)
+        apply_size_class(btn, "md")
         btn.setProperty("_result_primary", bool(primary))
         self._style_action_button(btn, primary)
 
@@ -144,31 +143,9 @@ class Result(QWidget):
 
     def _style_action_button(self, button: QPushButton, primary: bool) -> None:
         t = get_theme()
-        if primary:
-            button.setStyleSheet(
-                f"""
-                QPushButton {{
-                    background:{t.primary}; color:{t.text_on_primary};
-                    border:none; border-radius:{t.button_radius}px;
-                    padding:{t.button_padding_y}px {t.button_padding_x}px;
-                    font-size:{t.font_size_md}px; font-weight:{t.button_font_weight};
-                }}
-                QPushButton:hover {{ background:{t.primary_hover}; }}
-                QPushButton:pressed {{ background:{t.primary_pressed}; }}
-                """
-            )
-            return
-        button.setStyleSheet(
-            f"""
-            QPushButton {{
-                background:{t.bg_card}; color:{t.text_primary};
-                border:1px solid {t.border}; border-radius:{t.button_radius}px;
-                padding:{t.button_padding_y}px {t.button_padding_x}px;
-                font-size:{t.font_size_md}px;
-            }}
-            QPushButton:hover {{ background:{t.bg_hover}; border-color:{t.border_focus}; }}
-            """
-        )
+        apply_button_variant(button, "primary" if primary else "secondary")
+        apply_size_class(button, "md")
+        button.setStyleSheet(build_button_stylesheet(t))
 
     def set_status(self, status: str) -> None:
         self._status = status

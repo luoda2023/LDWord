@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.config.feature_configs import default_continuous_page_number_phases
+from src.config.header_footer_presets import split_page_number_phases
 from src.config.template import PageNumberPhaseConfig, TemplateConfig
 from src.qt_api import (
     QHBoxLayout,
@@ -33,11 +34,13 @@ from src.shared.ui.flow_section import FlowSection
 from src.shared.ui.inline_alert import InlineAlert
 from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.layout_sync import refresh_layout_chain, refresh_layout_chain_later, updates_suspended
+from src.shared.ui.sizing import apply_size_class, control_size_metrics
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.styled_spin_box import StyledSpinBox
 from src.shared.ui.template_form_layout import TemplateFormGrid, compact_form_column_gap, template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
+from src.shared.ui.viewport_mutation import viewport_mutation_for_widget
 
 if TYPE_CHECKING:
     from src.ui.panels.template_elements_detail import ElementsDetail
@@ -146,25 +149,7 @@ def continuous_page_number_preset() -> list[PageNumberPhaseConfig]:
     return default_continuous_page_number_phases()
 
 
-def split_page_number_preset(*, continue_body: bool) -> list[PageNumberPhaseConfig]:
-    return [
-        PageNumberPhaseConfig(
-            phase_id="front",
-            selectors=["front_matter"],
-            visible=True,
-            number_format="upperRoman",
-            start_mode="restart",
-            start_value=1,
-        ),
-        PageNumberPhaseConfig(
-            phase_id="body",
-            selectors=["body", "back_matter"],
-            visible=True,
-            number_format="decimal",
-            start_mode="continue" if continue_body else "restart",
-            start_value=1,
-        ),
-    ]
+split_page_number_preset = split_page_number_phases
 
 
 def default_page_number_phases(header_footer) -> list[PageNumberPhaseConfig]:
@@ -413,6 +398,12 @@ class PageSelectorEditor(QWidget):
 
     def _apply_theme(self) -> None:
         theme = get_theme()
+        button_metrics = control_size_metrics(
+            theme,
+            "sm",
+            vertical_padding=2,
+            border_width=1,
+        )
         self._custom_edit.setStyleSheet(build_text_input_stylesheet(theme, selector="QLineEdit"))
         self._hint.setStyleSheet(
             f"font-size: {theme.font_size_sm}px; color: {theme.text_hint};"
@@ -423,7 +414,8 @@ class PageSelectorEditor(QWidget):
             f"color: {theme.text_secondary};"
             f"border: 1px solid {theme.border};"
             f"border-radius: {theme.radius_sm}px;"
-            f"min-height: {theme.control_height_sm}px;"
+            f"min-height: {button_metrics.content_height}px;"
+            f"max-height: {button_metrics.content_height}px;"
             f"padding: 2px {theme.button_padding_x}px;"
             f"font-size: {theme.font_size_sm}px;"
             f"}}"
@@ -443,6 +435,7 @@ class PageSelectorEditor(QWidget):
             f"}}"
         )
         for button in self._selector_buttons.values():
+            apply_size_class(button, "sm")
             button.setStyleSheet(button_stylesheet)
         self._sync_chips_height()
 
@@ -622,7 +615,12 @@ class PageNumberPlanSection:
             start_value=1,
         )
 
-    def _append_page_phase_row(self, phase: PageNumberPhaseConfig) -> None:
+    def _insert_page_phase_row(
+        self,
+        phase: PageNumberPhaseConfig,
+        *,
+        index: int | None = None,
+    ) -> PageNumberPhaseControls:
         section = FlowSection("未选择范围", expanded=True, parent=self._page_phase_rows_host)
 
         phase_id_edit = QLineEdit(section)
@@ -706,8 +704,13 @@ class PageNumberPlanSection:
         move_up_btn.clicked.connect(lambda *_args, row=controls: self._move_phase_row(row, -1))
         move_down_btn.clicked.connect(lambda *_args, row=controls: self._move_phase_row(row, 1))
 
-        self._page_phase_rows_layout.addWidget(section)
-        self._page_phase_rows.append(controls)
+        if index is None:
+            self._page_phase_rows_layout.addWidget(section)
+            self._page_phase_rows.append(controls)
+        else:
+            target = max(0, min(int(index), len(self._page_phase_rows)))
+            self._page_phase_rows_layout.insertWidget(target, section)
+            self._page_phase_rows.insert(target, controls)
 
         phase_id_edit.setText(str(phase.phase_id or ""))
         selector_editor.set_selectors(list(phase.selectors or []))
@@ -715,6 +718,22 @@ class PageNumberPlanSection:
         self._set_combo_by_data(format_combo, phase.number_format or "decimal")
         self._set_combo_by_data(start_mode_combo, phase.start_mode or "restart")
         start_value_spin.setValue(float(max(1, int(phase.start_value or 1))))
+        return controls
+
+    def _settle_incremental_phase_rows(self) -> None:
+        """Synchronously settle an insert or move without rebuilding every row."""
+
+        self._refresh_page_phase_row_state()
+        self.apply_theme()
+        refresh_layout_chain(self._page_phase_rows_host, passes=1)
+
+    def _phase_viewport_mutation(self, anchor: QWidget | None):
+        return viewport_mutation_for_widget(
+            self._owner,
+            anchor=anchor,
+            layout_roots=(self._page_phase_rows_host, self.section),
+            paint_targets=(self.section, self._owner),
+        )
 
     def _rebuild_page_phase_rows(
         self,
@@ -728,7 +747,7 @@ class PageNumberPlanSection:
             if ensure_one and not phase_list:
                 phase_list = continuous_page_number_preset()
             for phase in phase_list:
-                self._append_page_phase_row(phase)
+                self._insert_page_phase_row(phase)
             self._refresh_page_phase_row_state()
             self.apply_theme()
             refresh_layout_chain(self.section)
@@ -932,45 +951,54 @@ class PageNumberPlanSection:
         else:
             phases = continuous_page_number_preset()
 
-        self._owner._is_syncing = True
-        try:
-            self._rebuild_page_phase_rows(phases)
-            self._set_numbering_mode(preset_id)
-        finally:
-            self._owner._is_syncing = False
-        self._owner._on_structure_edited()
+        with self._phase_viewport_mutation(self._numbering_mode_combo):
+            self._owner._is_syncing = True
+            try:
+                self._rebuild_page_phase_rows(phases)
+                self._set_numbering_mode(preset_id)
+            finally:
+                self._owner._is_syncing = False
+            self._owner._on_structure_edited()
 
     def _on_add_phase(self) -> None:
         if self._owner._current_template is None:
             return
-        self._owner._is_syncing = True
-        try:
-            self._set_numbering_mode("custom")
-            self._page_advanced_section.set_expanded(True)
-            self._append_page_phase_row(self._build_empty_phase())
-            self._page_phase_rows[-1].section.set_expanded(True)
-            self._refresh_page_phase_row_state()
-        finally:
-            self._owner._is_syncing = False
-        self.apply_theme()
-        self._owner._on_structure_edited()
+        with self._phase_viewport_mutation(self._add_phase_btn):
+            self._owner._is_syncing = True
+            try:
+                self._set_numbering_mode("custom")
+                self._page_advanced_section.set_expanded(True)
+                self._insert_page_phase_row(self._build_empty_phase())
+                self._page_phase_rows[-1].section.set_expanded(True)
+                self._refresh_page_phase_row_state()
+            finally:
+                self._owner._is_syncing = False
+            self.apply_theme()
+            self._owner._on_structure_edited()
 
     def _remove_phase_row(self, row: PageNumberPhaseControls) -> None:
         if self._owner._current_template is None or len(self._page_phase_rows) <= 1:
             return
         if row not in self._page_phase_rows:
             return
-        for index in range(self._page_phase_rows_layout.count()):
-            item = self._page_phase_rows_layout.itemAt(index)
-            if item is not None and item.widget() is row.section:
-                self._page_phase_rows_layout.takeAt(index)
-                break
-        self._page_phase_rows.remove(row)
-        row.section.setParent(None)
-        row.section.deleteLater()
-        self._refresh_page_phase_row_state()
-        self.apply_theme()
-        self._owner._on_structure_edited()
+        row_index = self._page_phase_rows.index(row)
+        anchor = (
+            self._page_phase_rows[row_index + 1].section
+            if row_index + 1 < len(self._page_phase_rows)
+            else self._page_phase_rows[row_index - 1].section
+        )
+        with self._phase_viewport_mutation(anchor):
+            for index in range(self._page_phase_rows_layout.count()):
+                item = self._page_phase_rows_layout.itemAt(index)
+                if item is not None and item.widget() is row.section:
+                    self._page_phase_rows_layout.takeAt(index)
+                    break
+            self._page_phase_rows.remove(row)
+            row.section.setParent(None)
+            row.section.deleteLater()
+            self._refresh_page_phase_row_state()
+            self.apply_theme()
+            self._owner._on_structure_edited()
 
     def _duplicate_phase_row(self, row: PageNumberPhaseControls) -> None:
         if self._owner._current_template is None or row not in self._page_phase_rows:
@@ -979,14 +1007,19 @@ class PageNumberPlanSection:
         index = self._page_phase_rows.index(row)
         copied = deepcopy(phases[index])
         copied.phase_id = self._unique_phase_id(copied.phase_id or f"phase_{index + 1}")
-        phases.insert(index + 1, copied)
-        self._owner._is_syncing = True
-        try:
-            self._rebuild_page_phase_rows(phases)
-            self._page_phase_rows[index + 1].section.set_expanded(True)
-        finally:
-            self._owner._is_syncing = False
-        self._owner._on_structure_edited()
+        with self._phase_viewport_mutation(row.section):
+            self._owner._is_syncing = True
+            try:
+                with updates_suspended(
+                    self._page_phase_rows_host,
+                    self.section,
+                    self._owner._editor_column,
+                ):
+                    self._insert_page_phase_row(copied, index=index + 1)
+                    self._settle_incremental_phase_rows()
+            finally:
+                self._owner._is_syncing = False
+            self._owner._on_structure_edited()
 
     def _move_phase_row(self, row: PageNumberPhaseControls, direction: int) -> None:
         if self._owner._current_template is None or row not in self._page_phase_rows:
@@ -995,15 +1028,25 @@ class PageNumberPlanSection:
         target = index + int(direction)
         if target < 0 or target >= len(self._page_phase_rows):
             return
-        phases = self.phase_rows_to_configs()
-        phases[index], phases[target] = phases[target], phases[index]
-        self._owner._is_syncing = True
-        try:
-            self._rebuild_page_phase_rows(phases)
-            self._page_phase_rows[target].section.set_expanded(True)
-        finally:
-            self._owner._is_syncing = False
-        self._owner._on_structure_edited()
+        with self._phase_viewport_mutation(row.section):
+            self._owner._is_syncing = True
+            try:
+                with updates_suspended(
+                    self._page_phase_rows_host,
+                    self.section,
+                    self._owner._editor_column,
+                ):
+                    layout_index = self._page_phase_rows_layout.indexOf(row.section)
+                    if layout_index < 0:
+                        return
+                    self._page_phase_rows_layout.takeAt(layout_index)
+                    self._page_phase_rows.pop(index)
+                    self._page_phase_rows.insert(target, row)
+                    self._page_phase_rows_layout.insertWidget(target, row.section)
+                    self._settle_incremental_phase_rows()
+            finally:
+                self._owner._is_syncing = False
+            self._owner._on_structure_edited()
 
     def _unique_phase_id(self, base: str) -> str:
         existing = {phase.phase_id for phase in self.phase_rows_to_configs()}

@@ -103,7 +103,7 @@ class LibraryActionRow(QWidget):
             apply_size_class(button, "md")
             button.setStyleSheet(stylesheet)
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
 
             for key, button in self._buttons.items():
                 icon_name = self._icons.get(key, "")

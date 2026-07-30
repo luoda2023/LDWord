@@ -8,7 +8,7 @@ from src.qt_api import QSizePolicy, QToolButton, QVBoxLayout, QWidget, Qt
 
 from src.shared.ui.layout_sync import refresh_layout_chain, refresh_layout_chain_later, updates_suspended
 from src.shared.ui.theme import bind_theme, get_theme
-from src.ui.icons.catalog import get_icon
+from src.shared.ui.icons.catalog import get_icon
 
 
 class CollapsibleSection(QWidget):

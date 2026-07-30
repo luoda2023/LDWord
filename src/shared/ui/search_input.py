@@ -12,12 +12,17 @@ Single formal implementation for:
 
 from __future__ import annotations
 
-from src.qt_api import QEvent, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTimer, QWidget, Signal, Qt
+from src.qt_api import QEvent, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSize, QTimer, QWidget, Signal, Qt
 
 from src.shared.ui.input_metrics import build_input_editor_stylesheet, configure_input_line_edit
-from src.shared.ui.sizing import apply_size_class
+from src.shared.ui.sizing import (
+    apply_size_class,
+    control_size_metrics,
+    resolved_control_height,
+    widget_size_class,
+)
 from src.shared.ui.theme import bind_theme, get_theme
-from src.ui.icons.catalog import get_icon
+from src.shared.ui.icons.catalog import get_icon
 
 
 class SearchInput(QWidget):
@@ -69,15 +74,45 @@ class SearchInput(QWidget):
         bind_theme(self, self._apply_theme)
         self._apply_theme()
 
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        base = super().sizeHint()
+        return QSize(
+            base.width(),
+            resolved_control_height(get_theme(), widget_size_class(self)),
+        )
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        base = super().minimumSizeHint()
+        return QSize(
+            base.width(),
+            resolved_control_height(get_theme(), widget_size_class(self)),
+        )
+
     @staticmethod
     def build_container_stylesheet(object_name: str, theme, *, focused: bool) -> str:
         border_color = theme.border_focus if focused else theme.border
         background = theme.bg_window if focused else theme.bg_input
+        metrics = {
+            size: control_size_metrics(theme, size, border_width=1)
+            for size in ("sm", "md", "lg")
+        }
         return f"""
             #{object_name} {{
                 background: {background};
                 border: 1px solid {border_color};
                 border-radius: {theme.input_radius}px;
+            }}
+            #{object_name}[sizeClass="sm"] {{
+                min-height: {metrics["sm"].content_height}px;
+                max-height: {metrics["sm"].content_height}px;
+            }}
+            #{object_name}[sizeClass="md"] {{
+                min-height: {metrics["md"].content_height}px;
+                max-height: {metrics["md"].content_height}px;
+            }}
+            #{object_name}[sizeClass="lg"] {{
+                min-height: {metrics["lg"].content_height}px;
+                max-height: {metrics["lg"].content_height}px;
             }}
         """
 

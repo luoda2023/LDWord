@@ -17,7 +17,7 @@ STANDARD_EXECUTION_FLOW_STEPS: tuple[ExecutionFlowStepSpec, ...] = (
     ExecutionFlowStepSpec(
         key="read",
         title="读取文件",
-        icon_name="inbox",
+        icon_name="file-input",
         stage_aliases=("Loading document",),
     ),
     ExecutionFlowStepSpec(
@@ -29,19 +29,19 @@ STANDARD_EXECUTION_FLOW_STEPS: tuple[ExecutionFlowStepSpec, ...] = (
     ExecutionFlowStepSpec(
         key="format",
         title="套用模板",
-        icon_name="file-text",
+        icon_name="layout-template",
         stage_aliases=("Running module",),
     ),
     ExecutionFlowStepSpec(
         key="report",
         title="生成报告",
-        icon_name="scan",
+        icon_name="file-text",
         stage_aliases=("Writing report", "报告生成"),
     ),
     ExecutionFlowStepSpec(
         key="deliver",
         title="输出文件",
-        icon_name="package-check",
+        icon_name="file-output",
         stage_aliases=("Saving output", "Completed"),
     ),
 )

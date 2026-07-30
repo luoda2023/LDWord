@@ -7,7 +7,7 @@ from __future__ import annotations
 from src.qt_api import QCheckBox, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget, Signal, Qt
 
 from src.shared.ui.theme import bind_theme, get_theme
-from src.ui.icons.catalog import get_icon
+from src.shared.ui.icons.catalog import get_icon
 
 
 class ModuleStepItem(QWidget):

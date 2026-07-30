@@ -81,7 +81,7 @@ class BaseDialog(QDialog):
         icon_name, fg_token = _ICON_MAP.get(icon_style, ("info", "info"))
         icon_bg = getattr(t, fg_token, t.info)
 
-        from src.ui.icons.catalog import get_icon
+        from src.shared.ui.icons.catalog import get_icon
 
         icon = get_icon(icon_name, size=t.dialog_icon_size, color=t.text_on_primary)
         icon_container = QWidget()
@@ -193,8 +193,7 @@ class BaseDialog(QDialog):
             #dialog_title {{
                 color: {t.text_primary};
                 font-size: {t.font_size_xl}px;
-                font-weight: 600;
-                font-family: {t.font_family};
+                font-weight: {t.font_weight_emphasis};
             }}
             #dialog_close {{
                 background: transparent;

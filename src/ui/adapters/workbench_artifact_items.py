@@ -53,6 +53,7 @@ def _build_artifact_items(
     scene_sample_manifest_paths: dict[str, str],
     output_target_preflight: dict[str, object] | None,
     question_figure_repair_queue: dict[str, object] | None,
+    official_document_assembly: dict[str, object] | None = None,
 ) -> list[ArtifactItemState]:
     preflight_by_label = _output_preflight_by_label(output_target_preflight)
     known_groups = _known_artifact_groups(
@@ -89,6 +90,11 @@ def _build_artifact_items(
                 detail=detail,
             )
         )
+    _extend_official_review_pdf_status_item(
+        items,
+        official_document_assembly,
+        output_paths=output_paths,
+    )
     _extend_path_items(items, "compare", compare_paths, delivery_preset_labels=True)
     _extend_report_items(items, report_paths, known_groups=known_groups)
     _extend_question_figure_repair_queue_item(
@@ -132,6 +138,45 @@ def _build_artifact_items(
             )
         )
     return items
+
+
+def _extend_official_review_pdf_status_item(
+    items: list[ArtifactItemState],
+    assembly: dict[str, object] | None,
+    *,
+    output_paths: dict[str, str],
+) -> None:
+    if not isinstance(assembly, dict):
+        return
+    status = str(assembly.get("review_pdf_status") or "not_requested").strip()
+    if status in {"", "not_requested", "generated"}:
+        return
+    if output_paths.get("review_pdf"):
+        return
+
+    issue = str(assembly.get("review_pdf_issue") or "").strip()
+    detail_by_status = {
+        "renderer_unavailable": (
+            "审阅 PDF 未生成：当前环境没有可用的 Word/LibreOffice PDF 渲染器；"
+            "正式公文仍已生成。"
+        ),
+        "render_failed": "审阅 PDF 生成失败；正式公文仍已生成。",
+        "output_missing": "PDF 渲染器未产生有效文件；正式公文仍已生成。",
+        "assembly_blocked": "公文装配未完成，因此未生成审阅 PDF。",
+    }
+    detail = detail_by_status.get(status, f"审阅 PDF 未生成（{status}）。")
+    if issue and status not in {"renderer_unavailable", "assembly_blocked"}:
+        detail = f"{detail} 原因：{issue}"
+    items.append(
+        ArtifactItemState(
+            kind="planned_output",
+            label=_delivery_artifact_label("review_pdf"),
+            group_id="review_pdf",
+            group_label=_delivery_artifact_label("review_pdf"),
+            status="warning",
+            detail=detail,
+        )
+    )
 
 
 def _extend_path_items(

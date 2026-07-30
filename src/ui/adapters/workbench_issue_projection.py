@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from src.ui.adapters.field_display_names import (
     field_display_name,
     replace_field_keys_with_display_names,
@@ -31,11 +33,11 @@ COVERAGE_PACK_DISPLAY_LABELS = {
 
 BOUNDARY_TEXT_DISPLAY_LABELS = {
     "does not judge professional compliance": "不判断专业合规，只处理格式和对象风险",
-    "does not absorb English journal submission or exam generation": "不混入英文投稿或试卷生成场景",
+    "does not absorb English journal submission or exam generation": "不混入英文投稿或试卷生成方案",
     "does not promise publisher-final layout or unreviewed rule fetching": "不承诺出版社最终版式；目标期刊规则需人工确认",
     "does not guarantee AI content quality or complex diagram generation": "不保证 AI 内容质量或复杂图生成",
     "does not judge bidding strategy, legal conclusions, or certificate authenticity": "不判断投标策略、法律结论或证书真伪",
-    "does not create many small administrative top-level scenes": "不为每类小公文单独开顶层场景",
+    "does not create many small administrative top-level scenes": "不为每类小公文单独开顶层方案",
     "does not verify technical truth or replace publisher systems": "不校验技术内容真伪，也不替代发布系统",
     "does not replace submission systems or promise marketing copy quality": "不替代申报系统，也不保证营销文案质量",
     "does not provide legal advice or judge clause validity": "不提供法律意见，也不判断条款有效性",
@@ -90,6 +92,169 @@ def workbench_issue_action_visual(
         badge_tone="neutral",
         detail_tone="success" if status_value == "resolved" else "neutral",
     )
+
+
+def workbench_issue_action_target(item: WorkbenchIssueItem) -> tuple[str, str]:
+    """Return the routable UI action target for a Workbench issue."""
+
+    if not isinstance(item, WorkbenchIssueItem):
+        return ("", "")
+    target_type = str(item.repair_target_type or "").strip()
+    target_key = str(item.repair_target_key or "").strip()
+    if not target_type:
+        return ("", "")
+    profile_id = _issue_repair_context_value(item, "profile_id")
+    profile_name = _issue_repair_context_value(item, "profile_name")
+    candidate_json = _issue_repair_context_value(item, "repair_candidate_json")
+    if (
+        (profile_id or profile_name)
+        and item.category == "question_figure_repair_queue"
+        and target_type == "question_figure_item"
+        and candidate_json
+    ):
+        candidate = _json_object(candidate_json)
+        if (
+            bool(candidate.get("confirmation_apply_supported"))
+            and _clean_text(candidate.get("confirmation_status")) == "ready"
+        ):
+            return (
+                "profile_question_figure_repair_candidate",
+                json.dumps(
+                    {
+                        "profile_id": profile_id,
+                        "profile_name": profile_name,
+                        "target_key": target_key,
+                        "candidate": candidate,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            )
+        conflict_candidate = _question_figure_conflict_selection_candidate(candidate)
+        if conflict_candidate:
+            return (
+                "profile_question_figure_repair_conflict_selection",
+                json.dumps(
+                    {
+                        "profile_id": profile_id,
+                        "profile_name": profile_name,
+                        "target_key": target_key,
+                        "candidate": conflict_candidate,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            )
+    if (profile_id or profile_name) and target_type in {
+        "field",
+        "asset",
+        "schema",
+        "question_figure_item",
+    }:
+        return (
+            f"profile_{target_type}",
+            json.dumps(
+                {
+                    "profile_id": profile_id,
+                    "profile_name": profile_name,
+                    "target_key": target_key,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        )
+    if target_type == "question_figure_batch_apply_transaction_task_summary":
+        payload = _json_object(target_key)
+        if not payload:
+            payload = {"target_key": target_key} if target_key else {}
+        return (
+            target_type,
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        )
+    return (target_type, target_key)
+
+
+def _question_figure_conflict_selection_candidate(
+    candidate: dict[str, object],
+) -> dict[str, object]:
+    if not isinstance(candidate, dict):
+        return {}
+    if _clean_text(candidate.get("confirmation_status")) != "conflict":
+        return {}
+    if _clean_text(candidate.get("confirmation_action")) != (
+        "resolve_question_figure_replacement_conflict"
+    ):
+        return {}
+    if not bool(candidate.get("conflict_resolution_select_supported")):
+        return {}
+    queue_id = _clean_text(candidate.get("queue_id"))
+    conflict_group_id = _clean_text(candidate.get("conflict_group_id"))
+    replacement_path = _clean_text(candidate.get("replacement_source_path"))
+    if not queue_id or not conflict_group_id or not replacement_path:
+        return {}
+    conflict_queue_ids = [
+        queue_id_value
+        for queue_id_value in _clean_list(candidate.get("conflict_candidate_queue_ids"))
+        if queue_id_value
+    ]
+    if queue_id not in conflict_queue_ids:
+        conflict_queue_ids.insert(0, queue_id)
+    rejected_queue_ids = [
+        queue_id_value
+        for queue_id_value in conflict_queue_ids
+        if queue_id_value != queue_id
+    ]
+    blockers = [
+        blocker
+        for blocker in _clean_list(candidate.get("apply_blockers"))
+        if blocker != "candidate_conflict_same_repair_target"
+    ]
+    resolved = dict(candidate)
+    resolved["confirmation_action"] = "confirm_question_figure_replacement"
+    resolved["confirmation_apply_supported"] = True
+    resolved["confirmation_status"] = "ready"
+    resolved["conflict_resolution_status"] = "selected"
+    resolved["conflict_resolution_action"] = (
+        "select_question_figure_replacement_conflict_candidate"
+    )
+    resolved["conflict_selected_queue_id"] = queue_id
+    resolved["conflict_resolution_group_id"] = conflict_group_id
+    resolved["conflict_resolution_candidate_queue_ids"] = conflict_queue_ids
+    resolved["conflict_resolution_rejected_queue_ids"] = rejected_queue_ids
+    resolved["conflict_resolution_by"] = "workbench_issue_action"
+    resolved["conflict_resolution_note"] = "selected from Workbench issue queue"
+    resolved["apply_blockers"] = blockers
+    return resolved
+
+
+def _issue_repair_context_value(item: WorkbenchIssueItem, key: str) -> str:
+    normalized_key = str(key or "").strip()
+    for context_key, context_value in tuple(getattr(item, "repair_context", ()) or ()):
+        if str(context_key or "").strip() == normalized_key:
+            return str(context_value or "").strip()
+    return ""
+
+
+def _json_object(value: str) -> dict[str, object]:
+    try:
+        payload = json.loads(str(value or ""))
+    except (TypeError, ValueError):
+        return {}
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _clean_text(value: object) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _clean_list(value: object) -> tuple[str, ...]:
+    if value is None:
+        values: list[object] = []
+    elif isinstance(value, (list, tuple, set)):
+        values = list(value)
+    else:
+        values = [value]
+    return tuple(cleaned for item in values if (cleaned := _clean_text(item)))
 
 
 def workbench_issue_evidence_lines(
@@ -212,7 +377,7 @@ def workbench_issue_display_text(
         ("coverage pack：", "覆盖资料包："),
         ("manual gate：", "人工确认："),
         ("fixture：", "样本文件："),
-        ("family：", "场景族："),
+        ("family：", "方案族："),
         ("pack：", "资料包："),
     )
     for source, target in replacements:

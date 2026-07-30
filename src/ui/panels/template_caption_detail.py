@@ -665,10 +665,7 @@ class CaptionDetail(QWidget):
             widget.setStyleSheet(f"font-size: {theme.font_size_md}px; color: {theme.text_primary};")
 
         line_edit_style = _caption_text_input_stylesheet(theme)
-        control_height = resolved_control_height(theme, "md")
         for widget in (self._figure_prefix_edit, self._table_prefix_edit, self._placeholder_edit):
-            widget.setMinimumHeight(control_height)
-            widget.setMaximumHeight(control_height)
             widget.setStyleSheet(line_edit_style)
         self._separator_edit.apply_theme(theme)
 
@@ -676,7 +673,7 @@ class CaptionDetail(QWidget):
         apply_template_summary_action_button(self._save_btn, "primary")
 
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
 
             self._summary_card.header.icon_label.setPixmap(
                 get_icon("waves-arrow-down", 28, theme.primary).pixmap(28, 28)

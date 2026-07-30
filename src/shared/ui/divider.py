@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.qt_api import QFrame, Qt
+from src.qt_api import QFrame
 
 from src.shared.ui.theme import bind_theme, get_theme
 

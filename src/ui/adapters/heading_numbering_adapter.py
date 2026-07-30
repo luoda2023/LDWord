@@ -23,6 +23,10 @@ from src.config.heading_style_semantics import (
 from src.config.style_semantics import display_font_size_with_name, resolve_style_size_pt
 from src.qt_api import QObject, Signal
 from src.shared.engine.numbering import format_number
+from src.shared.engine.heading_numbering_format import (
+    format_heading_level_number,
+    parse_heading_number_chain,
+)
 from src.ui.heading_numbering_logic import default_chain_value
 
 _EXISTING_NUMBER_RE = __import__("re").compile(
@@ -56,7 +60,6 @@ class HeadingNumberingAdapter(QObject):
     def set_template(self, template: TemplateConfig) -> None:
         self._last_applied_preset_key = None
         self._template = template
-        self.ensure_default_scheme()
         self.numbering_changed.emit()
 
     @property
@@ -382,8 +385,6 @@ class HeadingNumberingAdapter(QObject):
         return any(clean_text.startswith(prefix) for prefix in self.get_non_numbered_prefixes())
 
     def preview_number(self, level: int, counter_value: int = 1) -> str:
-        from src.modules.structure.heading_numbering import _format_level_number
-
         binding = self.get_binding(level)
         if not binding.enabled:
             return ""
@@ -394,7 +395,12 @@ class HeadingNumberingAdapter(QObject):
         counters[level] = counter_value
 
         level_bindings = self.template.heading_numbering.level_bindings
-        return _format_level_number(level, counters, binding, level_bindings)
+        return format_heading_level_number(
+            level,
+            counters,
+            binding,
+            level_bindings,
+        )
 
     def preview_heading_text(self, level: int, title: str, counter_value: int = 1) -> str:
         if self.preview_should_skip_numbering(title):
@@ -412,13 +418,11 @@ class HeadingNumberingAdapter(QObject):
         return format_number(counter_value, chain_style)
 
     def preview_reference_usage(self, level: int, counter_value: int = 1) -> tuple[int, str] | None:
-        from src.modules.structure.heading_numbering import _parse_chain
-
         for child_level in range(level + 1, self.max_levels + 1):
             child_binding = self.get_binding(child_level)
             if not child_binding.enabled:
                 continue
-            chain_segments = _parse_chain(child_binding.chain)
+            chain_segments = parse_heading_number_chain(child_binding.chain)
             parent_depth = sum(1 for segment in chain_segments if segment == "parent")
             if child_level - parent_depth <= level < child_level:
                 preview = self.preview_number(child_level, counter_value=counter_value)

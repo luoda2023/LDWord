@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from src.qt_api import QColor, QPainter, QPen, QRect, QRectF, QSizePolicy, Qt
+from src.qt_api import QColor, QLineF, QPainter, QRect, QRectF, QSizePolicy, Qt
+from src.shared.ui.paint_geometry import (
+    STROKE_ICON,
+    snapped_pen_width,
+    snapped_stroke_coordinate,
+    stroke_pen,
+)
+from src.shared.ui.typography_policy import TextRole, apply_text_role
 
 
 INPUT_EDITOR_TEXT_MARGIN_LEFT = -2
@@ -30,8 +37,8 @@ def input_border_color(theme, *, enabled: bool, active: bool) -> tuple[QColor, f
     if not enabled:
         return QColor(theme.border), 1.0
     if active:
-        return QColor(theme.border_focus), 1.5
-    return QColor(theme.text_hint), 1.25
+        return QColor(theme.border_focus), 1.0
+    return QColor(theme.border), 1.0
 
 
 def input_text_color(theme, *, enabled: bool) -> QColor:
@@ -54,23 +61,35 @@ def draw_input_surface(
     painter.drawRoundedRect(QRectF(0, 0, max(0, int(width)), max(0, int(height))), radius, radius)
 
     border_color, border_width = input_border_color(theme, enabled=enabled, active=active)
-    half_border = border_width / 2.0
+    rendered_border_width = snapped_pen_width(border_width, painter)
+    half_border = rendered_border_width / 2.0
     border_rect = QRectF(
         half_border,
         half_border,
-        max(0.0, float(width) - border_width),
-        max(0.0, float(height) - border_width),
+        max(0.0, float(width) - rendered_border_width),
+        max(0.0, float(height) - rendered_border_width),
     )
-    painter.setPen(QPen(border_color, border_width))
+    painter.setPen(stroke_pen(painter, border_color, border_width))
     painter.setBrush(Qt.NoBrush)
     painter.drawRoundedRect(border_rect, radius, radius)
 
     separator_color = QColor(theme.border_focus if active else theme.border)
     separator_color.setAlpha(170 if active else 135)
-    painter.setPen(QPen(separator_color, 1.0))
-    separator_x = input_separator_x(width, button_width=button_width)
+    painter.setPen(stroke_pen(painter, separator_color, 1.0, cap=Qt.FlatCap))
+    separator_x = snapped_stroke_coordinate(
+        input_separator_x(width, button_width=button_width),
+        1.0,
+        painter,
+    )
     inset = max(4, int(height) // 5)
-    painter.drawLine(separator_x, inset, separator_x, max(inset, int(height) - inset))
+    painter.drawLine(
+        QLineF(
+            separator_x,
+            float(inset),
+            separator_x,
+            float(max(inset, int(height) - inset)),
+        )
+    )
 
 
 def draw_combo_chevron(
@@ -85,7 +104,7 @@ def draw_combo_chevron(
     arrow_color = QColor(theme.border_focus if active else theme.text_secondary)
     if not enabled:
         arrow_color = QColor(theme.text_disabled)
-    painter.setPen(QPen(arrow_color, 1.8))
+    painter.setPen(stroke_pen(painter, arrow_color, STROKE_ICON))
     zone_center_x = int(width) - (int(theme.combo_arrow_zone_width) // 2)
     zone_center_y = int(height) // 2
     half = max(2, int(theme.combo_arrow_size) // 2)
@@ -105,7 +124,7 @@ def draw_spin_chevrons(
     arrow_color = QColor(theme.border_focus if active else theme.text_secondary)
     if not enabled:
         arrow_color = QColor(theme.text_disabled)
-    painter.setPen(QPen(arrow_color, 1.6))
+    painter.setPen(stroke_pen(painter, arrow_color, STROKE_ICON))
 
     zone_cx = int(width) - (int(theme.spin_button_width) // 2)
     mid_y = float(height) / 2.0
@@ -126,9 +145,11 @@ def configure_input_line_edit(
     *,
     stylesheet: str | None = None,
     text_margin_left: int = INPUT_EDITOR_TEXT_MARGIN_LEFT,
+    text_role: TextRole = TextRole.BODY,
 ) -> None:
-    """Apply shared editor geometry-neutral styling to a QLineEdit."""
+    """Apply one semantic font plus geometry-neutral styling to a QLineEdit."""
 
+    apply_text_role(line_edit, text_role)
     line_edit.setFrame(False)
     line_edit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
     line_edit.setContentsMargins(0, 0, 0, 0)
@@ -165,7 +186,12 @@ def build_input_editor_stylesheet(
     text_color: str | None = None,
     placeholder_color: str | None = None,
 ) -> str:
-    resolved_font_size = theme.font_size_md if font_size is None else int(font_size)
+    # Font ownership belongs to ``configure_input_line_edit``.  The optional
+    # declaration remains only as a compatibility escape hatch for legacy
+    # callers that have not migrated their special text role yet.
+    font_size_declaration = (
+        "" if font_size is None else f"font-size: {int(font_size)}px;"
+    )
     resolved_text_color = theme.text_primary if text_color is None else text_color
     resolved_placeholder_color = theme.text_hint if placeholder_color is None else placeholder_color
     return f"""
@@ -176,8 +202,7 @@ def build_input_editor_stylesheet(
             selection-background-color: {theme.primary};
             selection-color: {theme.text_on_primary};
             padding: {padding};
-            font-size: {resolved_font_size}px;
-            font-family: {theme.font_family};
+            {font_size_declaration}
         }}
         QLineEdit::placeholder {{
             color: {resolved_placeholder_color};
@@ -198,14 +223,42 @@ def build_framed_input_stylesheet(
     padding_y: int | None = None,
     min_height: int | None = None,
 ) -> str:
-    resolved_font_family = font_family or theme.font_family
-    resolved_font_size = theme.font_size_md if font_size is None else int(font_size)
+    font_family_declaration = (
+        f"font-family: {font_family};" if font_family else ""
+    )
+    # Default framed inputs inherit the application BODY role.  Explicit
+    # family/size declarations are compatibility escape hatches for existing
+    # specialized editors; new widgets should set a semantic QFont instead.
+    font_size_declaration = (
+        "" if font_size is None else f"font-size: {int(font_size)}px;"
+    )
     resolved_background = background or theme.bg_input
     resolved_focus_border = focus_border_color or theme.border_focus
     resolved_border_radius = theme.input_radius if border_radius is None else int(border_radius)
     resolved_padding_x = theme.input_padding_x if padding_x is None else padding_x
     resolved_padding_y = theme.input_padding_y if padding_y is None else padding_y
-    resolved_min_height = theme.control_height_md if min_height is None else int(min_height)
+    from src.shared.ui.sizing import control_size_metrics
+
+    metrics = control_size_metrics(
+        theme,
+        "md",
+        vertical_padding=resolved_padding_y,
+        border_width=1,
+    )
+    resolved_outer_height = metrics.outer_height if min_height is None else int(min_height)
+    resolved_content_height = max(
+        0,
+        resolved_outer_height - (resolved_padding_y * 2) - 2,
+    )
+    size_metrics = {
+        size: control_size_metrics(
+            theme,
+            size,
+            vertical_padding=resolved_padding_y,
+            border_width=1,
+        )
+        for size in ("sm", "md", "lg")
+    }
 
     return f"""
         {selector} {{
@@ -213,10 +266,11 @@ def build_framed_input_stylesheet(
             color: {theme.text_primary};
             border: 1px solid {theme.border};
             border-radius: {resolved_border_radius}px;
-            min-height: {resolved_min_height}px;
+            min-height: {resolved_content_height}px;
+            max-height: {resolved_content_height}px;
             padding: {resolved_padding_y}px {resolved_padding_x}px;
-            font-size: {resolved_font_size}px;
-            font-family: {resolved_font_family};
+            {font_size_declaration}
+            {font_family_declaration}
             selection-background-color: {theme.primary};
             selection-color: {theme.text_on_primary};
         }}
@@ -233,43 +287,43 @@ def build_framed_input_stylesheet(
 
         /* Size-class tiers via the shared sizeClass dynamic property. */
         {selector}[sizeClass="sm"] {{
-            min-height: {theme.control_height_sm}px;
-            max-height: {theme.control_height_sm}px;
+            min-height: {size_metrics["sm"].content_height}px;
+            max-height: {size_metrics["sm"].content_height}px;
         }}
         {selector}[sizeClass="md"] {{
-            min-height: {theme.control_height_md}px;
-            max-height: {theme.control_height_md}px;
+            min-height: {size_metrics["md"].content_height}px;
+            max-height: {size_metrics["md"].content_height}px;
         }}
         {selector}[sizeClass="lg"] {{
-            min-height: {theme.control_height_lg}px;
-            max-height: {theme.control_height_lg}px;
+            min-height: {size_metrics["lg"].content_height}px;
+            max-height: {size_metrics["lg"].content_height}px;
         }}
 
         QComboBox[sizeClass="sm"] {{
-            min-height: {theme.control_height_sm}px;
-            max-height: {theme.control_height_sm}px;
+            min-height: {size_metrics["sm"].content_height}px;
+            max-height: {size_metrics["sm"].content_height}px;
         }}
         QComboBox[sizeClass="md"] {{
-            min-height: {theme.control_height_md}px;
-            max-height: {theme.control_height_md}px;
+            min-height: {size_metrics["md"].content_height}px;
+            max-height: {size_metrics["md"].content_height}px;
         }}
 
         QSpinBox[sizeClass="sm"] {{
-            min-height: {theme.control_height_sm}px;
-            max-height: {theme.control_height_sm}px;
+            min-height: {size_metrics["sm"].content_height}px;
+            max-height: {size_metrics["sm"].content_height}px;
         }}
         QSpinBox[sizeClass="md"] {{
-            min-height: {theme.control_height_md}px;
-            max-height: {theme.control_height_md}px;
+            min-height: {size_metrics["md"].content_height}px;
+            max-height: {size_metrics["md"].content_height}px;
         }}
 
         QDoubleSpinBox[sizeClass="sm"] {{
-            min-height: {theme.control_height_sm}px;
-            max-height: {theme.control_height_sm}px;
+            min-height: {size_metrics["sm"].content_height}px;
+            max-height: {size_metrics["sm"].content_height}px;
         }}
         QDoubleSpinBox[sizeClass="md"] {{
-            min-height: {theme.control_height_md}px;
-            max-height: {theme.control_height_md}px;
+            min-height: {size_metrics["md"].content_height}px;
+            max-height: {size_metrics["md"].content_height}px;
         }}
     """
 

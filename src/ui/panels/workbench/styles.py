@@ -51,8 +51,7 @@ def build_workbench_stylesheet(t: AppTheme) -> str:
             background: transparent;
         }}
 
-        #wb_quick_execute_pane,
-        #wb_config_management_pane {{
+        #wb_quick_execute_pane {{
             background: {t.bg_card};
             border: 1px solid {t.border_light};
             border-radius: {t.radius_md}px;
@@ -60,16 +59,10 @@ def build_workbench_stylesheet(t: AppTheme) -> str:
         }}
 
         #wb_quick_execute_title,
-        #wb_config_management_title,
         #wb_execution_title {{
             color: {t.text_primary};
             font-size: {t.font_size_lg}px;
             font-weight: {t.font_weight_bold};
-        }}
-
-        #wb_config_management_description {{
-            color: {t.text_secondary};
-            font-size: {t.font_size_sm}px;
         }}
 
         #wb_strategy_card {{
@@ -94,14 +87,6 @@ def build_workbench_stylesheet(t: AppTheme) -> str:
         #wb_quick_card_summary {{
             color: {t.text_secondary};
             font-size: {t.font_size_sm}px;
-        }}
-
-        #wb_quick_card_action {{
-            min-height: {t.button_height_md}px;
-        }}
-
-        #wb_quick_card_action_secondary {{
-            min-height: {t.button_height_md}px;
         }}
 
         #wb_recent_run {{

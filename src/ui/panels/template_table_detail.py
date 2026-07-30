@@ -8,9 +8,7 @@ from dataclasses import dataclass
 from src.config.feature_configs import TABLE_SMART_LEVEL_OPTIONS, normalize_table_smart_levels
 from src.config.table_style_presets import (
     TABLE_STYLE_OPTIONS,
-    color_palette,
     color_variant,
-    table_style_label,
 )
 from src.config.template import TemplateConfig
 from src.qt_api import (
@@ -441,11 +439,11 @@ class TableCaptionDetail(QWidget):
         self._is_syncing = True
         try:
             table = template.table
-            table.smart_levels = normalize_table_smart_levels(table.smart_levels)
+            smart_levels = normalize_table_smart_levels(table.smart_levels)
             self._set_combo_by_data(self._border_combo, table.border_mode)
             self._set_combo_by_data(self._layout_combo, table.layout_mode)
             self._set_combo_by_data(self._table_alignment_combo, getattr(table, "table_alignment", "center"))
-            self._set_combo_by_data(self._smart_levels_combo, table.smart_levels)
+            self._set_combo_by_data(self._smart_levels_combo, smart_levels)
             self._set_combo_by_data(self._line_spacing_combo, table.line_spacing_mode)
             self._color_gallery.set_selection(
                 getattr(table, "color_table_accent", "blue"),
@@ -610,7 +608,7 @@ class TableCaptionDetail(QWidget):
         apply_template_summary_action_button(self._save_btn, "primary")
 
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
 
             for icon_name, widget in self._header_icons:
                 widget.setPixmap(get_icon(icon_name, 18, theme.primary).pixmap(18, 18))

@@ -19,12 +19,14 @@ class AdaptivePairRow(QWidget):
         stacked_spacing: int | None = 0,
         stretches: Sequence[int] | None = None,
         stack_slack: int = 0,
+        minimum_breakpoint: bool = False,
     ):
         super().__init__(parent)
         self._widgets = list(widgets)
         self._inline_spacing = int(spacing)
         self._stacked_spacing = self._inline_spacing if stacked_spacing is None else int(stacked_spacing)
         self._stack_slack = max(0, int(stack_slack))
+        self._minimum_breakpoint = bool(minimum_breakpoint)
         provided_stretches = tuple(stretches or ())
         self._stretches = tuple(
             provided_stretches[index] if index < len(provided_stretches) else 1
@@ -48,6 +50,7 @@ class AdaptivePairRow(QWidget):
             self._layout.addWidget(widget, int(stretch))
         if self._widgets and all(int(stretch) <= 0 for stretch in self._stretches):
             self._layout.addStretch(1)
+        self._forced_stacked: bool | None = None
         self._last_stacked: bool | None = None
         self._sync_direction()
 
@@ -65,6 +68,9 @@ class AdaptivePairRow(QWidget):
         if watched in self._widgets and event.type() in (QEvent.Show, QEvent.Hide):
             self._last_stacked = None
             self._sync_direction()
+            parent_sync = getattr(self.parentWidget(), "_sync_responsive_mode", None)
+            if callable(parent_sync):
+                parent_sync()
             refresh_layout_chain(self, passes=2)
         return super().eventFilter(watched, event)
 
@@ -95,13 +101,34 @@ class AdaptivePairRow(QWidget):
         return True
 
     def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt API contract
+        return self.height_for_width(width)
+
+    def height_for_width(self, width: int, *, stacked: bool | None = None) -> int:
         return self._layout_size(
-            stacked=int(width or 0) < self._stack_breakpoint(),
+            stacked=self._stacked_for_width(width) if stacked is None else bool(stacked),
             minimum=False,
         ).height()
 
+    def set_forced_stacked(self, stacked: bool | None) -> None:
+        """Let a parent grid coordinate one responsive mode across peer rows."""
+
+        normalized = None if stacked is None else bool(stacked)
+        if normalized == self._forced_stacked:
+            return
+        self._forced_stacked = normalized
+        self._last_stacked = None
+        self._sync_direction()
+
+    def responsive_breakpoint(self) -> int:
+        """Return the minimum usable inline width for this row."""
+
+        return self._stack_breakpoint()
+
+    def visible_widget_count(self) -> int:
+        return len(self._visible_widgets())
+
     def _sync_direction(self) -> None:
-        stacked = self.width() < self._stack_breakpoint()
+        stacked = self._stacked_for_width(self.width())
         if stacked == self._last_stacked:
             return
         self._last_stacked = stacked
@@ -119,14 +146,25 @@ class AdaptivePairRow(QWidget):
             self.setMinimumHeight(height)
 
     def _stack_breakpoint(self) -> int:
-        widths = [
-            max(widget.minimumSizeHint().width(), widget.sizeHint().width())
-            for widget in self._visible_widgets()
-        ]
+        if self._minimum_breakpoint:
+            widths = [
+                max(widget.minimumWidth(), widget.minimumSizeHint().width())
+                for widget in self._visible_widgets()
+            ]
+        else:
+            widths = [
+                max(widget.minimumSizeHint().width(), widget.sizeHint().width())
+                for widget in self._visible_widgets()
+            ]
         if not widths:
             return 0
         ideal_width = sum(widths) + self._inline_spacing * (len(widths) - 1)
         return max(max(widths), ideal_width - self._stack_slack)
+
+    def _stacked_for_width(self, width: int) -> bool:
+        if self._forced_stacked is not None:
+            return self._forced_stacked
+        return int(width or 0) < self._stack_breakpoint()
 
     def _layout_size(self, *, stacked: bool, minimum: bool) -> QSize:
         widths, heights = self._visible_widget_extents(minimum=minimum)

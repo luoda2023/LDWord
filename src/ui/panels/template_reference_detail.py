@@ -350,12 +350,35 @@ class ReferenceDetail(QWidget):
     def _is_independent(self) -> bool:
         if self._current_template is None:
             return False
-        return is_variant_overridden(self._current_template, _VARIANT_KEY)
+        ref = self._current_template.reference_style
+        has_legacy_typography = any((ref.font_cn, ref.font_en, ref.size_pt))
+        return bool(
+            is_variant_overridden(self._current_template, _VARIANT_KEY)
+            or has_legacy_typography
+        )
 
     def _editable_style(self) -> StyleConfig | None:
         if self._current_template is None:
             return None
+        if not is_variant_overridden(self._current_template, _VARIANT_KEY):
+            self._promote_legacy_reference_typography(self._current_template)
+        if not is_variant_overridden(self._current_template, _VARIANT_KEY):
+            return enable_variant_override(self._current_template, _VARIANT_KEY)
         return self._current_template.styles.get(_VARIANT_KEY)
+
+    def _style_for_display(self) -> StyleConfig | None:
+        if self._current_template is None:
+            return None
+        style = deepcopy(get_effective_style(self._current_template, _VARIANT_KEY))
+        ref = self._current_template.reference_style
+        if ref.font_cn:
+            style.font_cn = ref.font_cn
+        if ref.font_en:
+            style.font_en = ref.font_en
+        if ref.size_pt:
+            style.size_pt = ref.size_pt
+            style.size_display = display_font_size_with_name(ref.size_pt)
+        return style
 
     def _promote_legacy_reference_typography(self, template: TemplateConfig) -> None:
         ref = template.reference_style
@@ -393,7 +416,10 @@ class ReferenceDetail(QWidget):
         if self._current_template is None:
             self._source_summary.setText("")
             return
-        style = get_effective_style(self._current_template, _VARIANT_KEY)
+        style = self._style_for_display()
+        if style is None:
+            self._source_summary.setText("")
+            return
         mode = "独立设置" if self._is_independent() else "跟随正文"
         size_text = style.size_display or (f"{style.size_pt:g} 磅" if style.size_pt else "默认字号")
         alignment = {
@@ -494,8 +520,6 @@ class ReferenceDetail(QWidget):
 
     def set_template(self, template: TemplateConfig | None) -> None:
         preserve_snapshot = template is self._current_template and self._snapshot is not None
-        if template is not None:
-            self._promote_legacy_reference_typography(template)
         self._current_template = template
         if template is None:
             self._snapshot = None
@@ -512,7 +536,7 @@ class ReferenceDetail(QWidget):
             self._update_mode_visibility()
 
             if independent:
-                style = self._editable_style()
+                style = self._style_for_display()
                 if style is not None:
                     self._sync_style_form(style)
 
@@ -623,7 +647,7 @@ class ReferenceDetail(QWidget):
 
     def _refresh_action_icons(self) -> None:
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
         except Exception:
             return
 
@@ -667,7 +691,7 @@ class ReferenceDetail(QWidget):
         apply_template_summary_action_button(self._save_btn, "primary")
 
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
             self._summary_card.header.icon_label.setPixmap(
                 get_icon("book-open", 28, theme.primary).pixmap(28, 28)
             )

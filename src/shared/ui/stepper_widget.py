@@ -15,7 +15,7 @@ from src.qt_api import (
     Qt,
 )
 from src.shared.ui.theme import bind_theme, get_theme
-from src.ui.icons.catalog import get_icon
+from src.shared.ui.icons.catalog import get_icon
 
 _PULSE_INTERVAL_MS = 40
 _PULSE_STEP = 6  # degrees per tick

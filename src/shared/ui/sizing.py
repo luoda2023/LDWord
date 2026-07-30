@@ -24,27 +24,64 @@ Usage::
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal
 
-from src.qt_api import QWidget, Qt
+from src.qt_api import QWidget
 
 SizeClass = Literal["sm", "md", "lg"]
 
 _VALID_CLASSES = {"sm", "md", "lg"}
 
 
-def resolved_control_height(theme, size: SizeClass = "md") -> int:
-    """Return the rendered pixel height for a themed interactive control."""
+@dataclass(frozen=True)
+class ControlSizeMetrics:
+    """Resolved geometry for one interactive-control size tier."""
+
+    size: SizeClass
+    outer_height: int
+    vertical_padding: int
+    border_width: int
+
+    @property
+    def content_height(self) -> int:
+        """QSS min/max-height after accounting for padding and borders."""
+        return max(
+            0,
+            self.outer_height
+            - (self.vertical_padding * 2)
+            - (self.border_width * 2),
+        )
+
+
+def control_size_metrics(
+    theme,
+    size: SizeClass = "md",
+    *,
+    vertical_padding: int = 0,
+    border_width: int = 1,
+) -> ControlSizeMetrics:
+    """Return one unambiguous final-outer-height control metric."""
     if size not in _VALID_CLASSES:
         raise ValueError(
             f"Invalid size class: {size!r}. Expected one of {_VALID_CLASSES}"
         )
-    token = {
+    outer_height = {
         "sm": theme.control_height_sm,
         "md": theme.control_height_md,
         "lg": theme.control_height_lg,
     }[size]
-    return int(token) + 2
+    return ControlSizeMetrics(
+        size=size,
+        outer_height=max(1, int(outer_height)),
+        vertical_padding=max(0, int(vertical_padding)),
+        border_width=max(0, int(border_width)),
+    )
+
+
+def resolved_control_height(theme, size: SizeClass = "md") -> int:
+    """Return the final outer pixel height for a themed control."""
+    return control_size_metrics(theme, size).outer_height
 
 
 def apply_size_class(widget: QWidget, size: SizeClass) -> None:
@@ -72,72 +109,10 @@ def apply_size_class(widget: QWidget, size: SizeClass) -> None:
         style.unpolish(widget)
         style.polish(widget)
         widget.update()
+    widget.updateGeometry()
 
 
-def normalize_form_control_heights(
-    root: QWidget,
-    height: int,
-    *,
-    marker: str = "/* normalized-form-control-height */",
-) -> None:
-    """Force mixed form controls under ``root`` to render at one height.
-
-    ``StyledComboBox`` and ``StyledSpinBox`` both participate in the themed
-    size-class system, but Qt's spin-box size hint can still become taller
-    than combo boxes when both are placed in the same form. ``SpacingInput``
-    adds one more wrapper around the spin box, so its outer widget must also
-    be constrained. This helper keeps that contract centralized instead of
-    scattering object-specific QSS patches through panels.
-    """
-    if height <= 0:
-        return
-
-    from src.shared.ui.spacing_input import SpacingInput
-    from src.shared.ui.styled_combo_box import StyledComboBox
-    from src.shared.ui.styled_spin_box import StyledSpinBox
-
-    def _widgets() -> list[QWidget]:
-        return [root, *root.findChildren(QWidget)]
-
-    def _ensure_object_name(widget: QWidget) -> str:
-        name = widget.objectName()
-        if not name:
-            name = f"normalized_control_{id(widget)}"
-            widget.setObjectName(name)
-        return name
-
-    def _strip_previous_override(style_sheet: str) -> str:
-        if marker not in style_sheet:
-            return style_sheet.rstrip()
-        return style_sheet.split(marker, 1)[0].rstrip()
-
-    def _apply_qss_height(widget: QWidget) -> None:
-        object_name = _ensure_object_name(widget)
-        base_style = _strip_previous_override(widget.styleSheet())
-        override = f"""
-{marker}
-#{object_name} {{
-    min-height: {height}px;
-    max-height: {height}px;
-    padding-top: 0px;
-    padding-bottom: 0px;
-}}
-#{object_name}[sizeClass="sm"],
-#{object_name}[sizeClass="md"],
-#{object_name}[sizeClass="lg"] {{
-    min-height: {height}px;
-    max-height: {height}px;
-    padding-top: 0px;
-    padding-bottom: 0px;
-}}
-""".strip()
-        widget.setStyleSheet(f"{base_style}\n{override}".strip())
-        widget.updateGeometry()
-
-    for widget in _widgets():
-        if isinstance(widget, (StyledComboBox, StyledSpinBox)):
-            _apply_qss_height(widget)
-        elif isinstance(widget, SpacingInput):
-            widget.setMinimumHeight(height)
-            widget.setMaximumHeight(height)
-            widget.updateGeometry()
+def widget_size_class(widget: QWidget, default: SizeClass = "md") -> SizeClass:
+    """Return a validated size class from a widget dynamic property."""
+    value = str(widget.property("sizeClass") or default)
+    return value if value in _VALID_CLASSES else default

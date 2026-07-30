@@ -19,6 +19,7 @@ from src.qt_api import (
 from src.shared.ui.divider import Divider
 from src.shared.ui.input_metrics import build_input_editor_stylesheet, configure_input_line_edit
 from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.icons.catalog import get_icon
 
 
 class CommandPalette(QWidget):
@@ -67,8 +68,9 @@ class CommandPalette(QWidget):
         # 搜索框
         search_row = QHBoxLayout()
         search_row.setContentsMargins(12, 10, 12, 10)
-        self._search_icon = QLabel("🔍")
+        self._search_icon = QLabel()
         self._search_icon.setFixedWidth(24)
+        self._search_icon.setAlignment(Qt.AlignCenter)
         search_row.addWidget(self._search_icon)
         self._search_edit = QLineEdit()
         self._search_edit.setPlaceholderText("搜索命令...")
@@ -105,8 +107,11 @@ class CommandPalette(QWidget):
             t,
             stylesheet=build_input_editor_stylesheet(t, font_size=t.font_size_lg),
         )
+        self._search_icon.setPixmap(
+            get_icon("search", 16, t.icon_secondary).pixmap(16, 16)
+        )
         self._search_icon.setStyleSheet(
-            "background:transparent;border:none;font-size:16px;"
+            "background:transparent;border:none;"
         )
         self._list.setStyleSheet(
             f"""

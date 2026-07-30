@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.qt_api import QColor, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QSize, QVBoxLayout, QWidget
+from src.qt_api import QFrame, QHBoxLayout, QLabel, QSize, QVBoxLayout, QWidget
 
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.shared.ui.theme import bind_theme, get_theme
@@ -14,13 +14,12 @@ class DesignSystemCard(RoundedSurfaceFrame):
         self._surface_background_override: str | None = None
         self._surface_border_override: str | None = None
         self._surface_border_width_override: float | None = None
-        self._shadow_enabled = True
+        # Content cards render directly. QGraphicsEffect on a QWidget applies
+        # to all descendants and changes text/line compositing.
+        self._shadow_enabled = False
         self._show_header_separator = False
 
         self._layout = QVBoxLayout(self)
-        self._shadow = QGraphicsDropShadowEffect(self)
-        self.setGraphicsEffect(self._shadow)
-
         self._header_widget: QWidget | None = None
         self._header_layout: QHBoxLayout | None = None
         self._header_icon_label: QLabel | None = None
@@ -129,10 +128,11 @@ class DesignSystemCard(RoundedSurfaceFrame):
             ),
         )
 
-        self._shadow.setEnabled(self._shadow_enabled)
-        self._shadow.setBlurRadius(t.shadow_blur_md if self._shadow_enabled else 0)
-        self._shadow.setColor(QColor(0, 0, 0, 15 if self._shadow_enabled else 0))
-        self._shadow.setOffset(0, t.shadow_offset_y if self._shadow_enabled else 0)
+        # A requested shadow is represented by a stronger border until a
+        # parent-owned background-only elevation layer is needed. Never attach
+        # a graphics effect to a card that owns text children.
+        if self._shadow_enabled and self._surface_border_width_override is None:
+            self._border_width = max(self._border_width, 1.0)
 
         if self._title_label:
             self._title_label.setStyleSheet(
@@ -144,7 +144,7 @@ class DesignSystemCard(RoundedSurfaceFrame):
         if self._header_icon_label:
             self._header_icon_label.setVisible(bool(self._header_icon_name))
             if self._header_icon_name:
-                from src.ui.icons.catalog import get_icon
+                from src.shared.ui.icons.catalog import get_icon
 
                 self._header_icon_label.setPixmap(
                     get_icon(self._header_icon_name, 18, t.primary).pixmap(18, 18)

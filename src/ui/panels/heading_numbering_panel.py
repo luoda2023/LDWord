@@ -18,29 +18,21 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, replace
 
-from src.config.heading_presets import get_scheme_catalog, is_user_preset, scheme_label_exists
+from src.config.heading_presets import get_scheme_catalog
 from src.config.style_semantics import (
-    CM_TO_PT,
     LINE_SPACING_OPTIONS,
-    SPECIAL_INDENT_FIRST_LINE,
-    SPECIAL_INDENT_HANGING,
-    config_indent_value_to_pt,
-    display_font_size_with_name,
     resolve_spacing_render_pt,
-    line_spacing_display_label,
     line_spacing_is_editable,
     line_spacing_unit_label,
     normalize_line_spacing_type,
     spacing_editor_config,
     SPACING_UNIT_OPTIONS,
     resolve_style_paragraph_spacing,
-    resolve_style_special_indent,
     resolve_line_spacing_value,
 )
 from src.config.heading_style_semantics import NON_NUMBERED_HEADING_CUSTOM
 from src.config.template import StyleConfig
 from src.qt_api import (
-    QBrush,
     QCheckBox,
     QColor,
     QComboBox,
@@ -49,12 +41,10 @@ from src.qt_api import (
     QFontMetricsF,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPainter,
     QPen,
     QRectF,
@@ -69,7 +59,6 @@ from src.qt_api import (
     Signal,
 )
 from src.shared.ui import (
-    Badge,
     DashedSeparator,
     FlowSection,
     SummaryGridItem,
@@ -92,7 +81,6 @@ from src.shared.ui.style_preview_utils import (
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.sizing import (
     apply_size_class,
-    normalize_form_control_heights,
     resolved_control_height,
 )
 from src.shared.ui.template_form_layout import (
@@ -658,13 +646,7 @@ class HeadingNumberingPanel(BasePanel):
         )
 
         self._scheme_actions = FormActionButtonRow(self)
-        self._scheme_save_as_btn = self._scheme_actions.add_button("另存为方案", "secondary")
-        self._scheme_update_btn = self._scheme_actions.add_button("更新方案", "secondary")
-        self._scheme_delete_btn = self._scheme_actions.add_button("删除方案", "ghost-danger")
         self._scheme_open_folder_btn = self._scheme_actions.add_button("打开方案文件夹", "secondary")
-        self._scheme_save_as_btn.clicked.connect(self._on_scheme_save_as_requested)
-        self._scheme_update_btn.clicked.connect(self._on_scheme_update_requested)
-        self._scheme_delete_btn.clicked.connect(self._on_scheme_delete_requested)
         self._scheme_open_folder_btn.clicked.connect(self._on_scheme_open_folder_requested)
         self._scheme_actions_row = self._scheme_form.add_field("方案操作", self._scheme_actions)
         self._scheme_section.add_widget(self._scheme_form)
@@ -679,8 +661,13 @@ class HeadingNumberingPanel(BasePanel):
             self._preset_cb.clear()
             for key, entry in get_scheme_catalog().items():
                 label = str(entry.get("label", key))
-                suffix = "用户" if entry.get("source") == "user" else "内置"
-                self._preset_cb.addItem(f"{label}（{suffix}）", key)
+                is_user = entry.get("source") == "user"
+                self._preset_cb.add_badged_item(
+                    label,
+                    key,
+                    badge_text="自定" if is_user else "内置",
+                    badge_kind="user" if is_user else "builtin",
+                )
             if current_key:
                 index = self._find_preset_index(current_key)
                 self._preset_cb.setCurrentIndex(index)
@@ -705,23 +692,6 @@ class HeadingNumberingPanel(BasePanel):
         if text == "当前模板自定义":
             return custom_text
         return text or custom_text
-
-    def _default_scheme_save_as_name(self) -> str:
-        active_key = self._adapter.active_scheme_key()
-        label = ""
-        if active_key:
-            label = str(get_scheme_catalog().get(active_key, {}).get("label", "") or "")
-        if not label or label == "当前模板自定义":
-            label = "自定义编号方案"
-        if not scheme_label_exists(label):
-            return label
-        base = f"{label}副本"
-        candidate = base
-        suffix = 2
-        while scheme_label_exists(candidate):
-            candidate = f"{base} {suffix}"
-            suffix += 1
-        return candidate
 
     # ━━ 3. Level Editor ━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -798,15 +768,27 @@ class HeadingNumberingPanel(BasePanel):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(get_theme().template_detail_section_gap)
 
-        self._detail_title = QLabel("级别配置")
+        self._detail_header = QWidget(detail)
+        header_layout = QHBoxLayout(self._detail_header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(10)
+
+        self._detail_title = QLabel("级别配置", self._detail_header)
         self._detail_title.setObjectName("hn_detail_title")
-        layout.addWidget(self._detail_title)
+        header_layout.addWidget(self._detail_title)
+        header_layout.addStretch(1)
+
+        toc_label = QLabel("加入目录", self._detail_header)
+        toc_label.setObjectName("hn_detail_action_label")
+        header_layout.addWidget(toc_label)
+
+        self._toc_switch = ToggleSwitch(self._detail_header, checked=True)
+        self._toc_switch.toggled_signal.connect(self._on_detail_toc_changed)
+        header_layout.addWidget(self._toc_switch)
+        layout.addWidget(self._detail_header)
 
         self._build_result_strip(layout)
-        self._build_numbering_block(layout)
-        self._build_counter_block(layout)
-        self._build_output_reference_block(layout)
-        self._build_title_spacing_block(layout)
+        self._build_numbering_settings_block(layout)
         self._build_style_inspector(layout)
         self._build_expert_inspector(layout)
 
@@ -820,7 +802,7 @@ class HeadingNumberingPanel(BasePanel):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        self._result_heading_label = QLabel("正文预览", card)
+        self._result_heading_label = QLabel("编号预览", card)
         self._result_heading_label.setObjectName("hn_result_heading")
         layout.addWidget(self._result_heading_label)
 
@@ -835,33 +817,33 @@ class HeadingNumberingPanel(BasePanel):
         layout.addWidget(preview_shell)
         parent_layout.addWidget(card)
 
-    def _build_numbering_block(self, parent_layout: QVBoxLayout) -> None:
-        body_layout, _ = self._build_inspector_block(
+    def _build_numbering_settings_block(self, parent_layout: QVBoxLayout) -> None:
+        body_layout, self._numbering_settings_block = self._build_inspector_block(
             parent_layout,
-            "编号组成",
+            "编号设置",
         )
+
+        self._add_inspector_subsection(body_layout, "格式与层级")
         self._build_numbering_section(body_layout)
 
-    def _build_counter_block(self, parent_layout: QVBoxLayout) -> None:
-        body_layout, _ = self._build_inspector_block(
-            parent_layout,
-            "编号计数",
-        )
+        self._add_inspector_subsection(body_layout, "计数与衔接", separated=True)
         self._build_counter_section(body_layout)
 
-    def _build_title_spacing_block(self, parent_layout: QVBoxLayout) -> None:
-        body_layout, _ = self._build_inspector_block(
-            parent_layout,
-            "标题显示",
-        )
-        self._build_title_spacing_section(body_layout)
+    def _add_inspector_subsection(
+        self,
+        parent_layout: QVBoxLayout,
+        title: str,
+        *,
+        separated: bool = False,
+    ) -> None:
+        if separated:
+            divider = QFrame(self)
+            divider.setObjectName("hn_editor_divider")
+            parent_layout.addWidget(divider)
 
-    def _build_output_reference_block(self, parent_layout: QVBoxLayout) -> None:
-        body_layout, _ = self._build_inspector_block(
-            parent_layout,
-            "目录与下级引用",
-        )
-        self._build_output_reference_section(body_layout)
+        label = QLabel(title, self)
+        label.setObjectName("hn_subsection_title")
+        parent_layout.addWidget(label)
 
     def _build_style_inspector(self, parent_layout: QVBoxLayout) -> None:
         block = QFrame(self)
@@ -975,7 +957,7 @@ class HeadingNumberingPanel(BasePanel):
     def _refresh_result_strip(self) -> None:
         if not self._adapter.has_template or not hasattr(self, "_result_heading_label"):
             return
-        self._result_heading_label.setText("正文预览")
+        self._result_heading_label.setText("编号预览")
 
     def _refresh_style_summary(self) -> None:
         self._refresh_inspector_toggles()
@@ -1039,14 +1021,24 @@ class HeadingNumberingPanel(BasePanel):
         chain_row = self._compact_form_row("包含上级编号", self._chain_cb, parent=self)
         self._chain_sep_lbl_row = self._compact_form_row("连接符", self._chain_sep_edit, parent=self)
 
+        self._ref_style_cb = StyledComboBox(self)
+        self._ref_style_cb.setSizeAdjustPolicy(self._ref_style_cb.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
+        self._ref_style_cb.setToolTip("当下级标题包含本级编号时，本级编号在下级标题中使用的数字样式。")
+        for key, desc in STYLE_OPTIONS:
+            self._ref_style_cb.addItem(desc, key)
+        self._ref_style_cb.currentIndexChanged.connect(self._on_ref_style_edited)
+        self._ref_style_row = self._compact_form_row("下级引用样式", self._ref_style_cb, parent=self)
+
         self._numbering_grid = self._form_grid(
             [
                 [numbering_enabled_row, core_style_row],
                 [prefix_row, suffix_row],
-                [chain_row, self._chain_sep_lbl_row],
+                [chain_row, self._ref_style_row],
             ]
         )
         parent_layout.addWidget(self._numbering_grid)
+        self._chain_sep_grid = self._form_grid([[self._chain_sep_lbl_row]])
+        parent_layout.addWidget(self._chain_sep_grid)
 
     def _build_counter_section(self, parent_layout: QVBoxLayout) -> None:
         self._start_at_input = SpacingInput(
@@ -1068,52 +1060,23 @@ class HeadingNumberingPanel(BasePanel):
         self._restart_trigger_cb.currentIndexChanged.connect(self._on_restart_trigger_selected)
         self._restart_trigger_row = self._compact_form_row("触发级别", self._restart_trigger_cb, parent=self)
 
-        parent_layout.addWidget(
-            self._form_grid(
-                [
-                    [start_at_row, restart_on_row],
-                    [self._restart_trigger_row],
-                ]
-            )
-        )
-
-    def _build_title_spacing_section(self, parent_layout: QVBoxLayout) -> None:
         self._title_sep_edit = _WhitespacePresetWidget(compact_mode_width=190, parent=self)
         self._title_sep_edit.setToolTip("编号和标题正文之间的间隔。")
         self._title_sep_edit.setMinimumWidth(self._title_sep_edit.sizeHint().width())
         self._title_sep_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._title_sep_edit.textChanged.connect(self._on_title_sep_edited)
-        title_sep_row = self._compact_form_row("编号后间隔", self._title_sep_edit, parent=self)
+        self._title_sep_row = self._compact_form_row("编号后间隔", self._title_sep_edit, parent=self)
 
-        parent_layout.addWidget(
-            self._form_grid(
-                [
-                    [title_sep_row],
-                ]
-            )
+        self._counter_grid = self._form_grid(
+            [
+                [start_at_row, restart_on_row],
+                [self._title_sep_row],
+            ]
         )
+        parent_layout.addWidget(self._counter_grid)
+        self._restart_trigger_grid = self._form_grid([[self._restart_trigger_row]])
+        parent_layout.addWidget(self._restart_trigger_grid)
 
-    def _build_output_reference_section(self, parent_layout: QVBoxLayout) -> None:
-        self._toc_switch = ToggleSwitch(self, checked=True)
-        self._toc_switch.toggled_signal.connect(self._on_detail_toc_changed)
-        toc_row = self._compact_form_row("加入目录", self._toc_switch, parent=self)
-
-        self._ref_style_cb = StyledComboBox(self)
-        self._ref_style_cb.setSizeAdjustPolicy(self._ref_style_cb.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
-        self._ref_style_cb.setToolTip("当下级标题包含本级编号时，本级编号在下级标题中使用的数字样式。")
-        for key, desc in STYLE_OPTIONS:
-            self._ref_style_cb.addItem(desc, key)
-        self._ref_style_cb.currentIndexChanged.connect(self._on_ref_style_edited)
-        ref_style_row = self._compact_form_row("下级引用样式", self._ref_style_cb, parent=self)
-
-        parent_layout.addWidget(
-            self._form_grid(
-                [
-                    [toc_row],
-                    [ref_style_row],
-                ]
-            )
-        )
     def _build_expert_section(self, parent_layout: QVBoxLayout) -> None:
         raw_row = QWidget()
         raw_layout = QHBoxLayout(raw_row)
@@ -1197,16 +1160,12 @@ class HeadingNumberingPanel(BasePanel):
             units=SPACING_UNIT_OPTIONS, show_unit=True, unit_inline=True, parent=self,
         )
         self._hd_space_before.value_changed.connect(self._on_heading_spacing_edited)
-        hd_sb_suffix = QLabel("", self)
-        self._unit_labels.append(hd_sb_suffix)
 
         self._hd_space_after = SpacingInput(
             unit="pt", min_val=0.0, max_val=80.0, step=1.0, decimals=1,
             units=SPACING_UNIT_OPTIONS, show_unit=True, unit_inline=True, parent=self,
         )
         self._hd_space_after.value_changed.connect(self._on_heading_spacing_edited)
-        hd_sa_suffix = QLabel("", self)
-        self._unit_labels.append(hd_sa_suffix)
 
         line_type_row = self._compact_form_row("行距类型", self._hd_line_type, parent=self)
         line_value_row = self._compact_form_row(
@@ -1220,25 +1179,24 @@ class HeadingNumberingPanel(BasePanel):
             "段前",
             self._hd_space_before,
             parent=self,
-            suffix=hd_sb_suffix,
         )
         space_after_row = self._compact_form_row(
             "段后",
             self._hd_space_after,
             parent=self,
-            suffix=hd_sa_suffix,
         )
-        parent_layout.addWidget(
-            self._form_grid(
-                [
-                    [font_cn_row, font_en_row],
-                    [size_row, emphasis_row],
-                    [alignment_row],
-                    [line_type_row, line_value_row],
-                    [space_before_row, space_after_row],
-                ]
-            )
+        self._style_grid = self._form_grid(
+            [
+                [font_cn_row, size_row],
+                [font_en_row, emphasis_row],
+                [alignment_row],
+                [line_type_row, line_value_row],
+                [space_before_row, space_after_row],
+            ],
+            align_trailing_labels=True,
+            stack_slack=32,
         )
+        parent_layout.addWidget(self._style_grid)
 
     # ━━ 4. Non-numbered Section ━━━━━━━━━━━━━━━━━
 
@@ -1369,37 +1327,93 @@ class HeadingNumberingPanel(BasePanel):
         self._apply_heading_form_row_height(row)
         return row
 
-    def _form_grid(self, rows: list[list[QWidget]]) -> TemplateFormGrid:
+    def _form_grid(
+        self,
+        rows: list[list[QWidget]],
+        *,
+        align_trailing_labels: bool | None = None,
+        stack_slack: int = 0,
+    ) -> TemplateFormGrid:
         return TemplateFormGrid(
             rows,
             parent=self,
             column_gap=compact_form_column_gap(),
+            align_trailing_labels=align_trailing_labels,
+            stack_slack=stack_slack,
         )
 
     # ━━ Sidebar List ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     def _rebuild_level_list(self) -> None:
+        """增量同步可见级别行，并原位刷新行内容。"""
         t = get_theme()
         self._adv_list.blockSignals(True)
-        self._adv_list.clear()
-        if not self._adapter.has_template:
+        try:
+            levels = self._visible_level_count() if self._adapter.has_template else 0
+
+            # 级别始终是 1..N 的连续序列；数量收缩时只移除尾项。
+            while self._adv_list.count() > levels:
+                last_row = self._adv_list.count() - 1
+                item = self._adv_list.item(last_row)
+                row_widget = self._adv_list.itemWidget(item)
+                if row_widget is not None:
+                    self._adv_list.removeItemWidget(item)
+                    row_widget.deleteLater()
+                self._adv_list.takeItem(last_row)
+
+            # 数量扩展时只在尾部创建缺失的项。
+            while self._adv_list.count() < levels:
+                level = self._adv_list.count() + 1
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, level)
+                self._adv_list.addItem(item)
+                binding = self._adapter.get_binding(level)
+                self._adv_list.setItemWidget(
+                    item,
+                    self._build_level_row(
+                        level,
+                        binding,
+                        self._adapter.preview_number(level),
+                        self._sidebar_meta_text(level, binding),
+                    ),
+                )
+
+            # 编辑只原位更新文字、尺寸和禁用态，保留 item/widget 身份。
+            item_size = QSize(
+                max(0, t.heading_panel_sidebar_width - 2),
+                t.control_height_md + 18,
+            )
+            for level in range(1, levels + 1):
+                item = self._adv_list.item(level - 1)
+                item.setSizeHint(item_size)
+                item.setData(Qt.UserRole, level)
+                binding = self._adapter.get_binding(level)
+                row_widget = self._adv_list.itemWidget(item)
+                if row_widget is None:
+                    row_widget = self._build_level_row(
+                        level,
+                        binding,
+                        self._adapter.preview_number(level),
+                        self._sidebar_meta_text(level, binding),
+                    )
+                    self._adv_list.setItemWidget(item, row_widget)
+                else:
+                    self._update_level_row(
+                        row_widget,
+                        level,
+                        binding,
+                        self._adapter.preview_number(level),
+                        self._sidebar_meta_text(level, binding),
+                    )
+
+            if levels:
+                cur_row = max(0, min(self._selected_adv_level - 1, levels - 1))
+                self._adv_list.setCurrentRow(cur_row)
+        finally:
             self._adv_list.blockSignals(False)
+
+        if not self._adapter.has_template:
             return
-
-        levels = self._visible_level_count()
-        for level in range(1, levels + 1):
-            binding = self._adapter.get_binding(level)
-            preview = self._adapter.preview_number(level)
-            style_summary = self._sidebar_meta_text(level, binding)
-            item = QListWidgetItem()
-            item.setSizeHint(QSize(max(0, t.heading_panel_sidebar_width - 2), t.control_height_md + 18))
-            item.setData(Qt.UserRole, level)
-            self._adv_list.addItem(item)
-            self._adv_list.setItemWidget(item, self._build_level_row(level, binding, preview, style_summary))
-
-        cur_row = max(0, min(self._selected_adv_level - 1, levels - 1))
-        self._adv_list.setCurrentRow(cur_row)
-        self._adv_list.blockSignals(False)
         self._sync_detail_pane()
 
     def _sidebar_meta_text(self, level: int, binding) -> str:
@@ -1425,22 +1439,50 @@ class HeadingNumberingPanel(BasePanel):
         lv_lbl.setObjectName("hn_list_lv")
         top_layout.addWidget(lv_lbl)
 
-        txt_lbl = QLabel(preview_text if (preview_text and binding.enabled) else "未启用")
+        txt_lbl = QLabel()
         txt_lbl.setObjectName("hn_list_txt")
         txt_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        if binding and not binding.enabled:
-            _set_disabled_visual(txt_lbl, True)
         top_layout.addWidget(txt_lbl)
         layout.addWidget(top_row)
 
-        meta_lbl = QLabel(style_summary)
+        meta_lbl = QLabel()
         meta_lbl.setObjectName("hn_preview_meta")
         meta_lbl.setWordWrap(True)
-        if binding and not binding.enabled:
-            _set_disabled_visual(meta_lbl, True)
         layout.addWidget(meta_lbl)
 
+        self._update_level_row(widget, level, binding, preview_text, style_summary)
         return widget
+
+    def _update_level_row(
+        self,
+        widget: QWidget,
+        level: int,
+        binding,
+        preview_text: str,
+        style_summary: str,
+    ) -> None:
+        """原位更新一个级别行，不替换 QListWidget 中的对象。"""
+        level_label = widget.findChild(QLabel, "hn_list_lv")
+        preview_label = widget.findChild(QLabel, "hn_list_txt")
+        meta_label = widget.findChild(QLabel, "hn_preview_meta")
+        if level_label is None or preview_label is None or meta_label is None:
+            return
+
+        level_text = f"级别 {level}"
+        if level_label.text() != level_text:
+            level_label.setText(level_text)
+
+        enabled = bool(binding and binding.enabled)
+        resolved_preview = preview_text if (preview_text and enabled) else "未启用"
+        if preview_label.text() != resolved_preview:
+            preview_label.setText(resolved_preview)
+        if meta_label.text() != style_summary:
+            meta_label.setText(style_summary)
+
+        muted = not enabled
+        for label in (preview_label, meta_label):
+            if bool(label.property("muted")) != muted:
+                _set_disabled_visual(label, muted)
 
     # ━━ Detail Pane Sync ━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1526,10 +1568,11 @@ class HeadingNumberingPanel(BasePanel):
     def _sync_chain_sep_visibility(self) -> None:
         val = self._chain_cb.currentData()
         visible = should_show_chain_separator(val)
-        with updates_suspended(self._chain_sep_lbl_row, self._chain_sep_edit):
+        with updates_suspended(self._chain_sep_grid, self._chain_sep_lbl_row, self._chain_sep_edit):
+            self._chain_sep_grid.setVisible(visible)
             self._chain_sep_lbl_row.setVisible(visible)
             self._chain_sep_edit.setVisible(visible)
-            refresh_layout_chain(self._chain_sep_lbl_row)
+            refresh_layout_chain(self._chain_sep_grid)
 
     def _current_template_mode(self) -> str:
         if hasattr(self, "_use_raw_cb") and self._use_raw_cb.isChecked():
@@ -1573,9 +1616,10 @@ class HeadingNumberingPanel(BasePanel):
         if not hasattr(self, "_restart_trigger_row"):
             return
         visible = str(self._restart_on_cb.currentData() or "") == "specific" and self._restart_trigger_cb.count() > 0
-        with updates_suspended(self._restart_trigger_row):
+        with updates_suspended(self._restart_trigger_grid, self._restart_trigger_row):
+            self._restart_trigger_grid.setVisible(visible)
             self._restart_trigger_row.setVisible(visible)
-            refresh_layout_chain(self._restart_trigger_row)
+            refresh_layout_chain(self._restart_trigger_grid)
 
     def _sync_heading_style_editor(self, level: int) -> None:
         """Sync the heading format section with the selected level's style."""
@@ -1671,76 +1715,8 @@ class HeadingNumberingPanel(BasePanel):
         self._refresh_scheme_action_state()
 
     def _refresh_scheme_action_state(self) -> None:
-        if not hasattr(self, "_scheme_update_btn"):
-            return
-        active_key = self._adapter.active_scheme_key() if self._adapter.has_template else None
-        user_scheme = bool(active_key and is_user_preset(active_key))
-        has_valid_templates = not self._has_invalid_custom_templates()
-        self._scheme_save_as_btn.setEnabled(self._adapter.has_template and has_valid_templates)
-        self._scheme_update_btn.setEnabled(
-            user_scheme and self._adapter.active_scheme_has_changes() and has_valid_templates
-        )
-        self._scheme_delete_btn.setEnabled(user_scheme)
-
-    def _on_scheme_save_as_requested(self) -> None:
-        if not self._adapter.has_template:
-            return
-        if self._has_invalid_custom_templates():
-            Toast.show_warning("请先修正手写编号模板")
-            return
-        text, ok = QInputDialog.getText(
-            self,
-            "另存为编号方案",
-            "方案名称",
-            QLineEdit.Normal,
-            self._default_scheme_save_as_name(),
-        )
-        label = str(text or "").strip()
-        if not ok or not label:
-            return
-        try:
-            self._adapter.save_current_as_user_scheme(label)
-        except ValueError as exc:
-            Toast.show_warning(str(exc) or "编号方案名称已存在")
-            return
-        self._populate_preset_combo()
-        self._sync_preset_display()
-        self._refresh_summary()
-        Toast.show_success("编号方案已保存")
-
-    def _on_scheme_update_requested(self) -> None:
-        if not self._adapter.has_template:
-            return
-        if self._has_invalid_custom_templates():
-            Toast.show_warning("请先修正手写编号模板")
-            return
-        if not self._adapter.update_active_user_scheme():
-            return
-        self._populate_preset_combo()
-        self._sync_preset_display()
-        self._refresh_summary()
-        Toast.show_success("编号方案已更新")
-
-    def _on_scheme_delete_requested(self) -> None:
-        if not self._adapter.has_template:
-            return
-        active_key = self._adapter.active_scheme_key()
-        if not active_key or not is_user_preset(active_key):
-            return
-        answer = QMessageBox.question(
-            self,
-            "删除编号方案",
-            "删除该用户编号方案？当前模板里的编号设置会保留为自定义配置。",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if answer != QMessageBox.Yes:
-            return
-        if self._adapter.delete_active_user_scheme():
-            self._populate_preset_combo()
-            self._sync_preset_display()
-            self._refresh_summary()
-            Toast.show_success("编号方案已删除")
+        if hasattr(self, "_scheme_open_folder_btn"):
+            self._scheme_open_folder_btn.setEnabled(True)
 
     def _on_scheme_open_folder_requested(self) -> None:
         from src.config import heading_presets
@@ -2047,8 +2023,6 @@ class HeadingNumberingPanel(BasePanel):
             return
         if hasattr(self, "_preset_cb"):
             self._sync_preset_display()
-        if hasattr(self.bridge, "mark_template_dirty"):
-            self.bridge.mark_template_dirty()
         self._refresh_result_strip()
         self._refresh_style_summary()
         self._refresh_expert_summary()
@@ -2109,7 +2083,7 @@ class HeadingNumberingPanel(BasePanel):
         if not hasattr(self, "_restore_btn") or not hasattr(self, "_save_btn"):
             return
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
         except Exception:
             return
         t = get_theme()
@@ -2144,8 +2118,6 @@ class HeadingNumberingPanel(BasePanel):
     def on_template_changed(self, template) -> None:
         self._adapter.set_template(template)
         self._adapter.capture_snapshot()
-        if hasattr(self.bridge, "clear_template_dirty"):
-            self.bridge.clear_template_dirty()
         self._sync_from_template()
 
     def _sync_from_template(self) -> None:
@@ -2232,7 +2204,7 @@ class HeadingNumberingPanel(BasePanel):
             apply_button_variant(self._expert_toggle_btn, "ghost-primary")
 
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
             for icon_name, label in self._header_icons:
                 label.setPixmap(get_icon(icon_name, 18, t.primary).pixmap(18, 18))
         except Exception:
@@ -2244,7 +2216,7 @@ class HeadingNumberingPanel(BasePanel):
         self._refresh_action_state()
 
     def _apply_action_button_variants(self, theme) -> None:
-        if not hasattr(self, "_scheme_save_as_btn"):
+        if not hasattr(self, "_scheme_open_folder_btn"):
             return
         self._scheme_actions.apply_theme()
 
@@ -2259,6 +2231,10 @@ class HeadingNumberingPanel(BasePanel):
                 font-size: {t.font_size_lg + 1}px;
                 color: {t.text_primary};
                 font-weight: {t.font_weight_emphasis};
+            }}
+            #hn_detail_action_label {{
+                font-size: {t.font_size_md}px;
+                color: {t.text_secondary};
             }}
             #hn_list_lv {{
                 font-size: {t.font_size_sm}px; color: {t.text_secondary};
@@ -2303,6 +2279,11 @@ class HeadingNumberingPanel(BasePanel):
             #hn_block_title {{
                 font-size: {t.font_size_md}px;
                 color: {t.text_primary};
+                font-weight: {t.font_weight_emphasis};
+            }}
+            #hn_subsection_title {{
+                font-size: {t.font_size_sm}px;
+                color: {t.text_secondary};
                 font-weight: {t.font_weight_emphasis};
             }}
             QLabel#hn_form_label {{
@@ -2365,13 +2346,6 @@ class HeadingNumberingPanel(BasePanel):
         """ + build_button_stylesheet(t)
 
     def _sync_input_heights(self, theme) -> None:
-        reference_height = resolved_control_height(theme, "md")
-        if hasattr(self, "_scheme_section"):
-            normalize_form_control_heights(
-                self._scheme_section,
-                reference_height,
-                marker="/* heading-panel-form-control-height */",
-            )
         self._sync_heading_inspector_heights(theme)
 
     def _sync_heading_inspector_heights(self, theme=None) -> None:
@@ -2380,18 +2354,11 @@ class HeadingNumberingPanel(BasePanel):
             return
 
         control_height = heading_inspector_control_height(theme)
-        normalize_form_control_heights(
-            target,
-            control_height,
-            marker="/* heading-inspector-form-control-height */",
-        )
         for widget in [target, *target.findChildren(QWidget)]:
             if widget.property("headingInspectorFormRow"):
                 self._apply_heading_form_row_height(widget)
             if isinstance(widget, _WhitespacePresetWidget):
                 widget.set_control_height(control_height)
-            elif isinstance(widget, QLineEdit) and not self._is_combo_editor(widget):
-                self._apply_heading_control_height(widget, control_height)
             elif widget.objectName() in {"option_toggle_chip", "hn_emphasis_control"}:
                 self._apply_heading_control_height(widget, control_height)
 
@@ -2402,15 +2369,6 @@ class HeadingNumberingPanel(BasePanel):
         policy.setVerticalPolicy(QSizePolicy.Fixed)
         widget.setSizePolicy(policy)
         widget.updateGeometry()
-
-    def _is_combo_editor(self, widget: QWidget) -> bool:
-        parent = widget.parentWidget()
-        while parent is not None:
-            if isinstance(parent, StyledComboBox):
-                return True
-            parent = parent.parentWidget()
-        return False
-
 
 # ── Utility ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -2428,15 +2386,6 @@ def _set_state_property(widget, name: str, value) -> None:
     style.unpolish(widget)
     style.polish(widget)
     widget.update()
-
-
-def _clear_layout(layout) -> None:
-    while layout.count():
-        item = layout.takeAt(0)
-        w = item.widget()
-        if w:
-            w.blockSignals(True)
-            w.setParent(None)
 
 
 def _select(combo: StyledComboBox, value) -> None:

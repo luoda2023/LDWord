@@ -15,6 +15,7 @@ from src.services.material_assets import (
     rollback_question_figure_library_metadata,
 )
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.deferred_call import defer_qt_method
 from src.shared.ui.theme import get_theme
 
 
@@ -88,11 +89,11 @@ class QuestionFigureLibraryHistoryPresenterMixin:
                 "\u9898\u56fe\u7d20\u6750 metadata"
             )
             button.clicked.connect(
-                lambda *_args, selected_row=row_index: (
-                    self._rollback_question_figure_library_version_history_row(
-                        selected_row,
-                        confirmed=True,
-                    )
+                lambda *_args, selected_row=row_index: defer_qt_method(
+                    self,
+                    "_rollback_question_figure_library_version_history_row",
+                    selected_row,
+                    confirmed=True,
                 )
             )
             table.setCellWidget(row_index, 4, button)
@@ -149,15 +150,18 @@ class QuestionFigureLibraryHistoryPresenterMixin:
                 )
             )
             return False
+        snapshot = self._capture_question_figure_mutation_snapshot()
+        if snapshot is None:
+            return False
         self._asset_item_payloads = list(result.get("payloads") or [])
         profile.asset_item_history = [
             dict(record)
             for record in list(result.get("records") or [])
             if isinstance(record, dict)
         ]
-        self._persist_current_profile_editor()
+        if not self._publish_question_figure_mutation(snapshot):
+            return False
         self._refresh_summary()
-        self._sync_material_batch_selection()
         try:
             question_row = int(result.get("question_row", -1))
         except (TypeError, ValueError):

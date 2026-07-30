@@ -14,7 +14,7 @@ from src.shared.ui.dialog_style import (
     build_dialog_path_label_stylesheet,
 )
 from src.shared.ui.theme import get_theme
-from src.ui.icons.catalog import get_icon
+from src.shared.ui.icons.catalog import get_icon
 
 
 OK_TEXT = "确定"

@@ -6,13 +6,18 @@ from datetime import date
 import re
 from typing import Any, Mapping
 
+from src.config.official_material_form import official_material_field_label
+from src.shared.engine.material_token_contract import parse_material_token
+
 from src.ui.panels.assets.specs import (
     COMMON_ASSET_SLOTS,
     COMMON_FIELD_DEFS,
     FIELD_SOURCE_IMPORTED_MAPPING,
-    REQUIRED_FIELD_KEYS,
     AssetSlotSpec,
 )
+
+MATERIAL_FIELD_DRAFT_PREFIX = "__material_field_draft__"
+
 
 def _parse_fields_text(text: str) -> dict[str, str]:
     fields: dict[str, str] = {}
@@ -32,55 +37,44 @@ def _parse_fields_text(text: str) -> dict[str, str]:
     return fields
 
 
+def _duplicate_fields_text_keys(text: str) -> tuple[str, ...]:
+    """Return repeated explicit field keys without silently resolving them."""
+
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _value = line.split("=", 1)
+        elif ":" in line:
+            key, _value = line.split(":", 1)
+        else:
+            continue
+        key = key.strip()
+        if not key:
+            continue
+        if key in seen and key not in duplicates:
+            duplicates.append(key)
+        seen.add(key)
+    return tuple(duplicates)
+
+
 def _format_fields_text(fields: dict[str, str]) -> str:
     return "\n".join(f"{key}={value}" for key, value in fields.items())
 
 
-_REQUIRED_FIELD_FALLBACK_SENTINEL = object()
+def _exact_field_key(text: str) -> str:
+    """Normalize only the braces, never the user's exact field name."""
 
-
-def _parse_required_fields_text(
-    text: str,
-    *,
-    fallback: tuple[str, ...] | list[str] | object = _REQUIRED_FIELD_FALLBACK_SENTINEL,
-) -> list[str]:
-    parts = re.split(r"[,，、;\s]+", str(text or "").strip())
-    keys: list[str] = []
-    for part in parts:
-        key = _field_key_from_user_text(part)
-        if key and key not in keys:
-            keys.append(key)
-    if keys:
-        return keys
-    if fallback is _REQUIRED_FIELD_FALLBACK_SENTINEL:
-        return list(REQUIRED_FIELD_KEYS)
-    return list(fallback)
-
-
-def _format_required_fields_text(
-    keys: list[str] | tuple[str, ...],
-    *,
-    fallback: tuple[str, ...] | list[str] | object = _REQUIRED_FIELD_FALLBACK_SENTINEL,
-) -> str:
-    normalized = _normalize_required_field_keys(keys, fallback=fallback)
-    return "、".join(_field_label(key) for key in normalized)
-
-
-def _normalize_required_field_keys(
-    keys: list[str] | tuple[str, ...],
-    *,
-    fallback: tuple[str, ...] | list[str] | object = _REQUIRED_FIELD_FALLBACK_SENTINEL,
-) -> list[str]:
-    normalized: list[str] = []
-    for key in keys:
-        resolved = _field_key_from_user_text(str(key or ""))
-        if resolved and resolved not in normalized:
-            normalized.append(resolved)
-    if normalized:
-        return normalized
-    if fallback is _REQUIRED_FIELD_FALLBACK_SENTINEL:
-        return list(REQUIRED_FIELD_KEYS)
-    return list(fallback)
+    raw = str(text or "").strip()
+    if raw.startswith("{{") and raw.endswith("}}"):
+        raw = raw[2:-2]
+    key = raw.strip()
+    if not key or key != raw or any(char in key for char in "{}\r\n"):
+        return ""
+    return key
 
 
 def _field_key_from_user_text(text: str) -> str:
@@ -104,11 +98,11 @@ def _imported_field_keys_from_sources(field_sources: dict[str, str] | None) -> s
     }
 
 
-def _field_sources_from_imported_keys(fields: dict[str, str], imported_keys: set[str]) -> dict[str, str]:
+def _field_sources_from_imported_keys(imported_keys: set[str]) -> dict[str, str]:
     return {
         str(key): FIELD_SOURCE_IMPORTED_MAPPING
         for key in imported_keys
-        if str(key or "").strip() and str(fields.get(key, "") or "").strip()
+        if str(key or "").strip()
     }
 
 
@@ -187,7 +181,9 @@ def _looks_like_date(text: str) -> bool:
 
 def _field_label(key: str) -> str:
     labels = {field_key: label for field_key, label, _placeholder in COMMON_FIELD_DEFS}
-    return labels.get(key, key)
+    if key in labels:
+        return labels[key]
+    return official_material_field_label(key)
 
 
 def _asset_role_label(role: str, slot_specs: tuple[AssetSlotSpec, ...] | None = None) -> str:
@@ -200,6 +196,10 @@ def _asset_role_label(role: str, slot_specs: tuple[AssetSlotSpec, ...] | None = 
 
 def _placeholder_key(value: str) -> str:
     text = str(value or "").strip()
+    try:
+        return parse_material_token(text).identifier
+    except (TypeError, ValueError):
+        pass
     if text.startswith("{{") and text.endswith("}}"):
         text = text[2:-2]
     return text.strip()
@@ -265,12 +265,10 @@ def _normalized_import_key(key: str) -> str:
 
 
 __all__ = [
+    'MATERIAL_FIELD_DRAFT_PREFIX',
     '_parse_fields_text',
+    '_duplicate_fields_text_keys',
     '_format_fields_text',
-    '_REQUIRED_FIELD_FALLBACK_SENTINEL',
-    '_parse_required_fields_text',
-    '_format_required_fields_text',
-    '_normalize_required_field_keys',
     '_field_key_from_user_text',
     '_imported_field_keys_from_sources',
     '_field_sources_from_imported_keys',

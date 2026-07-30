@@ -93,7 +93,7 @@ class DetailSummaryHeader(QWidget):
             f"background: transparent;"
         )
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
 
             self._icon.setPixmap(
                 get_icon(self._icon_name, self._icon_size, theme.primary).pixmap(

@@ -10,6 +10,7 @@ class MaterialReadinessIssueGroups:
     """Structured material readiness issues for Workbench pre-execution UI."""
 
     schema_ids: tuple[str, ...] = ()
+    incompatible_schema_ids: tuple[str, ...] = ()
     field_keys: tuple[str, ...] = ()
     asset_roles: tuple[str, ...] = ()
     source_notes: tuple[str, ...] = ()
@@ -18,12 +19,22 @@ class MaterialReadinessIssueGroups:
 
     @property
     def has_issues(self) -> bool:
-        return bool(self.schema_ids or self.field_keys or self.asset_roles)
+        return bool(
+            self.schema_ids
+            or self.incompatible_schema_ids
+            or self.field_keys
+            or self.asset_roles
+        )
 
     def to_reasons(self) -> list[str]:
         reasons: list[str] = []
         if self.schema_ids:
             reasons.append("资料 Schema 未注册：" + ", ".join(self.schema_ids))
+        if self.incompatible_schema_ids:
+            reasons.append(
+                "资料包 Schema 与当前方案不兼容："
+                + ", ".join(self.incompatible_schema_ids)
+            )
         if self.field_keys:
             reasons.append("资料字段缺失：" + ", ".join(self.field_keys))
         if self.asset_roles:
@@ -34,6 +45,11 @@ class MaterialReadinessIssueGroups:
         lines: list[str] = []
         if self.schema_ids:
             lines.append("Schema：未注册 " + ", ".join(self.schema_ids))
+        if self.incompatible_schema_ids:
+            lines.append(
+                "Schema：资料包不兼容 "
+                + ", ".join(self.incompatible_schema_ids)
+            )
         if self.field_keys:
             lines.append("字段：" + ", ".join(self.field_keys))
         if self.asset_roles:
@@ -75,34 +91,6 @@ class WorkbenchIssueItem:
 
 
 @dataclass(frozen=True, slots=True)
-class WorkbenchIssueQueueSummary:
-    """Filterable summary for the Workbench pre-execution issue queue."""
-
-    total_count: int = 0
-    visible_count: int = 0
-    blocking_count: int = 0
-    actionable_count: int = 0
-    active_category: str = ""
-    active_action_group: str = ""
-    category_counts: tuple[tuple[str, int], ...] = ()
-    severity_counts: tuple[tuple[str, int], ...] = ()
-    status_counts: tuple[tuple[str, int], ...] = ()
-    owner_counts: tuple[tuple[str, int], ...] = ()
-    action_group_counts: tuple[tuple[str, int], ...] = ()
-    visible_action_group_counts: tuple[tuple[str, int], ...] = ()
-    repair_target_counts: tuple[tuple[str, int], ...] = ()
-    visible_items: tuple[WorkbenchIssueItem, ...] = ()
-
-    @property
-    def has_issues(self) -> bool:
-        return self.total_count > 0
-
-    @property
-    def has_filter(self) -> bool:
-        return bool(self.active_category or self.active_action_group)
-
-
-@dataclass(frozen=True, slots=True)
 class WorkbenchIssueActionVisualProjection:
     """Stable UI projection for a Workbench issue action group."""
 
@@ -134,7 +122,6 @@ class WorkbenchIssueEvidenceLineProjection:
         return self.label
 
 
-ISSUE_STATUS_VALUES: tuple[str, ...] = ("open", "in_progress", "resolved", "ignored")
 ISSUE_TERMINAL_STATUS_VALUES: tuple[str, ...] = ("resolved", "ignored")
 ISSUE_ACTION_GROUP_VALUES: tuple[str, ...] = (
     "handle_first",

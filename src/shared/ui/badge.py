@@ -46,7 +46,7 @@ class Badge(QWidget):
             border-radius: {t.radius_sm}px;
             padding: 1px 8px;
             font-size: {max(t.font_size_sm - 1, 11)}px;
-            font-weight: 500;
+            font-weight: {t.font_weight_medium};
             """
         )
         self._label.setMinimumHeight(max(16, t.spacing_md + 2))

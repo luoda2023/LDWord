@@ -99,7 +99,7 @@ class TagChip(QWidget):
             QLabel {{
                 color: {fg};
                 font-size: {t.font_size_sm}px;
-                font-weight: 500;
+                font-weight: {t.font_weight_medium};
                 background: transparent;
                 border: none;
             }}

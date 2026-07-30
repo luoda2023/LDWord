@@ -1,144 +1,141 @@
-"""Scene processing-scope section widgets."""
+"""Minimal plan editor for logical document processing scope."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-
-from src.qt_api import QVBoxLayout, QSizePolicy, QWidget, Signal
+from src.config.document_scope import (
+    document_scope_role_label,
+    selectable_document_scope_roles,
+)
+from src.qt_api import QCheckBox, QVBoxLayout, QSizePolicy, QWidget, Signal
 from src.shared.ui.card import Card
-from src.shared.ui.scope_zone_checklist import ScopeZoneChecklist, ScopeZoneOption
 from src.shared.ui.segmented_control import SegmentedControl
-from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
+from src.shared.ui.selection_control_style import build_checkbox_stylesheet
+from src.shared.ui.theme import bind_theme, get_theme
 
 
-SCENE_SCOPE_ZONE_SECTION_TITLE = "处理范围"
-SCENE_SCOPE_ZONE_SECTION_DESCRIPTION = ""
-SCENE_APPLICATION_BOUNDARY_MODE_OPTIONS = (
-    ("follow_template", "按模板默认"),
-    ("body_only", "只处理正文"),
-    ("full_document", "处理全文"),
-    ("confirm_before_apply", "每次执行前选择"),
+DOCUMENT_SCOPE_MODE_OPTIONS = (
+    ("all", "全部内容"),
+    ("body", "仅正文"),
+    ("selected", "指定区域"),
 )
 
 
-class SceneScopeZoneSection(QWidget):
-    """Card-level section for scene application boundary."""
+class DocumentScopeSection(QWidget):
+    """One control group; document recognition is intentionally absent."""
 
-    zone_changed = Signal(str, bool)
-    boundary_mode_changed = Signal(str)
+    scope_changed = Signal(str, object)
 
-    def __init__(
-        self,
-        parent=None,
-        *,
-        title: str = SCENE_SCOPE_ZONE_SECTION_TITLE,
-        description: str = SCENE_SCOPE_ZONE_SECTION_DESCRIPTION,
-        summary_items: Sequence[SummaryGridItem] = (),
-        zone_labels: Mapping[str, str] | None = None,
-        zone_options: Sequence[ScopeZoneOption] = (),
-        object_name_prefix: str = "scn_scope_zone_checklist",
-    ) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self._is_syncing = False
+        self._role_checks: dict[str, QCheckBox] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
         self._card = Card(parent=self)
-        self._card.set_header(title, icon_name="crosshair")
-        self._description_label = (
-            self._card.set_description(description) if description else None
-        )
+        self._card.set_header("处理范围", icon_name="crosshair")
+        self._mode_control = SegmentedControl(parent=self._card)
+        self._mode_control.setObjectName("scn_document_scope_mode")
+        for mode, label in DOCUMENT_SCOPE_MODE_OPTIONS:
+            self._mode_control.add_segment(label, mode)
+        self._mode_control.current_changed.connect(self._emit_scope_changed)
+        self._card.add_widget(self._mode_control)
 
-        self._summary = SummaryGrid(columns=2, parent=self._card)
-        self._summary.set_items(tuple(summary_items))
-        self._summary.setVisible(False)
-
-        self._boundary_mode_control = SegmentedControl(parent=self._card)
-        self._boundary_mode_control.setObjectName(
-            f"{object_name_prefix}_boundary_mode"
-        )
-        self._boundary_modes = tuple(SCENE_APPLICATION_BOUNDARY_MODE_OPTIONS)
-        for mode, label in self._boundary_modes:
-            self._boundary_mode_control.add_segment(label, mode)
-        self._boundary_mode_control.current_changed.connect(
-            self._on_boundary_mode_changed
-        )
-        self._card.add_widget(self._boundary_mode_control)
-
-        self._checklist = ScopeZoneChecklist(
-            self._card,
-            object_name_prefix=object_name_prefix,
-        )
-        options = tuple(zone_options) or tuple(
-            ScopeZoneOption(zone_id, label)
-            for zone_id, label in (zone_labels or {}).items()
-        )
-        self._checklist.set_options(options)
-        self._checklist.checked_changed.connect(self._on_zone_checked)
-        self._card.add_widget(self._checklist)
-        self._checklist.setVisible(False)
-
+        self._roles_widget = QWidget(self._card)
+        self._roles_layout = QVBoxLayout(self._roles_widget)
+        self._roles_layout.setContentsMargins(0, 8, 0, 0)
+        self._roles_layout.setSpacing(6)
+        self._card.add_widget(self._roles_widget)
         layout.addWidget(self._card)
+
+        self.set_scope("all", ())
+        self.set_mode_id("custom")
+        bind_theme(self, self._apply_theme)
+        self._apply_theme()
 
     @property
     def card(self) -> Card:
         return self._card
 
     @property
-    def summary(self) -> SummaryGrid:
-        return self._summary
+    def mode_control(self) -> SegmentedControl:
+        return self._mode_control
 
-    @property
-    def checklist(self) -> ScopeZoneChecklist:
-        return self._checklist
+    def set_mode_id(self, mode_id: str) -> None:
+        roles = selectable_document_scope_roles(mode_id)
+        if tuple(self._role_checks) == roles:
+            return
+        while self._roles_layout.count():
+            item = self._roles_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._role_checks = {}
+        for role_id in roles:
+            checkbox = QCheckBox(document_scope_role_label(role_id), self._roles_widget)
+            checkbox.setObjectName(f"scn_document_scope_role_{role_id}")
+            checkbox.toggled.connect(self._emit_scope_changed)
+            self._role_checks[role_id] = checkbox
+            self._roles_layout.addWidget(checkbox)
+        self._apply_theme()
+        self._sync_role_visibility()
 
-    @property
-    def boundary_mode_control(self) -> SegmentedControl:
-        return self._boundary_mode_control
+    def set_scope(self, mode: str, selected_roles) -> None:
+        self._is_syncing = True
+        try:
+            normalized = str(mode or "").strip() or "all"
+            for index, (candidate, _label) in enumerate(DOCUMENT_SCOPE_MODE_OPTIONS):
+                if candidate == normalized:
+                    self._mode_control.set_current_index(index)
+                    break
+            else:
+                self._mode_control.set_current_index(0)
+            selected = {str(role or "").strip() for role in selected_roles or ()}
+            for role_id, checkbox in self._role_checks.items():
+                checkbox.setChecked(role_id in selected)
+            self._sync_role_visibility()
+        finally:
+            self._is_syncing = False
 
-    @property
-    def checks(self):
-        return self._checklist.checks
+    def mode(self) -> str:
+        return str(self._mode_control.current_data() or "all")
 
-    def set_summary_items(self, items: Sequence[SummaryGridItem]) -> None:
-        self._summary.set_items(tuple(items))
+    def selected_roles(self) -> list[str]:
+        return [
+            role_id
+            for role_id, checkbox in self._role_checks.items()
+            if checkbox.isChecked()
+        ]
 
-    def set_zone_checked(self, zone_id: str, checked: bool) -> None:
-        self._checklist.set_checked(zone_id, checked)
+    def _emit_scope_changed(self, *_args) -> None:
+        if (
+            not self._is_syncing
+            and self.mode() == "selected"
+            and not self.selected_roles()
+            and "body" in self._role_checks
+        ):
+            self._is_syncing = True
+            try:
+                self._role_checks["body"].setChecked(True)
+            finally:
+                self._is_syncing = False
+        self._sync_role_visibility()
+        if not self._is_syncing:
+            self.scope_changed.emit(self.mode(), self.selected_roles())
 
-    def checked_states(self) -> dict[str, bool]:
-        return {
-            zone_id: checkbox.isChecked()
-            for zone_id, checkbox in self._checklist.checks.items()
-        }
+    def _sync_role_visibility(self) -> None:
+        self._roles_widget.setVisible(self.mode() == "selected")
 
-    def set_boundary_mode(self, mode: str) -> None:
-        normalized = str(mode or "").strip() or "follow_template"
-        for index, (candidate, _label) in enumerate(self._boundary_modes):
-            if candidate == normalized:
-                self._boundary_mode_control.set_current_index(index)
-                return
-        self._boundary_mode_control.set_current_index(0)
-
-    def boundary_mode(self) -> str:
-        value = self._boundary_mode_control.current_data()
-        return str(value or "follow_template")
-
-    def apply_theme(self) -> None:
-        self._checklist.apply_theme()
-
-    def _on_zone_checked(self, zone_id: str, checked: bool) -> None:
-        self.zone_changed.emit(zone_id, bool(checked))
-
-    def _on_boundary_mode_changed(self, *_args) -> None:
-        self.boundary_mode_changed.emit(self.boundary_mode())
+    def _apply_theme(self) -> None:
+        style = build_checkbox_stylesheet(get_theme())
+        for checkbox in self._role_checks.values():
+            checkbox.setStyleSheet(style)
 
 
 __all__ = [
-    "SCENE_APPLICATION_BOUNDARY_MODE_OPTIONS",
-    "SCENE_SCOPE_ZONE_SECTION_DESCRIPTION",
-    "SCENE_SCOPE_ZONE_SECTION_TITLE",
-    "SceneScopeZoneSection",
+    "DOCUMENT_SCOPE_MODE_OPTIONS",
+    "DocumentScopeSection",
 ]

@@ -11,11 +11,14 @@ import ctypes
 import sys
 
 from src.app_meta import APP_DISPLAY_NAME_FULL
-from src.qt_api import QFont, QHBoxLayout, QLabel, QMouseEvent, QPoint, QPushButton, QSize, QSizePolicy, QWidget, Qt
+from src.qt_api import QHBoxLayout, QLabel, QMouseEvent, QPoint, QPushButton, QSize, QSizePolicy, QWidget, Qt
 
+from src.config.work_mode import WorkModeSpec, list_work_modes
+from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.theme import get_theme, bind_theme
 from src.shared.ui.tooltip import set_global_tooltip
-from src.ui.icons.catalog import get_app_logo, get_icon
+from src.shared.ui.typography_policy import brand_font
+from src.shared.ui.icons.catalog import get_app_logo, get_icon
 
 
 class TitleBar(QWidget):
@@ -24,11 +27,20 @@ class TitleBar(QWidget):
     HEIGHT = 40
     ICON_SIZE = 14
 
-    def __init__(self, parent_window, parent=None):
+    def __init__(
+        self,
+        parent_window,
+        parent=None,
+        bridge=None,
+        work_mode_change_handler=None,
+    ):
         super().__init__(parent)
         self._window = parent_window
+        self._bridge = bridge
+        self._work_mode_change_handler = work_mode_change_handler
         self._drag_pos: QPoint | None = None
         self._pinned = False
+        self._syncing_work_mode = False
 
         self.setFixedHeight(self.HEIGHT)
         self.setObjectName("titlebar")
@@ -51,6 +63,19 @@ class TitleBar(QWidget):
         self._title_label.setObjectName("titlebar_title")
 
         layout.addWidget(self._title_label)
+        layout.addSpacing(16)
+
+        self._work_mode_combo = StyledComboBox(self)
+        self._work_mode_combo.setObjectName("titlebar_work_mode_combo")
+        self._work_mode_combo.set_titlebar_mode(True)
+        self._work_mode_combo.setFixedSize(128, 28)
+        self._work_mode_combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._work_mode_combo.setToolTip("选择当前工作模式。")
+        for mode in list_work_modes():
+            self._work_mode_combo.addItem(mode.label, mode.mode_id)
+        self._work_mode_combo.currentIndexChanged.connect(self._on_work_mode_changed)
+        layout.addWidget(self._work_mode_combo)
+
         layout.addStretch()
 
         # 窗口控制按钮
@@ -70,6 +95,10 @@ class TitleBar(QWidget):
         self._btn_max.clicked.connect(self._toggle_maximize)
         self._btn_close.clicked.connect(self._window.close)
 
+        if self._bridge is not None:
+            self._bridge.work_mode_changed.connect(self.set_work_mode)
+            self.set_work_mode(self._bridge.current_work_mode())
+
         self._apply_theme()
         bind_theme(self, self._apply_theme)
 
@@ -81,6 +110,29 @@ class TitleBar(QWidget):
         btn.setCursor(Qt.PointingHandCursor)
         btn.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
         return btn
+
+    def set_work_mode(self, mode: WorkModeSpec | str) -> None:
+        mode_id = str(getattr(mode, "mode_id", mode) or "").strip()
+        index = self._work_mode_combo.findData(mode_id)
+        if index < 0:
+            index = self._work_mode_combo.findData("custom")
+        self._syncing_work_mode = True
+        try:
+            self._work_mode_combo.setCurrentIndex(max(index, 0))
+        finally:
+            self._syncing_work_mode = False
+
+    def _on_work_mode_changed(self, *_args) -> None:
+        if self._syncing_work_mode or self._bridge is None:
+            return
+        mode_id = str(self._work_mode_combo.currentData() or "").strip()
+        if callable(self._work_mode_change_handler):
+            self._work_mode_change_handler(mode_id)
+            # A rejected or failed request leaves the bridge unchanged.  Keep
+            # the selector projected from that authoritative state.
+            self.set_work_mode(self._bridge.current_work_mode())
+            return
+        self._bridge.set_current_work_mode(mode_id)
 
     def _toggle_maximize(self) -> None:
         if self._window.isMaximized():
@@ -149,13 +201,9 @@ class TitleBar(QWidget):
         self._icon_label.setPixmap(logo.pixmap(24, 24))
         self._update_icons()
 
-        title_font = QFont(self._title_label.font())
-        title_font.setFamily("Segoe UI")
-        title_font.setPixelSize(t.font_size_md)
-        title_font.setWeight(QFont.Weight(t.font_weight_bold))
-        title_font.setBold(t.font_weight_bold >= 700)
-        title_font.setKerning(True)
-        self._title_label.setFont(title_font)
+        self._title_label.setFont(
+            brand_font(pixel_size=t.font_size_md, weight=t.font_weight_bold)
+        )
 
         self.setStyleSheet(f"""
             #titlebar {{

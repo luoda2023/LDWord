@@ -13,42 +13,21 @@ from src.config.material_schema_registry import (
 )
 from src.config.scene import SceneWorkspace
 from src.qt_api import QHBoxLayout, QLineEdit, QPushButton, QWidget, Qt, Signal
-from src.shared.ui import (
-    apply_button_variant,
-    build_button_stylesheet,
-    build_text_input_stylesheet,
-)
-from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
 from src.shared.ui.template_form_layout import template_form_row
 from src.shared.ui.text_area import TextArea
-from src.shared.ui.theme import get_theme
-from src.ui.panels.scene_summary_projection import (
+from src.ui.panels.scene_detail_support import (
+    _apply_template_button_contract,
+    _apply_template_line_edit_contract,
+)
+from src.ui.panels.scene_product_summary_projection import (
     COVERAGE_PACK_DISPLAY_LABELS,
     FAMILY_DISPLAY_LABELS,
     material_asset_role_display_name,
     material_field_display_name,
     material_schema_display_name,
 )
-
-
-def _apply_template_line_edit_contract(*line_edits: QLineEdit) -> None:
-    stylesheet = build_text_input_stylesheet(get_theme())
-    for line_edit in line_edits:
-        apply_size_class(line_edit, "md")
-        line_edit.setAttribute(Qt.WA_StyledBackground, True)
-        line_edit.setStyleSheet(stylesheet)
-
-
-def _apply_template_button_contract(*buttons: tuple[QPushButton, str]) -> None:
-    stylesheet = build_button_stylesheet(get_theme())
-    for button, variant in buttons:
-        apply_button_variant(button, variant)
-        apply_size_class(button, "md")
-        button.setCursor(Qt.PointingHandCursor)
-        button.setStyleSheet(stylesheet)
-
 
 def _format_list_text(values) -> str:
     return "\n".join(
@@ -77,7 +56,7 @@ def _populate_material_schema_combo(combo: StyledComboBox) -> None:
             (
                 f"资料规则 ID：{schema.schema_id}\n"
                 f"英文名称：{schema.label}\n"
-                f"适用场景族：{_schema_family_display_name(schema.family)}"
+                f"适用方案族：{_schema_family_display_name(schema.family)}"
             ),
             Qt.ToolTipRole,
         )
@@ -96,9 +75,13 @@ def _schema_preview_count(required_count: int, total_count: int) -> str:
     return f"{required_count} 必填 / {total_count} 全部"
 
 
-def _accepted_types_include_attachment(accepted_types) -> bool:
-    normalized = {str(item or "").strip().lower() for item in accepted_types or ()}
-    return bool(normalized - {"image"})
+def _material_role_is_attachment(role_spec: object) -> bool:
+    return (
+        str(getattr(role_spec, "material_domain", "") or "")
+        .strip()
+        .casefold()
+        == "attachment"
+    )
 
 
 def _schema_family_display_name(family_id: object) -> str:
@@ -145,7 +128,7 @@ def _readable_preview_lines(lines: list[str], *, empty: str, limit: int = 5) -> 
     return _format_list_text([*lines[:limit], f"还有 {len(lines) - limit} 项"])
 
 
-SCENE_MATERIAL_REQUIREMENT_SOURCE_LABEL = "本场景补充要求"
+SCENE_MATERIAL_REQUIREMENT_SOURCE_LABEL = "本方案补充要求"
 
 
 def _schema_field_preview(known_schemas, profile) -> tuple[str, str, str]:
@@ -202,7 +185,7 @@ def _schema_role_preview(known_schemas, profile, *, attachments: bool) -> tuple[
     for schema in known_schemas:
         for role_spec in getattr(schema, "asset_roles", ()):
             accepted_types = tuple(getattr(role_spec, "accepted_types", ("image",)) or ("image",))
-            if _accepted_types_include_attachment(accepted_types) != attachments:
+            if _material_role_is_attachment(role_spec) != attachments:
                 continue
             role = str(getattr(role_spec, "role", "") or "").strip()
             if not role:
@@ -375,11 +358,11 @@ def _build_material_schema_validation_items(scene: SceneWorkspace) -> tuple[Summ
         ),
         SummaryGridItem(
             key="schema_families",
-            label="适用场景族",
-            value=f"{len(families)} 个场景族" if families else "无",
-            detail=_format_list_text(family_names) or "无场景族",
+            label="适用方案族",
+            value=f"{len(families)} 个方案族" if families else "无",
+            detail=_format_list_text(family_names) or "无方案族",
             variant="info" if families else "neutral",
-            tooltip=_format_list_text(families) or "无场景族",
+            tooltip=_format_list_text(families) or "无方案族",
         ),
         SummaryGridItem(
             key="schema_fields",

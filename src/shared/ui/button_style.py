@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from src.qt_api import QPushButton, Qt
 
+from src.shared.ui.sizing import control_size_metrics
 from src.shared.ui.theme import AppTheme
 
 
@@ -22,16 +23,36 @@ def build_button_stylesheet(
     radius: int | None = None,
     font_size: int | None = None,
 ) -> str:
-    resolved_min_height = theme.button_height_md if min_height is None else min_height
     resolved_padding_x = theme.button_padding_x if padding_x is None else padding_x
     resolved_padding_y = theme.button_padding_y if padding_y is None else padding_y
     resolved_radius = theme.button_radius if radius is None else radius
     resolved_font_size = theme.font_size_md if font_size is None else font_size
+    metrics = control_size_metrics(
+        theme,
+        "md",
+        vertical_padding=resolved_padding_y,
+        border_width=1,
+    )
+    resolved_outer_height = metrics.outer_height if min_height is None else int(min_height)
+    resolved_content_height = max(
+        0,
+        resolved_outer_height - (resolved_padding_y * 2) - 2,
+    )
+    size_metrics = {
+        size: control_size_metrics(
+            theme,
+            size,
+            vertical_padding=resolved_padding_y,
+            border_width=1,
+        )
+        for size in ("sm", "md", "lg")
+    }
 
     return f"""
         {selector}[variant] {{
             outline: none;
-            min-height: {resolved_min_height}px;
+            min-height: {resolved_content_height}px;
+            max-height: {resolved_content_height}px;
             padding: {resolved_padding_y}px {resolved_padding_x}px;
             border-radius: {resolved_radius}px;
             font-size: {resolved_font_size}px;
@@ -41,7 +62,7 @@ def build_button_stylesheet(
         {selector}[variant="primary"] {{
             background: {theme.primary};
             color: {theme.text_on_primary};
-            border: none;
+            border: 1px solid transparent;
         }}
         {selector}[variant="primary"]:hover {{
             background: {theme.primary_hover};
@@ -66,7 +87,7 @@ def build_button_stylesheet(
         {selector}[variant="danger"] {{
             background: {theme.error};
             color: {theme.text_on_primary};
-            border: none;
+            border: 1px solid transparent;
         }}
         {selector}[variant="danger"]:hover {{
             background: {theme.error_hover};
@@ -78,7 +99,7 @@ def build_button_stylesheet(
         {selector}[variant="ghost-danger"] {{
             background: transparent;
             color: {theme.error};
-            border: none;
+            border: 1px solid transparent;
         }}
         {selector}[variant="ghost-danger"]:hover {{
             background: {theme.error_bg};
@@ -91,7 +112,7 @@ def build_button_stylesheet(
         {selector}[variant="ghost-primary"] {{
             background: transparent;
             color: {theme.primary};
-            border: none;
+            border: 1px solid transparent;
         }}
         {selector}[variant="ghost-primary"]:hover {{
             background: {theme.primary_light};
@@ -110,21 +131,21 @@ def build_button_stylesheet(
         {selector}[variant="ghost-primary"]:disabled {{
             background: transparent;
             color: {theme.text_disabled};
-            border: none;
+            border: 1px solid transparent;
         }}
 
         /* ── Size-class tiers (via sizeClass dynamic property) ── */
         {selector}[sizeClass="sm"] {{
-            min-height: {theme.control_height_sm}px;
-            max-height: {theme.control_height_sm}px;
+            min-height: {size_metrics["sm"].content_height}px;
+            max-height: {size_metrics["sm"].content_height}px;
         }}
         {selector}[sizeClass="md"] {{
-            min-height: {theme.button_height_md}px;
-            max-height: {theme.button_height_md}px;
+            min-height: {size_metrics["md"].content_height}px;
+            max-height: {size_metrics["md"].content_height}px;
         }}
         {selector}[sizeClass="lg"] {{
-            min-height: {theme.control_height_lg}px;
-            max-height: {theme.control_height_lg}px;
+            min-height: {size_metrics["lg"].content_height}px;
+            max-height: {size_metrics["lg"].content_height}px;
         }}
     """
 

@@ -105,7 +105,7 @@ class StyleResultReceiptRow(QWidget):
             f"color: {theme.text_secondary}; background: transparent;"
         )
         try:
-            from src.ui.icons.catalog import get_icon
+            from src.shared.ui.icons.catalog import get_icon
 
             self._icon.setPixmap(
                 get_icon(self._icon_name, size=16, color=theme.primary).pixmap(16, 16)

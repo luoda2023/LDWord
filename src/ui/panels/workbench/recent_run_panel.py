@@ -14,14 +14,13 @@ from src.qt_api import (
     QVBoxLayout,
     QWidget,
 )
-from src.shared.ui.style_difference_summary_slot import StyleDifferenceSummarySlot
 from src.shared.ui.style_management_block import StyleManagementBlock
 from src.shared.ui.style_receipt_slot_frame import StyleReceiptSlotFrame
 from src.shared.ui.theme import bind_theme, get_theme
 from src.ui.panels.style_object_projection_builders import (
     build_execution_style_projection,
 )
-from src.ui.icons.catalog import get_icon
+from src.shared.ui.icons.catalog import get_icon
 
 from .state import ArtifactItemState, RecentRunState
 
@@ -53,18 +52,12 @@ class RecentRunPanel(QWidget):
             object_name_prefix="wb_recent_style_receipt",
         )
         self._style_receipt_row = self._style_receipt_slot.receipt_row
-        self._style_difference_slot = StyleDifferenceSummarySlot(
-            self,
-            object_name_prefix="wb_recent_style_difference",
-        )
-        self._style_difference_slot.setVisible(False)
         self._style_review_block = StyleManagementBlock(
             self,
             title="样式回执",
             icon_name="type-outline",
             object_name_prefix="wb_recent_style_review",
             mode="execution_receipt_review",
-            difference_slot=self._style_difference_slot,
             receipt_slot=self._style_receipt_slot,
         )
         self._style_review_block.setVisible(False)
@@ -103,10 +96,8 @@ class RecentRunPanel(QWidget):
         style_projection = build_execution_style_projection(
             style_source_envelope=state.style_source_envelope,
             style_source_summary=state.style_source_summary,
-            difference=state.style_difference_summary,
         )
         self._style_review_block.apply_style_object_projection(style_projection)
-        self._style_difference_slot.setVisible(style_projection.difference is not None)
         self._sync_style_review_block_visible()
         if state.object_preflight_summary:
             summary_text = f"{summary_text}\n{state.object_preflight_summary}"
@@ -152,7 +143,6 @@ class RecentRunPanel(QWidget):
     def _sync_style_review_block_visible(self) -> None:
         self._style_review_block.setVisible(
             self._style_receipt_slot.has_receipt()
-            or not self._style_difference_slot.isHidden()
         )
         self._style_review_block.updateGeometry()
 

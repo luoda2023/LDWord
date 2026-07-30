@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from src.qt_api import QColor, QFrame, QPainter, QPainterPath, QRectF, Qt, QPen, QWidget
+import re
+
+from src.qt_api import QColor, QFrame, QPainter, QPainterPath, QRectF, Qt, QWidget
+from src.shared.ui.paint_geometry import snapped_pen_width, stroke_pen
 from src.shared.ui.theme import get_theme
 
 
 class RoundedSurfaceFrame(QFrame):
     """Shared self-painted rounded container for window shells and dialog cards.
 
-    Child widgets are automatically made background-transparent so that they
-    cannot paint rectangular opaque fills over the parent's rounded corners.
+    This class owns its own fill and border geometry. Child QSS backgrounds are
+    not clipped by this painter, so shell callers must not duplicate the outer
+    surface background/radius on edge-to-edge descendants.
     """
 
     def __init__(self, radius: int = 10, parent=None):
@@ -21,9 +25,8 @@ class RoundedSurfaceFrame(QFrame):
         self._border_style = Qt.SolidLine
 
     # ------------------------------------------------------------------
-    # Enforce transparent background on every child widget added to this
-    # container so that rectangular auto-fills never cover the rounded
-    # corner areas painted by paintEvent.
+    # Disable palette auto-fill on children. Explicit QSS backgrounds still
+    # paint normally and are intentionally outside this method's authority.
     # ------------------------------------------------------------------
     def childEvent(self, event) -> None:
         super().childEvent(event)
@@ -41,12 +44,12 @@ class RoundedSurfaceFrame(QFrame):
         border_width: float = 0.0,
         border_style=Qt.SolidLine,
     ) -> None:
-        self._background = QColor(Qt.transparent) if str(background).lower() == "transparent" else QColor(background)
+        self._background = _surface_color(background)
         self._radius = int(radius)
         self._border_color = (
-            QColor(Qt.transparent)
-            if not border_color or str(border_color).lower() == "transparent"
-            else QColor(border_color)
+            _surface_color("transparent")
+            if not border_color
+            else _surface_color(border_color)
         )
         self._border_width = float(max(0.0, border_width))
         self._border_style = border_style
@@ -56,28 +59,60 @@ class RoundedSurfaceFrame(QFrame):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
 
-        inset = 0.5 if self._border_width > 0 else 0.0
-        rect = QRectF(
-            inset,
-            inset,
-            max(0.0, self.width() - inset * 2),
-            max(0.0, self.height() - inset * 2),
-        )
-        path = QPainterPath()
-        path.addRoundedRect(rect, self._radius, self._radius)
-
+        fill_rect = QRectF(0.0, 0.0, float(self.width()), float(self.height()))
+        fill_path = QPainterPath()
+        fill_path.addRoundedRect(fill_rect, self._radius, self._radius)
         painter.setPen(Qt.NoPen)
         painter.setBrush(self._background)
-        painter.drawPath(path)
+        painter.drawPath(fill_path)
 
         if self._border_width > 0:
-            pen = QPen(self._border_color, self._border_width)
+            rendered_width = snapped_pen_width(self._border_width, painter)
+            inset = rendered_width / 2.0
+            border_rect = QRectF(
+                inset,
+                inset,
+                max(0.0, float(self.width()) - rendered_width),
+                max(0.0, float(self.height()) - rendered_width),
+            )
+            border_radius = max(0.0, float(self._radius) - inset)
+            border_path = QPainterPath()
+            border_path.addRoundedRect(border_rect, border_radius, border_radius)
+            pen = stroke_pen(
+                painter,
+                self._border_color,
+                self._border_width,
+                cap=Qt.RoundCap,
+                join=Qt.RoundJoin,
+                style=self._border_style,
+            )
             pen.setStyle(self._border_style)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
-            painter.drawPath(path)
+            painter.drawPath(border_path)
 
         painter.end()
+
+
+def _surface_color(value: object) -> QColor:
+    text = str(value or "").strip()
+    if not text or text.lower() == "transparent":
+        return QColor(Qt.transparent)
+    match = re.fullmatch(
+        r"rgba\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*([0-9.]+)\s*\)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return QColor(text)
+    red, green, blue = (
+        max(0, min(255, int(component)))
+        for component in match.groups()[:3]
+    )
+    alpha = float(match.group(4))
+    if alpha > 1:
+        alpha /= 255.0
+    return QColor(red, green, blue, round(max(0.0, min(1.0, alpha)) * 255))
 
 
 __all__ = ["RoundedSurfaceFrame"]

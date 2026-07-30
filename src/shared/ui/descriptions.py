@@ -65,10 +65,10 @@ class Descriptions(QWidget):
         t = get_theme()
 
         self.setStyleSheet(
-            f"""
-            Descriptions {{
+            """
+            Descriptions {
                 background: transparent;
-            }}
+            }
             """
         )
 
@@ -79,7 +79,7 @@ class Descriptions(QWidget):
                 QLabel {{
                     color: {t.text_secondary};
                     font-size: {t.font_size_md}px;
-                    font-weight: 500;
+                    font-weight: {t.font_weight_medium};
                     background: transparent;
                     border: none;
                 }}
