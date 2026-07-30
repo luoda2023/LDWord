@@ -14,8 +14,8 @@
 
 The two source specs are broader than one safe execution plan:
 
-- [`2026-03-31-workbench-homepage-redesign-v3-final.md`](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/docs/superpowers/specs/2026-03-31-workbench-homepage-redesign-v3-final.md)
-- [`2026-03-31-ui-components-gap-analysis.md`](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/docs/superpowers/specs/2026-03-31-ui-components-gap-analysis.md)
+- [`2026-03-31-workbench-homepage-redesign-v3-final.md`](../specs/2026-03-31-workbench-homepage-redesign-v3-final.md)
+- [`2026-03-31-ui-components-gap-analysis.md`](../specs/2026-03-31-ui-components-gap-analysis.md)
 
 They cover five different concerns:
 
