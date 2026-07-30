@@ -41,6 +41,11 @@ from src.pipeline.runner import (
 from src.reporting.execution_payload import (
     diagnostics_payload,
 )
+from src.reporting.official_batch_payload import (
+    official_document_batch_exception_payload,
+    official_document_batch_item_payload,
+    official_document_batch_preflight_failure_payload,
+)
 from src.shared.engine.exam_question_schema import (
     build_exam_delivery_runtime,
     inspect_exam_question_schema,
@@ -84,41 +89,12 @@ from .execution_preflight import (
     document_scope_diagnostic,
     prepare_document_material_preflight,
 )
+from .batch_reporting import (
+    attach_batch_reports,
+    batch_profile_ids,
+    build_batch_payload,
+)
 from .result_projection import project_execution_result
-
-
-def _lazy_optional_function(module_name: str, function_name: str):
-    def call(*args, **kwargs):
-        function = getattr(import_module(module_name), function_name)
-        return function(*args, **kwargs)
-
-    return call
-
-
-official_document_batch_exception_payload = _lazy_optional_function(
-    "src.reporting.official_batch_payload",
-    "official_document_batch_exception_payload",
-)
-official_document_batch_item_payload = _lazy_optional_function(
-    "src.reporting.official_batch_payload",
-    "official_document_batch_item_payload",
-)
-official_document_batch_preflight_failure_payload = _lazy_optional_function(
-    "src.reporting.official_batch_payload",
-    "official_document_batch_preflight_failure_payload",
-)
-attach_batch_reports = _lazy_optional_function(
-    "src.services.production_runtime.batch_reporting",
-    "attach_batch_reports",
-)
-batch_profile_ids = _lazy_optional_function(
-    "src.services.production_runtime.batch_reporting",
-    "batch_profile_ids",
-)
-build_batch_payload = _lazy_optional_function(
-    "src.services.production_runtime.batch_reporting",
-    "build_batch_payload",
-)
 
 
 _UNRESOLVED_OFFICIAL_MASTER = object()
