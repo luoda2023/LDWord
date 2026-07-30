@@ -1,0 +1,528 @@
+"""Compile AI Markdown into DocumentFragment and compose a local draft DOCX."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from hashlib import sha256
+import os
+from pathlib import Path
+import re
+from typing import TypeAlias
+from uuid import uuid4
+
+from docx import Document
+
+from src.config.content_artifacts import ContentMaterialBinding
+from src.config.content_materials import ContentInsertionRule, content_anchor_token
+from src.config.material_snapshot import MaterialSnapshot
+from src.services.material_content.artifact_repository import ContentArtifactRepository
+from src.services.material_content.compiler import compile_content_material
+from src.services.material_content.composer import (
+    ContentComposeRequest,
+    ContentMaterialComposer,
+)
+from src.assistant.domain.exam_authoring_contract import (
+    generated_exam_blockers,
+)
+from src.assistant.contracts.task_plan import (
+    ARTIFACT_KIND_EXAM,
+    ARTIFACT_KIND_NARRATIVE,
+    SOURCE_ROLE_PRODUCTION_INPUT,
+    SOURCE_ROLE_STRUCTURED_SOURCE,
+    SourceArtifactRef,
+)
+from src.shared.engine.exam_question_schema import parse_exam_markdown_source
+from src.shared.engine.material_token_contract import (
+    MaterialTokenNamespace,
+    material_token,
+)
+
+
+MAX_GENERATED_MARKDOWN_CHARACTERS = 100_000
+BIDDING_DOCUMENT_PROFILE_ID = "assistant.bidding-local-assembly.v1"
+_BIDDING_PROMPT_PROFILE_ID = "assistant.bidding-markdown.v1"
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedContentDraft:
+    draft_id: str
+    session_id: str
+    markdown_path: str
+    document_path: str
+    fragment: dict[str, object]
+    fragment_digest: str
+    artifact_id: str
+    manifest_sha256: str
+    compose_receipt_id: str
+    document_profile_id: str = ""
+
+    @property
+    def artifact_kind(self) -> str:
+        return ARTIFACT_KIND_NARRATIVE
+
+    @property
+    def production_input_path(self) -> str:
+        return self.document_path
+
+    @property
+    def preview_path(self) -> str:
+        return self.document_path
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "contract_kind": "assistant_generated_content_draft",
+            "artifact_kind": self.artifact_kind,
+            "draft_id": self.draft_id,
+            "session_id": self.session_id,
+            "markdown_path": self.markdown_path,
+            "document_path": self.document_path,
+            "fragment": dict(self.fragment),
+            "fragment_digest": self.fragment_digest,
+            "artifact_id": self.artifact_id,
+            "manifest_sha256": self.manifest_sha256,
+            "compose_receipt_id": self.compose_receipt_id,
+            "document_profile_id": self.document_profile_id,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedExamDraft:
+    """Validated exam Markdown retained as the authoritative production input."""
+
+    draft_id: str
+    session_id: str
+    markdown_path: str
+    source_digest: str
+    artifact_id: str
+    schema_id: str
+    validation_summary: dict[str, object]
+    issues: tuple[dict[str, object], ...] = ()
+
+    @property
+    def artifact_kind(self) -> str:
+        return ARTIFACT_KIND_EXAM
+
+    @property
+    def production_input_path(self) -> str:
+        return self.markdown_path
+
+    @property
+    def preview_path(self) -> str:
+        return self.markdown_path
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "contract_kind": "assistant_generated_exam_draft",
+            "artifact_kind": self.artifact_kind,
+            "draft_id": self.draft_id,
+            "session_id": self.session_id,
+            "markdown_path": self.markdown_path,
+            "source_digest": self.source_digest,
+            "artifact_id": self.artifact_id,
+            "schema_id": self.schema_id,
+            "validation_summary": dict(self.validation_summary),
+            "issues": [dict(item) for item in self.issues],
+        }
+
+
+GeneratedDraft: TypeAlias = GeneratedContentDraft | GeneratedExamDraft
+
+
+class AssistantContentGenerationAdapter:
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root)
+        self.drafts_root = self.root / "drafts"
+        self.repository = ContentArtifactRepository(self.root / "content_artifacts")
+        self.composer = ContentMaterialComposer(repository=self.repository)
+
+    def compile_and_compose(
+        self,
+        *,
+        session_id: str,
+        markdown: str,
+        prompt_profile_id: str = "",
+        cancelled=None,
+    ) -> GeneratedContentDraft:
+        normalized = _validate_generated_markdown(markdown)
+        if str(prompt_profile_id or "").strip() == _BIDDING_PROMPT_PROFILE_ID:
+            _validate_bidding_markdown(normalized)
+        draft_id = uuid4().hex
+        session_root = self.drafts_root / _safe_id(session_id)
+        session_root.mkdir(parents=True, exist_ok=True)
+        markdown_path = session_root / f"{draft_id}.md"
+        _atomic_write_text(markdown_path, normalized)
+        compiled = compile_content_material(
+            markdown_path,
+            self.repository,
+            cancelled=cancelled,
+        )
+        if compiled.blocked or compiled.artifact_ref is None or compiled.fragment is None:
+            codes = [str(item.code) for item in compiled.findings]
+            raise ValueError("content_compile_blocked:" + ",".join(codes))
+        content_id = "assistant_body"
+        binding = ContentMaterialBinding(
+            content_id=content_id,
+            label="AI 生成内容",
+            artifact_ref=compiled.artifact_ref,
+        )
+        rule = ContentInsertionRule(
+            rule_id="assistant-content-body",
+            content_id=content_id,
+            anchor_token=content_anchor_token(content_id),
+        )
+        snapshot = MaterialSnapshot(
+            content_bindings=(binding,),
+            content_rules=(rule,),
+            material_schema_id="assistant-generated-content-v1",
+            material_schema_version="1",
+            rule_versions={"content": "content-ir-v2"},
+        )
+        anchor_path = session_root / f"{draft_id}.anchor.docx"
+        composed_path = session_root / f"{draft_id}.composed.docx"
+        _write_anchor_docx(anchor_path, rule.anchor_token)
+        receipt = self.composer.compose(
+            ContentComposeRequest(
+                source_docx_path=str(anchor_path),
+                output_docx_path=str(composed_path),
+                snapshot=snapshot,
+            ),
+            cancel_check=cancelled,
+        )
+        document_path = composed_path
+        document_profile_id = ""
+        if str(prompt_profile_id or "").strip() == _BIDDING_PROMPT_PROFILE_ID:
+            document_path = session_root / f"{draft_id}.bidding.docx"
+            _write_bidding_document_profile(
+                source_path=composed_path,
+                output_path=document_path,
+            )
+            document_profile_id = BIDDING_DOCUMENT_PROFILE_ID
+        return GeneratedContentDraft(
+            draft_id=draft_id,
+            session_id=session_id,
+            markdown_path=str(markdown_path),
+            document_path=str(document_path),
+            fragment=compiled.fragment.to_dict(),
+            fragment_digest=compiled.fragment.digest,
+            artifact_id=compiled.artifact_ref.artifact_id,
+            manifest_sha256=compiled.artifact_ref.manifest_sha256,
+            compose_receipt_id=receipt.receipt_id,
+            document_profile_id=document_profile_id,
+        )
+
+    def compile_generated(
+        self,
+        *,
+        session_id: str,
+        markdown: str,
+        artifact_kind: str,
+        intent: str = "",
+        prompt_profile_id: str = "",
+        cancelled=None,
+    ) -> GeneratedDraft:
+        """Dispatch through an explicit artifact compiler, never by work-mode guess."""
+
+        compilers = {
+            ARTIFACT_KIND_NARRATIVE: self.compile_and_compose,
+            ARTIFACT_KIND_EXAM: self.compile_exam_markdown,
+        }
+        compiler = compilers.get(str(artifact_kind or "").strip())
+        if compiler is None:
+            raise ValueError(f"generated_artifact_kind_unsupported:{artifact_kind}")
+        arguments = {
+            "session_id": session_id,
+            "markdown": markdown,
+            "cancelled": cancelled,
+        }
+        if artifact_kind == ARTIFACT_KIND_EXAM:
+            arguments["intent"] = intent
+        else:
+            arguments["prompt_profile_id"] = prompt_profile_id
+        return compiler(**arguments)
+
+    def compile_exam_markdown(
+        self,
+        *,
+        session_id: str,
+        markdown: str,
+        intent: str = "",
+        cancelled=None,
+    ) -> GeneratedExamDraft:
+        normalized = _validate_generated_markdown(markdown)
+        if cancelled is not None and cancelled():
+            raise RuntimeError("content_generation_cancelled")
+        draft_id = uuid4().hex
+        session_root = self.drafts_root / _safe_id(session_id)
+        session_root.mkdir(parents=True, exist_ok=True)
+        markdown_path = session_root / f"{draft_id}.exam.md"
+        result = parse_exam_markdown_source(
+            normalized,
+            source_path=str(markdown_path),
+        )
+        blockers = list(
+            generated_exam_blockers(
+                normalized,
+                result,
+                intent=intent,
+            )
+        )
+        if result.error_count or blockers:
+            codes = [
+                str(issue.kind or "unknown")
+                for issue in result.issues
+                if str(issue.severity or "").casefold() == "error"
+            ]
+            codes.extend(blockers)
+            raise ValueError(
+                "exam_content_compile_blocked:" + ",".join(dict.fromkeys(codes))
+            )
+        _atomic_write_text(markdown_path, normalized)
+        digest = sha256(normalized.encode("utf-8")).hexdigest()
+        payload = result.to_dict()
+        return GeneratedExamDraft(
+            draft_id=draft_id,
+            session_id=session_id,
+            markdown_path=str(markdown_path),
+            source_digest=digest,
+            artifact_id=f"exam-{draft_id}",
+            schema_id="exam_items_v1",
+            validation_summary=dict(payload.get("summary") or {}),
+            issues=tuple(
+                dict(item)
+                for item in payload.get("issues", ())
+                if isinstance(item, dict)
+            ),
+        )
+
+
+def is_generated_draft(value: object) -> bool:
+    return isinstance(value, (GeneratedContentDraft, GeneratedExamDraft))
+
+
+def generated_draft_source_ref(draft: GeneratedDraft) -> SourceArtifactRef:
+    if isinstance(draft, GeneratedExamDraft):
+        return SourceArtifactRef(
+            artifact_id=draft.artifact_id,
+            role=SOURCE_ROLE_STRUCTURED_SOURCE,
+            media_type="text/markdown",
+            path=draft.markdown_path,
+            name=Path(draft.markdown_path).name,
+            schema_id=draft.schema_id,
+            digest=f"sha256:{draft.source_digest}",
+            source_kind="assistant_generated",
+        )
+    return SourceArtifactRef(
+        artifact_id=draft.artifact_id,
+        role=SOURCE_ROLE_PRODUCTION_INPUT,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        path=draft.document_path,
+        name=Path(draft.document_path).name,
+        schema_id="assistant-generated-content-v1",
+        digest=f"sha256:{_file_sha256(Path(draft.document_path))}",
+        source_kind="assistant_generated",
+    )
+
+
+def generated_draft_trace_refs(
+    draft: GeneratedDraft,
+) -> tuple[dict[str, object], ...]:
+    if isinstance(draft, GeneratedExamDraft):
+        return (
+            {
+                "draft_id": draft.draft_id,
+                "artifact_kind": draft.artifact_kind,
+                "artifact_id": draft.artifact_id,
+                "source_digest": draft.source_digest,
+                "schema_id": draft.schema_id,
+                "validation_summary": dict(draft.validation_summary),
+            },
+        )
+    return (
+        {
+            "draft_id": draft.draft_id,
+            "artifact_kind": draft.artifact_kind,
+            "fragment_digest": draft.fragment_digest,
+            "artifact_id": draft.artifact_id,
+            "manifest_sha256": draft.manifest_sha256,
+            "compose_receipt_id": draft.compose_receipt_id,
+            "document_profile_id": draft.document_profile_id,
+            "production_input_digest": _file_sha256(Path(draft.document_path)),
+        },
+    )
+
+
+def _validate_generated_markdown(markdown: str) -> str:
+    text = str(markdown or "").strip()
+    if not text:
+        raise ValueError("generated_content_empty")
+    if len(text) > MAX_GENERATED_MARKDOWN_CHARACTERS:
+        raise ValueError("generated_content_too_large")
+    if "\x00" in text:
+        raise ValueError("generated_content_contains_nul")
+    lowered = text.casefold()
+    if "<w:document" in lowered or "word/document.xml" in lowered:
+        raise ValueError("direct_ooxml_is_forbidden")
+    if text.startswith("```") and text.endswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 3:
+            text = "\n".join(lines[1:-1]).strip()
+    return text + "\n"
+
+
+def _validate_bidding_markdown(markdown: str) -> None:
+    """Reject structurally incomplete or material-ownership-breaking bid drafts."""
+
+    text = str(markdown or "")
+    codes: list[str] = []
+    if not re.search(r"(?m)^#\s+\S", text):
+        codes.append("level_1_title_missing")
+    required_tokens = {
+        "company_name": "{{@text:company_name}}",
+        "project_name": "{{@text:project_name}}",
+        "legal_person": "{{@text:legal_person}}",
+    }
+    for key, token in required_tokens.items():
+        if token not in text:
+            codes.append(f"material_token_missing:{key}")
+    required_sections = {
+        "project_understanding": ("项目理解",),
+        "response_content": ("响应内容", "项目响应", "需求响应"),
+        "implementation_plan": ("实施方案", "实施计划"),
+        "commitments": ("承诺事项", "服务承诺", "投标承诺"),
+    }
+    headings = tuple(
+        match.group(1).strip()
+        for match in re.finditer(r"(?m)^#{2,3}\s+(.+?)\s*$", text)
+    )
+    for key, aliases in required_sections.items():
+        if not any(
+            alias in heading
+            for heading in headings
+            for alias in aliases
+        ):
+            codes.append(f"required_section_missing:{key}")
+    if re.search(r"\{\{@img:[^}]+\}\}", text, flags=re.IGNORECASE):
+        codes.append("provider_owned_image_token_forbidden")
+    if codes:
+        raise ValueError(
+            "bidding_content_compile_blocked:"
+            + ",".join(dict.fromkeys(codes))
+        )
+
+
+def _safe_id(value: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized or not all(char.isalnum() or char in "_-" for char in normalized):
+        raise ValueError("unsafe assistant content session id")
+    return normalized
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    temporary = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _file_sha256(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _write_anchor_docx(path: Path, token: str) -> None:
+    temporary = path.with_suffix(f".docx.{os.getpid()}.tmp")
+    try:
+        document = Document()
+        document.add_paragraph(token)
+        document.save(temporary)
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _write_bidding_document_profile(
+    *,
+    source_path: Path,
+    output_path: Path,
+) -> None:
+    """Add local-only image slots after content compilation.
+
+    Generated Markdown intentionally cannot carry image material tokens.  The
+    bidding document profile adds the two package-owned slots to the DOCX
+    boundary, so the content compiler stays non-recursive while production can
+    still bind the current bidding package deterministically.
+    """
+
+    document = Document(source_path)
+    anchor = next(
+        (paragraph for paragraph in document.paragraphs if paragraph.text.strip()),
+        None,
+    )
+    if anchor is None:
+        raise ValueError("bidding_document_profile_requires_content")
+
+    logo_label = _insert_paragraph_after(anchor, "企业标志")
+    logo_label.paragraph_format.keep_with_next = True
+    logo_token = _insert_paragraph_after(
+        logo_label,
+        material_token(MaterialTokenNamespace.IMAGE, "LOGO1"),
+    )
+    logo_token.alignment = 1
+
+    seal_label = document.add_paragraph("企业公章")
+    seal_label.paragraph_format.keep_with_next = True
+    seal_token = document.add_paragraph(
+        material_token(MaterialTokenNamespace.IMAGE, "公章1")
+    )
+    seal_token.alignment = 1
+
+    temporary = output_path.with_suffix(f".docx.{os.getpid()}.tmp")
+    try:
+        document.save(temporary)
+        os.replace(temporary, output_path)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _insert_paragraph_after(paragraph, text: str):
+    from docx.oxml import OxmlElement
+    from docx.text.paragraph import Paragraph
+
+    element = OxmlElement("w:p")
+    paragraph._p.addnext(element)
+    inserted = Paragraph(element, paragraph._parent)
+    inserted.add_run(text)
+    return inserted
+
+
+__all__ = [
+    "BIDDING_DOCUMENT_PROFILE_ID",
+    "MAX_GENERATED_MARKDOWN_CHARACTERS",
+    "AssistantContentGenerationAdapter",
+    "GeneratedContentDraft",
+    "GeneratedDraft",
+    "GeneratedExamDraft",
+    "generated_draft_source_ref",
+    "generated_draft_trace_refs",
+    "is_generated_draft",
+]
