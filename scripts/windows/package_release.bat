@@ -23,7 +23,7 @@ if not errorlevel 1 (
     exit /b 1
 )
 
-echo [1/4] Ensure PyInstaller is installed
+echo [1/6] Ensure PyInstaller is installed
 ".venv\Scripts\python.exe" -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] PyInstaller is missing in .venv
@@ -34,14 +34,52 @@ if errorlevel 1 (
     echo PyInstaller already installed.
 )
 
-echo [2/4] Build release package from main.py
+echo [2/6] Build third-party license bundle
+".venv\Scripts\python.exe" "scripts\build_license_bundle.py"
+if errorlevel 1 (
+    echo [ERROR] License bundle generation failed
+    pause
+    exit /b 1
+)
+
+echo [3/6] Stage immutable product configuration
+".venv\Scripts\python.exe" "scripts\stage_release_config_library.py"
+if errorlevel 1 (
+    echo [ERROR] Product configuration staging failed
+    pause
+    exit /b 1
+)
+
+echo [4/6] Build release package from main.py
 ".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --windowed ^
     --name "%APP_NAME%" ^
+    --runtime-hook "scripts\windows\pyinstaller_font_engine_hook.py" ^
     --hidden-import PySide6.QtCore ^
     --hidden-import PySide6.QtGui ^
     --hidden-import PySide6.QtWidgets ^
     --hidden-import PySide6.QtSvg ^
     --hidden-import shiboken6 ^
+    --hidden-import src.config.entity_archive_codec ^
+    --hidden-import src.config.entity_bundle ^
+    --hidden-import src.ui.panels.theme_panel ^
+    --hidden-import src.ui.panels.workbench.batch_generation_detail ^
+    --hidden-import src.ui.panels.workbench.batch_generation_source_area ^
+    --hidden-import src.shared.ui.button_style ^
+    --hidden-import src.shared.ui.dashed_separator ^
+    --hidden-import src.shared.ui.detail_pane_controller ^
+    --hidden-import src.shared.ui.dynamic_navigation_rail ^
+    --hidden-import src.shared.ui.flow_layout ^
+    --hidden-import src.shared.ui.flow_section ^
+    --hidden-import src.shared.ui.input_style ^
+    --hidden-import src.shared.ui.library_action_row ^
+    --hidden-import src.shared.ui.master_detail_shell ^
+    --hidden-import src.shared.ui.navigation_card ^
+    --hidden-import src.shared.ui.segmented_control ^
+    --hidden-import src.shared.ui.summary_grid ^
+    --hidden-import src.shared.ui.template_summary_card ^
+    --hidden-import src.shared.ui.themed_radio_button ^
+    --hidden-import src.shared.ui.toast ^
+    --hidden-import src.services.material_attachments.processing ^
     --exclude-module PySide6.Qt3DAnimation ^
     --exclude-module PySide6.Qt3DCore ^
     --exclude-module PySide6.Qt3DExtras ^
@@ -84,10 +122,15 @@ echo [2/4] Build release package from main.py
     --exclude-module PySide6.QtWebEngineQuick ^
     --exclude-module PySide6.QtWebEngineWidgets ^
     --exclude-module PySide6.QtWebSockets ^
+    --exclude-module PIL.AvifImagePlugin ^
+    --exclude-module PIL._avif ^
     --add-data "defaults;defaults" ^
-    --add-data "src\ui\icons;src\ui\icons" ^
+    --add-data "build\release_config_library;config_library" ^
+    --add-data "count_profiles;count_profiles" ^
+    --add-data "src\shared\ui\icons;src\shared\ui\icons" ^
     --add-data "LICENSE;." ^
     --add-data "THIRD_PARTY_NOTICES.md;." ^
+    --add-data "licenses;licenses" ^
     main.py
 if errorlevel 1 (
     echo [ERROR] Packaging failed
@@ -95,7 +138,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [3/4] Copy human-readable notices next to the EXE
+echo [5/6] Copy human-readable notices next to the EXE
 if not exist "%DIST_DIR%" (
     echo [ERROR] Dist folder not found: %DIST_DIR%
     pause
@@ -103,6 +146,8 @@ if not exist "%DIST_DIR%" (
 )
 copy /Y "LICENSE" "%DIST_DIR%\LICENSE" >nul
 copy /Y "THIRD_PARTY_NOTICES.md" "%DIST_DIR%\THIRD_PARTY_NOTICES.md" >nul
+if exist "%DIST_DIR%\licenses" rmdir /s /q "%DIST_DIR%\licenses"
+xcopy /E /I /Y "licenses" "%DIST_DIR%\licenses" >nul
 if exist "defaults" (
     if exist "%DIST_DIR%\defaults" rmdir /s /q "%DIST_DIR%\defaults"
     xcopy /E /I /Y "defaults" "%DIST_DIR%\defaults" >nul
@@ -133,7 +178,7 @@ for %%D in ("%DIST_DIR%\_internal\PySide6" "%DIST_DIR%\PySide6") do (
     )
 )
 
-echo [4/4] Create compressed release archive
+echo [6/6] Create compressed release archive
 if exist "%ZIP_PATH%" del /q "%ZIP_PATH%"
 for %%I in ("%DIST_DIR%") do set "DIST_DIR_ABS=%%~fI"
 for %%I in ("%ZIP_PATH%") do set "ZIP_PATH_ABS=%%~fI"

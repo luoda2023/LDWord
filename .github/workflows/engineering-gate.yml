@@ -32,3 +32,6 @@ jobs:
 
       - name: Run baseline engineering gate
         run: python scripts/engineering_gate.py
+
+      - name: Run full regression suite
+        run: python -m pytest -q tests

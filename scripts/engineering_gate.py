@@ -1,7 +1,8 @@
 """Run the baseline engineering gate for local development and CI.
 
-The gate is intentionally small: it catches broken imports, syntax errors, and
-test collection drift before the heavier domain-specific release checks run.
+The gate stays intentionally small: it catches syntax errors, broken imports,
+test-collection drift, and representative smoke regressions before the heavier
+domain-specific release checks run.
 """
 
 from __future__ import annotations
@@ -40,8 +41,14 @@ BASELINE_COMMANDS: tuple[tuple[tuple[str, ...], bool], ...] = (
             "pytest",
             "-q",
             "tests/test_app_meta.py",
-            "tests/test_config_management_architecture.py",
+            "tests/test_template_panel_architecture.py::test_template_panel_overview_exposes_only_template_library_actions",
+            "tests/test_template_panel_architecture.py::test_template_panel_connects_template_management_handlers",
+            "tests/test_quick_execution_detail_architecture.py::test_quick_execution_detail_does_not_expose_advanced_scene_controls",
+            "tests/test_workbench_navigation_architecture.py::test_navigation_controller_owns_snapshot_and_dynamic_card_logic",
             "tests/test_heading_style_semantics.py",
+            "tests/test_architecture_boundaries.py",
+            "tests/test_code_health_budget.py",
+            "tests/test_icon_catalog_integrity.py",
         ),
         False,
     ),
@@ -57,6 +64,8 @@ def _run(command: tuple[str, ...], summarize_success: bool) -> int:
         check=False,
         capture_output=summarize_success,
         text=summarize_success,
+        encoding="utf-8" if summarize_success else None,
+        errors="replace" if summarize_success else None,
     )
     if summarize_success:
         _print_captured_result(completed)
@@ -88,6 +97,13 @@ def _gate_env() -> dict[str, str]:
     return env
 
 
+def _configure_output_encoding() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the baseline compile, collection, and smoke-test gate."
@@ -101,6 +117,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_output_encoding()
     args = parse_args(argv)
     if args.list:
         for command, _summarize_success in BASELINE_COMMANDS:

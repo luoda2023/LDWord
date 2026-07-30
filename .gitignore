@@ -4,6 +4,11 @@ __pycache__/
 *.pyo
 *.egg-info/
 .pytest_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
 # Build artifacts
 dist/
@@ -14,16 +19,24 @@ venv/
 
 # Test output (generated products)
 tests/output/
+/tests/TEST-1/*
+!/tests/TEST-1/中图分类号.docx
 artifacts/
+/output/
+/_codex_work/
 /.pytest_tmp/
 /.codex_tmp*/
+/.lark-material-transactions/
 /tmp_*/
-exam_masters/user/
-/exam_masters/*.docx
-exam_masters/builtin/*.docx
-!exam_masters/builtin/default_exam_v10.docx
-!exam_masters/builtin/default_exam_v20.docx
+/exam_masters/
 exam_samples/
+/config_library/content_artifacts/
+/config_library/template_workbench/
+/config_library/template_authoring_state/
+config_library/plans/*/user/
+config_library/templates/*/user/
+config_library/masters/*/user/
+config_library/material_packages/*/user/
 /manifest.json
 /request_cell_report.md
 /*.docx
@@ -56,6 +69,10 @@ test_results.txt
 /.tmp_*.txt
 /Untitled-*.txt
 *.bak
+*.tmp
+.DS_Store
+Thumbs.db
+Desktop.ini
 
 # IDE
 .idea/
@@ -66,3 +83,5 @@ test_results.txt
 # Local git worktrees
 .worktrees/
 .claude/worktrees/
+/.agents/
+/.superpowers/
