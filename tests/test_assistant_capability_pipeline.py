@@ -46,7 +46,12 @@ from src.assistant.runtime.provider_contract import (
     ProviderStreamEvent,
 )
 from src.assistant.runtime.turn_runner import attachment_fingerprints
-from src.config.entity import load_entity_archive
+from src.config.entity import EntityArchive, EntityProfile
+from src.config.image_materials import (
+    ImageMaterialRule,
+    ImagePlacementMode,
+    ImagePlacementPolicy,
+)
 from src.config.scene_natural_request_router import list_natural_request_routes
 from src.config.material_context import MaterialExecutionContext
 from src.config.materials import AssetItem
@@ -306,11 +311,34 @@ def test_bidding_generated_draft_consumes_package_fields_and_images_end_to_end(
     seal_path = tmp_path / "seal.png"
     Image.new("RGB", (80, 40), color="blue").save(logo_path)
     Image.new("RGB", (80, 80), color="red").save(seal_path)
-    package = load_entity_archive(
-        Path(
-            "config_library/material_packages/bidding/user/"
-            "未命名资料包/package.json"
+    image_rules = {
+        rule_id: ImageMaterialRule(
+            rule_id=rule_id,
+            source_role=role,
+            anchor_token=token,
+            placement=ImagePlacementPolicy(
+                mode=ImagePlacementMode.FIXED_BOX,
+                fixed_width_cm=6.0,
+            ),
         )
+        for rule_id, role, token in (
+            ("image:logo", "logo", "{{@img:LOGO1}}"),
+            ("image:seal", "seal", "{{@img:公章1}}"),
+        )
+    }
+    package = EntityArchive(
+        archive_id="bidder-main",
+        archive_name="投标资料包",
+        mode_id="bidding",
+        package_id="bidder-main",
+        material_schema_ids=["bid_materials_v1"],
+        profiles=[
+            EntityProfile(
+                profile_id="company-a",
+                profile_name="投标主体",
+                image_material_rules=image_rules,
+            )
+        ],
     )
     profile = package.profiles[0]
     assert package.material_schema_ids == ["bid_materials_v1"]
