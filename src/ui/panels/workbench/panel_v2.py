@@ -5,75 +5,57 @@ import json
 import logging
 from importlib import import_module
 
-from src.config.library import get_scene_entry, get_template_entry, load_template_from_library
+from src.config.library import (
+    get_scene_entry,
+    get_template_entry,
+    load_template_from_library,
+)
 from src.config.object_preflight_evidence import (
     ObjectPreflightEvidence,
     build_object_preflight_evidence,
     object_preflight_evidence_is_current,
 )
 from src.config.scene import SceneWorkspace
+from src.config.scene_presets import (
+    CAPABILITY_FEATURE_CARD_DEFINITIONS,
+    CAPABILITY_FEATURE_CARD_ORDER,
+)
 from src.config.scene_surface_registry import (
     scene_uses_exam_paper_surface,
     scene_uses_official_document_surface,
 )
-
 from src.config.template import TemplateConfig
 from src.qt_api import QWidget
-
 from src.shared.ui import DetailPaneController, MasterDetailShell, Toast
-
 from src.shared.ui.theme import bind_theme, get_theme
-
+from src.ui.adapters.field_display_names import (
+    field_display_context,
+    navigation_issue_hint,
+)
 from src.ui.adapters.workbench_execution_adapter import WorkbenchExecutionAdapter
 from src.ui.adapters.workbench_product_issue_navigation import (
     WorkbenchIssueNavigationProjection,
     workbench_issue_navigation_for_target,
 )
-from src.ui.adapters.field_display_names import (
-    field_display_context,
-    navigation_issue_hint,
-)
-
 from src.ui.adapters.workbench_strategy_adapter import WorkbenchStrategyAdapter
-
 from src.ui.base_panel import BasePanel
 from src.ui.bridge import navigation_intent_value
 from src.ui.panel_specs import PANEL_SPECS
 
 from .document_path_controller import WorkbenchDocumentPathController
 from .document_scope_controller import WorkbenchDocumentScopeController
-
 from .execution_controller import WorkbenchExecutionController
-
 from .execution_session_controller import WorkbenchExecutionSessionController
-
 from .feature_detail_panes import (
-
     CitationDetailPane,
-
     CleanupDetailPane,
-
     ContentDataDetailPane,
-
     FormulaDetailPane,
-
     TableChartDetailPane,
-
 )
-
 from .navigation_controller import WorkbenchNavigationController
-
 from .quick_execution_detail import QuickExecutionDetail
-from .material_suite_generation_detail import MaterialSuiteGenerationDetail
-from .material_suite_workbench_controller import MaterialSuiteWorkbenchController
-
-from src.config.scene_presets import (
-    CAPABILITY_FEATURE_CARD_DEFINITIONS,
-    CAPABILITY_FEATURE_CARD_ORDER,
-)
-
 from .styles import apply_workbench_v2_shell_theme
-
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +95,9 @@ def _decode_profile_repair_target(payload: str) -> tuple[str, str, str]:
     )
 
 
-def _decode_profile_repair_candidate(payload: str) -> tuple[str, str, dict[str, object]]:
+def _decode_profile_repair_candidate(
+    payload: str,
+) -> tuple[str, str, dict[str, object]]:
     raw = str(payload or "").strip()
     if not raw:
         return ("", "", {})
@@ -152,36 +136,29 @@ def _decode_transaction_task_summary_target(payload: str) -> tuple[str, str]:
 
 
 class WorkbenchPanel(BasePanel):
-
     """Master-detail workbench panel."""
 
     FEATURE_CARD_ORDER = CAPABILITY_FEATURE_CARD_ORDER
 
     CARD_DEFINITIONS = {
-
         "quick_execute": ("\u5feb\u901f\u6267\u884c", "zap"),
         "batch_generate": ("批量生成", "layers"),
         "material_suite_generate": ("成套生成", "package"),
-
     }
     CARD_DEFINITIONS.update(CAPABILITY_FEATURE_CARD_DEFINITIONS)
 
     @property
-
     def _execution_worker(self):
 
         return self._execution_session.active_worker
 
     @_execution_worker.setter
-
     def _execution_worker(self, worker) -> None:
 
         self._execution_session.set_active_worker(worker)
 
     def shutdown_active_execution(self, timeout_ms: int | None = 1000) -> bool:
-        return self._execution_session.shutdown_active_execution(
-            timeout_ms=timeout_ms
-        )
+        return self._execution_session.shutdown_active_execution(timeout_ms=timeout_ms)
 
     def _setup_ui(self) -> None:
 
@@ -225,11 +202,8 @@ class WorkbenchPanel(BasePanel):
         self._skip_next_scene_dirty_recheck = False
 
         self._execution_session = WorkbenchExecutionSessionController(
-
             resolve_document_path=self._resolve_document_path_for_execution,
-
             worker_parent=self,
-
         )
         self._pending_object_preflight_confirmation_key = ""
         self._pending_object_preflight_evidence: ObjectPreflightEvidence | None = None
@@ -257,18 +231,21 @@ class WorkbenchPanel(BasePanel):
 
         self._quick_execution_detail = QuickExecutionDetail(self)
         if hasattr(self._quick_execution_detail, "set_work_mode"):
-            self._quick_execution_detail.set_work_mode(self.bridge.current_work_mode_id())
+            self._quick_execution_detail.set_work_mode(
+                self.bridge.current_work_mode_id()
+            )
 
         # Batch generation is a fixed Workbench destination, but loading its
         # specialist surface must not expand the application entrypoint graph.
-        batch_module = import_module(
-            "src.ui.panels.workbench.batch_generation_detail"
-        )
+        batch_module = import_module("src.ui.panels.workbench.batch_generation_detail")
         self._batch_generation_detail = batch_module.BatchGenerationDetail(self)
-        self._batch_generation_detail.set_work_mode(
-            self.bridge.current_work_mode_id()
+        self._batch_generation_detail.set_work_mode(self.bridge.current_work_mode_id())
+        suite_detail_module = import_module(
+            "src.ui.panels.workbench.material_suite_generation_detail"
         )
-        self._suite_generation_detail = MaterialSuiteGenerationDetail(self)
+        self._suite_generation_detail = (
+            suite_detail_module.MaterialSuiteGenerationDetail(self)
+        )
 
         # Feature detail panes mapped to new capability group IDs
         self._table_chart_detail = TableChartDetailPane(self)
@@ -286,36 +263,23 @@ class WorkbenchPanel(BasePanel):
         self._quick_fill_detail = self._content_fill_detail
 
         detail_map = {
-
             "quick_execute": self._quick_execution_detail,
-
             "table_chart": self._table_chart_detail,
-
             "formula": self._formula_detail,
-
             "citation": self._citation_detail,
-
             "cleanup": self._cleanup_detail,
-
             "content_fill": self._content_fill_detail,
-
             "heading_numbering": self._heading_numbering_detail,
-
             "quick_fill": self._quick_fill_detail,
-
         }
         if self._batch_generation_detail is not None:
             detail_map["batch_generate"] = self._batch_generation_detail
         detail_map["material_suite_generate"] = self._suite_generation_detail
 
         self._details = DetailPaneController(
-
             self._detail_container,
-
             self._detail_layout,
-
             self._detail_scroll,
-
         )
 
         self._details.register_details(detail_map)
@@ -327,37 +291,26 @@ class WorkbenchPanel(BasePanel):
     def _build_controllers(self) -> None:
 
         self._document_paths = WorkbenchDocumentPathController(
-
             self._quick_execution_detail,
-
             pick_document_path=self._pick_document_path,
-
         )
         self._document_scope = WorkbenchDocumentScopeController(
             parent=self,
-            source_path=lambda: (
-                self._document_paths.selected_existing_document() or ""
-            ),
+            source_path=lambda: self._document_paths.selected_existing_document() or "",
             mode_id=self._current_work_mode_id,
             scene=lambda: (
-                self._current_scene
-                or self._quick_execution_detail.current_scene()
+                self._current_scene or self._quick_execution_detail.current_scene()
             ),
             status_detail=self._quick_execution_detail,
         )
 
         self._navigation = WorkbenchNavigationController(
-
             self._nav_rail,
-
             self._quick_execution_detail,
             self._batch_generation_detail,
             self._suite_generation_detail,
-
             card_definitions=self.CARD_DEFINITIONS,
-
             feature_card_order=self.FEATURE_CARD_ORDER,
-
         )
 
         self._navigation_cards = self._navigation.navigation_cards
@@ -365,32 +318,31 @@ class WorkbenchPanel(BasePanel):
         self._dynamic_cards = self._navigation.dynamic_cards
 
         self._execution = WorkbenchExecutionController(
-
             self._execution_adapter,
-
             self._quick_execution_detail,
             self._batch_generation_detail,
             self._suite_generation_detail,
-
             refresh_navigation=self._refresh_fixed_cards,
-
             clear_execution_worker=self._clear_execution_worker,
-
             has_ready_document=self._document_paths.has_selected_document,
-
         )
-        self._suite_generation_flow = MaterialSuiteWorkbenchController(
-            self._suite_generation_detail,
-            self._execution,
-            start_worker=self._start_worker_from_build,
-            active_worker=lambda: self._execution_worker,
-            cancel_execution=self._cancel_execution,
-            refresh_navigation=self._refresh_fixed_cards,
-            publish_material_selection=(
-                self.bridge.set_current_material_batch_selection
-            ),
-            open_material_workspace=lambda: self._emit_panel_navigation("assets"),
-            worker_parent=self,
+        suite_controller_module = import_module(
+            "src.ui.panels.workbench.material_suite_workbench_controller"
+        )
+        self._suite_generation_flow = (
+            suite_controller_module.MaterialSuiteWorkbenchController(
+                self._suite_generation_detail,
+                self._execution,
+                start_worker=self._start_worker_from_build,
+                active_worker=lambda: self._execution_worker,
+                cancel_execution=self._cancel_execution,
+                refresh_navigation=self._refresh_fixed_cards,
+                publish_material_selection=(
+                    self.bridge.set_current_material_batch_selection
+                ),
+                open_material_workspace=lambda: self._emit_panel_navigation("assets"),
+                worker_parent=self,
+            )
         )
 
     def _create_navigation_cards(self) -> None:
@@ -400,11 +352,9 @@ class WorkbenchPanel(BasePanel):
     def _bootstrap_strategy_context(self) -> None:
 
         if self.bridge.current_scene() is not None:
-
             self._current_scene = self.bridge.current_scene()
 
         else:
-
             self._current_scene = self._quick_execution_detail.current_scene()
 
             scene_entry = get_scene_entry(
@@ -413,31 +363,23 @@ class WorkbenchPanel(BasePanel):
             )
 
             self.bridge.set_current_scene(
-
                 self._current_scene,
-
                 config_id=self._current_scene.scene_id,
-
                 path=str(scene_entry.path) if scene_entry is not None else "",
-
                 source="library" if scene_entry is not None else "builtin",
-
-                source_type=scene_entry.source_type if scene_entry is not None else "builtin",
-
+                source_type=scene_entry.source_type
+                if scene_entry is not None
+                else "builtin",
                 emit_signal=False,
-
             )
 
         if self.bridge.current_template() is not None:
-
             self._current_template = self.bridge.current_template()
 
         else:
-
             template_id = self._quick_execution_detail.current_template_id()
 
             if template_id:
-
                 template_entry = get_template_entry(
                     template_id,
                     mode_id=self._current_work_mode_id(),
@@ -449,29 +391,22 @@ class WorkbenchPanel(BasePanel):
                 )
 
                 self.bridge.set_current_template(
-
                     self._current_template,
-
                     config_id=template_id,
-
                     path=str(template_entry.path) if template_entry is not None else "",
-
                     source="library" if template_entry is not None else "builtin",
-
                     source_type=(
-                        template_entry.source_type if template_entry is not None else "builtin"
+                        template_entry.source_type
+                        if template_entry is not None
+                        else "builtin"
                     ),
-
                     emit_signal=False,
-
                 )
 
         self._quick_execution_detail.set_scene_context(self._current_scene)
 
         self._quick_execution_detail.set_template_context(self._current_template)
-        current_document_path = str(
-            self.bridge.current_document_path() or ""
-        ).strip()
+        current_document_path = str(self.bridge.current_document_path() or "").strip()
         if current_document_path:
             selected_document = self._document_paths.apply_loaded_document(
                 current_document_path
@@ -480,7 +415,9 @@ class WorkbenchPanel(BasePanel):
                 self._document_scope.start_scan(selected_document)
 
         material_context = self.bridge.current_material_context()
-        self._content_fill_detail.set_material_context(material_context, emit_signal=False)
+        self._content_fill_detail.set_material_context(
+            material_context, emit_signal=False
+        )
         self._quick_execution_detail.set_material_context(material_context)
         if hasattr(self.bridge, "current_material_preview_snapshot"):
             self._quick_execution_detail.set_material_preview_snapshot(
@@ -532,19 +469,29 @@ class WorkbenchPanel(BasePanel):
 
         self._quick_execution_detail.feature_toggled.connect(self._on_feature_toggled)
 
-        self._quick_execution_detail.feature_config_requested.connect(self._open_feature_card)
+        self._quick_execution_detail.feature_config_requested.connect(
+            self._open_feature_card
+        )
 
-        self._quick_execution_detail.material_repair_requested.connect(self._open_material_repair_target)
+        self._quick_execution_detail.material_repair_requested.connect(
+            self._open_material_repair_target
+        )
 
-        self._quick_execution_detail.summary_changed.connect(self._on_quick_summary_changed)
+        self._quick_execution_detail.summary_changed.connect(
+            self._on_quick_summary_changed
+        )
 
-        self._quick_execution_detail.binding_changed.connect(self._on_quick_binding_changed)
+        self._quick_execution_detail.binding_changed.connect(
+            self._on_quick_binding_changed
+        )
         if self._batch_generation_detail is not None:
             self._batch_generation_detail.binding_changed.connect(
                 self._on_quick_binding_changed
             )
 
-        self._quick_execution_detail.scene_config_changed.connect(self._on_quick_scene_config_changed)
+        self._quick_execution_detail.scene_config_changed.connect(
+            self._on_quick_scene_config_changed
+        )
         self._quick_execution_detail.official_document_type_changed.connect(
             self._sync_official_document_type_from_quick
         )
@@ -573,12 +520,16 @@ class WorkbenchPanel(BasePanel):
             self._cancel_object_preflight_confirmation
         )
 
-        self._quick_execution_detail.document_selected.connect(self._on_quick_detail_document_selected)
+        self._quick_execution_detail.document_selected.connect(
+            self._on_quick_detail_document_selected
+        )
         self._quick_execution_detail.document_scope_review_requested.connect(
             self._document_scope.review
         )
 
-        self._content_fill_detail.material_context_changed.connect(self._sync_material_context_from_detail)
+        self._content_fill_detail.material_context_changed.connect(
+            self._sync_material_context_from_detail
+        )
         self._quick_execution_detail.material_context_changed.connect(
             self._sync_material_context_from_quick_detail
         )
@@ -591,7 +542,10 @@ class WorkbenchPanel(BasePanel):
         return "custom"
 
     def _on_work_mode_changed(self, mode) -> None:
-        mode_id = str(getattr(mode, "mode_id", "") or "").strip() or self._current_work_mode_id()
+        mode_id = (
+            str(getattr(mode, "mode_id", "") or "").strip()
+            or self._current_work_mode_id()
+        )
         self._document_scope.reset_decisions()
         if hasattr(self._quick_execution_detail, "set_work_mode"):
             self._quick_execution_detail.set_work_mode(mode_id)
@@ -605,7 +559,6 @@ class WorkbenchPanel(BasePanel):
     def closeEvent(self, event) -> None:
 
         if not self.shutdown_active_execution(timeout_ms=1000):
-
             event.ignore()
 
             return
@@ -619,25 +572,17 @@ class WorkbenchPanel(BasePanel):
     def _refresh_fixed_cards(self) -> None:
 
         self._navigation.refresh_fixed_cards(
-
             cached_document_path=self._document_paths.cached_document_path,
-
             strategy_state=self._strategy_state,
-
             execution_worker=self._execution_worker,
-
         )
 
     def _refresh_quick_execute_card(self) -> None:
 
         self._navigation.refresh_quick_execute_card(
-
             cached_document_path=self._document_paths.cached_document_path,
-
             strategy_state=self._strategy_state,
-
             execution_worker=self._execution_worker,
-
         )
 
     def _refresh_batch_generate_card(self) -> None:
@@ -652,15 +597,14 @@ class WorkbenchPanel(BasePanel):
             template_id = self._current_scene.template_id
 
         self._quick_execution_detail.set_strategy_context(
-
             template_name=self._strategy_state.template_label,
-
             template_id=template_id,
-
-            scene_name=self._strategy_state.name if self._strategy_state.source_type == "scene" else "",
-
-            strict_mode=self._strategy_state.strict_mode if self._strategy_state.source_type == "scene" else None,
-
+            scene_name=self._strategy_state.name
+            if self._strategy_state.source_type == "scene"
+            else "",
+            strict_mode=self._strategy_state.strict_mode
+            if self._strategy_state.source_type == "scene"
+            else None,
         )
         if self._batch_generation_detail is not None:
             self._batch_generation_detail.set_strategy_context(
@@ -675,7 +619,9 @@ class WorkbenchPanel(BasePanel):
 
     def _sync_strategy_state(self) -> None:
 
-        self._strategy_state = self._strategy_adapter.build_summary(self._current_template, self._current_scene)
+        self._strategy_state = self._strategy_adapter.build_summary(
+            self._current_template, self._current_scene
+        )
 
     def _on_quick_detail_document_selected(self, file_path: str) -> None:
 
@@ -689,7 +635,6 @@ class WorkbenchPanel(BasePanel):
         selected = self._document_paths.accept_detail_selection(file_path)
 
         if not selected:
-
             return
 
         if self._batch_generation_detail is not None:
@@ -711,7 +656,9 @@ class WorkbenchPanel(BasePanel):
 
         self._refresh_quick_execute_card()
 
-    def _on_quick_binding_changed(self, scene: SceneWorkspace, template_id: str) -> None:
+    def _on_quick_binding_changed(
+        self, scene: SceneWorkspace, template_id: str
+    ) -> None:
 
         self._clear_object_preflight_confirmation()
 
@@ -726,9 +673,7 @@ class WorkbenchPanel(BasePanel):
         ):
             self._quick_execution_detail.set_scene_context(current_bridge_scene)
             if self._batch_generation_detail is not None:
-                self._batch_generation_detail.set_scene_context(
-                    current_bridge_scene
-                )
+                self._batch_generation_detail.set_scene_context(current_bridge_scene)
             Toast.show_warning(
                 "\u5f53\u524d\u65b9\u6848\u6709\u672a\u4fdd\u5b58\u4fee\u6539\uff0c\u8bf7\u5148\u4fdd\u5b58\u6216\u6062\u590d\u540e\u518d\u5207\u6362\u3002"
             )
@@ -743,48 +688,48 @@ class WorkbenchPanel(BasePanel):
 
         self._current_scene = scene
 
-        scene_entry = get_scene_entry(scene.scene_id, mode_id=self._current_work_mode_id())
+        scene_entry = get_scene_entry(
+            scene.scene_id, mode_id=self._current_work_mode_id()
+        )
 
         self.bridge.set_current_scene(
-
             scene,
-
             config_id=scene.scene_id,
-
             path=str(scene_entry.path) if scene_entry is not None else "",
-
             source="library" if scene_entry is not None else "builtin",
-
-            source_type=scene_entry.source_type if scene_entry is not None else "builtin",
-
+            source_type=scene_entry.source_type
+            if scene_entry is not None
+            else "builtin",
         )
 
         template_id = str(template_id or "").strip()
 
         if template_id:
-
             if (
                 self.bridge.current_template() is not None
                 and self.bridge.current_template_id() == template_id
-                and self.bridge.current_template_mode_id() == self._current_work_mode_id()
+                and self.bridge.current_template_mode_id()
+                == self._current_work_mode_id()
             ):
                 self._current_template = self.bridge.current_template()
-                self._quick_execution_detail.set_template_context(self._current_template)
+                self._quick_execution_detail.set_template_context(
+                    self._current_template
+                )
                 self._refresh_strategy_summary()
                 self._refresh_fixed_cards()
                 return
 
-            template_entry = get_template_entry(template_id, mode_id=self._current_work_mode_id())
+            template_entry = get_template_entry(
+                template_id, mode_id=self._current_work_mode_id()
+            )
 
             try:
-
                 template = load_template_from_library(
                     template_id,
                     mode_id=self._current_work_mode_id(),
                 )
 
             except Exception as exc:
-
                 logger.warning(
                     "Workbench quick binding ignored template load failure for %s: %s",
                     template_id,
@@ -796,19 +741,15 @@ class WorkbenchPanel(BasePanel):
 
             if template is not None:
                 self.bridge.set_current_template(
-
                     template,
-
                     config_id=template_id,
-
                     path=str(template_entry.path) if template_entry is not None else "",
-
                     source="library" if template_entry is not None else "builtin",
-
                     source_type=(
-                        template_entry.source_type if template_entry is not None else "builtin"
+                        template_entry.source_type
+                        if template_entry is not None
+                        else "builtin"
                     ),
-
                 )
 
     def _on_quick_scene_config_changed(self, scene: SceneWorkspace) -> None:
@@ -817,22 +758,20 @@ class WorkbenchPanel(BasePanel):
 
         self._current_scene = scene
 
-        scene_entry = get_scene_entry(scene.scene_id, mode_id=self._current_work_mode_id())
+        scene_entry = get_scene_entry(
+            scene.scene_id, mode_id=self._current_work_mode_id()
+        )
 
         self._ignore_own_scene_changed = True
         try:
             self.bridge.set_current_scene(
-
                 scene,
-
                 config_id=scene.scene_id,
-
                 path=str(scene_entry.path) if scene_entry is not None else "",
-
                 source="library" if scene_entry is not None else "builtin",
-
-                source_type=scene_entry.source_type if scene_entry is not None else "builtin",
-
+                source_type=scene_entry.source_type
+                if scene_entry is not None
+                else "builtin",
             )
         finally:
             self._ignore_own_scene_changed = False
@@ -848,10 +787,7 @@ class WorkbenchPanel(BasePanel):
 
     def _open_feature_card(self, feature_id: str) -> None:
 
-        if (
-            feature_id in self._detail_map
-            and feature_id not in self._navigation_cards
-        ):
+        if feature_id in self._detail_map and feature_id not in self._navigation_cards:
             self._quick_execution_detail.set_feature_enabled(feature_id, True)
             self._sync_dynamic_cards()
         self._navigation.open_feature_card(feature_id)
@@ -871,9 +807,7 @@ class WorkbenchPanel(BasePanel):
             self.bridge.navigate_to_panel.emit(index)
         context = dict(issue_context or {})
         active_issue_id = str(
-            context.get("active_issue_id")
-            or context.get("issue_item_id")
-            or ""
+            context.get("active_issue_id") or context.get("issue_item_id") or ""
         ).strip()
         issue_display_name = str(
             context.get("issue_target_label_with_group")
@@ -937,8 +871,10 @@ class WorkbenchPanel(BasePanel):
             normalized_key,
         )
 
-        if normalized_type in {"asset", "field", "question_figure_item"} and normalized_key:
-
+        if (
+            normalized_type in {"asset", "field", "question_figure_item"}
+            and normalized_key
+        ):
             self.bridge.request_material_repair_target(normalized_type, normalized_key)
 
             if self._navigate_issue_projection(projection):
@@ -965,8 +901,9 @@ class WorkbenchPanel(BasePanel):
         )
 
         if projection.action_kind == "material_profile_candidate":
-
-            profile_id, profile_name, candidate = _decode_profile_repair_candidate(normalized_key)
+            profile_id, profile_name, candidate = _decode_profile_repair_candidate(
+                normalized_key
+            )
 
             self.bridge.request_material_profile_repair_candidate(
                 profile_id,
@@ -978,8 +915,9 @@ class WorkbenchPanel(BasePanel):
                 return
 
         if projection.action_kind == "material_profile_target":
-
-            profile_id, profile_name, repair_key = _decode_profile_repair_target(normalized_key)
+            profile_id, profile_name, repair_key = _decode_profile_repair_target(
+                normalized_key
+            )
 
             base_type = normalized_type.removeprefix("profile_")
 
@@ -994,7 +932,6 @@ class WorkbenchPanel(BasePanel):
                 return
 
         if projection.action_kind == "material_target":
-
             self._open_material_repair_target(normalized_type, normalized_key)
 
             return
@@ -1004,11 +941,9 @@ class WorkbenchPanel(BasePanel):
             return
 
         if projection.action_kind == "transaction_artifact":
-
             path, fragment = _decode_transaction_task_summary_target(normalized_key)
 
             if path:
-
                 recent_run_panel_module._open_artifact_file(path, fragment=fragment)
 
             self._navigate_issue_projection(projection)
@@ -1037,7 +972,6 @@ class WorkbenchPanel(BasePanel):
 
         selected_document = self._document_paths.apply_loaded_document(file_path)
         if selected_document is None:
-
             return
 
         if self._batch_generation_detail is not None:
@@ -1084,7 +1018,10 @@ class WorkbenchPanel(BasePanel):
                 if hasattr(self.bridge, "consume_scene_dirty_recheck_suppressed")
                 else False
             )
-            if getattr(self, "_skip_next_scene_dirty_recheck", False) or bridge_skip_recheck:
+            if (
+                getattr(self, "_skip_next_scene_dirty_recheck", False)
+                or bridge_skip_recheck
+            ):
                 self._skip_next_scene_dirty_recheck = False
             else:
                 self._quick_execution_detail.recheck_current_context()
@@ -1152,9 +1089,7 @@ class WorkbenchPanel(BasePanel):
         return document_path
 
     def _pick_document_path(self) -> str | None:
-        cleaned = str(
-            self._quick_execution_detail.pick_document_path() or ""
-        ).strip()
+        cleaned = str(self._quick_execution_detail.pick_document_path() or "").strip()
         return cleaned or None
 
     def _start_execution(self) -> None:
@@ -1170,7 +1105,9 @@ class WorkbenchPanel(BasePanel):
         )
         material_gate = None
         if not source_dependent_gate:
-            material_gate = self._quick_execution_detail.current_execution_gate_decision()
+            material_gate = (
+                self._quick_execution_detail.current_execution_gate_decision()
+            )
             if not material_gate.can_run:
                 self._quick_execution_detail.recheck_current_context(force=True)
                 return
@@ -1181,19 +1118,17 @@ class WorkbenchPanel(BasePanel):
         if not self._ensure_object_preflight_confirmed():
             return
         if source_dependent_gate:
-            material_gate = self._quick_execution_detail.current_execution_gate_decision()
+            material_gate = (
+                self._quick_execution_detail.current_execution_gate_decision()
+            )
             if not material_gate.can_run:
                 self._quick_execution_detail.recheck_current_context(force=True)
                 return
         assert material_gate is not None
         build = self._execution_session.build_worker(
-
             template=self._current_template,
-
             scene=self._current_scene,
-
             session_overrides=self._quick_execution_detail.runtime_template_overrides(),
-
             # The bridge is the authoritative workbench material state.
             # Quick execution and the legacy content-data editor both publish
             # here; execution must not depend on whichever widget refreshed last.
@@ -1212,24 +1147,18 @@ class WorkbenchPanel(BasePanel):
             template_source_type=self.bridge.current_template_source_type(),
             output_root=self._quick_execution_detail.custom_output_dir(),
             material_gate_confirmed=material_gate.requires_confirmation,
-            expected_input_revision=(
-                self._confirmed_object_preflight_source_revision
-            ),
+            expected_input_revision=(self._confirmed_object_preflight_source_revision),
             object_preflight_confirmation_digest=(
                 self._confirmed_object_preflight_digest
             ),
             document_structure_evidence=self._document_scope.evidence,
             document_scope_decisions=self._document_scope.decisions,
-
         )
 
         self._start_worker_from_build(build)
 
     def _start_batch_execution(self) -> None:
-        if (
-            self._batch_generation_detail is None
-            or self._execution_worker is not None
-        ):
+        if self._batch_generation_detail is None or self._execution_worker is not None:
             return
         set_feedback_target = getattr(self._execution, "set_feedback_target", None)
         if callable(set_feedback_target):
@@ -1244,25 +1173,16 @@ class WorkbenchPanel(BasePanel):
         )
 
         if not selection.archive.profiles:
-
             self._execution.reset_feedback()
 
             self.apply_execution_result(
-
                 {
-
                     "status": "failed",
-
                     "output_path": "",
-
                     "report_paths": [],
-
                     "failed_count": 0,
-
                     "error_text": "No material profiles selected for batch execution",
-
                 }
-
             )
 
             return
@@ -1270,7 +1190,10 @@ class WorkbenchPanel(BasePanel):
         material_gate = (
             self._batch_generation_detail.current_batch_execution_gate_decision()
         )
-        if not material_gate.can_run or not self._batch_generation_detail.can_start_execution():
+        if (
+            not material_gate.can_run
+            or not self._batch_generation_detail.can_start_execution()
+        ):
             self._refresh_batch_generate_card()
             return
 
@@ -1292,27 +1215,16 @@ class WorkbenchPanel(BasePanel):
             self._clear_object_preflight_confirmation()
 
         build = self._execution_session.build_batch_worker(
-
             template=self._current_template,
-
             scene=self._current_scene,
-
             archive=selection.archive,
-
             profile_ids=selection.profile_ids,
-
             base_output_dir=self._batch_generation_detail.output_dir() or None,
-
             output_dir_template=selection.output_dir_template,
-
             session_overrides=self._batch_generation_detail.runtime_template_overrides(),
-
             base_context=selection.base_context,
-
             source_kind=selection.source_kind,
-
             source_path=selection.source_path,
-
             item_metadata=selection.item_metadata,
             mode_id=self._current_work_mode_id(),
             plan_id=self.bridge.current_scene_id(),
@@ -1322,24 +1234,18 @@ class WorkbenchPanel(BasePanel):
             template_path=self.bridge.current_template_path(),
             template_source_type=self.bridge.current_template_source_type(),
             material_gate_confirmed=material_gate.requires_confirmation,
-            expected_input_revision=(
-                self._confirmed_object_preflight_source_revision
-            ),
+            expected_input_revision=(self._confirmed_object_preflight_source_revision),
             object_preflight_confirmation_digest=(
                 self._confirmed_object_preflight_digest
             ),
             document_structure_evidence=self._document_scope.evidence,
             document_scope_decisions=self._document_scope.decisions,
-
         )
 
         self._start_worker_from_build(build)
 
     def _start_failed_batch_retry(self) -> None:
-        if (
-            self._batch_generation_detail is None
-            or self._execution_worker is not None
-        ):
+        if self._batch_generation_detail is None or self._execution_worker is not None:
             return
         set_feedback_target = getattr(self._execution, "set_feedback_target", None)
         if callable(set_feedback_target):
@@ -1352,9 +1258,7 @@ class WorkbenchPanel(BasePanel):
         self._batch_generation_detail.set_runtime_template_overrides(
             self._quick_execution_detail.runtime_template_overrides()
         )
-        failed_profile_ids = (
-            self._batch_generation_detail.failed_batch_profile_ids()
-        )
+        failed_profile_ids = self._batch_generation_detail.failed_batch_profile_ids()
         batch_history_module = import_module(
             "src.shared.engine.official_document_batch_history"
         )
@@ -1362,9 +1266,7 @@ class WorkbenchPanel(BasePanel):
             batch_history_module.build_official_document_batch_retry_selection(
                 source_selection,
                 failed_profile_ids,
-                retry_of_run_id=(
-                    self._batch_generation_detail.last_batch_run_id()
-                ),
+                retry_of_run_id=(self._batch_generation_detail.last_batch_run_id()),
                 attempt_number=(
                     self._batch_generation_detail.next_batch_attempt_number()
                 ),
@@ -1372,9 +1274,7 @@ class WorkbenchPanel(BasePanel):
         )
 
         if not retry_selection.profile_ids:
-
             self.apply_execution_result(
-
                 {
                     "status": "failed",
                     "output_path": "",
@@ -1382,14 +1282,11 @@ class WorkbenchPanel(BasePanel):
                     "failed_count": 0,
                     "error_text": "没有可重试的公文批次失败项",
                 }
-
             )
 
             return
 
-        issue_module = import_module(
-            "src.ui.adapters.workbench_material_issues"
-        )
+        issue_module = import_module("src.ui.adapters.workbench_material_issues")
         retry_gate = issue_module.material_batch_readiness_gate_decision(
             self._current_scene,
             retry_selection,
@@ -1407,8 +1304,7 @@ class WorkbenchPanel(BasePanel):
             return
 
         source_document_required = not (
-            str(retry_selection.source_kind or "").strip()
-            == "official_document_table"
+            str(retry_selection.source_kind or "").strip() == "official_document_table"
             and scene_uses_official_document_surface(
                 self._current_scene,
                 mode_id=self._current_work_mode_id(),
@@ -1425,7 +1321,6 @@ class WorkbenchPanel(BasePanel):
             self._clear_object_preflight_confirmation()
 
         build = self._execution_session.build_batch_worker(
-
             template=self._current_template,
             scene=self._current_scene,
             archive=retry_selection.archive,
@@ -1447,15 +1342,12 @@ class WorkbenchPanel(BasePanel):
             template_path=self.bridge.current_template_path(),
             template_source_type=self.bridge.current_template_source_type(),
             material_gate_confirmed=retry_gate.requires_confirmation,
-            expected_input_revision=(
-                self._confirmed_object_preflight_source_revision
-            ),
+            expected_input_revision=(self._confirmed_object_preflight_source_revision),
             object_preflight_confirmation_digest=(
                 self._confirmed_object_preflight_digest
             ),
             document_structure_evidence=self._document_scope.evidence,
             document_scope_decisions=self._document_scope.decisions,
-
         )
 
         self._start_worker_from_build(build)
@@ -1463,7 +1355,6 @@ class WorkbenchPanel(BasePanel):
     def _start_worker_from_build(self, build) -> None:
 
         if build.already_running:
-
             return
 
         if getattr(build, "error_text", ""):
@@ -1487,29 +1378,19 @@ class WorkbenchPanel(BasePanel):
         worker = build.worker
 
         if worker is None:
-
             if build.cancelled:
-
                 return
 
             self._execution.reset_feedback()
 
             self.apply_execution_result(
-
                 {
-
                     "status": "failed",
-
                     "output_path": "",
-
                     "report_paths": [],
-
                     "failed_count": 0,
-
                     "error_text": "No execution worker available",
-
                 }
-
             )
 
             return
@@ -1539,9 +1420,7 @@ class WorkbenchPanel(BasePanel):
                         part for part in error_parts if str(part).strip()
                     ),
                     "execution_session": (
-                        snapshot.to_dict()
-                        if snapshot is not None
-                        else {}
+                        snapshot.to_dict() if snapshot is not None else {}
                     ),
                 }
             )
@@ -1652,15 +1531,9 @@ class WorkbenchPanel(BasePanel):
     def _apply_theme(self) -> None:
 
         apply_workbench_v2_shell_theme(
-
             self,
-
             self._nav_rail,
-
             self._detail_scroll,
-
             self._detail_container,
-
             theme=get_theme(),
-
         )

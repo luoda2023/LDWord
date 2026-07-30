@@ -9,13 +9,14 @@ lifecycle independently from a one-off run selection.
 from __future__ import annotations
 
 import copy
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 import hashlib
 import json
-from pathlib import Path
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 from src.config.atomic_io import atomic_write_text
 from src.config.entity import EntityArchive, EntityProfile, load_entity_archive
@@ -27,7 +28,6 @@ from src.config.entity_archive_validation import (
     first_payload_difference,
     validate_entity_archive_wire_payload,
 )
-
 
 MATERIAL_PACKAGE_VERSION = 6
 MATERIAL_PACKAGE_KIND = "alavette.material_package"
@@ -156,7 +156,9 @@ class MaterialPackageV6:
         record_ids: set[str] = set()
         for record in self.records:
             if record.record_id in record_ids:
-                raise ValueError(f"material_package_record_duplicate:{record.record_id}")
+                raise ValueError(
+                    f"material_package_record_duplicate:{record.record_id}"
+                )
             if record.group_id and record.group_id not in group_ids:
                 raise ValueError(
                     f"material_package_record_group_unknown:"
@@ -177,9 +179,7 @@ class MaterialPackageV6:
         )
 
     def active_records(self) -> list[MaterialRecord]:
-        return [
-            item for item in self.records if item.lifecycle_state == "active"
-        ]
+        return [item for item in self.records if item.lifecycle_state == "active"]
 
     def to_entity_archive(self) -> EntityArchive:
         """Return a lossless legacy execution adapter for existing consumers."""
@@ -194,9 +194,7 @@ class MaterialPackageV6:
                 record.values,
             ]
             profile.fields = {
-                key: value
-                for scope in scopes
-                for key, value in scope.fields.items()
+                key: value for scope in scopes for key, value in scope.fields.items()
             }
             profile.field_aliases = {
                 key: value
@@ -219,9 +217,7 @@ class MaterialPackageV6:
                 for key, value in scope.field_sources.items()
             }
             profile.declared_field_keys = list(
-                dict.fromkeys(
-                    (*profile.declared_field_keys, *profile.fields)
-                )
+                dict.fromkeys((*profile.declared_field_keys, *profile.fields))
             )
             profiles.append(profile)
         return EntityArchive(
@@ -406,7 +402,7 @@ def load_material_package_v6(path: str | Path) -> MaterialPackageV6:
     source = Path(path)
     payload = json.loads(source.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise ValueError("material_package_root_type_invalid:object_required")
+        raise TypeError("material_package_root_type_invalid:object_required")
     version = payload.get("version", 0)
     if type(version) is not int:
         raise ValueError("material_package_version_invalid")
@@ -475,9 +471,7 @@ def migrate_entity_archive_to_v6(
     archive = load_entity_archive(source)
     package = material_package_v6_from_archive(archive, source_path=source)
     save_material_package_v6(package, target)
-    warnings = (
-        "v5 没有共享层来源信息；迁移未自动提升重复字段到资料包共享层。",
-    )
+    warnings = ("v5 没有共享层来源信息；迁移未自动提升重复字段到资料包共享层。",)
     report_payload = {
         "kind": "alavette.material_package_migration_report",
         "version": 1,
@@ -513,7 +507,7 @@ def load_material_package_any(path: str | Path) -> MaterialPackageV6:
     source = Path(path)
     payload = json.loads(source.read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping):
-        raise ValueError("material_package_root_type_invalid:object_required")
+        raise TypeError("material_package_root_type_invalid:object_required")
     version = payload.get("version", 0)
     if version == MATERIAL_PACKAGE_VERSION:
         return load_material_package_v6(source)
@@ -581,9 +575,7 @@ def _validate_package_payload(
     if payload["kind"] != MATERIAL_PACKAGE_KIND:
         raise ValueError(f"material_package_kind_invalid:{payload['kind']}")
     if payload["version"] != MATERIAL_PACKAGE_VERSION:
-        raise ValueError(
-            f"material_package_version_unsupported:{payload['version']}"
-        )
+        raise ValueError(f"material_package_version_unsupported:{payload['version']}")
     _required_identity(payload["package_id"], "package_id")
     if type(payload["package_name"]) is not str:
         raise ValueError("material_package_v6_field_type_invalid:package_name")
@@ -592,9 +584,7 @@ def _validate_package_payload(
     if type(payload["material_schema_ids"]) is not list or not all(
         type(item) is str for item in payload["material_schema_ids"]
     ):
-        raise ValueError(
-            "material_package_v6_field_type_invalid:material_schema_ids"
-        )
+        raise ValueError("material_package_v6_field_type_invalid:material_schema_ids")
     _validate_scope_payload(payload["shared_scope"], "shared_scope")
     groups = payload["groups"]
     records = payload["records"]
@@ -605,9 +595,7 @@ def _validate_package_payload(
     group_ids: set[str] = set()
     for index, item in enumerate(groups):
         if type(item) is not dict:
-            raise ValueError(
-                f"material_package_v6_field_type_invalid:groups[{index}]"
-            )
+            raise ValueError(f"material_package_v6_field_type_invalid:groups[{index}]")
         _require_exact_keys(
             item,
             {"group_id", "group_name", "route_id", "values", "source_locator"},
@@ -631,9 +619,7 @@ def _validate_package_payload(
     record_ids: set[str] = set()
     for index, item in enumerate(records):
         if type(item) is not dict:
-            raise ValueError(
-                f"material_package_v6_field_type_invalid:records[{index}]"
-            )
+            raise ValueError(f"material_package_v6_field_type_invalid:records[{index}]")
         _require_exact_keys(
             item,
             {
@@ -695,8 +681,7 @@ def _validate_package_payload(
         difference = first_payload_difference(raw_profile, canonical)
         if difference:
             raise ValueError(
-                "material_package_record_profile_not_canonical:"
-                f"{index}:{difference}"
+                f"material_package_record_profile_not_canonical:{index}:{difference}"
             )
 
 
@@ -723,7 +708,7 @@ def _scope_payload(scope: MaterialValueScope) -> dict[str, object]:
 
 def _scope_from_payload(payload: object) -> MaterialValueScope:
     if not isinstance(payload, Mapping):
-        raise ValueError("material_package_v6_scope_invalid")
+        raise TypeError("material_package_v6_scope_invalid")
     return MaterialValueScope(
         fields=dict(payload["fields"]),
         field_aliases=dict(payload["field_aliases"]),
@@ -744,14 +729,10 @@ def _validate_scope_payload(payload: object, path: str) -> None:
             type(item_key) is str and type(item_value) is str
             for item_key, item_value in value.items()
         ):
-            raise ValueError(
-                f"material_package_v6_field_type_invalid:{path}.{key}"
-            )
+            raise ValueError(f"material_package_v6_field_type_invalid:{path}.{key}")
     for key in ("field_functions", "timeline_plans"):
         if type(payload[key]) is not dict:
-            raise ValueError(
-                f"material_package_v6_field_type_invalid:{path}.{key}"
-            )
+            raise ValueError(f"material_package_v6_field_type_invalid:{path}.{key}")
     if type(payload["override_fields"]) is not list or not all(
         type(item) is str for item in payload["override_fields"]
     ):
@@ -838,9 +819,7 @@ def _validate_source_locator(value: object, path: str) -> None:
     try:
         json.dumps(value, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"material_package_v6_source_locator_invalid:{path}"
-        ) from exc
+        raise ValueError(f"material_package_v6_source_locator_invalid:{path}") from exc
 
 
 def _require_exact_keys(

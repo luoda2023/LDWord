@@ -33,7 +33,6 @@ from src.shared.engine.docx_material_tokens import (
 from src.shared.engine.material_timeline import timeline_owned_field_keys
 from src.shared.engine.material_token_contract import parse_material_token
 
-
 SUITE_TOKEN_PATTERN = re.compile(r"\{\{([^{}\r\n]+)\}\}")
 SUPPORTED_WORD_SUFFIXES = frozenset({".docx"})
 SUPPORTED_EXCEL_SUFFIXES = frozenset({".xlsx", ".xlsm"})
@@ -206,9 +205,7 @@ class MaterialSuiteRunPlan:
     shared_units: tuple[SuiteRecordPlan, ...] = ()
     inspection: PackageInspection = field(default_factory=PackageInspection)
     recipe: GenerationRecipe = field(default_factory=GenerationRecipe)
-    request: MaterialSuiteRunRequest = field(
-        default_factory=MaterialSuiteRunRequest
-    )
+    request: MaterialSuiteRunRequest = field(default_factory=MaterialSuiteRunRequest)
 
     @property
     def ok(self) -> bool:
@@ -275,7 +272,9 @@ def compile_material_suite_plan(
         global_issues.append("尚未选择输出目录")
     elif output.exists() and not output.is_dir():
         global_issues.append("输出位置不是目录")
-    unknown_ids = sorted(set(selected_ids) - {item.record_id for item in package.records})
+    unknown_ids = sorted(
+        set(selected_ids) - {item.record_id for item in package.records}
+    )
     if unknown_ids:
         global_issues.append("本次选择包含未知记录：" + "、".join(unknown_ids))
 
@@ -562,9 +561,7 @@ def _effective_package(
     selection: MaterialBatchSelection | None,
 ) -> MaterialPackageV6:
     selected_package = (
-        getattr(selection, "material_package", None)
-        if selection is not None
-        else None
+        getattr(selection, "material_package", None) if selection is not None else None
     )
     if isinstance(selected_package, MaterialPackageV6):
         return copy.deepcopy(selected_package)
@@ -603,9 +600,7 @@ def _scan_template_bundle_once(
                 spec.kind,
             )
         except Exception as exc:  # noqa: BLE001 - template boundary
-            issues.append(
-                f"模板“{spec.label}”无法读取：{type(exc).__name__}: {exc}"
-            )
+            issues.append(f"模板“{spec.label}”无法读取：{type(exc).__name__}: {exc}")
     return scans, issues
 
 
@@ -620,9 +615,7 @@ def _compile_shared_units(
 ) -> tuple[SuiteRecordPlan, ...]:
     units: list[SuiteRecordPlan] = []
     package_specs = [
-        item
-        for item in template_bundle.artifacts
-        if item.emit_scope == "package_once"
+        item for item in template_bundle.artifacts if item.emit_scope == "package_once"
     ]
     if package_specs and selected_record_ids:
         context = _scope_context(
@@ -673,9 +666,7 @@ def _compile_shared_units(
         if item.record_id in selected_record_ids and item.group_id
     }
     group_specs = [
-        item
-        for item in template_bundle.artifacts
-        if item.emit_scope == "group_once"
+        item for item in template_bundle.artifacts if item.emit_scope == "group_once"
     ]
     for group_id in sorted(selected_groups):
         group = package.get_group(group_id)
@@ -714,7 +705,9 @@ def _compile_shared_units(
             aliases=aliases,
             issues=issues,
         )
-        target = output / _safe_component(group.route_id or group.group_name) / "_分组公共"
+        target = (
+            output / _safe_component(group.route_id or group.group_name) / "_分组公共"
+        )
         if target.exists():
             issues.append("分组公共产物目录已存在；为防止覆盖，请更换输出目录")
         units.append(
@@ -753,8 +746,7 @@ def _scope_context(
         scene_id=runtime.scene_id,
         package_id=package.package_id,
         material_schema_ids=(
-            tuple(runtime.material_schema_ids)
-            or tuple(package.material_schema_ids)
+            tuple(runtime.material_schema_ids) or tuple(package.material_schema_ids)
         ),
         archive_id=package.package_id,
         archive_name=package.package_name,
@@ -858,10 +850,7 @@ def _matched_artifacts(
         if spec.emit_scope == emit_scope
         and (
             not spec.route_key
-            or (
-                route_key
-                and spec.route_key.casefold() == route_key.casefold()
-            )
+            or (route_key and spec.route_key.casefold() == route_key.casefold())
         )
     ]
 
@@ -886,9 +875,7 @@ def _append_route_issues(
     elif (
         route_key
         and scoped_route_keys
-        and not any(
-            key.casefold() == route_key.casefold() for key in scoped_route_keys
-        )
+        and not any(key.casefold() == route_key.casefold() for key in scoped_route_keys)
     ):
         issues.append(f"产品路线“{route_key}”没有对应的成套模板")
     if not matched:
@@ -1002,9 +989,7 @@ def _load_manifest_bundle(
         if kind not in {"docx", "xlsx"}:
             issues.append(f"模板“{source_text}”类型不支持：{kind}")
             continue
-        emit_scope = str(
-            raw.get("emit_scope", "record_once") or "record_once"
-        ).strip()
+        emit_scope = str(raw.get("emit_scope", "record_once") or "record_once").strip()
         if emit_scope not in EMIT_SCOPES:
             issues.append(f"模板“{source_text}”生成作用域无效：{emit_scope}")
             continue
@@ -1033,7 +1018,9 @@ def _load_manifest_bundle(
         digest.update(item.source_revision.encode("ascii", errors="ignore"))
     return SuiteTemplateBundle(
         root_path=str(template_root),
-        bundle_id=str(payload.get("bundle_id", "") or _safe_component(template_root.name)),
+        bundle_id=str(
+            payload.get("bundle_id", "") or _safe_component(template_root.name)
+        ),
         bundle_name=str(payload.get("bundle_name", "") or template_root.name),
         revision=digest.hexdigest(),
         artifacts=tuple(artifacts),
@@ -1215,9 +1202,7 @@ def _lookup_value(key: str, values: Mapping[str, str]) -> str | None:
         return str(values[key])
     folded = key.casefold()
     matches = [
-        str(value)
-        for name, value in values.items()
-        if name.casefold() == folded
+        str(value) for name, value in values.items() if name.casefold() == folded
     ]
     return matches[0] if len(matches) == 1 else None
 
@@ -1249,9 +1234,7 @@ def _provenance_pairs(
 def _locator_pairs(
     locator: Mapping[str, object],
 ) -> tuple[tuple[str, str], ...]:
-    return tuple(
-        sorted((str(key), str(value)) for key, value in locator.items())
-    )
+    return tuple(sorted((str(key), str(value)) for key, value in locator.items()))
 
 
 def _safe_component(value: object) -> str:

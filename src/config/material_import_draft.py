@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from openpyxl import load_workbook
 
@@ -16,11 +17,6 @@ from src.config.material_package_v6 import (
     MaterialPackageV6,
     MaterialRecord,
     MaterialValueScope,
-)
-from src.shared.engine.material_timeline import (
-    default_timeline_plan,
-    evenly_distributed_nodes,
-    normalize_timeline_plans,
 )
 
 
@@ -81,9 +77,7 @@ class PackageImportDraft:
 
     @property
     def active_count(self) -> int:
-        return sum(
-            item.lifecycle_state == "active" for item in self.candidates
-        )
+        return sum(item.lifecycle_state == "active" for item in self.candidates)
 
     @property
     def draft_count(self) -> int:
@@ -91,17 +85,12 @@ class PackageImportDraft:
 
     @property
     def disabled_count(self) -> int:
-        return sum(
-            item.lifecycle_state == "disabled" for item in self.candidates
-        )
+        return sum(item.lifecycle_state == "disabled" for item in self.candidates)
 
     def materialize(self) -> MaterialPackageV6:
         records: list[MaterialRecord] = []
         for candidate in self.candidates:
-            timeline_plans = _legacy_timeline_from_fields(candidate.values.fields)
             values = copy.deepcopy(candidate.values)
-            if timeline_plans and not values.timeline_plans:
-                values.timeline_plans = timeline_plans
             profile = EntityProfile(
                 profile_id=candidate.record_id,
                 profile_name=candidate.record_name,
@@ -149,7 +138,7 @@ def inspect_material_workbook(
             if profile.primary_sheet
             else workbook.active
         )
-        headers, rows = _worksheet_rows(primary)
+        _headers, rows = _worksheet_rows(primary)
         shared_fields: dict[str, str] = {}
         shared_sources: dict[str, str] = {}
         issues: list[str] = []
@@ -171,9 +160,7 @@ def inspect_material_workbook(
                     if not value:
                         continue
                     if key in shared_fields and shared_fields[key] != value:
-                        issues.append(
-                            f"共享字段“{key}”在多个工作表中值不一致"
-                        )
+                        issues.append(f"共享字段“{key}”在多个工作表中值不一致")
                         continue
                     shared_fields[key] = value
                     shared_sources[key] = (
@@ -233,12 +220,10 @@ def inspect_material_workbook(
         record_fields = {
             key: value
             for key, value in row.items()
-            if value
-            and key not in profile.group_fields
+            if value and key not in profile.group_fields
         }
         field_sources = {
-            key: f"excel:{primary.title}!row:{row_number}"
-            for key in record_fields
+            key: f"excel:{primary.title}!row:{row_number}" for key in record_fields
         }
         candidates.append(
             ImportCandidate(
@@ -285,22 +270,14 @@ def _worksheet_rows(sheet) -> tuple[list[str], list[tuple[int, dict[str, str]]]]
     headers = [str(value or "").strip() for value in raw_headers]
     nonempty_headers = [item for item in headers if item]
     duplicates = sorted(
-        {
-            item
-            for item in nonempty_headers
-            if nonempty_headers.count(item) > 1
-        }
+        {item for item in nonempty_headers if nonempty_headers.count(item) > 1}
     )
     if duplicates:
-        raise ValueError(
-            "material_import_headers_duplicate:" + ",".join(duplicates)
-        )
+        raise ValueError("material_import_headers_duplicate:" + ",".join(duplicates))
     rows: list[tuple[int, dict[str, str]]] = []
     for row_number, raw_row in enumerate(iterator, start=2):
         values = {
-            header: _cell_text(
-                raw_row[index] if index < len(raw_row) else None
-            )
+            header: _cell_text(raw_row[index] if index < len(raw_row) else None)
             for index, header in enumerate(headers)
             if header
         }
@@ -348,63 +325,6 @@ def _cell_text(value: object) -> str:
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value).strip()
-
-
-_LEGACY_TIMELINE_OUTPUTS = (
-    "节点_设计策划",
-    "节点_编制计划书",
-    "节点_设计输入",
-    "节点_性能评审",
-    "节点_设计输出",
-    "节点_系统评审",
-    "节点_设计验证",
-    "节点_试产可行性",
-    "节点_试产总结",
-    "节点_设计确认",
-    "节点_设计正稿",
-)
-
-
-def _legacy_timeline_from_fields(
-    fields: Mapping[str, str],
-) -> dict[str, dict[str, object]]:
-    start_key = _first_value_key(
-        fields,
-        ("项目开始日期", "project_start_date", "start_date"),
-    )
-    end_key = _first_value_key(
-        fields,
-        ("项目结束日期", "project_end_date", "end_date"),
-    )
-    if not start_key or not end_key:
-        return {}
-    plan = default_timeline_plan()
-    plan["start_field"] = start_key
-    plan["end_field"] = end_key
-    plan["calendar"] = {
-        **dict(plan.get("calendar", {})),
-        "basis": "calendar_day",
-        "weekend_adjust": "forward",
-    }
-    nodes = evenly_distributed_nodes(len(_LEGACY_TIMELINE_OUTPUTS))
-    for node, output_key in zip(
-        nodes,
-        _LEGACY_TIMELINE_OUTPUTS,
-        strict=True,
-    ):
-        node["outputs"] = [{"field": output_key, "format": "yyyy-MM-dd"}]
-    plan["nodes"] = nodes
-    return normalize_timeline_plans({"legacy_iso_timeline": plan})
-
-
-def _first_value_key(
-    fields: Mapping[str, str],
-    keys: tuple[str, ...],
-) -> str:
-    for key in keys:
-        if str(fields.get(key, "") or "").strip():
-            return key
-    return ""
 
 
 def _unique_indexed_id(prefix: str, index: int, used: set[str]) -> str:

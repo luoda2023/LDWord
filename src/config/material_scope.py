@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from src.config.material_context import MaterialExecutionContext
 from src.config.material_package_v6 import (
     MaterialPackageV6,
     MaterialRecord,
     MaterialValueScope,
-)
-from src.shared.engine.material_timeline import (
-    timeline_output_field_keys,
 )
 
 
@@ -165,17 +162,16 @@ class MaterialScopeResolver:
         )
         resolution = context.resolve_material_fields()
         resolved_values = {
-            str(key): str(value)
-            for key, value in resolution.values.items()
+            str(key): str(value) for key, value in resolution.values.items()
         }
-        timeline_fields = timeline_output_field_keys(timelines)
+        timeline_owners = _timeline_output_owners(context.timeline_plans)
         for key in resolved_values:
             if key in provenance:
                 continue
-            if key in timeline_fields:
+            if key in timeline_owners:
                 provenance[key] = MaterialValueProvenance(
                     scope="derived_timeline",
-                    owner_id=_owner_for_timeline_output(timelines, key),
+                    owner_id=timeline_owners[key],
                 )
             elif key in functions:
                 provenance[key] = MaterialValueProvenance(
@@ -294,8 +290,7 @@ def _record_context(
         scene_id=runtime.scene_id,
         package_id=package.package_id,
         material_schema_ids=(
-            tuple(runtime.material_schema_ids)
-            or tuple(package.material_schema_ids)
+            tuple(runtime.material_schema_ids) or tuple(package.material_schema_ids)
         ),
         compatible_profile_ids=tuple(runtime.compatible_profile_ids),
         compatible_master_families=tuple(runtime.compatible_master_families),
@@ -407,14 +402,29 @@ def _merge_contract(
         target[key] = copy.deepcopy(raw_value)
 
 
-def _owner_for_timeline_output(
+def _timeline_output_owners(
     timelines: Mapping[str, dict[str, object]],
-    key: str,
-) -> str:
+) -> dict[str, str]:
+    owners: dict[str, str] = {}
     for plan_id, plan in timelines.items():
-        if key in timeline_output_field_keys({plan_id: plan}):
-            return str(plan_id)
-    return ""
+        if not bool(plan.get("enabled", True)) or bool(
+            plan.get("deleted", False)
+        ):
+            continue
+        for raw_node in list(plan.get("nodes", []) or []):
+            node = dict(raw_node) if isinstance(raw_node, Mapping) else {}
+            if not bool(node.get("active", True)):
+                continue
+            for raw_output in list(node.get("outputs", []) or []):
+                output = (
+                    dict(raw_output)
+                    if isinstance(raw_output, Mapping)
+                    else {}
+                )
+                key = str(output.get("field", "") or "").strip()
+                if key:
+                    owners.setdefault(key, str(plan_id))
+    return owners
 
 
 __all__ = [

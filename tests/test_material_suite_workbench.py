@@ -6,10 +6,9 @@ from docx import Document
 from openpyxl import Workbook
 
 from src.config.entity import EntityArchive, EntityProfile
-from src.config.material_import_draft import inspect_material_workbook
 from src.config.material_batch import MaterialBatchSelection
-from src.qt_api import QApplication
-from src.qt_api import Qt
+from src.config.material_import_draft import inspect_material_workbook
+from src.qt_api import QApplication, Qt
 from src.ui.bridge import PanelBridge
 from src.ui.panels.workbench.material_suite_generation_detail import (
     _load_material_package,

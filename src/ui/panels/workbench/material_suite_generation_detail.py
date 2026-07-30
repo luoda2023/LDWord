@@ -6,8 +6,8 @@ import copy
 from pathlib import Path
 
 from src.config.entity import EntityArchive
-from src.config.material_import_draft import inspect_material_workbook
 from src.config.material_batch import MaterialBatchSelection
+from src.config.material_import_draft import inspect_material_workbook
 from src.config.material_package_v6 import (
     MaterialPackageV6,
     load_material_package_any,
@@ -30,15 +30,16 @@ from src.qt_api import (
     QProgressBar,
     QPushButton,
     QSizePolicy,
+    Qt,
     QTextEdit,
     QVBoxLayout,
     QWidget,
-    Qt,
     Signal,
 )
 from src.shared.engine.material_timeline import (
     default_timeline_plan,
     evenly_distributed_nodes,
+    normalize_timeline_plans,
 )
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
@@ -736,7 +737,9 @@ def _load_material_package_v6_source(path: str) -> MaterialPackageV6:
     if source.suffix.lower() == ".json":
         return load_material_package_any(source)
     if source.suffix.lower() in {".xlsx", ".xlsm"}:
-        return inspect_material_workbook(source).materialize()
+        package = inspect_material_workbook(source).materialize()
+        _normalize_legacy_suite_records(package)
+        return package
     from src.ui.panels.assets.batch_import import _load_batch_profiles_from_path
 
     profiles = _load_batch_profiles_from_path(source)
@@ -762,8 +765,7 @@ def _selected_active_count(
     if isinstance(package, MaterialPackageV6):
         if explicit:
             return sum(
-                item.record_id in selected
-                and item.lifecycle_state == "active"
+                item.record_id in selected and item.lifecycle_state == "active"
                 for item in package.records
             )
         return sum(item.lifecycle_state == "active" for item in package.records)
@@ -827,7 +829,18 @@ def _normalize_legacy_suite_profiles(profiles) -> None:
         for node, output_key in zip(nodes, _LEGACY_TIMELINE_OUTPUTS, strict=True):
             node["outputs"] = [{"field": output_key, "format": "yyyy-MM-dd"}]
         plan["nodes"] = nodes
-        profile.timeline_plans = {"legacy_iso_timeline": plan}
+        profile.timeline_plans = normalize_timeline_plans(
+            {"legacy_iso_timeline": plan}
+        )
+
+
+def _normalize_legacy_suite_records(package: MaterialPackageV6) -> None:
+    for record in package.records:
+        _normalize_legacy_suite_profiles([record.profile])
+        if record.profile.timeline_plans and not record.values.timeline_plans:
+            record.values.timeline_plans = copy.deepcopy(
+                record.profile.timeline_plans
+            )
 
 
 def _first_existing_field(fields, candidates) -> str:

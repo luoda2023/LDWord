@@ -16,8 +16,8 @@ from .plan import (
 from .runner import MaterialSuiteGenerationRunner
 
 __all__ = [
-    "MaterialSuiteGenerationRunner",
     "GenerationRecipe",
+    "MaterialSuiteGenerationRunner",
     "MaterialSuiteRunPlan",
     "MaterialSuiteRunRequest",
     "PackageInspection",
