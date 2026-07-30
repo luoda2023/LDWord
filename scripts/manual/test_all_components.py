@@ -1,7 +1,7 @@
 ﻿"""全量控件预览面板。
 
 运行方式：
-    cd \"c:/Users/Administrator/Desktop/Lark-Formatter 1.0/Lark-Formatter V1.0\"
+    cd <repository-root>
     python scripts/manual/test_all_components.py
 """
 

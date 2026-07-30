@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import argparse
 import copy
-import json
 import os
 import sys
-import tempfile
 from dataclasses import asdict, dataclass, fields, is_dataclass
 from pathlib import Path
 
@@ -64,7 +61,6 @@ from src.config.scene_boundary_capability_matrix import (  # noqa: E402
 from src.config.scene_release_governance_registry import (  # noqa: E402
     SCENE_RELEASE_GOVERNANCE_DASHBOARD_GATE_CHECK_IDS,
     SCENE_RELEASE_GOVERNANCE_EARLY_GATE_CHECK_IDS,
-    SCENE_RELEASE_GOVERNANCE_EXPORT_SCRIPT_EVIDENCE_SOURCE_ID,
     SCENE_RELEASE_GOVERNANCE_SUMMARY_COUNT_SPECS,
     build_scene_release_governance_report,
     resolve_scene_release_governance_functions,
@@ -83,7 +79,6 @@ from src.config.scene_matrix_dashboard import (  # noqa: E402
     build_scene_matrix_dashboard,
 )
 from src.config.scene_matrix_drilldown import (  # noqa: E402
-    audit_scene_matrix_drilldown_report,
     build_scene_matrix_drilldown_report,
 )
 from src.config.scene_material_schema_audit import (  # noqa: E402
@@ -242,39 +237,6 @@ def _scene_matrix_dashboard_release_gate_counts(
         }
     )
     return counts
-
-
-class _MatrixDrilldownReleaseGateSnapshot:
-    """Fast pytest snapshot for release-gate inclusion tests."""
-
-    status = "passed"
-    item_count = 37
-    ready_count = 37
-    row_count = 556
-    visible_row_count = 556
-    issue_count = 0
-    source_evidence_count = 107
-    ready_source_evidence_count = 107
-    missing_source_evidence_count = 0
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            "status": self.status,
-            "counts": {
-                "item_count": self.item_count,
-                "ready_count": self.ready_count,
-                "row_count": self.row_count,
-                "visible_row_count": self.visible_row_count,
-                "issue_count": self.issue_count,
-                "source_evidence_count": self.source_evidence_count,
-                "ready_source_evidence_count": self.ready_source_evidence_count,
-                "missing_source_evidence_count": self.missing_source_evidence_count,
-            },
-            "items": [],
-            "rows": [],
-            "issues": [],
-            "source_evidence": [],
-        }
 
 
 @dataclass(slots=True)
@@ -754,6 +716,7 @@ def _build_release_gate_dashboard_residual_reports(
         ),
         "maturity_upgrade_report": maturity_upgrade_report,
         "matrix_dashboard": matrix_dashboard,
+        "dashboard_warning_count": matrix_dashboard.warning_count,
     }
     for report_id in SCENE_RELEASE_GOVERNANCE_DASHBOARD_GATE_CHECK_IDS:
         spec = scene_release_governance_report_spec(report_id)
@@ -925,14 +888,9 @@ def build_scene_matrix_release_gate_payload(output_dir: Path) -> dict[str, objec
         release_governance_export_gate.evidence
     )
     release_governance_export_script_counts = release_governance_export_gate.counts
-    if _pytest_release_gate_lightweight_enabled():
-        matrix_drilldown = _MatrixDrilldownReleaseGateSnapshot()
-        checks["scene_matrix_drilldown"] = _issue_check([])
-    else:
-        matrix_drilldown = build_scene_matrix_drilldown_report(project_root=ROOT)
-        checks["scene_matrix_drilldown"] = _issue_check(
-            audit_scene_matrix_drilldown_report(matrix_drilldown)
-        )
+    matrix_drilldown = build_scene_matrix_drilldown_report(project_root=ROOT)
+    matrix_drilldown_issues = matrix_drilldown.issues
+    checks["scene_matrix_drilldown"] = _issue_check(matrix_drilldown_issues)
 
     failed = {
         check_id: check
