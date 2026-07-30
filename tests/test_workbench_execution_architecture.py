@@ -606,9 +606,15 @@ def test_execution_runtime_leaf_contracts_have_real_non_runtime_owners():
     assert expected_execution_payload_functions <= execution_payload_functions
     assert moved_batch_reporting_functions.isdisjoint(runtime_functions)
     assert expected_batch_reporting_functions <= batch_reporting_functions
-    assert "from src.reporting.official_batch_payload import" in runtime_source
+    assert "_lazy_optional_function" in runtime_functions
+    assert '"src.reporting.official_batch_payload"' in runtime_source
+    assert (
+        '"src.services.production_runtime.batch_reporting"'
+        in runtime_source
+    )
+    assert "from src.reporting.official_batch_payload import" not in runtime_source
     assert "from src.reporting.execution_payload import" in runtime_source
-    assert "from .batch_reporting import" in runtime_source
+    assert "from .batch_reporting import" not in runtime_source
     assert "src.ui" not in official_payload_source
     assert "src.ui" not in execution_payload_source
     assert "src.ui" not in batch_reporting_source
