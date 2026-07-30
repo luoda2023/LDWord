@@ -51,9 +51,8 @@ def create_panel(
         # context is represented once by Form's bridge and task surfaces.
         return AssistantPanel(bridge, first_level=True)
     if panel_id == "theme":
-        from src.ui.panels.theme_panel import ThemePanel
-
-        return ThemePanel(bridge)
+        panel_module = import_module("src.ui.panels.theme_panel")
+        return panel_module.ThemePanel(bridge)
     if panel_id == "preferences":
         from src.ui.panels.preferences_panel import PreferencesPanel
 

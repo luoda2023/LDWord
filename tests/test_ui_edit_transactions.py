@@ -221,7 +221,10 @@ def test_window_close_failure_restores_real_scene_and_material_edits(
     qapp,
     monkeypatch,
 ):
-    window = MainWindow(enable_background_services=False)
+    window = MainWindow(
+        enable_background_services=False,
+        include_optional_panels=True,
+    )
     failure = _PreparedCloseFailure()
     try:
         scene_panel = window._ensure_panel_loaded_for_id("scene")

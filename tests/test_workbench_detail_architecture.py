@@ -428,18 +428,12 @@ def test_workbench_quick_execution_does_not_expose_zone_toggles(monkeypatch):
         app.processEvents()
 
         apply_calls = []
-        style_source_calls = []
         recheck_calls = []
 
         monkeypatch.setattr(
             detail,
             "_apply_scene",
             lambda scene: apply_calls.append(scene),
-        )
-        monkeypatch.setattr(
-            detail,
-            "_sync_style_prereview_state",
-            lambda: style_source_calls.append(True),
         )
         monkeypatch.setattr(
             detail,
@@ -452,7 +446,6 @@ def test_workbench_quick_execution_does_not_expose_zone_toggles(monkeypatch):
 
         assert bridge.is_scene_dirty() is False
         assert apply_calls == []
-        assert style_source_calls == []
         assert recheck_calls == []
     finally:
         panel.close()

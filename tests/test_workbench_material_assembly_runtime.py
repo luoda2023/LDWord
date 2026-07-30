@@ -30,6 +30,7 @@ from src.pipeline.result import PipelineResult
 import src.pipeline.runner as pipeline_runner
 import src.services.material_content.composer as content_composer
 import src.services.material_execution.dependency_indexer as dependency_indexer
+import src.services.material_execution.material_snapshot_builder as material_snapshot_builder
 from src.services.material_content.artifact_repository import ContentArtifactRepository
 from src.services.material_content.compiler import compile_content_material
 from src.services.material_attachments import build_single_attachment_binding
@@ -80,6 +81,11 @@ def _isolated_content_repository(
     monkeypatch.setattr(assembly_runtime, "CONFIG_LIBRARY_ROOT", config_root)
     monkeypatch.setattr(content_composer, "CONFIG_LIBRARY_ROOT", config_root)
     monkeypatch.setattr(dependency_indexer, "CONFIG_LIBRARY_ROOT", config_root)
+    monkeypatch.setattr(
+        material_snapshot_builder,
+        "CONFIG_LIBRARY_ROOT",
+        config_root,
+    )
     return ContentArtifactRepository(config_root / "content_artifacts")
 
 
@@ -725,6 +731,8 @@ def test_pipeline_adapter_excludes_legacy_image_module_and_returns_visibility(
         force_delivery_presets=False,
         official_master=None,
         image_rule_tokens=("{{@img:qualification1}}",),
+        document_structure_evidence=None,
+        document_scope_decisions=(),
     )
     request = MaterialPipelineRequest(
         execution_id="e1",
@@ -832,6 +840,8 @@ def test_pipeline_adapter_never_fabricates_required_visibility_receipt(
         force_delivery_presets=False,
         official_master=None,
         image_rule_tokens=(),
+        document_structure_evidence=None,
+        document_scope_decisions=(),
     )
     digest = sha256(prepared.read_bytes()).hexdigest()
     request = MaterialPipelineRequest(
@@ -946,6 +956,8 @@ def test_pipeline_adapter_refreshes_only_variant_without_pending_image_work(
         force_delivery_presets=False,
         official_master=None,
         image_rule_tokens=("{{@img:qualification1}}",),
+        document_structure_evidence=None,
+        document_scope_decisions=(),
     )
 
     adapter(request)

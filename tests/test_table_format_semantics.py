@@ -137,11 +137,13 @@ def test_table_format_only_formats_body_tables_when_doc_tree_is_present():
     config.table.layout_mode = "compact"
 
     context = PipelineContext(
+        document_scope_gate_active=True,
         doc_tree=DocTree(
             sections=[
                 DocSection("cover", 0, 1),
                 DocSection("body", 1, 2),
-            ]
+            ],
+            writable_roles=frozenset({"body"}),
         )
     )
 

@@ -298,6 +298,7 @@ def _runtime_repair_target_types(config, *, gates) -> tuple[str, ...]:
         values.append("delivery_preset")
     if gates:
         values.append("plugin_manual_gate")
+        values.append("boundary_confirmation")
     return _unique_texts(values)
 
 

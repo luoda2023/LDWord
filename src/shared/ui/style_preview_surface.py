@@ -156,6 +156,11 @@ class StylePreviewSurface(QWidget):
 
     def _sync_text(self) -> None:
         summary = self._envelope.summary
+        if (
+            self._envelope.kind == "section_paragraph"
+            and summary == "当前有效样式"
+        ):
+            summary = "当前分区有效样式"
         detail = self._envelope.detail
         self._summary_label.setText(summary)
         self._summary_label.setVisible(bool(self._show_metadata and summary))

@@ -29,7 +29,9 @@ def test_dynamic_navigation_rail_can_remove_section_header_without_stale_deleted
 def test_workbench_navigation_and_execution_controller_sources_keep_readable_copy():
     navigation_source = (ROOT / "src/ui/panels/workbench/navigation_controller.py").read_text(encoding="utf-8")
     execution_source = (ROOT / "src/ui/panels/workbench/execution_controller.py").read_text(encoding="utf-8")
-    quick_detail_source = (ROOT / "src/ui/panels/workbench/quick_execution_detail.py").read_text(encoding="utf-8")
+    feedback_source = (
+        ROOT / "src/ui/panels/workbench/quick_execution_feedback_mixin.py"
+    ).read_text(encoding="utf-8")
     result_presenter_source = (
         ROOT / "src/ui/panels/workbench/quick_execution_result_presenter.py"
     ).read_text(encoding="utf-8")
@@ -39,5 +41,5 @@ def test_workbench_navigation_and_execution_controller_sources_keep_readable_cop
     assert "高级功能" in navigation_source
     assert "execution_history" not in navigation_source
     assert "execution_history" not in execution_source
-    assert "build_execution_result_presentation" in quick_detail_source
+    assert "build_execution_result_presentation" in feedback_source
     assert "✓ 本次生成完成" in result_presenter_source

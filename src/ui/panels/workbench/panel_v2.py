@@ -259,11 +259,12 @@ class WorkbenchPanel(BasePanel):
         if hasattr(self._quick_execution_detail, "set_work_mode"):
             self._quick_execution_detail.set_work_mode(self.bridge.current_work_mode_id())
 
-        # Batch generation is a core Workbench destination. Keep this as a
-        # static import so release packaging can always discover the module.
-        from .batch_generation_detail import BatchGenerationDetail
-
-        self._batch_generation_detail = BatchGenerationDetail(self)
+        # Batch generation is a fixed Workbench destination, but loading its
+        # specialist surface must not expand the application entrypoint graph.
+        batch_module = import_module(
+            "src.ui.panels.workbench.batch_generation_detail"
+        )
+        self._batch_generation_detail = batch_module.BatchGenerationDetail(self)
         self._batch_generation_detail.set_work_mode(
             self.bridge.current_work_mode_id()
         )

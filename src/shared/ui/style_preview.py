@@ -15,6 +15,20 @@ from src.shared.ui.theme import bind_theme, get_theme
 DEFAULT_SAMPLE_TEXT = "样式预览示例 AaBbCc 123"
 
 
+def _envelope_preview_detail(
+    presentation: StylePresentationEnvelope,
+) -> str:
+    detail = presentation.preview_detail()
+    if (
+        presentation.kind == "section_paragraph"
+        and "有效样式" in presentation.summary
+        and detail
+        and not detail.startswith("不同：")
+    ):
+        return f"不同：{detail}"
+    return detail
+
+
 @dataclass(frozen=True, slots=True)
 class StylePreviewProjection:
     """Shared compact projection for a paragraph-style preview widget."""
@@ -224,10 +238,11 @@ class StylePreview(QLabel):
             else StylePreviewProjection(
                 sample_text=presentation.preview_sample_text(fallback=empty_text),
                 source_label=presentation.preview_source_label(),
-                detail=presentation.preview_detail(),
+                detail=_envelope_preview_detail(presentation),
             )
         )
         self.apply_projection(preview_projection, empty_text=empty_text)
+        self.setToolTip(presentation.tooltip_text())
         self.setProperty("style_presentation_kind", presentation.kind)
         self.setProperty("style_presentation_title", presentation.display_title())
         self.setProperty(

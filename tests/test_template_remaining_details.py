@@ -132,7 +132,7 @@ def test_reference_detail_displays_legacy_typography_without_mutating_template()
         app.processEvents()
 
 
-def test_scene_panel_reference_detail_updates_preview_and_dirty_state():
+def test_scene_panel_reference_format_is_summary_only_and_routes_to_rules():
     app = _app()
     bridge = PanelBridge()
     scene = SceneWorkspace(scene_id="thesis", category="thesis", template_id="default")
@@ -141,65 +141,21 @@ def test_scene_panel_reference_detail_updates_preview_and_dirty_state():
     panel = ScenePanel(bridge)
 
     try:
-        panel._show_detail("scn_reference")
-        panel._reference._hanging_indent.set_value(1.2, "cm")
+        reference_row = panel._overview._setting_rows["reference_format"]
+        original_indent = scene.reference_style.hanging_indent_cm
+
+        assert f"{original_indent:g}cm" in reference_row.summary_text()
+        assert reference_row._target_card_id == "scn_rules"
+        assert "_reference" not in panel._DETAIL_ATTR_NAMES
+
+        reference_row._jump_btn.click()
         app.processEvents()
 
-        assert scene.reference_style.hanging_indent_cm == 1.2
-        assert isinstance(panel._reference._summary_grid, SummaryGrid)
-        assert panel._reference._summary_grid._tile_style == "module"
-        assert len(panel._reference._summary_grid.items()) == 2
-        assert "1.2cm" in panel._reference._summary_grid.value_for("citation_rules")
-        assert "1.2cm" in panel._overview._setting_rows["reference_format"].summary_text()
-        assert bridge.is_scene_dirty() is True
-    finally:
-        panel.close()
-        app.processEvents()
-
-
-def test_scene_panel_reference_detail_restore_entry_snapshot_survives_bridge_echo():
-    app = _app()
-    bridge = PanelBridge()
-    scene = SceneWorkspace(scene_id="thesis", category="thesis", template_id="default")
-    bridge.set_current_scene(scene, config_id="thesis", emit_signal=False)
-    bridge.set_current_template(TemplateConfig(), config_id="default", emit_signal=False)
-    panel = ScenePanel(bridge)
-    original_indent = scene.reference_style.hanging_indent_cm
-
-    try:
-        panel._show_detail("scn_reference")
-        panel._reference._hanging_indent.set_value(original_indent + 0.4, "cm")
-        app.processEvents()
-
-        assert panel._reference._restore_entry_btn.isEnabled() is True
-
-        panel._reference._restore_entry_btn.click()
-        app.processEvents()
-
+        assert panel._nav_rail.selected_card_id() == "scn_rules"
+        assert panel._rules is panel._detail_map["scn_rules"]
         assert scene.reference_style.hanging_indent_cm == original_indent
-        assert panel._reference._restore_entry_btn.isEnabled() is False
-    finally:
-        panel.close()
-        app.processEvents()
-
-
-def test_scene_panel_reference_detail_uses_scene_dirty_state_instead_of_template_save():
-    app = _app()
-    bridge = PanelBridge()
-    scene = SceneWorkspace(scene_id="thesis", category="thesis", template_id="default")
-    bridge.set_current_scene(scene, config_id="thesis", emit_signal=False)
-    bridge.set_current_template(TemplateConfig(), config_id="default", emit_signal=False)
-    panel = ScenePanel(bridge)
-
-    try:
-        panel._show_detail("scn_reference")
-        panel._reference._hanging_indent.set_value(1.6, "cm")
-        app.processEvents()
-
-        assert scene.reference_style.hanging_indent_cm == 1.6
-        assert bridge.is_scene_dirty() is True
+        assert bridge.is_scene_dirty() is False
         assert bridge.is_template_dirty() is False
-        assert panel._reference._save_btn.isEnabled() is False
     finally:
         panel.close()
         app.processEvents()

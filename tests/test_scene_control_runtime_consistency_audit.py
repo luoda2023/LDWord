@@ -23,9 +23,9 @@ def test_scene_control_runtime_consistency_locks_n2_175_runtime_groups():
     rows = {row.runtime_id: row for row in report.rows}
 
     assert report.status == "passed"
-    assert report.runtime_control_count == 7
-    assert report.ready_runtime_control_count == 7
-    assert report.control_contract_link_count == 7
+    assert report.runtime_control_count == 12
+    assert report.ready_runtime_control_count == 12
+    assert report.control_contract_link_count == 16
     assert report.issue_count == 0
     assert report.missing_source_evidence_count == 0
     assert audit_scene_control_runtime_consistency_report(report) == ()
@@ -37,6 +37,7 @@ def test_scene_control_runtime_consistency_locks_n2_175_runtime_groups():
         "output": 2,
         "plugin": 1,
         "scene": 3,
+        "template": 5,
     }
 
     row_height = rows["fixed_layout_row_height_profile"]
@@ -138,9 +139,9 @@ def test_release_gate_includes_scene_control_runtime_consistency_audit(tmp_path)
         payload["checks"]["scene_control_runtime_consistency_audit"]["status"]
         == "passed"
     )
-    assert payload["counts"]["scene_control_runtime_control_count"] == 7
-    assert payload["counts"]["scene_control_runtime_ready_control_count"] == 7
-    assert payload["counts"]["scene_control_runtime_contract_link_count"] == 7
+    assert payload["counts"]["scene_control_runtime_control_count"] == 12
+    assert payload["counts"]["scene_control_runtime_ready_control_count"] == 12
+    assert payload["counts"]["scene_control_runtime_contract_link_count"] == 16
     assert payload["counts"]["scene_control_runtime_issue_count"] == 0
     assert (
         payload["counts"]["scene_control_runtime_missing_source_evidence_count"]
