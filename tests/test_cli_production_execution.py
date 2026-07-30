@@ -109,6 +109,22 @@ def test_console_output_and_argparse_are_cp936_safe(monkeypatch) -> None:
     assert "invalid choice" in stderr.text()
 
 
+def test_console_output_and_argparse_are_safe_without_windowed_streams(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+
+    console_print("windowed CLI has no attached console")
+    with pytest.raises(SystemExit) as help_exit:
+        main.parse_args(["--help"])
+    with pytest.raises(SystemExit) as error_exit:
+        main.parse_args(["--font-engine", "unsupported"])
+
+    assert help_exit.value.code == 0
+    assert error_exit.value.code == 2
+
+
 def test_cli_defaults_match_gui_custom_default_binding() -> None:
     resources = _resolve_cli_resources(template_path=None, scene_path=None)
 

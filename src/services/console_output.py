@@ -37,6 +37,10 @@ def write_console(
     """Write one complete, encoding-safe console record."""
 
     target = stream if stream is not None else sys.stdout
+    if target is None:
+        # PyInstaller's ``--windowed`` mode intentionally exposes no console
+        # streams. CLI help and validation errors must still terminate cleanly.
+        return
     payload = f"{message}{end}"
     safe_payload = _safe_text_for_stream(payload, target)
     try:
