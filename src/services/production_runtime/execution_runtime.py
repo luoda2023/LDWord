@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 from importlib import import_module
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.config.entity import EntityArchive
 from src.services.execution_session import (
@@ -85,6 +86,30 @@ from .execution_preflight import (
     prepare_document_material_preflight,
 )
 from .result_projection import project_execution_result
+
+
+if TYPE_CHECKING:
+    # Keep leaf ownership statically discoverable without forcing these optional,
+    # dependency-heavy reporting modules into every execution-runtime import.
+    from src.reporting.official_batch_payload import (
+        official_document_batch_exception_payload as _official_batch_exception_owner,
+        official_document_batch_item_payload as _official_batch_item_owner,
+        official_document_batch_preflight_failure_payload as _official_batch_preflight_owner,
+    )
+    from .batch_reporting import (
+        attach_batch_reports as _attach_batch_reports_owner,
+        batch_profile_ids as _batch_profile_ids_owner,
+        build_batch_payload as _build_batch_payload_owner,
+    )
+
+    _STATIC_LEAF_OWNER_CONTRACTS = (
+        _official_batch_exception_owner,
+        _official_batch_item_owner,
+        _official_batch_preflight_owner,
+        _attach_batch_reports_owner,
+        _batch_profile_ids_owner,
+        _build_batch_payload_owner,
+    )
 
 
 def _lazy_optional_function(module_name: str, function_name: str):
