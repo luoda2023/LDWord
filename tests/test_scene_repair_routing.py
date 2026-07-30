@@ -1,12 +1,10 @@
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.config.control_contract_registry import ControlContractAuditResult
 from src.config.material_context import MaterialExecutionContext
 from src.config.scene import SceneWorkspace
 from src.config.scene_sample_fixture_registry import SceneSampleFixtureAuditIssue
@@ -19,17 +17,16 @@ from src.config.scene_repair_routing import (
     repair_route_for_issue,
     repair_route_for_target,
 )
-from src.ui.adapters.workbench_execution_adapter import (
-    WorkbenchIssueItem,
-    control_contract_issue_items,
+from src.ui.adapters.workbench_boundary_issues import (
     coverage_boundary_issue_items,
-    material_readiness_issue_items,
-    object_preflight_issue_items,
-    output_target_preflight_issue_items,
-    parameter_ownership_issue_items,
     sample_fixture_issue_items,
 )
-from src.ui.panels.workbench.scene_presets import create_bidding_scene
+from src.ui.adapters.workbench_execution_adapter import (
+    output_target_preflight_issue_items,
+)
+from src.ui.adapters.workbench_issue_models import WorkbenchIssueItem
+from src.ui.adapters.workbench_material_issues import material_readiness_issue_items
+from src.config.scene_presets import create_bidding_scene
 
 
 def test_scene_repair_routing_registry_covers_n2_131_required_targets():
@@ -45,8 +42,9 @@ def test_scene_repair_routing_registry_covers_n2_131_required_targets():
         "template_field_repair"
     )
     assert repair_route_for_target("parameter_ownership").route_id == "scene_profile"
-    assert repair_route_for_target("scene_scope_field").route_id == "scene_field_repair"
-    assert repair_route_for_target("scene_style_field").route_id == "scene_field_repair"
+    assert repair_route_for_target("scene_document_scope_field").route_id == (
+        "scene_field_repair"
+    )
     assert repair_route_for_target("field").route_id == "material_package"
     assert repair_route_for_target("asset").route_id == "material_package"
     assert repair_route_for_target("schema").route_id == "material_package"
@@ -70,7 +68,20 @@ def test_scene_repair_route_summary_exposes_surface_and_owner_layer():
     assert "ScenePanel fixed-layout profile" in summary
 
 
-def test_scene_repair_routing_classifies_existing_workbench_issue_items():
+def test_object_preflight_route_uses_compact_confirmation_contract():
+    route = get_scene_repair_route("object_preflight")
+
+    assert "compact block-or-confirm decision" in route.action_contract
+
+
+def test_plugin_route_uses_capability_boundary_and_manual_handoff():
+    route = get_scene_repair_route("plugin_manual_gate")
+
+    assert "capability boundary" in route.primary_surface
+    assert "issue" not in route.primary_surface.lower()
+
+
+def test_scene_repair_routing_classifies_current_workbench_issue_items():
     material_items = material_readiness_issue_items(
         create_bidding_scene(),
         MaterialExecutionContext(),
@@ -86,32 +97,9 @@ def test_scene_repair_routing_classifies_existing_workbench_issue_items():
             ]
         }
     )
-    object_items = object_preflight_issue_items(
-        {
-            "enabled": True,
-            "findings_count": 1,
-            "findings": [
-                {
-                    "kind": "comments",
-                    "severity": "warning",
-                    "location": "word/comments.xml",
-                    "message": "含批注",
-                }
-            ],
-        }
-    )
     plugin_items = coverage_boundary_issue_items(
         SceneWorkspace(scene_id="exam_teaching", category="exam_teaching")
     )
-    control_items = control_contract_issue_items(
-        ControlContractAuditResult(missing_required_contracts=("body.special_indent",))
-    )
-
-    @dataclass
-    class FutureSceneWorkspace(SceneWorkspace):
-        experimental_knob: str = ""
-
-    scene_items = parameter_ownership_issue_items(FutureSceneWorkspace(scene_id="future"))
     sample_items = sample_fixture_issue_items(
         SceneWorkspace(scene_id="contract_delivery", category="contract_delivery"),
         audit=[
@@ -140,40 +128,34 @@ def test_scene_repair_routing_classifies_existing_workbench_issue_items():
         repair_target_type="template_style_field",
         repair_target_key="template.styles.body.left_indent_chars",
     )
-    scene_style_item = WorkbenchIssueItem(
-        issue_id="scene.references.font",
-        category="scene_style",
+    scene_scope_item = WorkbenchIssueItem(
+        issue_id="scene.document_scope",
+        category="scene_document_scope",
         severity="warning",
-        title="场景样式覆盖",
-        summary="references_body.font_cn",
-        repair_target_type="scene_style_field",
-        repair_target_key="scene.section_styles.references_body.font_cn",
+        title="方案处理范围",
+        summary="指定区域需要确认",
+        repair_target_type="scene_document_scope_field",
+        repair_target_key="scene.document_scope.selected_roles",
     )
 
     classified = {
         "template_field": repair_route_for_issue(template_field_item).route_id,
-        "scene_style": repair_route_for_issue(scene_style_item).route_id,
+        "scene_scope": repair_route_for_issue(scene_scope_item).route_id,
         "material_field": repair_route_for_issue(material_items[0]).route_id,
         "material_asset": repair_route_for_issue(material_items[1]).route_id,
         "output_target": repair_route_for_issue(output_items[0]).route_id,
-        "object_preflight": repair_route_for_issue(object_items[0]).route_id,
         "plugin_boundary": repair_route_for_issue(plugin_items[0]).route_id,
-        "control_contract": repair_route_for_issue(control_items[0]).route_id,
-        "parameter_ownership": repair_route_for_issue(scene_items[0]).route_id,
         "sample_fixture": repair_route_for_issue(sample_items[0]).route_id,
         "fixed_layout": repair_route_for_issue(fixed_layout_item).route_id,
     }
 
     assert classified == {
         "template_field": "template_field_repair",
-        "scene_style": "scene_field_repair",
+        "scene_scope": "scene_field_repair",
         "material_field": "material_package",
         "material_asset": "material_package",
         "output_target": "output_delivery",
-        "object_preflight": "object_preflight",
         "plugin_boundary": "plugin_manual_gate",
-        "control_contract": "template_control_contract",
-        "parameter_ownership": "scene_profile",
         "sample_fixture": "scene_profile",
         "fixed_layout": "fixed_layout",
     }

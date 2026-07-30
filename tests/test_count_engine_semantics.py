@@ -4,18 +4,23 @@ import zipfile
 from pathlib import Path
 
 from docx import Document
+import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.config.resolved import ResolvedConfig
+from src.config.execution_config_integrity import execution_config_integrity_issue
 from src.modules.structure.heading_recognition import HeadingRecognitionModule
 from src.modules.validate.validation import ValidationModule
+from src.pipeline.context import PipelineContext
 from src.pipeline.runner import Pipeline
+from src.pipeline.tracker import ChangeTracker
 from src.report_writer import write_json_report, write_markdown_report
 from src.shared.engine.count_engine import (
     COUNT_PROFILE_DIR,
+    CountProfileRegistryError,
     count_document,
     get_count_profile,
     load_count_profiles_from_directory,
@@ -171,6 +176,77 @@ def test_count_profiles_load_from_external_json_files(tmp_path):
     assert profiles[0].count_references is False
     assert profiles[0].source.endswith("custom.json")
     assert (COUNT_PROFILE_DIR / "builtin.json").exists()
+
+    with pytest.raises(
+        CountProfileRegistryError,
+        match="count_profile_registry_required_profiles_missing:basic",
+    ):
+        load_count_profiles_from_directory(
+            profile_dir,
+            required_profile_ids={"basic", "custom_words"},
+        )
+
+
+def test_count_profile_registry_missing_or_empty_fails_closed(tmp_path):
+    missing = tmp_path / "missing"
+    with pytest.raises(
+        CountProfileRegistryError,
+        match="count_profile_registry_missing:",
+    ):
+        load_count_profiles_from_directory(missing)
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(
+        CountProfileRegistryError,
+        match="count_profile_registry_empty:",
+    ):
+        load_count_profiles_from_directory(empty)
+
+    (empty / "empty.json").write_text('{"profiles": []}', encoding="utf-8")
+    with pytest.raises(
+        CountProfileRegistryError,
+        match="count_profile_registry_empty:",
+    ):
+        load_count_profiles_from_directory(empty)
+
+
+def test_unknown_count_profile_cannot_emit_a_successful_count_record():
+    config = ResolvedConfig(strict_mode=False)
+    config.compliance_profile.count_profile_id = "not_registered"
+    context = PipelineContext()
+    tracker = ChangeTracker()
+
+    with pytest.raises(KeyError, match="unknown_count_profile:not_registered"):
+        ValidationModule().apply(Document(), config, tracker, context)
+
+    assert context.count_result is None
+    assert tracker.get_by_module("count_engine") == []
+
+
+def test_pipeline_uses_shared_integrity_gate_for_unknown_count_profile(tmp_path):
+    source = tmp_path / "source.docx"
+    Document().save(source)
+    config = ResolvedConfig(strict_mode=False)
+    config.output.final_docx = False
+    config.compliance_profile.count_profile_id = "not_registered"
+
+    assert (
+        execution_config_integrity_issue(config)
+        == "unknown_count_profile:not_registered"
+    )
+    result = Pipeline(
+        modules=[HeadingRecognitionModule(), ValidationModule()],
+        config=config,
+        output_dir=str(tmp_path / "out"),
+    ).execute(str(source))
+
+    assert result.success is False
+    assert result.error == (
+        "pipeline_configuration_invalid:unknown_count_profile:not_registered"
+    )
+    assert result.context is None
+    assert result.tracker is None
 
 
 def test_count_profile_include_exclude_scopes_affect_text_metrics():

@@ -8,11 +8,9 @@ sys.path.insert(0, str(ROOT))
 from src.qt_api import QApplication
 from src.config.scene import SceneWorkspace
 from src.config.scene_family_application import apply_planned_scene_family_defaults
-from src.ui.adapters.workbench_execution_adapter import WorkbenchIssueItem
 from src.ui.bridge import PanelBridge
-from src.ui.panels.scene_panel import (
+from src.ui.panels.scene_material_requirement_block import (
     _build_material_schema_validation_items,
-    _format_request_cell_tooltip as scene_request_cell_tooltip,
 )
 from src.ui.panels.scene_summary_projection import (
     build_delivery_summary_items,
@@ -34,9 +32,8 @@ from src.ui.panels.scene_summary_projection import (
     scene_sample_fixture_library_status_tooltip,
 )
 from src.ui.panels.template_panel import TemplatePanel
-import src.ui.panels.workbench.quick_execution_detail as quick_execution_detail_module
 from src.ui.panels.workbench.quick_execution_detail import QuickExecutionDetail
-from src.ui.panels.workbench.scene_presets import (
+from src.config.scene_presets import (
     create_bidding_scene,
     create_official_scene,
     create_technical_scene,
@@ -114,6 +111,78 @@ def _assert_absent(texts: list[str], banned_terms: tuple[str, ...], context: str
     joined = "\n".join(str(text or "") for text in texts)
     for term in banned_terms:
         assert term not in joined, f"{context} leaked {term!r}:\n{joined}"
+
+
+def test_document_scope_copy_stays_compact_and_separates_plan_from_document_review():
+    plan_source = (
+        ROOT / "src/ui/panels/scene_scope_sections.py"
+    ).read_text(encoding="utf-8")
+    review_source = (
+        ROOT / "src/ui/panels/workbench/document_scope_review.py"
+    ).read_text(encoding="utf-8")
+
+    for text in ("处理范围", "全部内容", "仅正文", "指定区域"):
+        assert text in plan_source
+    for banned in (
+        "格式例外",
+        "自动识别",
+        "识别规则",
+        "关键词",
+        "置信度",
+        "模板",
+        "说明",
+    ):
+        assert banned not in plan_source
+    assert "QLabel" not in plan_source
+    assert "set_description" not in plan_source
+    assert plan_source.count("set_header(") == 1
+
+    for text in (
+        "文档范围",
+        "识别中",
+        "待确认",
+        "确认文档范围",
+        "确认范围",
+    ):
+        assert text in review_source
+    for banned in ("格式例外", "识别规则", "置信度", "跟随模板"):
+        assert banned not in review_source
+
+
+def test_ui_source_does_not_reintroduce_scene_product_copy():
+    banned_terms = (
+        "场景切换",
+        "场景配置",
+        "当前场景",
+        "新建场景",
+        "打开场景",
+        "删除场景",
+        "重命名场景",
+        "场景与模板",
+        "场景策略",
+        "场景规则",
+        "场景概览",
+        "场景规划",
+        "加载场景",
+        "未知场景 ID",
+        "打开场景文件夹",
+        "场景样式",
+        "去场景",
+        "场景页",
+        "场景控件",
+        "场景选择",
+        "场景管理",
+        "场景设置",
+    )
+    violations: list[str] = []
+
+    for path in sorted((ROOT / "src" / "ui").rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        for term in banned_terms:
+            if term in source:
+                violations.append(f"{path.relative_to(ROOT)} contains {term}")
+
+    assert violations == []
 
 
 def test_scene_visible_copy_guard_keeps_machine_terms_out_of_main_paths():
@@ -196,7 +265,7 @@ def test_scene_overview_summary_main_copy_hides_internal_keys_and_counts():
         visible_texts,
         (
             "模板管样式 13",
-            "场景管流程 37",
+            "方案管流程 37",
             "资料管输入 6",
             "输出管版本 17",
             "custom_basic",
@@ -315,7 +384,7 @@ def test_scene_material_rule_validation_copy_hides_registry_internals():
     for label in (
         "资料规则校验",
         "资料规则",
-        "适用场景族",
+        "适用方案族",
         "合同方字段资料",
         "签章资料",
         "产品资料",
@@ -391,7 +460,7 @@ def test_request_cell_tooltips_use_reader_labels_in_scene_panel():
 
     tooltips: list[str] = []
     for cell in cells:
-        tooltips.append(scene_request_cell_tooltip(cell))
+        tooltips.append(scene_request_cell_list_item_projection(cell).tooltip)
 
     _assert_absent(
         tooltips,
@@ -412,7 +481,7 @@ def test_request_cell_tooltips_use_reader_labels_in_scene_panel():
     assert "覆盖层级：直接证据" in joined
     assert "覆盖层级：容易误解" in joined
     assert "资料包：合同交付" in joined
-    assert "场景族：合同交付" in joined
+    assert "方案族：合同交付" in joined
     assert "证据样本：1 个" in joined
     assert "证据编号：contract_delivery_revisions" in joined
 
@@ -520,7 +589,7 @@ def test_request_cell_count_and_empty_projection_speaks_reader_language():
     tooltip = scene_request_cell_count_tooltip(0, 9, "direct_family_fixture")
     assert "当前筛选：直接证据" in tooltip
     assert "没有匹配的请求说法" in tooltip
-    assert "本场景共 9 条" in tooltip
+    assert "本方案共 9 条" in tooltip
     assert scene_request_cell_empty_text(
         "manual_boundary_fixture",
         9,
@@ -587,8 +656,8 @@ def test_template_scene_entry_context_copy_stays_task_oriented():
                 "return_panel_id": "scene",
                 "return_card_id": "scn_overview",
                 "payload": {
-                    "entry_context_title": "来自场景：核对模板与样式",
-                    "entry_context_detail": "场景：合同交付；模板：默认格式 (default)",
+                    "entry_context_title": "来自方案：核对模板与样式",
+                    "entry_context_detail": "方案：合同交付；模板：默认格式 (default)",
                     "entry_context_action": (
                         "核对页面、正文、标题、表格、页眉页脚、目录和题注"
                     ),
@@ -614,7 +683,7 @@ def test_template_scene_entry_context_copy_stays_task_oriented():
             ),
             "template entry context copy",
         )
-        assert panel._entry_context_title.text() == "来自场景：核对模板与样式"
+        assert panel._entry_context_title.text() == "来自方案：核对模板与样式"
         assert (
             "核对页面、正文、标题、表格、页眉页脚、目录和题注"
             in panel._entry_context_detail.text()
@@ -623,64 +692,23 @@ def test_template_scene_entry_context_copy_stays_task_oriented():
         panel.close()
 
 
-def test_workbench_issue_visible_copy_translates_raw_audit_terms(monkeypatch):
+def test_workbench_static_governance_copy_does_not_enter_quick_main_surface():
     app = _app()
     detail = QuickExecutionDetail()
     try:
-        monkeypatch.setattr(
-            quick_execution_detail_module,
-            "sample_fixture_issue_items",
-            lambda _scene: [
-                WorkbenchIssueItem(
-                    issue_id=(
-                        "sample_fixture."
-                        "contract_delivery_missing_surfaces_contract_delivery_revisions"
-                    ),
-                    category="sample_fixture",
-                    severity="error",
-                    title="样本覆盖缺口",
-                    summary="contract_delivery: missing_surfaces",
-                    details=(
-                        "覆盖 pack：contract_delivery",
-                        "缺口类型：missing_surfaces",
-                        "Sample fixture must declare at least one DOCX surface.",
-                    ),
-                    source_notes=("scene_sample_fixture_registry",),
-                    repair_target_type="sample_fixture",
-                    repair_target_key="contract_delivery",
-                    owner="scene",
-                )
-            ],
-        )
         detail._apply_scene(
             SceneWorkspace(scene_id="contract_delivery", category="contract_delivery")
         )
         detail.set_document_path("C:/docs/contract.docx")
         app.processEvents()
 
-        assert any(
-            item.summary == "contract_delivery: missing_surfaces"
-            for item in detail.current_issue_items()
-        )
-        unfiltered_tooltip = detail._issue_queue_label.toolTip()
-        detail.set_issue_queue_filter("sample_fixture")
-        app.processEvents()
-
-        if detail._issue_list.count():
-            detail._issue_list.setCurrentRow(0)
-            app.processEvents()
-
         texts = [
-            detail._issue_queue_label.text(),
-            detail._issue_queue_label.toolTip(),
-            unfiltered_tooltip,
-            detail._issue_detail_title.text(),
-            detail._issue_detail_advice.text(),
-            detail._issue_detail_body.text(),
+            detail._exec_status_label.text(),
+            detail._exec_status_label.toolTip(),
+            detail._execute_btn.text(),
+            detail._material_repair_btn.text(),
+            detail._material_repair_btn.toolTip(),
         ]
-        for index in range(detail._issue_list.count()):
-            item = detail._issue_list.item(index)
-            texts.extend([item.text(), item.toolTip()])
 
         _assert_absent(
             texts,
@@ -691,15 +719,16 @@ def test_workbench_issue_visible_copy_translates_raw_audit_terms(monkeypatch):
                 "missing_surfaces",
                 "Sample fixture",
                 "does not provide legal advice",
+                "不提供法律意见",
+                "样本覆盖",
+                "插件边界",
                 "field:",
                 "asset:",
             ),
-            "workbench issue visible copy",
+            "quick execution main surface",
         )
-        joined = "\n".join(texts)
-        assert "合同交付" in joined
-        assert "样本缺少 Word 对象" in joined
-        assert "样本覆盖登记" in joined
-        assert "不提供法律意见" in joined
+        assert detail._exec_status_label.text() == "可生成"
+        assert not hasattr(detail, "_issue_panel")
+        assert not hasattr(detail, "current_issue_items")
     finally:
         detail.close()

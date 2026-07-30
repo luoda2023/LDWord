@@ -45,11 +45,22 @@ def test_heading_numbering_panel_preset_combo_contains_only_real_presets():
         assert "__custom__" not in values
         assert "__current_scheme_display__" not in values
         assert panel._preset_cb.placeholderText() == "当前配置（自定义）"
-        assert panel._preset_cb.currentData() == _PRESET_KEY
-        assert panel._adapter.detect_active_preset() == _PRESET_KEY
+        assert panel._preset_cb.currentData() is None
+        assert panel._adapter.detect_active_preset() is None
     finally:
         panel.close()
         app.processEvents()
+
+
+def test_heading_numbering_adapter_binding_is_read_only_for_empty_scheme():
+    template = TemplateConfig()
+    before = template.heading_numbering.level_bindings.copy()
+    adapter = HeadingNumberingAdapter()
+
+    adapter.set_template(template)
+
+    assert template.heading_numbering.level_bindings == before == {}
+    assert adapter.detect_active_preset() is None
 
 
 def test_heading_numbering_panel_scheme_actions_are_third_row_and_use_project_button_variants():
@@ -58,11 +69,11 @@ def test_heading_numbering_panel_scheme_actions_are_third_row_and_use_project_bu
     try:
         items = panel._scheme_form._items
         assert items.index(panel._preset_row) < items.index(panel._levels_row) < items.index(panel._scheme_actions_row)
-        assert panel._scheme_save_as_btn.property("variant") == "secondary"
-        assert panel._scheme_update_btn.property("variant") == "secondary"
-        assert panel._scheme_delete_btn.property("variant") == "ghost-danger"
         assert panel._scheme_open_folder_btn.property("variant") == "secondary"
         assert panel._scheme_open_folder_btn.text() == "打开方案文件夹"
+        assert not hasattr(panel, "_scheme_save_as_btn")
+        assert not hasattr(panel, "_scheme_update_btn")
+        assert not hasattr(panel, "_scheme_delete_btn")
     finally:
         panel.close()
         app.processEvents()
@@ -75,12 +86,7 @@ def test_heading_numbering_panel_scheme_action_row_keeps_buttons_fully_visible()
         panel.resize(960, 900)
         app.processEvents()
 
-        buttons = (
-            panel._scheme_save_as_btn,
-            panel._scheme_update_btn,
-            panel._scheme_delete_btn,
-            panel._scheme_open_folder_btn,
-        )
+        buttons = (panel._scheme_open_folder_btn,)
 
         assert all(button.property("sizeClass") == "md" for button in buttons)
         assert panel._scheme_actions.layout().alignment() & Qt.AlignVCenter
@@ -233,46 +239,16 @@ def test_panel_preset_selection_changes_levels():
         app.processEvents()
 
 
-def test_panel_scheme_save_update_delete_chain(tmp_path, monkeypatch):
-    import src.config.heading_presets as heading_presets
-    from src.ui.panels import heading_numbering_panel as panel_module
-
-    monkeypatch.setattr(heading_presets, "USER_SCHEME_DIR", tmp_path)
-    monkeypatch.setattr(panel_module.QInputDialog, "getText", lambda *_args, **_kwargs: ("面板方案", True))
-    monkeypatch.setattr(panel_module.QMessageBox, "question", lambda *_args, **_kwargs: panel_module.QMessageBox.Yes)
-    monkeypatch.setattr(panel_module.Toast, "show_success", lambda *_args, **_kwargs: None)
-
+def test_panel_scheme_management_is_folder_only():
     app, panel = _build_panel()
 
     try:
-        panel._on_scheme_save_as_requested()
-        app.processEvents()
-
-        scheme_id = panel._adapter.active_scheme_key()
-        assert scheme_id is not None and scheme_id.startswith("user.")
-        assert panel._preset_cb.currentData() == scheme_id
-        assert panel._scheme_update_btn.isEnabled() is False
-        assert panel._scheme_delete_btn.isEnabled() is True
-
-        panel._adapter.set_binding_field(1, "display_template_mode", TEMPLATE_MODE_CUSTOM)
-        panel._adapter.set_binding_field(1, "display_template", "第{nn}章")
-        panel._mark_dirty()
-        app.processEvents()
-        assert panel._scheme_update_btn.isEnabled() is True
-        panel._on_scheme_update_requested()
-        app.processEvents()
-        saved = heading_presets.get_preset_bindings(scheme_id)
-        assert saved is not None
-        assert saved["heading1"].display_template_mode == TEMPLATE_MODE_CUSTOM
-        assert saved["heading1"].display_template == "第{nn}章"
-        assert panel._scheme_update_btn.isEnabled() is False
-
-        panel._on_scheme_delete_requested()
-        app.processEvents()
-
-        assert heading_presets.is_user_preset(scheme_id) is False
-        assert panel._scheme_update_btn.isEnabled() is False
-        assert panel._scheme_delete_btn.isEnabled() is False
+        assert panel._scheme_open_folder_btn.text() == "打开方案文件夹"
+        assert not hasattr(panel, "_on_scheme_save_as_requested")
+        assert not hasattr(panel, "_on_scheme_update_requested")
+        assert not hasattr(panel, "_on_scheme_delete_requested")
+        assert not hasattr(panel, "_scheme_update_btn")
+        assert not hasattr(panel, "_scheme_delete_btn")
     finally:
         panel.close()
         app.processEvents()
@@ -310,7 +286,7 @@ def test_panel_custom_template_mode_survives_rebuild_and_validates():
         assert panel._adapter.get_binding(1).display_template == "{parent.nn}-{cn}"
         assert panel._raw_template_error_label.text()
         assert panel._save_btn.isEnabled() is False
-        assert panel._scheme_save_as_btn.isEnabled() is False
+        assert not hasattr(panel, "_scheme_save_as_btn")
 
         panel._raw_template_edit.setText("第{cn}章")
         panel._on_raw_template_edited("第{cn}章")

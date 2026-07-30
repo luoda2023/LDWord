@@ -11,6 +11,7 @@ from src.shared.ui.base_dialog import BaseDialog
 from src.shared.ui.confirm_dialog import ConfirmDialog
 from src.shared.ui.folder_picker import FolderPicker
 from src.shared.ui.input_style import build_text_input_stylesheet
+from src.shared.ui.sizing import control_size_metrics
 from src.shared.ui.theme import LIGHT
 
 
@@ -78,8 +79,16 @@ def test_shared_text_input_stylesheet_uses_theme_tokens():
 
     assert f"border-radius: {LIGHT.input_radius}px;" in qss
     assert f"padding: {LIGHT.input_padding_y}px {LIGHT.input_padding_x}px;" in qss
-    assert f"min-height: {LIGHT.control_height_md}px;" in qss
-    assert f"font-size: {LIGHT.font_size_md}px;" in qss
+    metrics = control_size_metrics(
+        LIGHT,
+        "md",
+        vertical_padding=LIGHT.input_padding_y,
+        border_width=1,
+    )
+    assert f"min-height: {metrics.content_height}px;" in qss
+    assert f"max-height: {metrics.content_height}px;" in qss
+    assert "font-size:" not in qss
+    assert "font-weight:" not in qss
 
 
 def test_dialogs_input_text_uses_shared_text_input_helper():
@@ -120,6 +129,24 @@ def test_folder_picker_further_decomposes_constructor_helpers():
     assert "self._build_browse_button" in init_source
     assert "QLineEdit()" not in init_source
     assert "QPushButton(BROWSE_BUTTON_TEXT)" not in init_source
+
+
+def test_folder_picker_wrapper_does_not_clip_themed_controls():
+    app = _app()
+    picker = FolderPicker()
+    try:
+        picker.resize(700, picker.sizeHint().height())
+        picker.show()
+        app.processEvents()
+
+        assert picker.height() >= picker.minimumSizeHint().height()
+        assert picker._path.geometry().bottom() <= picker.rect().bottom()
+        assert picker._btn.geometry().bottom() <= picker.rect().bottom()
+        assert picker._path.height() >= picker._path.minimumSizeHint().height()
+        assert picker._btn.height() >= picker._btn.minimumSizeHint().height()
+    finally:
+        picker.close()
+        app.processEvents()
 
 
 def test_dialog_cluster_uses_shared_dialog_style_helpers():

@@ -9,7 +9,7 @@ from src.config.material_schema_registry import (
     resolve_material_schema_ids,
 )
 from src.config.scene_family_registry import list_planned_scene_families
-from src.ui.panels.workbench.scene_presets import SCENE_FACTORIES
+from src.config.scene_presets import SCENE_FACTORIES
 
 
 def test_planned_scene_family_material_schema_ids_are_registered():
@@ -171,9 +171,9 @@ def test_form_and_qualification_material_schemas_capture_high_frequency_candidat
     assert {
         "fixed_layout_profile_id",
         "answer_sheet_reuse_profile_id",
-        "fixed_row_height_policy_id",
         "placeholder_residue_policy",
     } <= form_batch_field_keys
+    assert "fixed_row_height_policy_id" not in form_batch_field_keys
     assert any("professional form systems" in item for item in form_batch.boundaries)
 
     assert qualifications.family == "qualification_archive_packages"
@@ -268,15 +268,26 @@ def test_official_policy_material_schema_captures_archive_metadata_fields():
     assert official.family == "official"
     official_field_keys = {field.key for field in official.fields}
     assert {
+        "title",
+        "body",
+        "organization",
+        "document_no",
+        "issue_date",
         "document_type",
         "security_level",
         "urgency",
         "signer",
+        "attachment_note",
         "copy_scope",
+        "printing_org",
+        "printing_date",
         "archive_status",
         "archive_no",
         "retention_period",
     } <= official_field_keys
+    assert {"title", "body", "organization", "document_no", "issue_date"} <= set(
+        official.required_field_keys
+    )
     assert any("archive-office approval" in item for item in official.boundaries)
 
     assert meeting.family == "meeting_policy_documents"

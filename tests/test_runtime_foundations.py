@@ -6,16 +6,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.qt_api import QApplication, Qt
-from src.qt_api import QVBoxLayout
 from src.qt_api import QWidget
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.shared.ui.sizing import (
     apply_size_class,
-    normalize_form_control_heights,
-    resolved_control_height,
 )
 from src.shared.ui.input_metrics import INPUT_EDITOR_TEXT_MARGIN_LEFT
-from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.styled_spin_box import StyledSpinBox
 from src.shared.ui.theme import get_theme
@@ -36,35 +32,6 @@ def test_apply_size_class_sets_dynamic_property_for_qss_sizing():
     apply_size_class(widget, "md")
 
     assert widget.property("sizeClass") == "md"
-
-
-def test_normalize_form_control_heights_unifies_mixed_inputs():
-    app = _app()
-    host = QWidget()
-    layout = QVBoxLayout(host)
-    combo = StyledComboBox(host)
-    combo.addItems(["A", "B"])
-    spin = StyledSpinBox(host)
-    spacing = SpacingInput(unit="", units=(), show_unit=False, parent=host)
-    layout.addWidget(combo)
-    layout.addWidget(spin)
-    layout.addWidget(spacing)
-
-    height = resolved_control_height(get_theme(), "md")
-    normalize_form_control_heights(host, height)
-
-    host.resize(360, 180)
-    host.show()
-    app.processEvents()
-
-    try:
-        assert combo.height() == height
-        assert spin.height() == height
-        assert spacing.height() == height
-        assert spacing.spin_box.height() == height
-    finally:
-        host.close()
-        app.processEvents()
 
 
 def test_styled_spin_box_normalizes_editor_text_inset():

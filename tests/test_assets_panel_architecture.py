@@ -4,7 +4,7 @@ from pathlib import Path
 from src.qt_api import QApplication
 from src.shared.ui.master_detail_shell import MasterDetailShell
 from src.ui.bridge import PanelBridge
-from src.ui.panel_registry import PANEL_SPECS, create_panel
+from src.ui.panel_registry import OPTIONAL_PANEL_SPECS, create_panel
 from src.ui.panels.assets import batch_import, enterprise_boundary, specs
 from src.ui.panels.assets.archive_presenter import ArchivePresenterMixin
 from src.ui.panels.assets.asset_collection_state_presenter import AssetCollectionStatePresenterMixin
@@ -17,7 +17,10 @@ from src.ui.panels.assets.image_inventory_presenter import ImageInventorySetupPr
 from src.ui.panels.assets.material_context_application_presenter import (
     MaterialContextApplicationPresenterMixin,
 )
-from src.ui.panels.assets.material_settings_presenter import MaterialSettingsPresenterMixin
+from src.ui.panels.assets.material_change_transaction import (
+    MaterialChangeTransactionCoordinator,
+)
+from src.ui.panels.assets.persistence_presenter import MaterialPersistenceCoordinator
 from src.ui.panels.assets.preview_table_presenter import PreviewTablePresenterMixin
 from src.ui.panels.assets.profile_editor_presenter import ProfileEditorPresenterMixin
 from src.ui.panels.assets.profile_presenter import ProfilePresenterMixin
@@ -131,8 +134,6 @@ FIELD_STATUS_METHODS = {
 FIELD_EDITOR_STATE_METHODS = {
     "_on_structured_field_changed",
     "_on_more_fields_changed",
-    "_on_required_fields_changed",
-    "_required_field_keys",
     "_editor_fields",
     "_set_structured_fields",
 }
@@ -155,7 +156,6 @@ ASSET_FILE_OPERATION_METHODS = {
     "_select_asset_file",
     "_select_attachment_file",
     "_attachment_role_spec",
-    "_handle_asset_drag_event",
     "_apply_asset_slot_path",
     "_clear_asset_file",
     "_clear_attachment_file",
@@ -184,14 +184,9 @@ MATERIAL_CONTEXT_APPLICATION_METHODS = {
     "load_mapping_from_path",
     "_apply_current_profile",
     "_open_document_generation",
-    "_load_mapping_dialog",
     "_apply_mapping_payload",
     "_on_material_context_changed",
     "_set_editor_values",
-}
-
-MATERIAL_SETTINGS_METHODS = {
-    "_setup_material_settings_card",
 }
 
 ARCHIVE_STATE_METHODS = {
@@ -203,7 +198,6 @@ ARCHIVE_STATE_METHODS = {
 
 ARCHIVE_SETUP_METHODS = {
     "_setup_archive_overview_card",
-    "_setup_import_export_card",
 }
 
 BATCH_PROFILE_IMPORT_METHODS = {
@@ -332,15 +326,56 @@ def test_panel_registry_creates_assets_panel_shell():
     _app()
     panel = create_panel("assets", PanelBridge())
     try:
-        spec = next(item for item in PANEL_SPECS if item.id == "assets")
+        spec = next(item for item in OPTIONAL_PANEL_SPECS if item.id == "assets")
 
         assert isinstance(panel, AssetsPanel)
         assert spec.icon == "package"
         assert panel.objectName() == "AssetsPanel"
         assert isinstance(panel._shell, MasterDetailShell)
         assert panel._section_nav.item_count == len(specs.ASSETS_SECTION_SPECS)
+        assert "advanced" not in panel._section_nav_cards
+        assert "advanced" not in panel._section_pages
+        assert not hasattr(panel, "_advanced_card")
+        assert "preview" not in panel._section_nav_cards
+        assert "batch" not in panel._section_nav_cards
+        assert "io" not in panel._section_nav_cards
+        assert "io" not in panel._section_pages
     finally:
         panel.close()
+
+
+def test_images_page_starts_with_rules_then_inventory_and_resets_scroll_offset():
+    app = _app()
+    panel = create_panel("assets", PanelBridge())
+    try:
+        panel.resize(1200, 800)
+        panel.show()
+        app.processEvents()
+
+        images_layout = panel._section_layouts["images"]
+        images_summary = panel._section_summary_cards["images"]
+        assert images_summary.isHidden()
+        assert images_layout.indexOf(images_summary) == -1
+        assert images_layout.indexOf(panel._image_rules_card) == 0
+        assert images_layout.indexOf(panel._image_card) == 1
+        assert panel._image_rules_card._title_label.text() == "图片规则"
+        image_actions = panel._material_persistence_actions["images"]
+        assert panel._image_rules_card._header_actions_layout.indexOf(image_actions) >= 0
+        assert panel._image_card._header_actions_layout.indexOf(image_actions) == -1
+        assert panel._image_card._title_label.text() == "图片资料"
+        assert panel._card_section_ids[panel._image_rules_card] == "images"
+        assert panel._card_section_ids[panel._image_card] == "images"
+
+        scroll_bar = panel._detail_scroll.verticalScrollBar()
+        scroll_bar.setRange(0, 500)
+        scroll_bar.setValue(180)
+        panel._on_section_selected("images")
+
+        assert scroll_bar.value() == 0
+        assert panel._asset_slots_layout.contentsMargins().top() >= 6
+    finally:
+        panel.close()
+        app.processEvents()
 
 
 def test_assets_panel_delegates_section_shell_to_presenter_mixin():
@@ -475,18 +510,6 @@ def test_assets_panel_delegates_material_context_application_to_presenter_mixin(
     assert not (MATERIAL_CONTEXT_APPLICATION_METHODS & panel_methods)
 
 
-def test_assets_panel_delegates_material_settings_to_presenter_mixin():
-    panel_methods = _class_methods(ROOT / "src/ui/panels/assets_panel.py", "AssetsPanel")
-    presenter_methods = _class_methods(
-        ROOT / "src/ui/panels/assets/material_settings_presenter.py",
-        "MaterialSettingsPresenterMixin",
-    )
-
-    assert issubclass(AssetsPanel, MaterialSettingsPresenterMixin)
-    assert MATERIAL_SETTINGS_METHODS <= presenter_methods
-    assert not (MATERIAL_SETTINGS_METHODS & panel_methods)
-
-
 def test_assets_panel_delegates_profile_state_to_profile_presenter_mixin():
     panel_methods = _class_methods(ROOT / "src/ui/panels/assets_panel.py", "AssetsPanel")
     presenter_methods = _class_methods(
@@ -598,12 +621,10 @@ def test_assets_section_summary_stays_state_driven():
         "_build_section_summary_state",
         "_section_summary_item_groups",
         "_generate_summary_items",
-        "_io_summary_items",
         "_field_summary_items",
         "_image_summary_items",
         "_preview_summary_items",
         "_batch_summary_items",
-        "_advanced_summary_items",
     } <= presenter_methods
     assert "_build_section_summary_state" in refresh_calls
     assert "_section_summary_item_groups" in summary_card_calls
@@ -710,6 +731,44 @@ def test_assets_panel_trivial_wrapper_methods_stay_removed():
 
     assert not (REMOVED_ASSETS_PANEL_WRAPPER_METHODS & panel_methods)
     assert not (REMOVED_ASSETS_PANEL_WRAPPER_METHODS & panel_names)
+
+
+def test_material_persistence_uses_owned_coordinators_instead_of_an_mro_mixin():
+    base_names = {base.__name__ for base in AssetsPanel.__bases__}
+    archive_names = _module_identifier_names(
+        ROOT / "src/ui/panels/assets/archive_presenter.py"
+    )
+
+    assert "PersistencePresenterMixin" not in base_names
+    assert len(AssetsPanel.__bases__) == 33
+    assert {
+        "_current_archive_entry",
+        "_current_archive_path",
+        "_persisted_archive_snapshot",
+        "_prepared_material_changes",
+    }.isdisjoint(archive_names)
+
+    panel = AssetsPanel(PanelBridge())
+    try:
+        assert isinstance(panel._material_persistence, MaterialPersistenceCoordinator)
+        assert isinstance(
+            panel._material_change_transaction,
+            MaterialChangeTransactionCoordinator,
+        )
+        assert {
+            "_current_archive_entry",
+            "_current_archive_path",
+            "_persisted_archive_snapshot",
+            "_prepared_material_changes",
+            "_material_persistence_actions",
+        }.isdisjoint(panel.__dict__)
+        assert panel._current_archive_entry is panel._material_persistence.current_entry
+        assert (
+            panel._prepared_material_changes
+            is panel._material_change_transaction.prepared_state
+        )
+    finally:
+        panel.close()
 
 
 def test_deleted_enterprise_remote_identifiers_do_not_return_to_assets_panel():

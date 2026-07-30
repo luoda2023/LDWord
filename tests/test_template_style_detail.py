@@ -18,6 +18,7 @@ from src.shared.ui.summary_grid import SummaryGrid
 from src.shared.ui.template_form_layout import TemplateFormGrid, TemplateSplitColumns
 from src.shared.ui.template_summary_header import TemplateSummaryHeader
 from src.shared.ui.toast import Toast
+from src.shared.ui.typography_policy import TextRole, font_for_role
 from src.ui.bridge import PanelBridge
 from src.ui.panels.template_panel import TemplatePanel
 from src.ui.panels.template_style_detail import StyleDetail
@@ -72,24 +73,6 @@ def test_style_detail_syncs_widget_values_from_template():
         assert detail._style_management_block.property(
             "style_management_slot_plan"
         ) == "source|scope|editor"
-        assert detail._style_management_block.property(
-            "style_management_has_rules"
-        ) is False
-        assert detail._style_management_block.property(
-            "style_management_has_policy"
-        ) is False
-        assert detail._style_management_block.property(
-            "style_management_has_policy_slot"
-        ) is False
-        assert detail._style_management_block.property(
-            "style_management_policy_control_ready"
-        ) is False
-        assert detail._style_management_block.property(
-            "style_management_has_preview"
-        ) is False
-        assert detail._style_management_block.property(
-            "style_management_has_legacy_widgets"
-        ) is False
         assert not hasattr(detail, "_template_policy_deck")
         assert detail._font_cn.selected_font() == "黑体"
         assert detail._font_en.selected_font() == "Arial"
@@ -128,6 +111,35 @@ def test_style_detail_syncs_widget_values_from_template():
         detail.close()
 
 
+def test_style_detail_fixed_value_combo_keeps_body_font_authority():
+    app = _app()
+    detail = StyleDetail()
+    template = TemplateConfig()
+    template.styles["body"] = StyleConfig(
+        line_spacing_type="exact",
+        line_spacing_pt=20,
+    )
+    expected = font_for_role(TextRole.BODY)
+
+    try:
+        detail.set_template(template)
+        detail.resize(900, 700)
+        detail.show()
+        app.processEvents()
+
+        combo = detail._line_type_combo
+        assert combo.currentText() == "固定值"
+        for actual in (combo.font(), combo.view().font()):
+            assert tuple(actual.families()) == tuple(expected.families())
+            assert actual.pixelSize() == expected.pixelSize()
+            assert actual.weight() == expected.weight()
+        assert "font-size:" not in combo.styleSheet()
+        assert "font-weight:" not in combo.styleSheet()
+        assert "font-family:" not in combo.styleSheet()
+    finally:
+        detail.close()
+
+
 def test_style_detail_syncs_spacing_units_from_template():
     _app()
     detail = StyleDetail()
@@ -153,12 +165,12 @@ def test_style_detail_syncs_spacing_units_from_template():
         detail.close()
 
 
-def test_style_detail_keeps_scene_overrides_out_of_body_layout():
+def test_style_detail_keeps_plan_scope_out_of_body_layout():
     _app()
     detail = StyleDetail()
     template = TemplateConfig()
     scene = SceneWorkspace(scene_id="custom", template_id="default")
-    scene.section_styles["references_body"] = StyleConfig(font_cn="黑体")
+    scene.document_scope.mode = "body"
 
     try:
         detail.set_scene(scene)
@@ -168,10 +180,7 @@ def test_style_detail_keeps_scene_overrides_out_of_body_layout():
         assert detail._style_management_block.property(
             "style_management_slot_plan"
         ) == "source|scope|editor"
-        assert detail._style_management_block.property(
-            "style_management_has_policy"
-        ) is False
-        assert detail.focus_navigation_field("scene.section_styles.references_body") is False
+        assert detail.focus_navigation_field("scene.document_scope.mode") is False
     finally:
         detail.close()
 
@@ -196,7 +205,6 @@ def test_style_detail_reuses_shared_controls():
     editor_source = (
         ROOT / "src/shared/ui/paragraph_style_editor.py"
     ).read_text(encoding="utf-8")
-    format_source = (ROOT / "src/ui/panels/template_format.py").read_text(encoding="utf-8")
 
     assert "StyleManagementBlock(" in source
     assert "build_template_body_style_projection" in source
@@ -274,7 +282,6 @@ def test_style_detail_reuses_shared_controls():
     assert "“字”会跟随当前字号换算；需要精确版式时可切到“磅”或 “cm”。" not in source
     assert "固定值：直接输入磅值，例如 20 磅。" not in source
     assert "·" not in source
-    assert "·" not in format_source
 
 
 def test_style_detail_organizes_body_controls_into_cards():
@@ -611,7 +618,7 @@ def test_template_panel_style_save_overwrites_current_file_and_clears_dirty(tmp_
         assert reloaded.styles["body"].font_cn == "黑体"
         assert bridge.is_template_dirty() is False
         assert panel._style_detail._save_btn.isEnabled() is False
-        assert "已保存" in panel._io_detail._status.text()
+        assert "已保存" in panel._last_template_management_status
     finally:
         panel.close()
         app.processEvents()

@@ -7,9 +7,6 @@ sys.path.insert(0, str(ROOT))
 
 from src.config.style_field_descriptors import (  # noqa: E402
     canonical_paragraph_style_field_id,
-    scene_style_field_path,
-    scene_style_navigation_target_from_field_id,
-    scene_style_policy_key_from_field_id,
     style_field_control_label,
     style_field_descriptor,
     style_field_group_descriptor,
@@ -22,7 +19,7 @@ from src.config.style_field_descriptors import (  # noqa: E402
 from src.shared.ui.paragraph_style_editor import ParagraphStyleEditor  # noqa: E402
 
 
-def test_style_field_descriptor_normalizes_template_scene_and_contract_paths():
+def test_style_field_descriptor_normalizes_template_and_contract_paths():
     descriptor = style_field_descriptor("template.styles.body.font_name")
 
     assert descriptor is not None
@@ -37,11 +34,10 @@ def test_style_field_descriptor_normalizes_template_scene_and_contract_paths():
     assert descriptor.visible_in_standard_mode is True
     assert descriptor.visible_in_diagnostic_mode is True
     assert descriptor.template_path == "template.styles.body.font_cn"
-    assert descriptor.scene_editor_path == "section_style.font_cn"
     assert descriptor.control_contract_key == "body.font_cn"
 
     assert canonical_paragraph_style_field_id(
-        "scene.section_styles.references_body.line_spacing_value"
+        "template.styles.body.line_spacing_value"
     ) == "line_spacing_pt"
     assert style_field_label("body.special_indent_mode") == "特殊缩进"
     assert style_field_control_label("body.line_spacing_value") == "行距值"
@@ -49,10 +45,6 @@ def test_style_field_descriptor_normalizes_template_scene_and_contract_paths():
     assert (
         template_style_field_path("body.line_spacing_value")
         == "template.styles.body.line_spacing_pt"
-    )
-    assert (
-        scene_style_field_path("references_body", "line_spacing_value")
-        == "scene.section_styles.references_body.line_spacing_pt"
     )
     assert style_field_descriptor(
         "template.styles.body.line_spacing_type"
@@ -73,39 +65,14 @@ def test_paragraph_style_editor_consumes_shared_field_descriptors(qapp):
     try:
         assert editor.widget_for_field("template.styles.body.font_name") is editor.font_cn
         assert editor.widget_for_field(
-            "scene.section_styles.references_body.special_indent_mode"
+            "template.styles.body.special_indent_mode"
         ) is editor.special_indent
-        assert editor.widget_for_field("section_style.left_indent_chars") is (
+        assert editor.widget_for_field("body.left_indent_chars") is (
             editor.left_indent
         )
         assert editor.widget_for_field("body.not_a_field") is None
     finally:
         editor.close()
-
-
-def test_scene_style_navigation_target_normalizes_policy_paths():
-    assert scene_style_navigation_target_from_field_id(
-        "scene.section_styles.references_body.font_cn"
-    ) == ("references_body", "font_cn")
-    assert scene_style_navigation_target_from_field_id(
-        "section_styles.references_body.line_spacing_value"
-    ) == ("references_body", "line_spacing_value")
-    assert scene_style_navigation_target_from_field_id(
-        "references_body.special_indent_mode"
-    ) == ("references_body", "special_indent_mode")
-    assert scene_style_navigation_target_from_field_id(
-        "scene.section_styles.references_body"
-    ) == ("references_body", "")
-    assert (
-        scene_style_policy_key_from_field_id("section_styles.acknowledgment_body")
-        == "acknowledgment_body"
-    )
-    assert scene_style_navigation_target_from_field_id(
-        "scene.section_styles.*.font_cn"
-    ) == ("", "")
-    assert scene_style_policy_key_from_field_id(
-        "scene.section_styles.not_a_variant.font_cn"
-    ) == ""
 
 
 def test_style_field_layout_rows_project_editor_information_architecture():

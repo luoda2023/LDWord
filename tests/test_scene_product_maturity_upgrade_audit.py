@@ -187,7 +187,7 @@ def test_product_maturity_upgrade_audit_maps_every_subject_to_l5_blockers():
     assert form_batch.next_upgrade_goal == "maintain_green_l5"
     assert "profile browser" in form_batch.evidence_surfaces
     assert "answer-sheet reuse path" in form_batch.evidence_surfaces
-    assert "fixed row-height policy material field" in form_batch.evidence_surfaces
+    assert "scene-owned fixed row-height policy" in form_batch.evidence_surfaces
     assert form_batch.remaining_product_gaps == ()
     assert form_batch.gap_domain_ids == ()
 

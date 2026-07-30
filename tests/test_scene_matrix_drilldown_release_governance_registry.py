@@ -77,7 +77,7 @@ def test_drilldown_item_factories_use_release_governance_registry_for_sources():
 
     assert "_release_governance_item_factories()" in source
     assert "SCENE_RELEASE_GOVERNANCE_DASHBOARD_SOURCE_IDS" in source
-    assert "scene_release_governance_report_spec(report_id)" in source
+    assert "RELEASE_GOVERNANCE_ITEM_FACTORIES.get(report_id)" in source
     assert set(SCENE_RELEASE_GOVERNANCE_DASHBOARD_SOURCE_IDS) == {
         spec.report_id for spec in SCENE_RELEASE_GOVERNANCE_EXPORT_REPORT_SPECS
     }

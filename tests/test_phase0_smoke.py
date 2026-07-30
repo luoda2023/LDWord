@@ -12,14 +12,17 @@ sys.path.insert(0, str(ROOT))
 
 from docx import Document
 
-from src.config.scene import FormatScopeConfig, SceneApplicationBoundaryConfig
+from src.config.document_scope import DocumentScopePolicy
 from src.modules.base import BaseModule, ModuleMeta
 from src.modules.registry import create_all_modules
 from src.pipeline.context import PipelineContext
 from src.pipeline.runner import Pipeline
+from src.pipeline.module_selection import (
+    ModuleDisposition,
+    build_module_selection_plan,
+)
 from src.pipeline.scheduler import (
     compute_dirty_modules,
-    select_enabled_modules,
     topological_sort,
     validate_data_flow,
     validate_schema_contract,
@@ -31,6 +34,7 @@ class StubPageSetup(BaseModule):
         name="page_setup",
         description="Page setup",
         category="basic",
+        execution_phase="format",
         requires_config=("page_setup",),
     )
 
@@ -50,6 +54,7 @@ class StubHeadingRecognition(BaseModule):
         name="heading_recognition",
         description="Heading recognition",
         category="structure",
+        execution_phase="semantics",
         provides=("doc_tree", "heading_map"),
     )
 
@@ -70,6 +75,7 @@ class StubHeadingNumbering(BaseModule):
         name="heading_numbering",
         description="Heading numbering",
         category="structure",
+        execution_phase="semantics",
         depends_on=("heading_recognition",),
         consumes=("doc_tree", "heading_map"),
     )
@@ -91,6 +97,8 @@ class StubCyclicA(BaseModule):
         name="cyclic_a",
         description="Cycle A",
         category="test",
+        execution_phase="fill",
+        scope_behavior="document_level",
         depends_on=("cyclic_b",),
     )
 
@@ -103,6 +111,8 @@ class StubCyclicB(BaseModule):
         name="cyclic_b",
         description="Cycle B",
         category="test",
+        execution_phase="fill",
+        scope_behavior="document_level",
         depends_on=("cyclic_a",),
     )
 
@@ -115,6 +125,8 @@ class StubFailingModule(BaseModule):
         name="zz_fail",
         description="Intentional failure",
         category="test",
+        execution_phase="format",
+        scope_behavior="document_level",
     )
 
     def apply(self, doc, config, tracker, context):
@@ -259,40 +271,62 @@ def test_pipeline_custom_output_path():
             Path(result.output_paths.get("final", "")).unlink(missing_ok=True)
 
 
-def test_pipeline_injects_format_scope_into_context():
+def test_pipeline_fails_closed_before_running_an_invalid_document_scope():
     tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
     tmp_path = tmp.name
     tmp.close()
     Document().save(tmp_path)
-
-    custom_scope = FormatScopeConfig(mode="manual", page_ranges_text="2-5")
-    custom_boundary = SceneApplicationBoundaryConfig(mode="confirm_before_apply")
 
     try:
         pipeline = Pipeline(
             modules=[],
             config=SimpleNamespace(
                 strict_mode=True,
-                application_boundary=custom_boundary,
-                format_scope=custom_scope,
+                mode_id="custom",
+                document_scope=DocumentScopePolicy(mode="future"),
             ),
         )
         result = pipeline.execute(tmp_path)
 
-        assert result.success
-        assert result.context is not None
-        assert result.context.format_scope.mode == "manual"
-        assert result.context.format_scope.page_ranges_text == "2-5"
-        assert result.context.format_scope is not custom_scope
-        assert result.context.application_boundary.mode == "confirm_before_apply"
-        assert result.context.application_boundary is not custom_boundary
+        assert result.success is False
+        assert result.status == "failed"
+        assert result.context is None
+        assert result.output_paths == {}
+        assert result.error == "document_scope_mode_invalid:future"
     finally:
         Path(tmp_path).unlink(missing_ok=True)
-        if 'result' in locals():
-            Path(result.output_paths.get("final", "")).unlink(missing_ok=True)
+        if "result" in locals() and result.output_paths.get("final"):
+            Path(result.output_paths["final"]).unlink(missing_ok=True)
 
 
-def test_select_enabled_modules_prunes_unmet_hard_dependencies():
+def test_module_selection_plan_prunes_unmet_hard_dependencies():
+    from src.config.template import TemplateConfig
+    from src.config.scene import SceneWorkspace
+    from src.config.resolver import resolve_config
+
+    scene = SceneWorkspace()
+    scene.module_switches["heading_recognition"] = False
+    config = resolve_config(TemplateConfig(), scene)
+
+    selection = build_module_selection_plan(
+        create_all_modules(),
+        config.is_module_enabled,
+    )
+    enabled = list(selection.select_modules(create_all_modules()))
+    names = [mod.meta.name for mod in enabled]
+
+    assert "heading_recognition" not in names
+    assert "heading_numbering" not in names
+    assert "toc" not in names
+    toc_decision = selection.decision_for("toc")
+    assert toc_decision.disposition is ModuleDisposition.AUTO_PRUNED
+    assert toc_decision.unmet_dependencies == ("heading_recognition",)
+
+    pipeline = Pipeline(modules=enabled, config=config)
+    assert set(mod.meta.name for mod in pipeline._modules) == set(names)
+
+
+def test_toc_stays_enabled_when_heading_numbering_is_disabled():
     from src.config.template import TemplateConfig
     from src.config.scene import SceneWorkspace
     from src.config.resolver import resolve_config
@@ -300,19 +334,13 @@ def test_select_enabled_modules_prunes_unmet_hard_dependencies():
     scene = SceneWorkspace()
     scene.module_switches["heading_numbering"] = False
     config = resolve_config(TemplateConfig(), scene)
+    modules = create_all_modules()
 
-    enabled, auto_pruned = select_enabled_modules(
-        create_all_modules(),
-        config.is_module_enabled,
-    )
-    names = [mod.meta.name for mod in enabled]
+    selection = build_module_selection_plan(modules, config.is_module_enabled)
 
-    assert "heading_numbering" not in names
-    assert "toc" not in names
-    assert auto_pruned["toc"] == ["heading_numbering"]
-
-    pipeline = Pipeline(modules=enabled, config=config)
-    assert set(mod.meta.name for mod in pipeline._modules) == set(names)
+    assert selection.is_effectively_enabled("heading_recognition") is True
+    assert selection.is_effectively_enabled("heading_numbering") is False
+    assert selection.is_effectively_enabled("toc") is True
 
 
 def test_pipeline_context_slots_are_enforced():

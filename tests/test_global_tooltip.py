@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.qt_api import QEvent, QSize, QWidget
+from src.qt_api import QEvent, QFont, QSize, QWidget
 from src.shared.ui.theme import DARK, get_theme, set_theme
 from src.shared.ui.tooltip import (
     DEFAULT_GAP,
@@ -13,6 +13,7 @@ from src.shared.ui.tooltip import (
     TOOLTIP_PLACEMENT_PROPERTY,
     TOOLTIP_ROLE_PROPERTY,
     GlobalTooltipController,
+    disable_global_tooltip,
     install_global_tooltip,
     set_global_tooltip,
     tooltip_position_for,
@@ -97,13 +98,35 @@ def test_global_tooltip_controller_intercepts_native_tooltip_events(qapp):
         widget.close()
 
 
-def test_global_tooltip_controller_ignores_plain_widget_tooltips(qapp):
+def test_global_tooltip_controller_intercepts_plain_widget_tooltips_by_default(qapp):
     controller = install_global_tooltip(qapp)
     widget = QWidget()
     try:
         widget.resize(40, 40)
         widget.show()
         widget.setToolTip("例如宋体、黑体、Times New Roman，未收录字体名也会保留。")
+
+        handled = controller.eventFilter(widget, QEvent(QEvent.ToolTip))
+        options = controller.options_for(widget)
+
+        assert handled is True
+        assert options is not None
+        assert options.placement == "auto"
+        assert options.role == "default"
+        assert options.delay_ms == 120
+    finally:
+        controller.hide_tooltip()
+        widget.close()
+
+
+def test_global_tooltip_controller_allows_explicit_native_opt_out(qapp):
+    controller = install_global_tooltip(qapp)
+    widget = QWidget()
+    try:
+        widget.resize(40, 40)
+        widget.show()
+        widget.setToolTip("保留原生提示")
+        disable_global_tooltip(widget)
 
         handled = controller.eventFilter(widget, QEvent(QEvent.ToolTip))
 
@@ -114,7 +137,7 @@ def test_global_tooltip_controller_ignores_plain_widget_tooltips(qapp):
         widget.close()
 
 
-def test_global_tooltip_popup_uses_theme_tokens_and_single_line_style(qapp):
+def test_global_tooltip_popup_uses_theme_tokens_and_direct_text_rendering(qapp):
     controller = install_global_tooltip(qapp)
     original_theme = get_theme()
     widget = QWidget()
@@ -129,13 +152,35 @@ def test_global_tooltip_popup_uses_theme_tokens_and_single_line_style(qapp):
 
         assert controller.popup._label.wordWrap() is False
         assert controller.popup._label.text() == "素材管理"
+        assert controller.popup.graphicsEffect() is None
+        assert controller.popup._surface.graphicsEffect() is None
+        assert controller.popup._label.graphicsEffect() is None
+        assert controller.popup._label.font().pixelSize() == 12
+        assert controller.popup._label.font().weight() == QFont.Weight.Normal
         stylesheet = controller.popup._surface.styleSheet()
         assert DARK.bg_tooltip in stylesheet
         assert DARK.border in stylesheet
         assert DARK.text_on_tooltip in stylesheet
+        assert "font-size:" not in stylesheet
+        assert "font-weight:" not in stylesheet
     finally:
         controller.hide_tooltip()
         set_theme(original_theme)
+        widget.close()
+
+
+def test_global_tooltip_wraps_long_plain_text_to_bounded_width(qapp):
+    controller = install_global_tooltip(qapp)
+    widget = QWidget()
+    try:
+        widget.resize(40, 40)
+        widget.show()
+        controller.popup.show_text("长提示内容" * 30, widget, "right")
+
+        assert controller.popup._label.wordWrap() is True
+        assert controller.popup._label.width() == 360
+    finally:
+        controller.hide_tooltip()
         widget.close()
 
 

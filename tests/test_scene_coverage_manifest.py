@@ -37,7 +37,7 @@ from src.config.plugin_manual_gate import (
     list_plugin_manual_gates,
 )
 from src.config.scene_family_registry import list_planned_scene_families
-from src.ui.panels.workbench.scene_presets import SCENE_META_MAP
+from src.config.scene_presets import SCENE_META_MAP
 
 
 def test_v12_coverage_manifest_has_required_high_frequency_packs():
@@ -280,8 +280,8 @@ def test_coverage_manifest_tracks_implemented_and_missing_closures_per_pack():
     assert any("citation and formula confidence reporting" in item for item in chinese.implemented_closures)
     assert not any("explicit thesis_cn profile split" in item for item in chinese.missing_closures)
     assert not chinese.missing_closures
-    assert any("output target issue queue" in item for item in quick.implemented_closures)
-    assert any("filterable Workbench problem center" in item for item in quick.implemented_closures)
+    assert any("unified execution gate" in item for item in quick.implemented_closures)
+    assert any("accessible result details" in item for item in quick.implemented_closures)
     assert not quick.missing_closures
     assert any("field consistency" in item for item in contract.implemented_closures)
     assert any("legal boundary" in item for item in contract.implemented_closures)
@@ -296,8 +296,8 @@ def test_coverage_manifest_tracks_implemented_and_missing_closures_per_pack():
     assert any("profile aliases" in item for item in batch_forms.implemented_closures)
     assert not any("profile aliases" in item for item in batch_forms.missing_closures)
     assert not any("fixed-layout mapping report" in item for item in batch_forms.missing_closures)
-    assert any("per-record batch issue" in item for item in batch_forms.implemented_closures)
-    assert any("batch issue center UI" in item for item in batch_forms.implemented_closures)
+    assert any("per-record batch diagnostics" in item for item in batch_forms.implemented_closures)
+    assert any("result detail consumes batch diagnostics" in item for item in batch_forms.implemented_closures)
     assert any("profile-specific repair" in item for item in batch_forms.implemented_closures)
     assert not any("profile-specific repair" in item for item in batch_forms.missing_closures)
     assert any("question schema" in item for item in exam.implemented_closures)

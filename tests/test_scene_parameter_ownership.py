@@ -39,13 +39,21 @@ def test_scene_parameter_ownership_classifies_high_risk_scene_board_parameters()
     assert classify_scene_parameter("formula_style.unify_font").owner_layer == "scene"
     assert classify_scene_parameter("watermark.enabled").owner_layer == "scene"
     assert classify_scene_parameter("watermark.text").owner_layer == "scene"
-    assert classify_scene_parameter("output.final_docx").owner_layer == "output"
+    assert classify_scene_parameter("output.final_docx") is None
+    assert (
+        classify_scene_parameter(
+            "delivery_presets.0.artifacts.final_docx"
+        ).owner_layer
+        == "output"
+    )
     assert classify_scene_parameter("delivery_presets.0.filename_template").owner_layer == "output"
     assert classify_scene_parameter("delivery_presets.3.content_visibility_rules").owner_layer == "output"
     assert classify_scene_parameter("header_footer.page_number_plan").owner_layer == "template"
-    assert classify_scene_parameter("application_boundary").owner_layer == "scene"
-    assert classify_scene_parameter("format_scope").owner_layer == "scene"
-    assert classify_scene_parameter("section_styles").owner_layer == "scene"
+    assert classify_scene_parameter("document_scope").owner_layer == "scene"
+    assert classify_scene_parameter("application_boundary") is None
+    assert classify_scene_parameter("format_scope") is None
+    assert classify_scene_parameter("default_material_profile_id").owner_layer == "scene"
+    assert classify_scene_parameter("section_styles") is None
 
 
 def test_scene_parameter_ownership_requires_exact_nested_registration():
@@ -56,6 +64,21 @@ def test_scene_parameter_ownership_requires_exact_nested_registration():
     assert classify_scene_parameter("watermark.opacity") is None
     assert classify_scene_parameter("delivery_presets.0.unknown_flag") is None
     assert classify_scene_parameter("delivery_presets.-1.filename_template") is None
+
+
+def test_template_baselines_are_not_reintroduced_as_scene_compatibility_fields():
+    scene = SceneWorkspace()
+
+    assert not hasattr(scene, "output")
+
+    for path in ("table", "header_footer", "toc", "caption", "formula_table"):
+        assert not hasattr(scene, path)
+        ownership = classify_scene_parameter(path)
+        assert ownership is not None
+        assert ownership.owner_layer == "template"
+        assert ownership.template_baseline is True
+
+    assert audit_scene_parameter_ownership().is_clean
 
 
 def test_scene_parameter_ownership_audit_flags_new_scene_fields():
@@ -83,4 +106,14 @@ def test_scene_parameter_execution_consumers_have_code_anchors():
     assert any(
         anchor.source_path == "src/report_writer.py"
         for anchor in anchors["report writer"]
+    )
+    assert any(
+        anchor.source_path
+        == "src/services/production_runtime/execution_runtime.py"
+        for anchor in anchors["batch runner"]
+    )
+    assert any(
+        anchor.source_path
+        == "src/services/production_runtime/batch_reporting.py"
+        for anchor in anchors["batch runner"]
     )

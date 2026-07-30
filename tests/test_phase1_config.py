@@ -12,21 +12,119 @@ Phase 1 冒烟测试 — 验证配置层
 import sys
 import json
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.config.template import TemplateConfig, PageSetupConfig, MarginConfig, StyleConfig
+from src.config.template import TemplateConfig
 from src.config.scene import SceneWorkspace
-from src.config.resolved import (
-    ConfigValue,
-    ImageInsertionItem,
-    ReplacementRule,
-    ResolvedConfig,
-)
+from src.config.dataclass_utils import dict_to_dataclass
+from src.config.migration import normalize_scene_payload, normalize_template_payload
+from src.config.resolved import ImageInsertionItem, ReplacementRule
 from src.config.resolver import resolve_config
 from src.config.entity import EntityArchive, EntityProfile, load_entity_archive, save_entity_archive
+
+
+def _materialize_legacy_template(payload: dict) -> TemplateConfig:
+    return dict_to_dataclass(TemplateConfig, normalize_template_payload(payload))
+
+
+def _materialize_legacy_scene(payload: dict) -> SceneWorkspace:
+    return dict_to_dataclass(SceneWorkspace, normalize_scene_payload(payload))
+
+
+@pytest.mark.parametrize(
+    "profile_name",
+    ("input_source_profile", "compliance_profile"),
+)
+def test_canonical_scene_loader_rejects_unknown_failure_policy(
+    tmp_path,
+    profile_name,
+):
+    from src.config.loader import ConfigLoadError, load_scene
+
+    payload = asdict(SceneWorkspace())
+    payload[profile_name]["failure_policy"] = "blok"
+    target = tmp_path / f"invalid-{profile_name}.json"
+    target.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigLoadError, match=f"{profile_name}.failure_policy"):
+        load_scene(target)
+
+
+@pytest.mark.parametrize(
+    ("corruption", "expected_issue"),
+    (
+        ("duplicate", "duplicate_delivery_preset_id:final"),
+        ("empty_preset", "delivery_preset_id_empty:0"),
+        ("empty_default", "default_delivery_preset_id_empty"),
+        ("unknown_default", "default_delivery_preset_id_unknown:missing"),
+    ),
+)
+def test_canonical_scene_loader_rejects_invalid_delivery_identity(
+    tmp_path,
+    corruption,
+    expected_issue,
+):
+    from src.config.loader import ConfigLoadError, load_scene
+
+    payload = asdict(SceneWorkspace())
+    if corruption == "duplicate":
+        payload["delivery_presets"].append(
+            dict(payload["delivery_presets"][0])
+        )
+    elif corruption == "empty_preset":
+        payload["delivery_presets"][0]["preset_id"] = ""
+    elif corruption == "empty_default":
+        payload["default_delivery_preset_id"] = ""
+    else:
+        payload["default_delivery_preset_id"] = "missing"
+    target = tmp_path / f"invalid-delivery-{corruption}.json"
+    target.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigLoadError, match=expected_issue):
+        load_scene(target)
+
+
+@pytest.mark.parametrize("default_id", ("", "missing"))
+def test_scene_preserves_invalid_default_delivery_identity_until_fail_closed(
+    default_id,
+):
+    from src.config.scene import DeliveryPreset
+
+    scene = SceneWorkspace(
+        default_delivery_preset_id=default_id,
+        delivery_presets=[DeliveryPreset(preset_id="first")],
+    )
+
+    assert scene.default_delivery_preset_id == default_id
+    with pytest.raises(ValueError, match="default_delivery_preset_id"):
+        resolve_config(TemplateConfig(), scene)
+
+
+def test_resolve_config_rejects_duplicate_delivery_identity():
+    from src.config.scene import DeliveryPreset
+
+    scene = SceneWorkspace(
+        default_delivery_preset_id="same",
+        delivery_presets=[
+            DeliveryPreset(preset_id="same"),
+            DeliveryPreset(preset_id="same"),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="duplicate_delivery_preset_id:same"):
+        resolve_config(TemplateConfig(), scene)
 
 
 def test_template_config():
@@ -45,21 +143,20 @@ def test_scene_workspace():
     assert scene.is_module_enabled("page_setup") is True
     assert scene.is_module_enabled("md_cleanup") is False
     assert scene.is_module_enabled("reference_format") is True
-    assert scene.format_scope.mode == "auto"
-    assert scene.format_scope.page_ranges_text == ""
-    assert scene.format_scope.sections["body"] is True
-    assert scene.application_boundary.mode == "follow_template"
-    assert scene.application_boundary.confirm_before_apply is False
+    assert not hasattr(scene, "format_scope")
+    assert not hasattr(scene, "available_sections")
+    assert not hasattr(scene, "application_boundary")
+    assert scene.document_scope.mode == "all"
     print("  ✅ SceneWorkspace 实例化正确")
 
 
-def test_scene_application_boundary_normalizes_legacy_format_scope():
-    """旧 format_scope 门禁会归一成新的高层处理范围。"""
+def test_scene_payload_drops_obsolete_scope_fields_without_inference():
+    """Removed section metadata cannot recreate an executable boundary."""
     from src.config.migration import normalize_scene_payload
 
     normalized = normalize_scene_payload(
         {
-            "scene_id": "legacy_body_only",
+            "scene_id": "obsolete_scope_payload",
             "format_scope": {
                 "sections": {
                     "body": True,
@@ -67,17 +164,40 @@ def test_scene_application_boundary_normalizes_legacy_format_scope():
                     "appendix": False,
                 }
             },
+            "available_sections": ["body", "references"],
         }
     )
 
-    assert normalized["application_boundary"] == {
-        "mode": "body_only",
-        "confirm_before_apply": False,
-    }
+    assert "format_scope" not in normalized
+    assert "available_sections" not in normalized
+    assert "application_boundary" not in normalized
 
-    scene = SceneWorkspace(application_boundary={"mode": "confirm_before_apply"})
-    assert scene.application_boundary.mode == "confirm_before_apply"
-    assert scene.application_boundary.confirm_before_apply is True
+    scene = SceneWorkspace(document_scope={"mode": "body"})
+    assert scene.document_scope.mode == "body"
+
+
+def test_normalize_scene_payload_drops_obsolete_scene_output_mirror():
+    from src.config.migration import normalize_scene_payload
+
+    normalized = normalize_scene_payload(
+        {
+            "scene_id": "official",
+            "output": {
+                "final_docx": True,
+                "review_pdf": True,
+                "report_json": False,
+            },
+            "template_overrides": {
+                "output.review_pdf": True,
+            },
+        }
+    )
+
+    assert "output" not in normalized
+    assert not any(
+        key == "output" or key.startswith("output.")
+        for key in normalized.get("template_overrides", {})
+    )
 
 
 def test_resolve_config_basic():
@@ -89,46 +209,27 @@ def test_resolve_config_basic():
     assert resolved.page_setup.paper_size == "A4"
     assert resolved.is_module_enabled("page_setup") is True
     assert resolved.is_module_enabled("md_cleanup") is False
-    assert resolved.application_boundary.mode == "follow_template"
+    assert resolved.document_scope.mode == "all"
     print("  ✅ resolve_config() 基本合并正确")
 
 
-def test_resolve_config_projects_application_boundary_to_runtime_scope():
-    """新处理范围应投影成旧模块可消费的 runtime scope。"""
+def test_resolve_config_preserves_document_scope_policy():
     scene = SceneWorkspace(name="body_only_scene")
-    scene.application_boundary.mode = "body_only"
-    scene.format_scope.sections["references"] = True
-    scene.format_scope.sections["appendix"] = True
+    scene.document_scope.mode = "body"
 
     resolved = resolve_config(TemplateConfig(), scene)
 
-    assert resolved.application_boundary.mode == "body_only"
-    assert resolved.format_scope.mode == "auto"
-    assert resolved.format_scope.sections["body"] is True
-    assert all(
-        enabled is False
-        for key, enabled in resolved.format_scope.sections.items()
-        if key != "body"
-    )
+    assert resolved.document_scope.mode == "body"
+    assert resolved.document_scope.included_roles("custom") == ("body",)
 
 
-def test_resolve_config_infers_boundary_from_legacy_scope_when_needed():
-    """直接旧字段配置仍可进入新边界，避免破坏旧场景。"""
-    scene = SceneWorkspace(name="legacy_body_only")
-    scene.format_scope.sections = {
-        key: key == "body"
-        for key in scene.format_scope.sections
-    }
+def test_resolve_config_defaults_to_all_content_without_document_state():
+    scene = SceneWorkspace(name="full_document")
 
     resolved = resolve_config(TemplateConfig(), scene)
 
-    assert resolved.application_boundary.mode == "body_only"
-    assert resolved.format_scope.sections["body"] is True
-    assert all(
-        enabled is False
-        for key, enabled in resolved.format_scope.sections.items()
-        if key != "body"
-    )
+    assert resolved.document_scope.mode == "all"
+    assert not hasattr(resolved, "format_scope")
 
 
 def test_resolve_config_override():
@@ -350,9 +451,55 @@ def test_module_switch_alias_normalization():
     print("  ✅ 模块开关别名归一正确")
 
 
-def test_load_template_normalizes_legacy_fields():
-    """legacy template 字段应在 loader 阶段归一到 canonical schema。"""
-    from src.config.loader import load_template
+def test_scene_workspace_rejects_unknown_module_switch_instead_of_enabling_default():
+    with pytest.raises(ValueError, match=r"unknown module switch key.*page_setp"):
+        SceneWorkspace(module_switches={"page_setp": False})
+
+
+def test_canonical_scene_loader_rejects_unknown_module_switch(tmp_path):
+    from src.config.loader import ConfigLoadError, load_scene
+
+    payload = asdict(SceneWorkspace())
+    payload["module_switches"]["page_setp"] = False
+    target = tmp_path / "invalid-module-switch.json"
+    target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ConfigLoadError, match="Invalid canonical config payload"):
+        load_scene(target)
+
+
+def test_resolve_config_rejects_module_switch_tampering_before_document_mutation(
+    tmp_path,
+):
+    from docx import Document
+    from docx.shared import Cm
+
+    source = tmp_path / "source.docx"
+    document = Document()
+    document.sections[0].top_margin = Cm(1)
+    document.save(source)
+
+    scene = SceneWorkspace()
+    scene.module_switches = {"page_setp": False}
+
+    with pytest.raises(ValueError, match=r"unknown module switch key.*page_setp"):
+        resolve_config(TemplateConfig(), scene)
+
+    assert round(Document(source).sections[0].top_margin.cm, 2) == 1.0
+
+
+def test_explicit_scene_migration_rejects_unknown_module_switch_sources():
+    for payload in (
+        {"module_switches": {"page_setp": False}},
+        {"capabilities": {"page_setp": False}},
+        {"pipeline": ["page_setp"]},
+    ):
+        with pytest.raises(ValueError, match=r"unknown module switch key.*page_setp"):
+            normalize_scene_payload(payload)
+
+
+def test_explicit_template_migration_normalizes_legacy_fields():
+    """Legacy template fields are handled only by explicit migration."""
 
     legacy_template = {
         "name": "legacy_template",
@@ -403,7 +550,7 @@ def test_load_template_normalizes_legacy_fields():
         json.dump(legacy_template, tmp, ensure_ascii=False, indent=2)
         tmp.close()
 
-        template = load_template(tmp.name)
+        template = _materialize_legacy_template(legacy_template)
 
         assert template.table.layout_mode == "full"
         assert template.table.border_mode == "color_table"
@@ -433,8 +580,7 @@ def test_load_template_normalizes_legacy_fields():
         Path(tmp.name).unlink(missing_ok=True)
 
 
-def test_load_template_supports_nested_page_number_plan_schema():
-    from src.config.loader import load_template
+def test_explicit_template_migration_supports_nested_page_number_plan_schema():
 
     payload = {
         "name": "nested_page_number_plan",
@@ -489,7 +635,7 @@ def test_load_template_supports_nested_page_number_plan_schema():
         json.dump(payload, tmp, ensure_ascii=False, indent=2)
         tmp.close()
 
-        template = load_template(tmp.name)
+        template = _materialize_legacy_template(payload)
         header_footer = template.header_footer
 
         assert header_footer.header.mode == "fixed"
@@ -507,8 +653,7 @@ def test_load_template_supports_nested_page_number_plan_schema():
         Path(tmp.name).unlink(missing_ok=True)
 
 
-def test_load_template_normalizes_flat_footer_text_and_alignment():
-    from src.config.loader import load_template
+def test_explicit_template_migration_normalizes_flat_footer_fields():
 
     payload = {
         "name": "flat_footer_fields",
@@ -522,7 +667,7 @@ def test_load_template_normalizes_flat_footer_text_and_alignment():
         json.dump(payload, tmp, ensure_ascii=False, indent=2)
         tmp.close()
 
-        template = load_template(tmp.name)
+        template = _materialize_legacy_template(payload)
         header_footer = template.header_footer
 
         assert header_footer.footer.content_mode == "page_number_with_text"
@@ -572,9 +717,8 @@ def test_save_template_round_trips_nested_page_number_plan_without_legacy_flat_f
         target.unlink(missing_ok=True)
 
 
-def test_load_template_lifts_legacy_heading_alias_into_heading_numbering():
+def test_explicit_template_migration_lifts_legacy_heading_alias():
     """legacy top-level heading 别名应只在 migration 层吸收，不再进入 runtime schema。"""
-    from src.config.loader import load_template
 
     legacy_template = {
         "name": "legacy_heading_alias",
@@ -589,7 +733,7 @@ def test_load_template_lifts_legacy_heading_alias_into_heading_numbering():
         json.dump(legacy_template, tmp, ensure_ascii=False, indent=2)
         tmp.close()
 
-        template = load_template(tmp.name)
+        template = _materialize_legacy_template(legacy_template)
 
         assert not hasattr(template, "heading")
         assert template.heading_numbering.level_bindings["heading1"].display_core_style == "arabic"
@@ -603,8 +747,7 @@ def test_load_template_lifts_legacy_heading_alias_into_heading_numbering():
         Path(tmp.name).unlink(missing_ok=True)
 
 
-def test_load_template_preserves_special_indent_schema_and_legacy_fields():
-    from src.config.loader import load_template
+def test_explicit_template_migration_preserves_special_indent_fields():
 
     payload = {
         "styles": {
@@ -627,7 +770,7 @@ def test_load_template_preserves_special_indent_schema_and_legacy_fields():
         json.dump(payload, tmp, ensure_ascii=False, indent=2)
         tmp.close()
 
-        template = load_template(tmp.name)
+        template = _materialize_legacy_template(payload)
 
         assert template.styles["normal"].special_indent_mode == "first_line"
         assert template.styles["normal"].special_indent_value == 2
@@ -643,9 +786,8 @@ def test_load_template_preserves_special_indent_schema_and_legacy_fields():
         Path(tmp.name).unlink(missing_ok=True)
 
 
-def test_load_scene_normalizes_legacy_capabilities_and_overrides():
+def test_explicit_scene_migration_normalizes_capabilities_and_overrides():
     """legacy scene capabilities / pipeline / enabled 字段应在 loader 阶段收口。"""
-    from src.config.loader import load_scene
 
     legacy_scene = {
         "name": "legacy_scene",
@@ -680,7 +822,7 @@ def test_load_scene_normalizes_legacy_capabilities_and_overrides():
         json.dump(legacy_scene, tmp, ensure_ascii=False, indent=2)
         tmp.close()
 
-        scene = load_scene(tmp.name)
+        scene = _materialize_legacy_scene(legacy_scene)
 
         assert scene.is_module_enabled("page_setup") is True
         assert scene.is_module_enabled("paragraph_style") is True
@@ -694,9 +836,9 @@ def test_load_scene_normalizes_legacy_capabilities_and_overrides():
         assert scene.strict_mode is False
         assert scene.citation_link.auto_number_reference_entries is False
         assert scene.chem_typography.allow_tokens == ["H2O"]
-        assert scene.template_overrides["table.layout_mode"] == "full"
+        assert "table.layout_mode" not in scene.template_overrides
         assert "header_footer.page_number_enabled" not in scene.template_overrides
-        assert scene.header_footer.page_number_enabled is False
+        assert not hasattr(scene, "header_footer")
         print("  ✅ loader 可将 legacy scene capabilities/pipeline/enabled 归一")
     finally:
         Path(tmp.name).unlink(missing_ok=True)
@@ -726,9 +868,8 @@ def test_normalize_scene_payload_treats_legacy_pipeline_as_explicit_enabled_list
 
 
 
-def test_load_scene_accepts_overrides_alias():
+def test_explicit_scene_migration_accepts_overrides_alias():
     """Scene overrides should normalize into template_overrides."""
-    from src.config.loader import load_scene
 
     payload = {
         "name": "scene_with_overrides_alias",
@@ -743,7 +884,7 @@ def test_load_scene_accepts_overrides_alias():
         json.dump(payload, tmp, ensure_ascii=False, indent=2)
         tmp.close()
 
-        scene = load_scene(tmp.name)
+        scene = _materialize_legacy_scene(payload)
 
         assert scene.template_overrides["table.layout_mode"] == "compact"
         assert scene.template_overrides["styles.normal.size_display"] == "\u4e94\u53f7"
@@ -753,17 +894,10 @@ def test_load_scene_accepts_overrides_alias():
         Path(tmp.name).unlink(missing_ok=True)
 
 
-def test_save_load_scene_preserves_header_footer_and_toc_on_scene_top_level():
+def test_save_load_scene_omits_removed_template_appearance_fields():
     from src.config.loader import load_scene, save_scene
 
     scene = SceneWorkspace(name="scene_roundtrip")
-    scene.header_footer.header_mode = "fixed"
-    scene.header_footer.header_text = "固定页眉"
-    scene.header_footer.page_number_enabled = False
-    scene.header_footer.front_matter_page_number_format = "lowerRoman"
-    scene.header_footer.body_page_number_start = 5
-    scene.toc.enabled = False
-    scene.toc.max_level = 4
 
     tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
     target = Path(tmp.name)
@@ -772,15 +906,16 @@ def test_save_load_scene_preserves_header_footer_and_toc_on_scene_top_level():
         save_scene(scene, target)
         reloaded = load_scene(target)
 
-        assert reloaded.header_footer.header_mode == "fixed"
-        assert reloaded.header_footer.header_text == "固定页眉"
-        assert reloaded.header_footer.page_number_enabled is False
-        assert reloaded.header_footer.front_matter_page_number_format == "lowerRoman"
-        assert reloaded.header_footer.body_page_number_start == 5
-        assert reloaded.toc.enabled is False
-        assert reloaded.toc.max_level == 4
-        assert "header_footer.page_number_enabled" not in reloaded.template_overrides
-        assert "toc.enabled" not in reloaded.template_overrides
+        payload = json.loads(target.read_text(encoding="utf-8"))
+        for field_name in (
+            "table",
+            "header_footer",
+            "toc",
+            "caption",
+            "formula_table",
+        ):
+            assert field_name not in payload
+            assert not hasattr(reloaded, field_name)
     finally:
         target.unlink(missing_ok=True)
 
@@ -863,7 +998,7 @@ def test_resolve_config_keeps_non_page_number_header_footer_scene_overrides():
     assert resolved.get_with_source("header_footer.page_number_enabled").source == "template"
 
 
-def test_load_scene_preserves_high_level_scene_profiles():
+def test_explicit_scene_migration_preserves_high_level_scene_profiles():
     from src.config.loader import load_scene, save_scene
 
     payload = {
@@ -928,7 +1063,7 @@ def test_load_scene_preserves_high_level_scene_profiles():
         json.dump(payload, tmp, ensure_ascii=False, indent=2)
         tmp.close()
 
-        scene = load_scene(target)
+        scene = _materialize_legacy_scene(payload)
         assert scene.input_source_profile.accepted_formats == ["docx", "markdown"]
         assert scene.input_source_profile.require_material_package is True
         assert scene.input_source_profile.material_schema_id == "journal_materials_v1"

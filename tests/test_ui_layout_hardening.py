@@ -7,33 +7,36 @@ from PySide6.QtTest import QTest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.config.style_variant_semantics import STYLE_VARIANTS
+from src.config.builtin_templates import create_builtin_template
 from src.config.template import StyleConfig, TemplateConfig
-from src.qt_api import QApplication, QPoint, Qt, QVBoxLayout, QWidget
+from src.qt_api import QApplication, QComboBox, QLineEdit, QPoint, QPushButton, Qt, QVBoxLayout, QWidget
 from src.shared.ui.adaptive_pair_row import AdaptivePairRow
 from src.shared.ui.font_combo import FontCombo
 from src.shared.ui.form_row import FormRow
+from src.shared.ui.folder_picker import FolderPicker
+from src.shared.ui.form_action_row import FormActionButtonRow
+from src.shared.ui.icon_button import apply_icon_button_style
+from src.shared.ui.input_style import build_text_input_stylesheet
+from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.file_drop_zone import FileDropZone
 from src.shared.ui.option_toggle_chip import OptionToggleChip
 from src.shared.ui.spacing_input import SpacingInput
+from src.shared.ui.search_input import SearchInput
 from src.shared.ui.style_editing_section import StyleEditingSection
-from src.shared.ui.style_owner_state import (
-    scene_section_style_owner_state,
-    template_body_style_owner_state,
-)
+from src.shared.ui.style_owner_state import template_body_style_owner_state
 from src.shared.ui.style_owner_toolbar import StyleOwnerOption
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.styled_spin_box import StyledSpinBox
+from src.shared.ui.template_form_layout import TemplateFormGrid
 from src.qt_api import QLabel
-from src.shared.ui.sizing import resolved_control_height
-from src.shared.ui.theme import get_theme
+from src.shared.ui.sizing import apply_size_class, resolved_control_height
+from src.shared.ui.theme import DARK, LIGHT, get_theme, set_theme
 from src.ui.bridge import PanelBridge
 from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
 from src.ui.panels.template_panel import TemplatePanel
 from src.ui.panels.template_reference_detail import ReferenceDetail
 from src.ui.panels.template_style_detail import StyleDetail
 from src.ui.panels.template_table_detail import TableCaptionDetail
-from src.ui.panels.scene_style_override_sections import SceneStyleOverrideSection
-from src.ui.panels.scene_summary_projection import build_scene_style_override_summary_items
 
 
 def _app():
@@ -82,6 +85,155 @@ def test_shared_form_controls_follow_md_height_contract():
 
     host.close()
     app.processEvents()
+
+
+def test_all_shared_md_controls_use_one_outer_height_without_clipping():
+    app = _app()
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    theme = get_theme()
+    expected_height = resolved_control_height(theme, "md")
+
+    line_edit = QLineEdit(host)
+    line_edit.setStyleSheet(build_text_input_stylesheet(theme))
+    button = QPushButton("Action", host)
+    apply_button_variant(button, "secondary")
+    button.setStyleSheet(build_button_stylesheet(theme))
+    combo = QComboBox(host)
+    combo.addItem("Option")
+    combo.setStyleSheet(build_text_input_stylesheet(theme, selector="QComboBox"))
+    styled_combo = StyledComboBox(host)
+    styled_combo.addItem("Option")
+    styled_spin = StyledSpinBox(host)
+    search = SearchInput(parent=host)
+    spacing = SpacingInput(show_unit=False, parent=host)
+    folder = FolderPicker(parent=host)
+    drop_zone = FileDropZone(parent=host)
+    actions = FormActionButtonRow(host)
+    action_button = actions.add_button("Action")
+    icon_button = QPushButton(host)
+    apply_icon_button_style(icon_button, size=34, icon_size=16)
+
+    controls = [
+        line_edit,
+        button,
+        combo,
+        styled_combo,
+        styled_spin,
+        search,
+        spacing,
+        folder._path,
+        folder._btn,
+        drop_zone._file_input,
+        drop_zone._browse_button,
+        drop_zone._recent_combo,
+        action_button,
+    ]
+    for control in controls:
+        apply_size_class(control, "md")
+    for widget in (
+        line_edit,
+        button,
+        combo,
+        styled_combo,
+        styled_spin,
+        search,
+        spacing,
+        folder,
+        drop_zone,
+        actions,
+        icon_button,
+    ):
+        layout.addWidget(widget)
+
+    try:
+        host.resize(760, 900)
+        host.show()
+        app.processEvents()
+
+        for control in controls:
+            assert control.height() == expected_height, type(control).__name__
+            assert control.maximumHeight() >= control.minimumSizeHint().height()
+            assert control.height() >= control.minimumSizeHint().height()
+        assert folder._path.geometry().bottom() <= folder.rect().bottom()
+        assert folder._btn.geometry().bottom() <= folder.rect().bottom()
+        assert icon_button.height() == 34
+        assert icon_button.width() == 34
+        assert icon_button.maximumHeight() >= icon_button.minimumSizeHint().height()
+    finally:
+        host.close()
+        app.processEvents()
+
+
+def test_shared_control_outer_height_is_stable_across_theme_refresh():
+    app = _app()
+    controls = [StyledComboBox(), StyledSpinBox(), SearchInput(), FolderPicker()]
+    try:
+        for theme in (DARK, LIGHT):
+            set_theme(theme)
+            app.processEvents()
+            expected = resolved_control_height(theme, "md")
+            for control in controls:
+                control.show()
+            app.processEvents()
+            for control in controls:
+                assert control.height() == expected
+                assert control.maximumHeight() >= control.minimumSizeHint().height()
+    finally:
+        set_theme(LIGHT)
+        for control in controls:
+            control.close()
+        app.processEvents()
+
+
+def test_every_size_class_and_button_variant_resolves_to_outer_height():
+    app = _app()
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    theme = get_theme()
+    controls: list[tuple[QWidget, str]] = []
+
+    for size in ("sm", "md", "lg"):
+        line_edit = QLineEdit(host)
+        line_edit.setStyleSheet(build_text_input_stylesheet(theme))
+        combo = StyledComboBox(host)
+        combo.addItem("Option")
+        spin = StyledSpinBox(host)
+        search = SearchInput(parent=host)
+        for control in (line_edit, combo, spin, search):
+            apply_size_class(control, size)
+            controls.append((control, size))
+            layout.addWidget(control)
+
+        for variant in (
+            "primary",
+            "secondary",
+            "danger",
+            "ghost-danger",
+            "ghost-primary",
+        ):
+            button = QPushButton(variant, host)
+            apply_button_variant(button, variant)
+            button.setStyleSheet(build_button_stylesheet(theme))
+            apply_size_class(button, size)
+            controls.append((button, size))
+            layout.addWidget(button)
+
+    try:
+        host.resize(760, 1200)
+        host.show()
+        app.processEvents()
+        for control, size in controls:
+            expected = resolved_control_height(theme, size)
+            assert control.height() == expected, (
+                type(control).__name__,
+                size,
+                control.property("variant"),
+            )
+            assert control.maximumHeight() >= control.minimumSizeHint().height()
+    finally:
+        host.close()
+        app.processEvents()
 
 
 def test_interaction_panels_delegate_fixed_heights_to_shared_controls():
@@ -434,7 +586,6 @@ def test_heading_panel_detail_rows_keep_text_to_control_gap_compact():
 
         row_map = {row.widget: row for row in panel.findChildren(FormRow)}
         widgets = [
-            panel._toc_switch,
             panel._start_at_input,
             panel._restart_on_cb,
             panel._ref_style_cb,
@@ -470,7 +621,7 @@ def test_heading_panel_numbering_composition_uses_responsive_form_grid():
         pairs = [
             (row_map[panel._level_enabled_switch], row_map[panel._core_style_cb]),
             (row_map[panel._prefix_edit], row_map[panel._suffix_edit]),
-            (row_map[panel._chain_cb], row_map[panel._chain_sep_edit]),
+            (row_map[panel._chain_cb], row_map[panel._ref_style_cb]),
         ]
 
         for left_row, right_row in pairs:
@@ -483,7 +634,9 @@ def test_heading_panel_numbering_composition_uses_responsive_form_grid():
             assert left_row.height() == 44
             assert right_row.height() == 44
 
-        panel.resize(760, 900)
+        # The inspector's current master/detail split keeps the form inline at
+        # 760 px; use its actual narrow floor to exercise the stacked mode.
+        panel.resize(600, 900)
         app.processEvents()
         app.processEvents()
 
@@ -674,7 +827,7 @@ def test_heading_panel_chain_separator_uses_presets_with_custom_fallback():
     panel = HeadingNumberingPanel(PanelBridge())
 
     try:
-        panel.on_template_changed(TemplateConfig())
+        panel.on_template_changed(create_builtin_template("default"))
         panel.resize(1280, 900)
         panel.show()
         app.processEvents()
@@ -869,6 +1022,76 @@ def test_adaptive_pair_row_can_opt_back_into_inline_stacked_spacing():
     app.processEvents()
 
 
+def test_template_form_grid_coordinates_responsive_mode_across_rows():
+    app = _app()
+    compact_left = QWidget()
+    compact_right = QWidget()
+    wide_left = QWidget()
+    wide_right = QWidget()
+    for widget, width in (
+        (compact_left, 80),
+        (compact_right, 80),
+        (wide_left, 180),
+        (wide_right, 180),
+    ):
+        widget.setMinimumSize(width, 36)
+
+    grid = TemplateFormGrid(
+        [
+            [compact_left, compact_right],
+            [wide_left, wide_right],
+        ],
+        column_gap=12,
+    )
+
+    try:
+        grid.resize(300, 200)
+        grid.show()
+        app.processEvents()
+
+        assert all(row._forced_stacked is True for row in grid._pair_rows)
+
+        grid.resize(420, 200)
+        app.processEvents()
+
+        assert all(row._forced_stacked is False for row in grid._pair_rows)
+    finally:
+        grid.close()
+        app.processEvents()
+
+
+def test_heading_style_uses_canonical_pairs_and_keeps_spacing_inline_at_desktop_width():
+    app = _app()
+    panel = HeadingNumberingPanel(PanelBridge())
+
+    try:
+        panel.on_template_changed(TemplateConfig())
+        panel.resize(760, 900)
+        panel.show()
+        app.processEvents()
+        app.processEvents()
+
+        row_map = {row.widget: row for row in panel.findChildren(FormRow)}
+        assert panel._style_grid._rows[:2] == [
+            (row_map[panel._hd_font_cn], row_map[panel._hd_size_combo]),
+            (row_map[panel._hd_font_en], row_map[panel._hd_emphasis_widget]),
+        ]
+
+        paired_rows = [
+            (row_map[panel._hd_font_cn], row_map[panel._hd_size_combo]),
+            (row_map[panel._hd_font_en], row_map[panel._hd_emphasis_widget]),
+            (row_map[panel._hd_line_type], row_map[panel._hd_line_value]),
+            (row_map[panel._hd_space_before], row_map[panel._hd_space_after]),
+        ]
+        for left_row, right_row in paired_rows:
+            left_y = left_row.mapTo(panel, left_row.rect().topLeft()).y()
+            right_y = right_row.mapTo(panel, right_row.rect().topLeft()).y()
+            assert left_y == right_y
+    finally:
+        panel.close()
+        app.processEvents()
+
+
 def test_style_editing_section_renders_chrome_preview_and_surface_in_order():
     app = _app()
     shell = StyleEditingSection(
@@ -937,147 +1160,6 @@ def test_style_editing_section_renders_chrome_preview_and_surface_in_order():
         assert _dark_sample_count(shell) > 20
     finally:
         shell.close()
-        app.processEvents()
-
-
-def test_template_and_scene_style_shells_keep_summary_preview_surface_order():
-    app = _app()
-    template_detail = StyleDetail()
-    scene_section = SceneStyleOverrideSection(
-        summary_items=build_scene_style_override_summary_items(None, None),
-        style_variants=STYLE_VARIANTS,
-        object_name_prefix="layout_scene_style_override",
-    )
-
-    try:
-        template = TemplateConfig()
-        template.styles["body"] = StyleConfig(font_cn="宋体", font_en="Times New Roman", size_pt=12)
-        template_detail.set_template(template)
-        template_detail.resize(980, 1100)
-        template_detail.show()
-
-        scene_section.resize(980, 1300)
-        scene_section.show()
-        app.processEvents()
-        app.processEvents()
-
-        gap = get_theme().template_detail_section_gap
-
-        template_summary_bottom = (
-            template_detail._summary_card.mapTo(template_detail, QPoint(0, 0)).y()
-            + template_detail._summary_card.height()
-        )
-        template_shell_top = template_detail._style_editing_section.mapTo(
-            template_detail,
-            QPoint(0, 0),
-        ).y()
-        assert template_shell_top >= template_summary_bottom + gap
-        assert template_detail._style_surface is template_detail._style_editing_section.style_surface
-        assert template_detail._style_owner_status is None
-        assert template_detail._style_editing_section.owner_status is None
-        assert _dark_sample_count(template_detail) > 30
-
-        scene_card_bottom = (
-            scene_section.card.mapTo(scene_section, QPoint(0, 0)).y()
-            + scene_section.card.height()
-        )
-        scene_shell_top = scene_section.editing_section.mapTo(
-            scene_section,
-            QPoint(0, 0),
-        ).y()
-        scene_editing = scene_section.editing_section
-        scene_rule_deck = scene_section.rule_control_deck
-        scene_preview_top = scene_editing.preview.mapTo(scene_section, QPoint(0, 0)).y()
-        scene_comparison_top = scene_rule_deck.comparison_strip.mapTo(
-            scene_section,
-            QPoint(0, 0),
-        ).y()
-        scene_status_bottom = (
-            scene_editing.owner_status.mapTo(scene_section, QPoint(0, 0)).y()
-            + scene_editing.owner_status.height()
-        )
-        scene_owner_top = scene_editing.owner_toolbar.mapTo(scene_section, QPoint(0, 0)).y()
-        scene_owner_bottom = (
-            scene_editing.owner_toolbar.mapTo(scene_section, QPoint(0, 0)).y()
-            + scene_editing.owner_toolbar.height()
-        )
-
-        assert scene_comparison_top < scene_status_bottom
-        assert scene_owner_top >= scene_status_bottom
-        assert scene_preview_top >= scene_owner_bottom
-        assert scene_shell_top >= scene_card_bottom
-        assert scene_editing.style_surface is scene_section.editing_section.style_surface
-        assert _dark_sample_count(scene_section) > 30
-    finally:
-        template_detail.close()
-        scene_section.close()
-        app.processEvents()
-
-
-def test_scene_style_management_block_collapses_readonly_surface():
-    app = _app()
-    section = SceneStyleOverrideSection(
-        summary_items=build_scene_style_override_summary_items(None, None),
-        style_variants=STYLE_VARIANTS[:1],
-        object_name_prefix="layout_scene_style_collapse",
-    )
-
-    class EditableProjection:
-        label = "参考文献"
-        status_value = "已覆盖"
-        status_detail = "与模板不同"
-        editor_hint = "正在编辑参考文献样式"
-        editable = True
-        overridden = True
-        variant = "info"
-
-    try:
-        section.resize(980, 900)
-        section.show()
-        app.processEvents()
-
-        section.apply_owner_state(
-            scene_section_style_owner_state(
-                style=StyleConfig(font_cn="宋体"),
-                variant_label="参考文献",
-                section_enabled=True,
-                overridden=False,
-            )
-        )
-        app.processEvents()
-        assert section.editing_section.style_surface.isHidden() is True
-        assert section.management_block.property("style_management_editor_available") is True
-        assert section.management_block.property("style_management_editor_visible") is False
-        assert section.management_block.property("style_management_editor_collapsed") is True
-        assert (
-            section.management_block.property(
-                "style_management_editor_collapsed_by_readonly"
-            )
-            is True
-        )
-
-        section.apply_owner_state(
-            scene_section_style_owner_state(
-                style=StyleConfig(font_cn="宋体"),
-                projection=EditableProjection(),
-                variant_label="参考文献",
-                section_enabled=True,
-                overridden=True,
-            )
-        )
-        app.processEvents()
-        assert section.editing_section.style_surface.isVisible() is True
-        assert section.management_block.property("style_management_editor_available") is True
-        assert section.management_block.property("style_management_editor_visible") is True
-        assert section.management_block.property("style_management_editor_collapsed") is False
-        assert (
-            section.management_block.property(
-                "style_management_editor_collapsed_by_readonly"
-            )
-            is False
-        )
-    finally:
-        section.close()
         app.processEvents()
 
 

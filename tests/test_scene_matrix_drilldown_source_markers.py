@@ -9,6 +9,7 @@ from src.config.scene_matrix_drilldown_sources import (  # noqa: E402
     SCENE_MATRIX_DRILLDOWN_AUDIT_DOCS_PATH,
     SCENE_MATRIX_DRILLDOWN_CONFIG_SOURCE_PATH,
     SCENE_MATRIX_DRILLDOWN_EXPORT_SCRIPT_SOURCE_PATH,
+    SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILE_SOURCE_PATH,
     SCENE_MATRIX_DRILLDOWN_RELEASE_ITEMS_SOURCE_PATH,
     SCENE_MATRIX_DRILLDOWN_RUNTIME_SOURCE_PATH,
     SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS,
@@ -31,7 +32,6 @@ def test_drilldown_sources_group_runtime_audit_source_markers():
         "scene_matrix_drilldown_row_material_reference_audit",
         "scene_matrix_drilldown_row_input_object_word_registry_audit",
         "scene_matrix_drilldown_row_plugin_risk_maturity_registry_audit",
-        "scene_matrix_drilldown_action_capability_projection_profile_audit",
         "scene_matrix_drilldown_projection_test_reference_audit",
         "scene_matrix_drilldown_projection_source_reference_audit",
         "scene_matrix_drilldown_projection_surface_reference_audit",
@@ -57,6 +57,21 @@ def test_drilldown_sources_group_runtime_audit_source_markers():
     assert "_drilldown_runtime_source_marker_entry" in source
     assert source.count(f'"{SCENE_MATRIX_DRILLDOWN_RUNTIME_SOURCE_PATH}"') == 1
     assert runtime_source_ids == expected_source_ids
+
+
+def test_projection_profile_class_marker_uses_its_definition_module():
+    marker_by_source_id = {
+        source_id: (source_path, markers)
+        for source_id, source_path, markers in SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS
+    }
+
+    definition_path, definition_markers = marker_by_source_id[
+        "scene_matrix_drilldown_action_capability_projection_profile_audit"
+    ]
+
+    assert definition_path == SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILE_SOURCE_PATH
+    assert "SceneMatrixDrilldownProjectionProfile" in definition_markers
+    assert "SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILE_MAP" in definition_markers
 
 
 def test_drilldown_sources_group_historical_audit_doc_markers():
@@ -209,7 +224,7 @@ def test_drilldown_sources_group_middle_repeated_source_paths():
 
 def test_drilldown_sources_only_repeat_governed_source_paths():
     expected_repeated_source_path_counts = {
-        SCENE_MATRIX_DRILLDOWN_RUNTIME_SOURCE_PATH: 25,
+        SCENE_MATRIX_DRILLDOWN_RUNTIME_SOURCE_PATH: 24,
         SCENE_MATRIX_DRILLDOWN_RELEASE_ITEMS_SOURCE_PATH: 2,
         SCENE_MATRIX_DRILLDOWN_EXPORT_SCRIPT_SOURCE_PATH: 3,
         SCENE_MATRIX_DRILLDOWN_TEST_SOURCE_PATH: 2,

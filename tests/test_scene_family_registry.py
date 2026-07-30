@@ -10,7 +10,7 @@ from src.config.scene_family_registry import (
     get_planned_scene_family,
     list_planned_scene_families,
 )
-from src.ui.panels.workbench.scene_presets import (
+from src.config.scene_presets import (
     SCENE_FACTORIES,
     SCENE_META_MAP,
     create_scene,

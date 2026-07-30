@@ -61,8 +61,8 @@ EXPECTED_SCENE_MATRIX_DASHBOARD_AGGREGATE_COUNTS: dict[str, int] = {
     "request_cell_count": 53,
     "request_cell_pack_link_count": 57,
     "high_frequency_completeness_ready_pack_count": 12,
-    "task_lexicon_task_count": 29,
-    "task_lexicon_phrase_count": 31,
+    "task_lexicon_task_count": 30,
+    "task_lexicon_phrase_count": 32,
     "task_lexicon_negative_task_count": 1,
     "task_lexicon_issue_count": 0,
     "ambiguous_boundary_count": 6,
@@ -285,11 +285,11 @@ EXPECTED_SCENE_MATRIX_DASHBOARD_AGGREGATE_COUNTS: dict[str, int] = {
     "material_repair_flow_count": 11,
     "material_repair_flow_ready_count": 11,
     "material_repair_flow_capability_count": 33,
-    "material_repair_flow_signal_count": 35,
+    "material_repair_flow_signal_count": 36,
     "material_repair_flow_target_type_count": 8,
     "material_repair_flow_runtime_surface_count": 21,
-    "material_repair_flow_ui_surface_count": 19,
-    "material_repair_flow_test_evidence_count": 26,
+    "material_repair_flow_ui_surface_count": 16,
+    "material_repair_flow_test_evidence_count": 25,
     "material_repair_flow_covered_pack_count": 10,
     "material_repair_flow_covered_family_count": 15,
     "material_repair_flow_issue_count": 0,
@@ -966,7 +966,7 @@ def _assert_scene_matrix_dashboard_aggregate_rows(report, rows):
     assert "answer_sheet" in exam.delivery_preset_ids
     assert exam.fixed_layout_profile_channel_count == 2
     assert exam.report_artifact_drilldown_channel_count == 10
-    assert exam.delivery_content_visibility_rule_count == 20
+    assert exam.delivery_content_visibility_rule_count == 24
     assert exam.delivery_structured_intermediate_preset_count == 5
     assert exam.delivery_execution_channel_count >= 5
     assert {"json", "xlsx"}.issubset(set(exam.input_structured_formats))
@@ -1236,8 +1236,8 @@ def test_scene_matrix_dashboard_profiled_count_entries_require_profile_fields():
     entries = _dashboard_profiled_count_entries(
         SCENE_MATRIX_DASHBOARD_TASK_LEXICON_COUNT_PROFILE,
         {
-            "task_count": 29,
-            "phrase_count": 31,
+            "task_count": 30,
+            "phrase_count": 32,
             "negative_task_count": 1,
             "issue_count": 0,
             "missing_source_evidence_count": 99,
@@ -1245,8 +1245,8 @@ def test_scene_matrix_dashboard_profiled_count_entries_require_profile_fields():
     )
 
     assert entries == {
-        "task_lexicon_task_count": 29,
-        "task_lexicon_phrase_count": 31,
+        "task_lexicon_task_count": 30,
+        "task_lexicon_phrase_count": 32,
         "task_lexicon_negative_task_count": 1,
         "task_lexicon_issue_count": 0,
     }
@@ -1255,8 +1255,8 @@ def test_scene_matrix_dashboard_profiled_count_entries_require_profile_fields():
         _dashboard_profiled_count_entries(
             SCENE_MATRIX_DASHBOARD_TASK_LEXICON_COUNT_PROFILE,
             {
-                "task_count": 29,
-                "phrase_count": 31,
+                "task_count": 30,
+                "phrase_count": 32,
                 "negative_task_count": 1,
             },
         )

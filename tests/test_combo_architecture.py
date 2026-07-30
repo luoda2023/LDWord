@@ -16,6 +16,7 @@ from src.shared.ui.sizing import resolved_control_height
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.styled_spin_box import StyledSpinBox
 from src.shared.ui.theme import LIGHT, get_theme
+from src.shared.ui.typography_policy import TextRole, font_for_role
 from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
 
 
@@ -30,6 +31,62 @@ def test_styled_combo_box_uses_combo_tokens():
     assert f"padding-right: {LIGHT.combo_arrow_zone_width}px;" in qss
     assert f"width: {LIGHT.combo_arrow_zone_width}px;" in qss
     assert f"border-radius: {LIGHT.input_radius}px;" in qss
+    assert "font-size:" not in qss
+    assert "font-weight:" not in qss
+    assert "font-family:" not in qss
+
+
+def test_styled_combo_box_uses_one_semantic_font_for_control_popup_and_editor():
+    app = _app()
+    combo = StyledComboBox()
+    expected = font_for_role(TextRole.BODY)
+
+    try:
+        combo.setEditable(True)
+        app.processEvents()
+
+        editor = combo.lineEdit()
+        assert editor is not None
+        for actual in (combo.font(), combo.view().font(), editor.font()):
+            assert tuple(actual.families()) == tuple(expected.families())
+            assert actual.pixelSize() == expected.pixelSize()
+            assert actual.weight() == expected.weight()
+            assert actual.hintingPreference() == expected.hintingPreference()
+
+        assert "font-size:" not in combo.styleSheet()
+        assert "font-weight:" not in combo.styleSheet()
+        assert "font-size:" not in combo.view().styleSheet()
+        assert "font-weight:" not in combo.view().styleSheet()
+        assert "font-size:" not in editor.styleSheet()
+        assert "font-weight:" not in editor.styleSheet()
+    finally:
+        combo.close()
+        combo.deleteLater()
+
+
+def test_styled_combo_box_special_text_role_propagates_without_qss_override():
+    app = _app()
+    combo = StyledComboBox(text_role=TextRole.CAPTION)
+    expected = font_for_role(TextRole.CAPTION)
+
+    try:
+        combo.setEditable(True)
+        app.processEvents()
+
+        editor = combo.lineEdit()
+        assert editor is not None
+        assert combo.font().pixelSize() == expected.pixelSize()
+        assert combo.view().font().pixelSize() == expected.pixelSize()
+        assert editor.font().pixelSize() == expected.pixelSize()
+
+        combo.set_text_role(TextRole.BODY)
+        body = font_for_role(TextRole.BODY)
+        assert combo.font().pixelSize() == body.pixelSize()
+        assert combo.view().font().pixelSize() == body.pixelSize()
+        assert editor.font().pixelSize() == body.pixelSize()
+    finally:
+        combo.close()
+        combo.deleteLater()
 
 
 def test_styled_combo_box_arrow_metrics_are_tokenized():
@@ -53,6 +110,21 @@ def test_styled_combo_box_full_width_mode_uses_expanding_layout_policy():
         assert combo.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
         assert combo.sizePolicy().verticalPolicy() == QSizePolicy.Fixed
         assert combo.sizeAdjustPolicy() == QComboBox.AdjustToMinimumContentsLengthWithIcon
+    finally:
+        combo.close()
+        combo.deleteLater()
+
+
+def test_styled_combo_box_titlebar_mode_uses_compact_chrome_variant():
+    _app()
+    combo = StyledComboBox()
+    try:
+        combo.set_titlebar_mode(True)
+
+        assert combo.property("titlebarMode") == "true"
+        assert combo.cursor().shape() == Qt.PointingHandCursor
+        assert '[titlebarMode="true"]' in combo.styleSheet()
+        assert "min-height: 28px;" in combo.styleSheet()
     finally:
         combo.close()
         combo.deleteLater()
@@ -157,6 +229,8 @@ def test_styled_combo_box_editor_stylesheet_keeps_native_text_visible():
     assert f"color: {LIGHT.text_hint};" in qss
     assert "QLineEdit::placeholder" in qss
     assert "color: transparent;" not in qss
+    assert "font-size:" not in qss
+    assert "font-weight:" not in qss
 
 
 def test_combo_and_spin_share_embedded_editor_geometry_helper():

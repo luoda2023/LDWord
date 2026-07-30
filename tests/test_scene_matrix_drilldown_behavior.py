@@ -545,8 +545,11 @@ def test_scene_summary_projection_exposes_matrix_drilldown_items():
     assert "Formula/output/watermark" in items["scene_matrix_drilldown"].detail
     assert "Control runtime consistency" in items["scene_matrix_drilldown"].detail
     assert "Maturity upgrade" in items["scene_matrix_drilldown"].detail
-    assert items["scene_matrix_drilldown_sources"].value == "107/107 ready"
+    assert items["scene_matrix_drilldown_sources"].label == "Static source markers"
+    assert items["scene_matrix_drilldown_sources"].value == "107/107 present"
+    assert items["scene_matrix_drilldown_sources"].variant == "info"
     assert "0 missing" in items["scene_matrix_drilldown_sources"].detail
+    assert "not runtime verification" in items["scene_matrix_drilldown_sources"].detail
     assert "scene_ambiguity_clarification_ui_audit" in (
         items["scene_matrix_drilldown_sources"].detail
     )

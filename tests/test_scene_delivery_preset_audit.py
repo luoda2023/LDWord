@@ -41,6 +41,12 @@ def test_scene_delivery_preset_audit_tracks_high_frequency_family_delivery():
     assert report.issue_count == 0
     assert report.warning_count == 0
     assert report.missing_source_evidence_count == 0
+    source_evidence = {
+        evidence.source_id: evidence for evidence in report.source_evidence
+    }
+    assert source_evidence[
+        "report_writer_delivery_evidence"
+    ].source_path == "src/product_report_writer.py"
 
     project = rows["project_application"]
     assert project.planned_delivery_preset_ids == (

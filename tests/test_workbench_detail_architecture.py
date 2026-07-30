@@ -23,9 +23,9 @@ from src.ui.panels.workbench.feature_detail_panes import (
     FormulaDetailPane,
     TableChartDetailPane,
 )
-from src.ui.panels.workbench.scene_presets import create_bidding_scene
+from src.config.scene_presets import create_bidding_scene
 from src.ui.panels.workbench.state import ExecutionResultState
-from src.ui.adapters.workbench_execution_adapter import WorkbenchIssueItem
+from src.ui.adapters.workbench_issue_models import WorkbenchIssueItem
 import src.ui.panels.workbench.panel_v2 as panel_v2_module
 from src.ui.panels.workbench.panel_v2 import WorkbenchPanel
 
@@ -117,9 +117,10 @@ def test_workbench_panel_keeps_current_detail_alias_in_sync():
     try:
         assert panel._current_detail is panel._details.current_detail
 
-        panel._nav_rail.select_card("config_management")
+        panel._quick_execution_detail.set_feature_enabled("content_fill", True)
+        panel._nav_rail.select_card("content_fill")
 
-        assert panel._current_detail is panel._config_management_detail
+        assert panel._current_detail is panel._content_fill_detail
         assert panel._current_detail is panel._details.current_detail
     finally:
         panel.close()
@@ -143,8 +144,9 @@ def test_workbench_panel_routes_issue_repair_targets_to_existing_surfaces(monkey
         panel._open_issue_repair_target("field", "company_name")
 
         assert bridge.current_material_repair_target() == ("field", "company_name")
-        assert navigated[-1] == _panel_index("assets")
-        assert intents[-1]["panel_id"] == "assets"
+        assert panel._current_detail is panel._content_fill_detail
+        assert navigated == []
+        assert intents == []
 
         panel._open_issue_repair_target(
             "profile_field",
@@ -163,8 +165,9 @@ def test_workbench_panel_routes_issue_repair_targets_to_existing_surfaces(monkey
             "field",
             "employee_id",
         )
-        assert navigated[-1] == _panel_index("assets")
-        assert intents[-1]["panel_id"] == "assets"
+        assert panel._current_detail is panel._content_fill_detail
+        assert navigated == []
+        assert intents == []
 
         question_target = json.dumps(
             {
@@ -195,8 +198,9 @@ def test_workbench_panel_routes_issue_repair_targets_to_existing_surfaces(monkey
             "question_figure_item",
             question_target,
         )
-        assert navigated[-1] == _panel_index("assets")
-        assert intents[-1]["panel_id"] == "assets"
+        assert panel._current_detail is panel._content_fill_detail
+        assert navigated == []
+        assert intents == []
 
         replacement_candidate = {
             "confirmation_status": "ready",
@@ -224,8 +228,9 @@ def test_workbench_panel_routes_issue_repair_targets_to_existing_surfaces(monkey
         assert candidate_profile_name == "Exam A"
         assert candidate["repair_target_key"] == question_target
         assert candidate["replacement_source_path"] == "C:/exam/question_2_expected.png"
-        assert navigated[-1] == _panel_index("assets")
-        assert intents[-1]["panel_id"] == "assets"
+        assert panel._current_detail is panel._content_fill_detail
+        assert navigated == []
+        assert intents == []
 
         panel._open_issue_repair_target("template_style_field", "body.font_name")
 
@@ -271,10 +276,11 @@ def test_workbench_panel_routes_issue_repair_targets_to_existing_surfaces(monkey
         assert conflict_payload["replacement_source_path"] == (
             "C:/exam/question_2_expected_a.png"
         )
-        assert navigated[-1] == _panel_index("assets")
+        assert panel._current_detail is panel._content_fill_detail
 
-        panel._nav_rail.select_card("config_management")
-        assert panel._current_detail is panel._config_management_detail
+        panel._quick_execution_detail.set_feature_enabled("content_fill", True)
+        panel._nav_rail.select_card("content_fill")
+        assert panel._current_detail is panel._content_fill_detail
         before_count = len(navigated)
         panel._open_issue_repair_target(
             "question_figure_batch_apply_transaction_task_summary",
@@ -354,55 +360,7 @@ def test_workbench_panel_routes_issue_repair_targets_to_existing_surfaces(monkey
         panel.close()
 
 
-def test_workbench_panel_round_trips_active_issue_from_repair_navigation():
-    _app()
-    bridge = PanelBridge()
-    panel = WorkbenchPanel(bridge)
-    intents: list[object] = []
-    bridge.navigate_to_intent.connect(intents.append)
-    try:
-        detail = panel._quick_execution_detail
-        detail._apply_scene(create_bidding_scene())
-        detail.set_document_path("C:/docs/bid.docx")
-        detail.set_issue_queue_filter("material_asset")
-
-        assert detail.current_filtered_issue_items()[0].issue_id == (
-            "material.assets.missing"
-        )
-
-        detail._issue_action_btn.click()
-
-        assert intents[-1]["panel_id"] == "assets"
-        assert intents[-1]["active_issue_id"] == "material.assets.missing"
-        assert intents[-1]["payload"]["issue_item_id"] == "material.assets.missing"
-
-        detail.set_issue_queue_filter("material_field")
-        assert detail.current_filtered_issue_items()[0].issue_id == (
-            "material.fields.missing"
-        )
-
-        panel.handle_navigation_intent(
-            {
-                "panel_id": "workbench",
-                "card_id": "quick_execute",
-                "active_issue_id": "material.assets.missing",
-                "payload": {"issue_item_id": "material.assets.missing"},
-            }
-        )
-
-        assert panel._nav_rail.selected_card_id() == "quick_execute"
-        assert detail.current_active_issue_id() == "material.assets.missing"
-        assert detail.current_filtered_issue_items()[0].issue_id == (
-            "material.assets.missing"
-        )
-        assert detail._issue_list.currentItem().data(Qt.UserRole) == (
-            "material.assets.missing"
-        )
-    finally:
-        panel.close()
-
-
-def test_workbench_panel_auto_rechecks_config_issue_on_scene_dirty():
+def test_workbench_panel_auto_rechecks_compact_gate_on_scene_dirty():
     _app()
     bridge = PanelBridge()
     panel = WorkbenchPanel(bridge)
@@ -410,11 +368,11 @@ def test_workbench_panel_auto_rechecks_config_issue_on_scene_dirty():
         detail = panel._quick_execution_detail
         detail._apply_scene(create_bidding_scene())
         detail.set_document_path("C:/docs/bid.docx")
-        detail.set_issue_queue_filter("material_asset")
 
-        assert detail.current_filtered_issue_items()[0].issue_id == (
-            "material.assets.missing"
-        )
+        before = detail.current_execution_gate_decision()
+        assert before.can_run is False
+        assert before.blocking_reasons
+        assert detail._exec_status_label.text() == "无法生成：缺少必需资料"
 
         detail._material_context = MaterialExecutionContext(
             entity_data={
@@ -430,42 +388,11 @@ def test_workbench_panel_auto_rechecks_config_issue_on_scene_dirty():
 
         bridge.mark_scene_dirty()
 
-        assert detail.current_issue_items() == []
-        assert detail._issue_panel.isHidden() is True
-    finally:
-        panel.close()
-
-
-def test_workbench_panel_does_not_auto_clear_execution_result_issues_on_dirty():
-    _app()
-    bridge = PanelBridge()
-    panel = WorkbenchPanel(bridge)
-    try:
-        detail = panel._quick_execution_detail
-        result_issue = WorkbenchIssueItem(
-            issue_id="execution.template.warning",
-            category="batch_issue",
-            severity="warning",
-            title="执行结果问题",
-            summary="模板字段仍需确认",
-            repair_target_type="template_style_field",
-            repair_target_key="body.font_name",
-            owner="template",
-        )
-        detail.set_execution_result(
-            ExecutionResultState(
-                status="partial_success",
-                summary="部分完成",
-                issue_items=[result_issue],
-            )
-        )
-
-        bridge.mark_template_dirty()
-
-        assert [item.issue_id for item in detail.current_issue_items()] == [
-            "execution.template.warning"
-        ]
-        assert detail._issue_queue_source == "execution_result"
+        after = detail.current_execution_gate_decision()
+        assert after.state == "ready"
+        assert detail._exec_status_label.text() == "可生成"
+        assert detail._execute_btn.isEnabled() is True
+        assert detail._material_repair_btn.isHidden() is True
     finally:
         panel.close()
 
@@ -477,19 +404,17 @@ def test_workbench_panel_applies_external_scene_to_quick_execution_detail():
     try:
         scene = SceneWorkspace(scene_id="external_sync", template_id="default")
         scene.strict_mode = False
-        scene.format_scope.sections = {
-            "body": True,
-            "references": False,
-            "appendix": True,
-        }
 
         panel.on_scene_changed(scene)
 
         detail = panel._quick_execution_detail
-        assert detail.current_scene() is scene
+        assert detail.current_scene() == scene
+        assert detail.current_scene() is not scene
         assert detail.current_scene_id() == "external_sync"
         assert detail.current_strategy() == "preserve"
         assert not hasattr(detail, "_zone_checks")
+        detail.current_scene().strict_mode = True
+        assert scene.strict_mode is False
     finally:
         panel.close()
 

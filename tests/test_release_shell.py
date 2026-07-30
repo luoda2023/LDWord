@@ -1,9 +1,42 @@
+import ast
+import json
 from pathlib import Path
 
-from scripts import engineering_gate
+from scripts import check_public_release, engineering_gate
 
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _required_lazy_shared_ui_hidden_imports() -> set[str]:
+    init_path = ROOT / "src" / "shared" / "ui" / "__init__.py"
+    init_tree = ast.parse(init_path.read_text(encoding="utf-8-sig"))
+    export_map: dict[str, tuple[str, str]] = {}
+    for node in init_tree.body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "_EXPORT_MAP"
+        ):
+            export_map = ast.literal_eval(node.value)
+            break
+
+    imported_names: set[str] = set()
+    for source_path in (ROOT / "src").rglob("*.py"):
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(source_tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "src.shared.ui":
+                imported_names.update(alias.name for alias in node.names)
+
+    missing_exports = imported_names.difference(export_map)
+    assert not missing_exports, (
+        "src.shared.ui package imports must resolve through _EXPORT_MAP: "
+        f"{sorted(missing_exports)}"
+    )
+    return {
+        f"src.shared.ui{export_map[name][0]}"
+        for name in imported_names
+    }
 
 
 def test_release_shell_files_exist():
@@ -126,6 +159,19 @@ def test_engineering_gate_ci_installs_dev_dependencies_from_pyproject():
     assert "pytest" in pyproject.lower()
 
 
+def test_engineering_gate_uses_explicit_low_dispute_ruff_rules():
+    ruff_commands = [
+        command
+        for command, _summarize_success in engineering_gate.BASELINE_COMMANDS
+        if command[1:3] == ("-m", "ruff")
+    ]
+
+    assert len(ruff_commands) == 1
+    command = ruff_commands[0]
+    assert command[3:6] == ("check", "--select", "E9,F63,F7,F82")
+    assert command[6:] == ("main.py", "scripts", "src", "tests")
+
+
 def test_ci_workflows_install_project_dev_dependency_profile():
     workflow_dir = ROOT / ".github" / "workflows"
     workflows = {
@@ -155,6 +201,9 @@ def test_windows_package_script_builds_pyside6_release_and_copies_notices():
     assert '--hidden-import PySide6.QtWidgets' in script
     assert '--hidden-import PySide6.QtSvg' in script
     assert '--hidden-import shiboken6' in script
+    assert '--hidden-import src.ui.panels.theme_panel' in script
+    assert '--hidden-import src.ui.panels.workbench.batch_generation_detail' in script
+    assert '--hidden-import src.ui.panels.workbench.batch_generation_source_area' in script
     assert '--exclude-module PySide6.QtGraphs' in script
     assert '--exclude-module PySide6.QtGraphsWidgets' in script
     assert '--exclude-module PySide6.QtHttpServer' in script
@@ -170,6 +219,31 @@ def test_windows_package_script_builds_pyside6_release_and_copies_notices():
     assert '-m pip install pyinstaller' not in script
     assert "PyInstaller is missing in .venv" in script
     assert "THIRD_PARTY_NOTICES.md" in script
+    assert "scripts\\build_license_bundle.py" in script
+    assert '--add-data "licenses;licenses"' in script
+    assert "scripts\\stage_release_config_library.py" in script
+    assert '--add-data "build\\release_config_library;config_library"' in script
+    assert '--add-data "config_library;config_library"' not in script
+    assert "--exclude-module PIL.AvifImagePlugin" in script
+    assert "--exclude-module PIL._avif" in script
+    assert '--add-data "count_profiles;count_profiles"' in script
+    assert '--collect-submodules src.shared.ui' not in script
+    packaged_shared_ui_hidden_imports = {
+        stripped.split()[1]
+        for line in script.splitlines()
+        if (stripped := line.strip()).startswith(
+            "--hidden-import src.shared.ui."
+        )
+    }
+    assert (
+        packaged_shared_ui_hidden_imports
+        == _required_lazy_shared_ui_hidden_imports()
+    )
+    assert '--collect-submodules src.services.material_attachments' not in script
+    assert '--hidden-import src.services.material_attachments.processing' in script
+    assert '--hidden-import src.config.entity_archive_codec' in script
+    assert '--hidden-import src.config.entity_bundle' in script
+    assert 'xcopy /E /I /Y "licenses"' in script
     assert "LICENSE" in script
     assert "defaults" in script
 
@@ -197,11 +271,16 @@ def test_public_release_checker_and_readme_document_mit_source_release():
 
     assert "--strict" in checker
     assert "THIRD_PARTY_NOTICES.md" in checker
+    assert "licenses/manifest.json" in checker
     assert "README.md" in checker
+    assert "exam_masters/user" in checker
+    assert "config_library/plans/*/user" in checker
+    assert "config_library/material_packages/*/user" in checker
 
     assert "PySide6" in readme
     assert "MIT" in readme
     assert "THIRD_PARTY_NOTICES.md" in readme
+    assert "licenses/manifest.json" in readme
     assert ".\\install_env.bat" in readme
     assert ".\\package_release.bat" in readme
     assert ".\\check_public_release.bat" in readme
@@ -209,7 +288,119 @@ def test_public_release_checker_and_readme_document_mit_source_release():
 
     assert "MIT" in checklist
     assert "THIRD_PARTY_NOTICES.md" in checklist
+    assert "Lucide" in checklist
+    assert "Feather" in checklist
     assert "clean_public_release.bat" in checklist
+
+
+def test_public_release_checker_flags_user_resource_pools_without_blocking_builtins(
+    tmp_path,
+):
+    for rel in check_public_release.REQUIRED_DOCS:
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("placeholder", encoding="utf-8")
+    license_text = tmp_path / "licenses" / "fixture-license.txt"
+    license_text.write_text("fixture license", encoding="utf-8")
+    components = [
+        {
+            "id": component_id,
+            "name": component_id,
+            "purpose": "fixture",
+            "license_expression": "MIT",
+            "python_distributions": [],
+            "documents": [
+                {
+                    "title": "fixture",
+                    "path": "fixture-license.txt",
+                }
+            ],
+        }
+        for component_id in (
+            "python-runtime",
+            "qt-for-python",
+            "lucide-icons",
+            "openssl",
+        )
+    ]
+    components[1].update(
+        {
+            "license_expression": "LGPL-3.0-only",
+            "declared_license_expression": "LGPL-3.0-only OR GPL-3.0-only",
+            "documents": [
+                {
+                    "title": "LGPLv3",
+                    "license_id": "LGPL-3.0-only",
+                    "path": "fixture-license.txt",
+                },
+                {
+                    "title": "GPLv3",
+                    "license_id": "GPL-3.0-only",
+                    "path": "fixture-license.txt",
+                },
+            ],
+        }
+    )
+    (tmp_path / "licenses" / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "component_count": len(components),
+                "components": components,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "requirements.txt").write_text("", encoding="utf-8")
+    (tmp_path / "THIRD_PARTY_NOTICES.md").write_text(
+        "Lucide Feather Qt for Python Alavette Flow",
+        encoding="utf-8",
+    )
+
+    user_dirs = [
+        tmp_path / "exam_masters" / "user",
+        tmp_path / "config_library" / "plans" / "exam" / "user",
+        tmp_path / "config_library" / "templates" / "official" / "user",
+        tmp_path / "config_library" / "masters" / "exam" / "user",
+        tmp_path / "config_library" / "material_packages" / "official" / "user",
+    ]
+    builtin_dirs = [
+        tmp_path / "exam_masters" / "builtin",
+        tmp_path / "config_library" / "plans" / "exam" / "builtin",
+        tmp_path / "config_library" / "templates" / "official" / "builtin",
+        tmp_path / "config_library" / "masters" / "exam" / "builtin",
+        tmp_path / "config_library" / "material_packages" / "official" / "builtin",
+    ]
+    for directory in (*user_dirs, *builtin_dirs):
+        directory.mkdir(parents=True)
+        (directory / ".keep").write_text("", encoding="utf-8")
+
+    errors, warnings = check_public_release.scan_release_tree(tmp_path)
+    warning_text = "\n".join(warnings)
+
+    assert errors == []
+    assert "Runtime/user path should not be published: exam_masters/user" in warning_text
+    assert (
+        "Runtime/user path should not be published: config_library/plans/exam/user"
+        in warning_text
+    )
+    assert (
+        "Runtime/user path should not be published: config_library/templates/official/user"
+        in warning_text
+    )
+    assert (
+        "Runtime/user path should not be published: config_library/masters/exam/user"
+        in warning_text
+    )
+    assert (
+        "Runtime/user path should not be published: config_library/material_packages/official/user"
+        in warning_text
+    )
+    assert "exam_masters/builtin" not in warning_text
+    assert "config_library/plans/exam/builtin" not in warning_text
+    assert "config_library/templates/official/builtin" not in warning_text
+    assert "config_library/masters/exam/builtin" not in warning_text
+    assert "config_library/material_packages/official/builtin" not in warning_text
 
 
 def test_gitignore_covers_local_release_artifacts():
@@ -223,6 +414,11 @@ def test_gitignore_covers_local_release_artifacts():
         "demo_crash.log",
         "alavette_form.log",
         "*_new.docx",
+            "/exam_masters/",
+        "config_library/plans/*/user/",
+        "config_library/templates/*/user/",
+        "config_library/masters/*/user/",
+        "config_library/material_packages/*/user/",
         ".pytest_cache/",
     ]:
         assert entry in gitignore

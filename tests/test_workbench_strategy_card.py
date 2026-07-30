@@ -46,7 +46,7 @@ def test_strategy_summary_state_exposes_homepage_safe_fields():
     assert state.name == "未命名策略"
     assert state.source_type == "default"
     assert state.template_label == "未绑定模板"
-    assert state.scene_label == "未绑定场景"
+    assert state.scene_label == "未绑定方案"
 
 
 def test_strategy_card_renders_strategy_summary_labels():
@@ -65,9 +65,9 @@ def test_strategy_card_renders_strategy_summary_labels():
 
     assert card._name_value.text() == "策略: 论文标准"
     assert card._template_value.text() == "模板: thesis.yaml"
-    assert card._scene_value.text() == "场景: 结构优先"
+    assert card._scene_value.text() == "方案: 结构优先"
     assert card._modules_value.text() == "模块数: 3"
-    assert card._source_value.text() == "来源: 场景"
+    assert card._source_value.text() == "来源: 方案"
     assert card._strict_mode_value.text() == "严格模式: 是"
 
 
@@ -76,7 +76,7 @@ def test_strategy_card_renders_strategy_summary_labels():
     [
         ("default", "默认"),
         ("template", "模板"),
-        ("scene", "场景"),
+        ("scene", "方案"),
     ],
 )
 def test_strategy_card_maps_internal_source_type_for_display(source_type, expected_source):
@@ -95,7 +95,7 @@ def test_strategy_card_uses_neutral_strict_mode_text_when_scene_unbound():
     state = StrategySummaryState(
         source_type="template",
         strict_mode=True,
-        scene_label="未绑定场景",
+        scene_label="未绑定方案",
     )
 
     card.set_state(state)
@@ -134,7 +134,7 @@ def test_workbench_strategy_adapter_preserves_template_when_scene_missing():
 
     assert summary.name == "未命名策略"
     assert summary.template_label == "论文模板"
-    assert summary.scene_label == "未绑定场景"
+    assert summary.scene_label == "未绑定方案"
     assert summary.enabled_module_count == 0
     assert summary.source_type == "template"
     assert summary.strict_mode is True
@@ -178,5 +178,5 @@ def test_workbench_strategy_adapter_strips_whitespace_before_fallback_selection(
 
     assert summary.template_label == "未绑定模板"
     assert summary.name == "未命名策略"
-    assert summary.scene_label == "通用场景"
+    assert summary.scene_label == "通用方案"
     assert summary.source_type == "scene"

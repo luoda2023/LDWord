@@ -94,7 +94,9 @@ def test_control_contract_registry_locks_pairing_units_and_disabled_rules():
 
     assert special.unit_set == ("chars", "pt", "cm")
     assert "mode=none" in special.disabled_state_rule
-    assert "none/first_line/hanging" in special.scene_surface
+    assert special.owner_layer == "template"
+    assert special.template_surface == "TemplatePanel StyleDetail"
+    assert special.scene_surface == ""
 
     assert line.unit_set == ("exact", "single", "one_half", "double", "multiple")
     assert "single/one_half/double" in line.disabled_state_rule

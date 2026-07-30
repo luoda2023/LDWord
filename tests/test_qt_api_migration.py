@@ -31,7 +31,9 @@ def test_release_notices_clarify_mit_source_but_not_relicense_dependencies():
 
     assert "MIT" in notices
     assert "PySide6" in notices
-    assert "第三方依赖" in notices
+    assert "项目自身代码：MIT" in notices
+    assert "第三方软件、图标和二进制：保留各自原始许可" in notices
+    assert "PySide6、Shiboken6 与 Qt 并非 MIT" in notices
 
 
 def test_project_license_file_exists_and_is_mit():

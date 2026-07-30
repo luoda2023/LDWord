@@ -146,8 +146,8 @@ def test_template_panel_page_setup_edit_updates_preview_and_dirty_state():
         assert panel._page_detail._restore_entry_btn.isEnabled() is True
         assert panel._page_detail._save_btn.isEnabled() is True
         assert bridge.is_template_dirty() is True
-        assert emitted
-        assert emitted[-1].page_setup.margin.top_cm == 4.5
+        assert emitted == []
+        assert bridge.current_template().page_setup.margin.top_cm != 4.5
     finally:
         panel.close()
         app.processEvents()
@@ -409,6 +409,10 @@ def test_template_panel_page_save_overwrites_current_file_and_clears_dirty(tmp_p
     panel = TemplatePanel(bridge)
     monkeypatch.setattr(Toast, "show_success", staticmethod(lambda *args, **kwargs: None))
     monkeypatch.setattr(Toast, "show_error", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(
+        "src.ui.panels.template_panel.confirm",
+        lambda *args, **kwargs: True,
+    )
 
     try:
         target = tmp_path / "imported_template.json"
@@ -435,7 +439,7 @@ def test_template_panel_page_save_overwrites_current_file_and_clears_dirty(tmp_p
         assert reloaded.page_setup.margin.top_cm == 4.2
         assert bridge.is_template_dirty() is False
         assert panel._page_detail._save_btn.isEnabled() is False
-        assert "已保存" in panel._io_detail._status.text()
+        assert "已保存" in panel._last_template_management_status
     finally:
         panel.close()
         app.processEvents()
@@ -447,12 +451,17 @@ def test_template_panel_page_save_uses_current_path_for_library_templates(tmp_pa
     panel = TemplatePanel(bridge)
     monkeypatch.setattr(Toast, "show_success", staticmethod(lambda *args, **kwargs: None))
     monkeypatch.setattr(Toast, "show_error", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(
+        "src.ui.panels.template_panel.confirm",
+        lambda *args, **kwargs: True,
+    )
 
     try:
         target = tmp_path / "library_template.json"
         save_template(panel._current_template, target)
         panel._current_template_path = str(target)
         panel._current_template_source = "library"
+        panel._current_template_source_type = "user"
 
         panel._page_detail._page_inputs["top_cm"].set_value(4.6, "cm")
         app.processEvents()

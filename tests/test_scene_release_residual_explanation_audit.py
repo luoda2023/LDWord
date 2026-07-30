@@ -75,6 +75,28 @@ def test_release_residual_explanation_covers_all_visible_residuals():
     assert all(row.summary_marker_present for row in rows.values())
 
 
+def test_release_residual_explanation_has_no_dashboard_builder_back_edge():
+    source = (
+        ROOT / "src/config/scene_release_residual_explanation_audit.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from src.config.scene_matrix_dashboard import" not in source
+    assert "build_scene_matrix_dashboard()" not in source
+
+    mismatched = build_scene_release_residual_explanation_audit_report(
+        project_root=ROOT,
+        dashboard_warning_count=2,
+    )
+    warning_projection = next(
+        row
+        for row in mismatched.rows
+        if row.residual_id == "dashboard_warning_projection"
+    )
+    assert mismatched.status == "failed"
+    assert warning_projection.status == "uncovered"
+    assert "count_mismatch" in warning_projection.issue_ids
+
+
 def test_release_gate_includes_release_residual_explanations(tmp_path, capsys):
     payload = build_scene_matrix_release_gate_payload(tmp_path)
 

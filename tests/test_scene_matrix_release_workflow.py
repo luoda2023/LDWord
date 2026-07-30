@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -196,6 +197,26 @@ def test_scene_matrix_release_gate_cli_stays_thin_and_delegates_payload_builder(
 
     assert "def build_scene_matrix_release_gate_payload" in payload_module
     assert "from src.config." in payload_module
+
+
+def test_scene_matrix_release_gate_json_stdout_is_code_page_safe(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    import scripts.verify_scene_matrix_release_gate as release_gate
+
+    payload = {"status": "passed", "unicode_marker": "✓ 中文"}
+    monkeypatch.setattr(
+        release_gate,
+        "build_scene_matrix_release_gate_payload",
+        lambda _output_dir: payload,
+    )
+
+    assert release_gate.main(["--json", "--output-dir", str(tmp_path)]) == 0
+    output = capsys.readouterr().out
+    output.encode("ascii")
+    assert json.loads(output) == payload
 
 
 def test_scene_matrix_release_gate_human_summary_keeps_source_markers_visible():

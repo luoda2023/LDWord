@@ -16,6 +16,7 @@ class StubHeadingRecognition(BaseModule):
         description="Heading recognition",
         category="structure",
         provides=("doc_tree", "heading_map"),
+        execution_phase="semantics",
     )
 
     def apply(self, doc, config, tracker, context):
@@ -29,6 +30,8 @@ class StubSoftConsumer(BaseModule):
         category="basic",
         soft_after=("heading_recognition",),
         soft_consumes=("doc_tree",),
+        scope_behavior="document_level",
+        execution_phase="semantics",
     )
 
     def apply(self, doc, config, tracker, context):

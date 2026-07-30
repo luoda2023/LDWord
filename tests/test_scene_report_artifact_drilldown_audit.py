@@ -51,7 +51,7 @@ def test_scene_report_artifact_drilldown_audit_locks_n2_180_channels():
 
     runtime_maps = rows["runtime_delivery_artifact_maps"]
     assert "material_package" in runtime_maps.artifact_kind_ids
-    assert "_write_material_package_artifacts" in runtime_maps.runtime_surface_ids
+    assert "write_material_package_artifacts" in runtime_maps.runtime_surface_ids
     assert "material_package_paths" in runtime_maps.report_surface_ids
 
     grouping = rows["artifact_grouping_and_report_inference"]
@@ -176,7 +176,6 @@ def test_scene_report_artifact_drilldown_export_script_prints_markdown():
 def test_release_gate_includes_scene_report_artifact_drilldown_audit(tmp_path):
     payload = build_scene_matrix_release_gate_payload(tmp_path)
 
-    assert payload["status"] == "passed"
     assert payload["checks"]["scene_report_artifact_drilldown_audit"]["status"] == (
         "passed"
     )

@@ -6,9 +6,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.qt_api import QApplication
-from src.config.style_difference_projection import StyleDifferenceSummaryProjection
 from src.shared.engine.scene_sample_docx_builder import build_scene_sample_docx_library
-from src.shared.ui.style_difference_summary_slot import StyleDifferenceSummarySlot
 from src.shared.ui.style_management_block import StyleManagementBlock
 from src.shared.ui.style_presentation_envelope import StylePresentationEnvelope
 from src.shared.ui.style_receipt_slot_frame import StyleReceiptSlotFrame
@@ -30,7 +28,6 @@ def test_recent_run_panel_routes_style_receipt_through_style_object_projection()
     assert "apply_style_object_projection(style_projection)" in source
     assert "effective_style_source_envelope" not in source
     assert "_style_receipt_slot.apply_envelope" not in source
-    assert "_style_difference_slot.apply_projection" not in source
 
 
 def test_recent_run_panel_default_summary_text():
@@ -47,13 +44,10 @@ def test_recent_run_panel_default_summary_text():
             "execution_receipt_review"
         )
         assert panel._style_review_block.property("style_management_content_plan") == (
-            "difference|receipt"
+            "receipt"
         )
         assert isinstance(panel._style_receipt_slot, StyleReceiptSlotFrame)
         assert panel._style_receipt_slot.isHidden() is True
-        assert isinstance(panel._style_difference_slot, StyleDifferenceSummarySlot)
-        assert panel._style_difference_slot.isHidden() is True
-        assert panel._style_review_block.difference_slot is panel._style_difference_slot
         assert panel._style_review_block.receipt_slot is panel._style_receipt_slot
         assert panel._style_receipt_slot.property("style_management_mode") == (
             "execution_receipt_review"
@@ -138,7 +132,7 @@ def test_recent_run_panel_includes_style_source_summary():
         state = RecentRunState(
             status="success",
             summary="本次执行已完成",
-            style_source_summary="样式来源：本次按模板“默认格式”处理；参考文献（行距）使用场景独立样式。",
+            style_source_summary="样式来源：本次使用模板“默认格式”。",
         )
 
         panel.set_state(state)
@@ -149,45 +143,10 @@ def test_recent_run_panel_includes_style_source_summary():
         assert panel._style_receipt_slot.has_receipt() is True
         assert panel._style_receipt_row.isHidden() is False
         assert panel._style_receipt_row.summary_text() == (
-            "样式来源：本次按模板“默认格式”处理；参考文献（行距）使用场景独立样式。"
+            "样式来源：本次使用模板“默认格式”。"
         )
         assert panel._style_receipt_row.detail.text() == (
-            "本次按模板“默认格式”处理；参考文献（行距）使用场景独立样式。"
-        )
-        assert panel._style_difference_slot.isHidden() is True
-    finally:
-        panel.close()
-
-
-def test_recent_run_panel_includes_style_difference_summary():
-    _app()
-    panel = RecentRunPanel()
-    try:
-        state = RecentRunState(
-            status="success",
-            summary="本次执行已完成",
-            style_difference_summary=StyleDifferenceSummaryProjection(
-                template_status="模板基线",
-                current_status="参考文献 独立样式",
-                difference_status="已调整 1 项",
-                detail="不同：行距",
-                variant="warning",
-                section_count=1,
-                changed_section_count=1,
-            ),
-        )
-
-        panel.set_state(state)
-
-        assert panel._summary.text() == "本次执行已完成"
-        assert panel._style_review_block.isHidden() is False
-        assert panel._style_receipt_slot.isHidden() is True
-        assert panel._style_difference_slot.isHidden() is False
-        assert panel._style_difference_slot.property("style_difference_status") == (
-            "已调整 1 项"
-        )
-        assert panel._style_difference_slot.property("style_difference_detail") == (
-            "不同：行距"
+            "本次使用模板“默认格式”。"
         )
     finally:
         panel.close()
@@ -203,15 +162,14 @@ def test_recent_run_panel_accepts_style_source_envelope():
             style_source_envelope=StylePresentationEnvelope(
                 kind="execution_receipt",
                 title="样式来源",
-                summary="本次按模板“默认格式”处理",
-                detail="参考文献（行距）使用场景独立样式。",
+                summary="本次使用模板“默认格式”。",
             ),
         )
 
         panel.set_state(state)
 
         assert panel._style_receipt_row.summary_text() == (
-            "样式来源：本次按模板“默认格式”处理；参考文献（行距）使用场景独立样式。"
+            "样式来源：本次使用模板“默认格式”。"
         )
         assert panel._style_review_block.isHidden() is False
         assert panel._style_review_block.property("style_object_kind") == "execution_style"
@@ -238,7 +196,6 @@ def test_recent_run_panel_hides_receipt_slot_without_style_source():
         )
 
         assert panel._summary.text() == "本次执行已完成"
-        assert panel._style_difference_slot.isHidden() is True
         assert panel._style_receipt_row.isHidden() is True
         assert panel._style_receipt_slot.isHidden() is True
         assert panel._style_review_block.isHidden() is True

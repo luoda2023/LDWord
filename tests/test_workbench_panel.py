@@ -10,8 +10,8 @@ sys.path.insert(0, str(ROOT))
 from src.qt_api import QApplication
 from src.ui.bridge import PanelBridge
 from src.ui.main_window import MainWindow
-from src.ui.panel_registry import PANEL_SPECS
-from src.ui.panels.workbench_panel import WorkbenchPanel
+from src.ui.panel_registry import OPTIONAL_PANEL_SPECS, PANEL_SPECS, create_panel
+from src.ui.panels.workbench import WorkbenchPanel
 
 
 def _app():
@@ -25,23 +25,26 @@ def test_main_window_registers_real_workbench_panel():
         expected_index = next(i for i, spec in enumerate(PANEL_SPECS) if spec.id == "workbench")
         workbench_panel = window.panel_stack.widget(expected_index)
         assert isinstance(workbench_panel, WorkbenchPanel)
+        assert workbench_panel._batch_generation_detail is not None
+        assert "batch_generate" in workbench_panel._navigation_cards
     finally:
         window.close()
 
 
-def test_main_window_lazily_loads_non_initial_panels():
+def test_main_window_keeps_theme_in_core_navigation_and_assets_optional():
     _app()
     window = MainWindow()
     try:
-        theme_index = next(i for i, spec in enumerate(PANEL_SPECS) if spec.id == "theme")
+        panel_ids = tuple(spec.id for spec in PANEL_SPECS)
+        optional_ids = tuple(spec.id for spec in OPTIONAL_PANEL_SPECS)
+        assert "assets" not in panel_ids
+        assert optional_ids == ("assets",)
+        assert panel_ids[-2:] == ("theme", "preferences")
+        assert window.panel_stack.count() == len(PANEL_SPECS)
 
-        assert window.panel_stack.widget(theme_index).__class__.__name__ == "_PlaceholderPanel"
-        assert theme_index not in window._loaded_panel_indexes
-
-        window._show_panel(theme_index)
-
-        assert window.panel_stack.widget(theme_index).__class__.__name__ == "ThemePanel"
-        assert theme_index in window._loaded_panel_indexes
+        theme_index = panel_ids.index("theme")
+        theme_panel = window._show_panel(theme_index, allow_async=False)
+        assert theme_panel.__class__.__name__ == "ThemePanel"
     finally:
         window.close()
 
@@ -52,6 +55,53 @@ def test_workbench_panel_exposes_navigation_components():
     try:
         assert panel._nav_rail.selected_card_id() == "quick_execute"
         assert panel._current_detail is panel._quick_execution_detail
+        assert "batch_generate" in panel._navigation_cards
+        panel._nav_rail.select_card("batch_generate")
+        assert panel._current_detail is panel._batch_generation_detail
+    finally:
+        panel.close()
+
+
+def test_optional_main_window_adds_assets_without_changing_core_workbench():
+    _app()
+    window = MainWindow(include_optional_panels=True)
+    try:
+        workbench_panel = window.panel_stack.widget(0)
+        assert isinstance(workbench_panel, WorkbenchPanel)
+        assert workbench_panel._batch_generation_detail is not None
+        assert "batch_generate" in workbench_panel._navigation_cards
+        assert [spec.id for spec in window._panel_specs].count("theme") == 1
+        assert "assets" in {spec.id for spec in window._panel_specs}
+    finally:
+        window.close()
+
+
+def test_legacy_optional_feature_flag_cannot_hide_batch_generation():
+    _app()
+    panel = create_panel(
+        "workbench",
+        PanelBridge(),
+        include_optional_features=False,
+    )
+    try:
+        assert isinstance(panel, WorkbenchPanel)
+        assert panel._batch_generation_detail is not None
+        assert "batch_generate" in panel._navigation_cards
+    finally:
+        panel.close()
+
+
+def test_workbench_removes_ai_shortcut_from_quick_execution():
+    _app()
+    bridge = PanelBridge()
+    panel = WorkbenchPanel(bridge)
+    try:
+        ids = [spec.id for spec in PANEL_SPECS]
+        assert "assistant" in ids
+        assert "assistant_home" not in panel._detail_map
+        assert not hasattr(panel, "_assistant_panel")
+        assert not hasattr(panel._quick_execution_detail, "_assistant_btn")
+        assert not hasattr(panel._quick_execution_detail, "assistant_requested")
     finally:
         panel.close()
 

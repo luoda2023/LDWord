@@ -766,6 +766,7 @@ def test_report_writer_emits_scene_sample_fixture_manifest_evidence(tmp_path, mo
         elapsed=0.1,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
     write_markdown_report(
         result,
@@ -774,6 +775,7 @@ def test_report_writer_emits_scene_sample_fixture_manifest_evidence(tmp_path, mo
         elapsed=0.1,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
 
     payload = json.loads(report_json.read_text(encoding="utf-8"))
@@ -834,6 +836,7 @@ def test_report_writer_omits_scene_sample_fixture_manifest_when_missing(
         elapsed=0.1,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
     write_markdown_report(
         result,
@@ -842,6 +845,7 @@ def test_report_writer_omits_scene_sample_fixture_manifest_when_missing(
         elapsed=0.1,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
 
     payload = json.loads(report_json.read_text(encoding="utf-8"))
@@ -980,6 +984,8 @@ class _RiskyRewriteModule(BaseModule):
         name="risky_rewriter",
         description="Risky package rewriter",
         category="test",
+        execution_phase="format",
+        scope_behavior="document_level",
     )
 
     def apply(self, doc, config, tracker: ChangeTracker, context: PipelineContext) -> None:

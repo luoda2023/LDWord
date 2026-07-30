@@ -127,7 +127,7 @@ def test_release_governance_registry_defines_export_certificate_surface():
         "boundary_maturity_release_envelope_report",
         "release_residual_ratio_ledger_report",
         "maturity_upgrade_report",
-        "matrix_dashboard",
+        "dashboard_warning_count",
     )
 
 

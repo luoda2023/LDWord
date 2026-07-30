@@ -230,18 +230,30 @@ def test_panel_has_inspector_structure_without_override_actions():
     # Inspector structure should be present
     assert "_build_detail_panel_inspector" in panel_source
     assert "_build_result_strip" in panel_source
-    assert "_build_numbering_block" in panel_source
-    assert "_build_counter_block" in panel_source
-    assert "_build_title_spacing_block" in panel_source
-    assert "_build_output_reference_block" in panel_source
+    assert "_build_numbering_settings_block" in panel_source
+    assert "_build_numbering_block" not in panel_source
+    assert "_build_counter_block" not in panel_source
+    assert "_build_title_spacing_block" not in panel_source
+    assert "_build_output_reference_block" not in panel_source
     assert "_build_style_inspector" in panel_source
     assert "_build_expert_inspector" in panel_source
     assert "_style_toggle_btn" not in panel_source
     assert "_expert_toggle_btn" in panel_source
 
     detail_source = inspect.getsource(HeadingNumberingPanel._build_detail_panel_inspector)
-    assert detail_source.index("_build_counter_block") < detail_source.index("_build_output_reference_block")
-    assert detail_source.index("_build_output_reference_block") < detail_source.index("_build_title_spacing_block")
+    settings_source = inspect.getsource(HeadingNumberingPanel._build_numbering_settings_block)
+    numbering_source = inspect.getsource(HeadingNumberingPanel._build_numbering_section)
+    counter_source = inspect.getsource(HeadingNumberingPanel._build_counter_section)
+    assert detail_source.count("_build_numbering_settings_block") == 1
+    assert "编号设置" in settings_source
+    assert "格式与层级" in settings_source
+    assert "计数与衔接" in settings_source
+    assert "加入目录" in detail_source
+    assert "_toc_switch" in detail_source
+    assert "下级引用样式" in numbering_source
+    assert "编号后间隔" in counter_source
+    assert "[self._title_sep_row]" in counter_source
+    assert "_restart_trigger_grid" in counter_source
 
 
 def test_panel_no_minipage_preview():

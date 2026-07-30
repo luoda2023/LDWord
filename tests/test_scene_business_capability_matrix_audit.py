@@ -235,6 +235,9 @@ def test_business_capability_matrix_locks_n2_181_baseline():
         "ambiguous_decision",
     )
     assert rows["qualification_archive_packages"].missing_journey_groups == ()
+    assert "bidding_original_copy" in (
+        rows["qualification_archive_packages"].request_cell_ids
+    )
     assert "bidding_materials_missing_attachment_degraded" in (
         rows["qualification_archive_packages"].fixture_ids
     )

@@ -14,7 +14,6 @@ from src.config.template import StyleConfig
 from src.modules.structure.heading_recognition import HeadingRecognitionModule
 from src.modules.structure.toc import (
     TocModule,
-    _fallback_toc_section,
     _find_insert_position,
     _format_existing_toc_paragraphs,
     _insert_toc,
@@ -23,6 +22,7 @@ from src.modules.structure.toc import (
 from src.pipeline.context import PipelineContext
 from src.pipeline.tracker import ChangeTracker
 from src.shared.engine.field_builder import iter_field_instructions
+from src.shared.engine.document_structure_model import DocSection, DocTree
 from src.shared.engine.ooxml_ops import qn
 from src.shared.engine.toc_style_ops import sync_toc_styles
 
@@ -103,10 +103,14 @@ def test_legacy_toc_style_sync_still_accepts_raw_styles_dict():
 
 def test_toc_insert_position_prefers_existing_toc_section_from_doc_tree():
     doc = Document()
+    for _ in range(10):
+        doc.add_paragraph("x")
     context = SimpleNamespace(
-        heading_map={5: 1},
-        doc_tree=SimpleNamespace(
-            get_section=lambda section: SimpleNamespace(start_index=2, end_index=8) if section == "toc" else None
+        doc_tree=DocTree(
+            sections=[
+                DocSection("toc", 2, 8),
+                DocSection("body", 8, 10),
+            ]
         ),
     )
 
@@ -119,13 +123,11 @@ def test_toc_insert_position_uses_cover_end_before_first_heading():
         doc.add_paragraph("x")
 
     context = SimpleNamespace(
-        heading_map={4: 1},
-        doc_tree=SimpleNamespace(
-            get_section=lambda section: (
-                SimpleNamespace(start_index=0, end_index=3)
-                if section == "cover"
-                else None
-            )
+        doc_tree=DocTree(
+            sections=[
+                DocSection("cover", 0, 3),
+                DocSection("body", 3, 6),
+            ]
         ),
     )
 
@@ -191,18 +193,7 @@ def test_toc_formats_existing_paragraphs_using_doc_tree_range():
     assert title_outline.get(qn("w:val")) == "9"
 
 
-def test_toc_fallback_section_uses_title_and_entry_block():
-    doc = Document()
-    doc.add_paragraph("Cover")
-    doc.add_paragraph("Contents")
-    doc.add_paragraph("1 Intro\t1")
-    doc.add_paragraph("1.1 Background\t2")
-    doc.add_paragraph("Chapter 1 Intro")
-
-    assert _fallback_toc_section(doc) == (1, 4)
-
-
-def test_toc_resolve_existing_range_rejects_suspicious_doc_tree_section():
+def test_toc_resolve_existing_range_fails_closed_for_suspicious_tree_section():
     doc = Document()
     if "TOC Heading" not in [style.name for style in doc.styles]:
         doc.styles.add_style("TOC Heading", WD_STYLE_TYPE.PARAGRAPH)
@@ -220,12 +211,12 @@ def test_toc_resolve_existing_range_rejects_suspicious_doc_tree_section():
         doc_tree=SimpleNamespace(get_section=lambda section: SimpleNamespace(start_index=0, end_index=4) if section == "toc" else None)
     )
 
-    assert _resolve_existing_toc_range(doc, context) == (0, 2)
+    assert _resolve_existing_toc_range(doc, context) is None
 
     changed = _format_existing_toc_paragraphs(doc, config, context)
-    assert changed == 2
-    assert title.style.name == "TOC Heading"
-    assert entry.style.name == "TOC 1"
+    assert changed == 0
+    assert title.style.name != "TOC Heading"
+    assert entry.style.name != "TOC 1"
     assert body_heading.style.name != "TOC 1"
 
 
@@ -250,21 +241,26 @@ def test_toc_plain_mode_inserts_plain_entries_from_front_body_and_back_matter():
     config.styles["toc_level2"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=12, alignment="left")
     config.styles["toc_level3"] = StyleConfig(font_cn="Songti", font_en="Times New Roman", size_pt=10.5, alignment="left")
 
+    expected_position = context.doc_tree.insertion_index_for_role("toc")
     TocModule().apply(doc, config, ChangeTracker(), context)
 
-    texts = [para.text for para in doc.paragraphs[:7]]
-    assert texts == ["硕士学位论文", "目录", "Abstract", "Chapter 1 Intro", "1.1 Background", "References", "Abstract"]
-    assert doc.paragraphs[2].style.name == "TOC 1"
-    assert doc.paragraphs[3].style.name == "TOC 1"
-    assert doc.paragraphs[4].style.name == "TOC 2"
-    assert doc.paragraphs[5].style.name == "TOC 1"
+    texts = [para.text for para in doc.paragraphs]
+    assert texts[expected_position] == "目录"
+    assert "Chapter 1 Intro" in texts
+    assert "1.1 Background" in texts
+    assert "References" in texts
+    assert doc.paragraphs[expected_position + 1].style.name == "TOC 1"
+    assert doc.paragraphs[expected_position + 2].style.name == "TOC 1"
+    assert doc.paragraphs[expected_position + 3].style.name == "TOC 2"
+    assert doc.paragraphs[expected_position + 4].style.name == "TOC 1"
 
 
 def test_toc_plain_mode_preserves_fourth_level_entry_style():
     doc = Document()
     doc.add_heading("1.1.1.1 Deep Topic", level=4)
 
-    context = PipelineContext(heading_map={0: 4})
+    context = PipelineContext()
+    HeadingRecognitionModule().apply(doc, ResolvedConfig(), ChangeTracker(), context)
 
     config = ResolvedConfig()
     config.toc.mode = "plain"
@@ -285,10 +281,10 @@ def test_toc_plain_mode_rebuilds_existing_plain_toc_block():
         doc.styles.add_style("TOC Heading", WD_STYLE_TYPE.PARAGRAPH)
     if "TOC 1" not in [style.name for style in doc.styles]:
         doc.styles.add_style("TOC 1", WD_STYLE_TYPE.PARAGRAPH)
-    old_title = doc.add_paragraph("Contents")
-    old_entry = doc.add_paragraph("Old entry")
-    old_entry.style = doc.styles["TOC 1"]
     doc.add_paragraph("硕士学位论文")
+    old_title = doc.add_paragraph("Contents")
+    old_entry = doc.add_paragraph("Chapter 1 Intro\t1")
+    old_entry.style = doc.styles["TOC 1"]
     doc.add_heading("Chapter 1 Intro", level=1)
     doc.add_paragraph("Body content")
 
@@ -302,7 +298,8 @@ def test_toc_plain_mode_rebuilds_existing_plain_toc_block():
 
     TocModule().apply(doc, config, ChangeTracker(), context)
 
-    assert doc.paragraphs[0].text == "目录"
-    assert doc.paragraphs[1].text == "Chapter 1 Intro"
-    assert doc.paragraphs[1].style.name == "TOC 1"
-    assert old_title.text != doc.paragraphs[0].text
+    assert doc.paragraphs[0].text == "硕士学位论文"
+    assert doc.paragraphs[1].text == "目录"
+    assert doc.paragraphs[2].text == "Chapter 1 Intro"
+    assert doc.paragraphs[2].style.name == "TOC 1"
+    assert old_title.text != doc.paragraphs[1].text

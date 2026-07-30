@@ -23,15 +23,15 @@ def test_high_frequency_task_lexicon_audit_locks_v29_task_families():
     rows = {row.task_id: row for row in report.rows}
 
     assert report.status == "passed"
-    assert report.task_count == 29
-    assert report.phrase_count == 31
+    assert report.task_count == 30
+    assert report.phrase_count == 32
     assert report.issue_count == 0
     assert report.negative_task_count == 1
     assert report.ambiguous_task_count == 4
     assert report.manual_boundary_task_count == 10
     assert report.handoff_task_count == 1
-    assert report.request_sample_count == 35
-    assert report.request_cell_count == 35
+    assert report.request_sample_count == 36
+    assert report.request_cell_count == 36
     assert report.missing_source_evidence_count == 0
     assert audit_high_frequency_task_lexicon_report(report) == ()
     assert tuple(payload["required_task_ids"]) == N2_161_REQUIRED_TASK_IDS
@@ -152,8 +152,8 @@ def test_release_gate_includes_high_frequency_task_lexicon_audit(tmp_path):
     assert payload["checks"]["high_frequency_task_lexicon_audit"]["status"] == (
         "passed"
     )
-    assert payload["counts"]["high_frequency_task_lexicon_task_count"] == 29
-    assert payload["counts"]["high_frequency_task_lexicon_phrase_count"] == 31
+    assert payload["counts"]["high_frequency_task_lexicon_task_count"] == 30
+    assert payload["counts"]["high_frequency_task_lexicon_phrase_count"] == 32
     assert payload["counts"]["high_frequency_task_lexicon_negative_task_count"] == 1
     assert payload["counts"]["high_frequency_task_lexicon_ambiguous_task_count"] == 4
     assert payload["counts"]["high_frequency_task_lexicon_issue_count"] == 0

@@ -34,8 +34,8 @@ def test_navigation_highlighter_moves_single_highlight_between_widgets():
 
         highlighter.highlight(
             second,
-            "scene.section_styles.references_body.font_cn",
-            display_label="参考文献正文中文字体",
+            "scene.document_scope.selected_roles",
+            display_label="指定区域",
         )
 
         assert highlighter.current_widget is second
@@ -45,15 +45,15 @@ def test_navigation_highlighter_moves_single_highlight_between_widgets():
         assert first.toolTip() == ""
         assert second.property("navigation_field_highlight") is True
         assert second.property("navigation_field_display_label") == (
-            "参考文献正文中文字体"
+            "指定区域"
         )
         assert second.property("navigation_field_raw_label") == (
-            "scene.section_styles.references_body.font_cn"
+            "scene.document_scope.selected_roles"
         )
         assert second.property("navigation_field_diagnostic_label") == (
-            "scene.section_styles.references_body.font_cn"
+            "scene.document_scope.selected_roles"
         )
-        assert second.toolTip() == "当前执行问题定位：参考文献正文中文字体"
+        assert second.toolTip() == "当前执行问题定位：指定区域"
 
         highlighter.clear()
 

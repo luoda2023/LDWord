@@ -9,7 +9,7 @@ from src.qt_api import QApplication
 from src.ui.bridge import PanelBridge
 from src.ui.panels.workbench.heading_quick_card import HeadingQuickCard
 from src.ui.panels.heading_numbering_panel import HeadingNumberingPanel
-from src.ui.panels.workbench_panel import WorkbenchPanel
+from src.ui.panels.workbench import WorkbenchPanel
 
 
 def _app():

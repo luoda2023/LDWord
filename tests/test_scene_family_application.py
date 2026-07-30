@@ -10,11 +10,10 @@ from src.config.scene_family_application import (
     audit_planned_scene_family_application_parity,
     apply_planned_scene_family_defaults,
     has_planned_scene_family_application,
-    planned_family_is_application_boundary_only,
     planned_family_id_for_scene,
 )
 from src.shared.engine.count_engine import get_count_profile
-from src.ui.panels.workbench.scene_presets import (
+from src.config.scene_presets import (
     create_official_scene,
     create_technical_scene,
     create_thesis_scene,
@@ -74,8 +73,8 @@ def test_thesis_cn_family_application_keeps_existing_thesis_scene_profile_explic
     assert presets["review"].artifacts.compare_docx is True
     assert presets["review"].include_structured_intermediate is True
     assert presets["compliance_report"].artifacts.final_docx is False
-    assert scene.output.final_docx is True
-    assert scene.output.compare_docx is False
+    assert scene.default_delivery_preset().artifacts.final_docx is True
+    assert scene.default_delivery_preset().artifacts.compare_docx is False
 
 
 def test_thesis_cn_family_application_is_idempotent_for_existing_presets():
@@ -162,7 +161,7 @@ def test_contract_delivery_family_application_builds_executable_profile_defaults
     assert presets["signing_copy"].report_level == "detailed"
     assert presets["field_consistency_report"].artifacts.final_docx is False
     assert presets["field_consistency_report"].report_level == "detailed"
-    assert scene.output.compare_docx is True
+    assert scene.default_delivery_preset().artifacts.compare_docx is True
 
 
 def test_contract_delivery_family_application_is_idempotent_for_known_presets():
@@ -187,10 +186,8 @@ def test_contract_delivery_family_application_is_idempotent_for_known_presets():
     )
 
 
-def test_planned_family_application_parity_allows_only_manual_plugin_boundary():
+def test_planned_family_application_parity_has_no_registry_gaps():
     assert audit_planned_scene_family_application_parity() == {}
-    assert planned_family_is_application_boundary_only("ip_patent_documents") is True
-    assert planned_family_is_application_boundary_only("finance_quote_documents") is False
 
 
 def test_hr_batch_family_application_builds_batch_defaults():
@@ -405,8 +402,8 @@ def test_exam_teaching_family_application_builds_multi_version_delivery_defaults
         "question_body",
     }
     assert presets["answer_sheet"].artifacts.material_manifest is True
-    assert scene.output.final_docx is True
-    assert scene.output.compare_docx is False
+    assert scene.default_delivery_preset().artifacts.final_docx is True
+    assert scene.default_delivery_preset().artifacts.compare_docx is False
 
 
 def test_exam_teaching_family_application_is_idempotent_for_known_presets():
@@ -482,7 +479,7 @@ def test_journal_en_family_application_builds_submission_package_defaults():
     assert presets["declaration_package"].artifacts.material_package is True
     assert presets["compliance_report"].artifacts.final_docx is False
     assert presets["compliance_report"].artifacts.report_markdown is True
-    assert scene.output.final_docx is True
+    assert scene.default_delivery_preset().artifacts.final_docx is True
 
 
 def test_long_document_family_application_builds_delivery_package_defaults():
@@ -541,8 +538,8 @@ def test_long_document_family_application_builds_delivery_package_defaults():
     assert presets["archive_package"].artifacts.material_manifest is True
     assert presets["archive_package"].artifacts.material_package is True
     assert presets["archive_package"].include_structured_intermediate is True
-    assert scene.output.final_docx is True
-    assert scene.output.compare_docx is False
+    assert scene.default_delivery_preset().artifacts.final_docx is True
+    assert scene.default_delivery_preset().artifacts.compare_docx is False
 
 
 def test_long_document_family_application_is_idempotent_for_known_presets():
@@ -624,8 +621,8 @@ def test_project_application_family_application_builds_attachment_inventory_prof
     assert presets["attachment_inventory_report"].artifacts.final_docx is False
     assert presets["attachment_inventory_report"].artifacts.material_manifest is True
     assert presets["attachment_inventory_report"].artifacts.material_package is True
-    assert scene.output.material_manifest is True
-    assert scene.output.material_package is True
+    assert scene.default_delivery_preset().artifacts.material_manifest is True
+    assert scene.default_delivery_preset().artifacts.material_package is True
 
 
 def test_project_application_family_application_is_idempotent_for_known_presets():
@@ -713,9 +710,9 @@ def test_product_sales_family_application_builds_pre_sales_package_defaults():
     assert presets["pre_sales_package"].artifacts.material_manifest is True
     assert presets["pre_sales_package"].artifacts.material_package is True
     assert presets["pre_sales_package"].include_structured_intermediate is True
-    assert scene.output.final_docx is True
-    assert scene.output.material_manifest is True
-    assert scene.output.material_package is False
+    assert scene.default_delivery_preset().artifacts.final_docx is True
+    assert scene.default_delivery_preset().artifacts.material_manifest is True
+    assert scene.default_delivery_preset().artifacts.material_package is False
 
 
 def test_product_sales_family_application_is_idempotent_for_known_presets():
@@ -769,6 +766,8 @@ def test_qualification_archive_family_application_builds_directory_package_defau
     profile = scene.input_source_profile
     assert profile.material_schema_id == "qualification_archive_assets_v1"
     assert profile.material_schema_ids == ["qualification_archive_assets_v1"]
+    assert profile.required_material_fields == []
+    assert profile.required_image_roles == []
     assert profile.require_material_package is True
     assert {"json", "xlsx"} <= set(profile.structured_formats)
     assert profile.markdown_policy == "disabled"
@@ -790,8 +789,35 @@ def test_qualification_archive_family_application_builds_directory_package_defau
     assert presets["missing_items_report"].artifacts.material_manifest is True
     assert presets["missing_items_report"].artifacts.material_package is False
     assert presets["archive_manifest"].artifacts.material_package is True
-    assert scene.output.material_manifest is True
-    assert scene.output.material_package is True
+    assert scene.default_delivery_preset().artifacts.material_manifest is True
+    assert scene.default_delivery_preset().artifacts.material_package is True
+
+
+def test_qualification_archive_family_replaces_base_bidding_material_requirements():
+    scene = SceneWorkspace(
+        scene_id="bidding",
+        mode_id="bidding",
+        category="business",
+    )
+    scene.input_source_profile.material_schema_id = "bid_materials_v1"
+    scene.input_source_profile.material_schema_ids = ["bid_materials_v1"]
+    scene.input_source_profile.required_material_fields = [
+        "company_name",
+        "project_name",
+        "legal_person",
+    ]
+    scene.input_source_profile.required_image_roles = ["logo", "seal"]
+
+    apply_planned_scene_family_defaults(
+        scene,
+        family_id="qualification_archive_packages",
+    )
+
+    profile = scene.input_source_profile
+    assert profile.material_schema_id == "qualification_archive_assets_v1"
+    assert profile.material_schema_ids == ["qualification_archive_assets_v1"]
+    assert profile.required_material_fields == []
+    assert profile.required_image_roles == []
 
 
 def test_qualification_archive_family_application_is_idempotent_for_known_presets():
@@ -901,10 +927,10 @@ def test_regulated_disclosure_family_application_builds_archive_package_defaults
     assert presets["archive_manifest"].artifacts.final_docx is False
     assert presets["archive_manifest"].artifacts.material_manifest is True
     assert presets["archive_manifest"].artifacts.material_package is True
-    assert scene.output.final_docx is True
-    assert scene.output.compare_docx is True
-    assert scene.output.material_manifest is True
-    assert scene.output.material_package is False
+    assert scene.default_delivery_preset().artifacts.final_docx is True
+    assert scene.default_delivery_preset().artifacts.compare_docx is True
+    assert scene.default_delivery_preset().artifacts.material_manifest is True
+    assert scene.default_delivery_preset().artifacts.material_package is False
 
 
 def test_regulated_disclosure_family_application_is_idempotent_for_known_presets():
@@ -955,7 +981,10 @@ def test_meeting_policy_family_application_builds_official_archive_defaults():
 
     profile = scene.input_source_profile
     assert profile.material_schema_id == "administrative_meeting_fields_v1"
-    assert profile.material_schema_ids == ["administrative_meeting_fields_v1"]
+    assert profile.material_schema_ids == [
+        "official_document_v1",
+        "administrative_meeting_fields_v1",
+    ]
     assert profile.require_material_package is True
     assert {"json"} <= set(profile.structured_formats)
     assert {"organization", "meeting_title", "meeting_date"} <= set(
@@ -995,8 +1024,8 @@ def test_meeting_policy_family_application_builds_official_archive_defaults():
     assert presets["archive_manifest"].artifacts.final_docx is False
     assert presets["archive_manifest"].artifacts.material_manifest is True
     assert presets["archive_manifest"].artifacts.material_package is True
-    assert scene.output.final_docx is True
-    assert scene.output.material_manifest is True
+    assert scene.default_delivery_preset().artifacts.final_docx is True
+    assert scene.default_delivery_preset().artifacts.material_manifest is True
 
 
 def test_meeting_policy_family_application_is_idempotent_for_known_presets():
@@ -1031,7 +1060,6 @@ def test_non_supported_planning_family_application_is_explicit_noop():
 
     assert planned_family_id_for_scene(scene) == "ip_patent_documents"
     assert has_planned_scene_family_application(scene) is False
-    assert planned_family_is_application_boundary_only("ip_patent_documents") is True
 
     result = apply_planned_scene_family_defaults(scene)
 

@@ -7,19 +7,19 @@ sys.path.insert(0, str(ROOT))
 
 from src.config.scene import ExamBlankStyleConfig, ExamPaperConfig, SceneWorkspace
 from src.config.scene_family_application import apply_planned_scene_family_defaults
-from src.config.template import StyleConfig, TemplateConfig
+from src.shared.ui.icons.catalog import get_icon_names
 from src.ui.panels.scene_overview_projection import (
     first_screen_forbidden_terms,
     first_screen_texts,
     build_scene_overview_spec,
 )
+from src.ui.panels.scene_summary_projection import build_scene_overview_summary_items
 from src.ui.panels.style_source_projection import build_style_source_projection
 from src.ui.panels.workbench.execution_flow_projection import standard_execution_flow_steps
 
 
-def test_style_source_projection_tracks_template_and_section_source():
+def test_style_source_projection_is_template_only():
     scene = SceneWorkspace(scene_id="custom", category="custom", template_id="default")
-    scene.section_styles["references_body"] = StyleConfig()
 
     projection = build_style_source_projection(
         scene,
@@ -29,46 +29,11 @@ def test_style_source_projection_tracks_template_and_section_source():
 
     assert projection.template_label == "默认格式"
     assert projection.template_action_summary == "核对页面、正文和 Word 对象"
-    assert projection.independent_section_count == 1
-    assert projection.independent_section_labels == ("参考文献",)
-    assert projection.diff_tags == ("参考文献：独立设置",)
-    assert projection.section_diff_labels == ("参考文献：独立设置",)
-    assert projection.section_status_label == "1 个格式例外：参考文献"
-    assert projection.status_label == "有格式例外"
-    assert projection.view_mode == "scene_editable"
-    assert projection.has_independent_sections is True
+    assert projection.status_label == "模板"
     assert projection.primary_action.label == "看模板"
     assert projection.primary_action.target_card_id == "tpl_overview"
-    assert projection.secondary_action.label == "调例外"
-    assert projection.secondary_action.target_card_id == "scn_rules"
     assert "OOXML" not in projection.summary
-    assert "模板：默认格式" in projection.summary
-    assert "例外：1 个格式例外：参考文献" in projection.summary
-
-
-def test_style_source_projection_reuses_template_diff_labels_when_template_is_available():
-    template = TemplateConfig()
-    template.styles["body"] = StyleConfig(line_spacing_type="exact", line_spacing_pt=20)
-    scene = SceneWorkspace(scene_id="custom", category="custom", template_id="default")
-    scene.section_styles["references_body"] = StyleConfig(
-        line_spacing_type="exact",
-        line_spacing_pt=26,
-    )
-
-    projection = build_style_source_projection(
-        scene,
-        template=template,
-        template_label="默认格式",
-    )
-
-    assert projection.status_label == "有格式例外"
-    assert projection.diff_tags == ("参考文献：行距",)
-    assert projection.section_diff_labels == ("参考文献：行距",)
-    assert len(projection.section_differences) == 1
-    assert projection.section_differences[0].changed_labels == ("行距",)
-    assert projection.section_differences[0].compact_label == "参考文献（行距）"
-    assert projection.section_status_label == "1 个格式例外：参考文献（行距）"
-    assert "例外：1 个格式例外：参考文献（行距）" in projection.summary
+    assert projection.summary == "模板：默认格式"
 
 
 def test_scene_overview_projection_shapes_user_first_screen():
@@ -88,26 +53,18 @@ def test_scene_overview_projection_shapes_user_first_screen():
     assert [step.title for step in spec.run_steps] == [
         step.title for step in standard_execution_flow_steps()
     ]
-    assert len(spec.key_settings) == 3
+    assert len(spec.key_settings) == 2
     assert [row.label for row in spec.key_settings] == [
         "资料包",
         "处理范围",
-        "套用模板",
     ]
-    style_source_row = next(row for row in spec.key_settings if row.key == "style_source")
     scope_row = next(row for row in spec.key_settings if row.key == "scope")
     materials_row = next(row for row in spec.key_settings if row.key == "materials")
     assert spec.style_source == style_source_projection
     assert materials_row.summary == "未开启资料包，只处理当前文档"
-    assert scope_row.summary == "按模板默认"
+    assert scope_row.summary == "全部内容"
     assert "/" not in scope_row.summary
     assert "文档区域" not in scope_row.summary
-    assert style_source_row.summary == "使用默认格式，无格式例外"
-    assert style_source_row.status == style_source_projection.status_label
-    assert style_source_row.target_card_id == "scn_rules"
-    assert style_source_row.action_label == "设置"
-    assert style_source_row.secondary_target_card_id == ""
-    assert style_source_row.secondary_action_label == ""
     assert {row.target_card_id for row in spec.key_settings} >= {
         "scn_content",
         "scn_rules",
@@ -129,14 +86,53 @@ def test_scene_overview_projection_shapes_user_first_screen():
     assert not first_screen_forbidden_terms(spec)
 
 
+def test_scene_overview_icons_are_registered_and_semantically_aligned():
+    scene = SceneWorkspace(scene_id="custom", category="custom", template_id="default")
+    spec = build_scene_overview_spec(scene, template_label="默认格式")
+    summary_items = build_scene_overview_summary_items(scene)
+
+    rule_icons = {row.key: row.icon_name for row in spec.key_settings}
+    step_icons = {step.key: step.icon_name for step in spec.run_steps}
+    summary_icons = {
+        item.key: item.icon_name
+        for item in summary_items
+        if item.key in {"input_profile", "object_preflight", "delivery"}
+    }
+
+    assert rule_icons == {
+        "materials": "package",
+        "scope": "scan-text",
+    }
+    assert step_icons == {
+        "read": "file-input",
+        "preflight": "shield-alert",
+        "format": "layout-template",
+        "report": "file-text",
+        "deliver": "file-output",
+    }
+    assert summary_icons == {
+        "input_profile": "file-input",
+        "object_preflight": "shield-alert",
+        "delivery": "file-output",
+    }
+
+    registered_icons = set(get_icon_names())
+    referenced_icons = {
+        *rule_icons.values(),
+        *step_icons.values(),
+        *summary_icons.values(),
+    }
+    assert referenced_icons <= registered_icons
+
+
 def test_scene_overview_projection_uses_exam_assembly_rows_for_exam_scene():
     scene = SceneWorkspace(
         scene_id="exam",
+        mode_id="exam",
         name="试卷",
         category="exam_paper",
         category_label="试卷",
         template_id="default",
-        default_template_id="default",
     )
 
     spec = build_scene_overview_spec(scene, template_label="默认格式")
@@ -144,7 +140,7 @@ def test_scene_overview_projection_uses_exam_assembly_rows_for_exam_scene():
     visible_text = "\n".join(first_screen_texts(spec))
 
     assert labels == [
-        "试卷母版",
+        "当前方案",
         "本次信息",
     ]
     assert "资料包" not in labels
@@ -153,7 +149,7 @@ def test_scene_overview_projection_uses_exam_assembly_rows_for_exam_scene():
     assert {row.target_card_id for row in spec.key_settings} == {"scn_exam_paper"}
     assert "工作台" in visible_text
     assert "标题、科目、年级、考试时间、满分" in visible_text
-    assert "页眉页脚和密封线由试卷母版决定" in visible_text
+    assert "页眉页脚和密封线由试卷卷面决定" in visible_text
     assert "题目装配" not in visible_text
     assert "答案处理" not in visible_text
     assert "紧凑试卷" not in visible_text
@@ -165,13 +161,13 @@ def test_scene_overview_projection_uses_exam_assembly_rows_for_exam_scene():
 def test_scene_overview_projection_reads_exam_paper_config_mapping():
     scene = SceneWorkspace(
         scene_id="exam",
+        mode_id="exam",
         name="试卷",
         category="exam_paper",
         category_label="试卷",
         template_id="default",
-        default_template_id="default",
+        master_id="default_exam",
         exam_paper=ExamPaperConfig(
-            blank_style_id="compact_exam",
             question_structure_mode="numbered_questions",
             answer_policy="student_only",
             runtime_fields=["title", "exam_date"],
@@ -181,7 +177,7 @@ def test_scene_overview_projection_reads_exam_paper_config_mapping():
     spec = build_scene_overview_spec(scene, template_label="默认格式")
     rows = {row.key: row for row in spec.key_settings}
 
-    assert "默认试卷" in rows["exam_blank_style"].summary
+    assert "A4 标准卷面" in rows["exam_blank_style"].summary
     assert "紧凑试卷" not in rows["exam_blank_style"].summary
     assert "exam_question_structure" not in rows
     assert "exam_answer_handling" not in rows
@@ -192,13 +188,13 @@ def test_scene_overview_projection_reads_exam_paper_config_mapping():
 def test_scene_overview_projection_reads_custom_exam_blank_style_label():
     scene = SceneWorkspace(
         scene_id="exam",
+        mode_id="exam",
         name="试卷",
         category="exam_paper",
         category_label="试卷",
         template_id="default",
-        default_template_id="default",
+        master_id="user_default_exam_copy",
         exam_paper=ExamPaperConfig(
-            blank_style_id="user_default_exam_copy",
             custom_blank_styles=[
                 ExamBlankStyleConfig(
                     style_id="user_default_exam_copy",
@@ -223,12 +219,13 @@ def test_scene_overview_projection_uses_shared_template_preview_action_when_avai
         template_label="默认格式",
         template_preview_action="核对页面、正文、标题、表格、页眉页脚、目录和题注",
     )
-    template_row = next(row for row in spec.key_settings if row.key == "style_source")
-
-    assert template_row.status == "同源预览"
-    assert template_row.summary == "使用默认格式，无格式例外"
-    assert "核对页面、正文、标题、表格、页眉页脚、目录和题注" not in template_row.summary
-    assert "编号：" not in template_row.summary
+    assert spec.style_source.status_label == "模板"
+    assert spec.style_source.summary == "模板：默认格式"
+    assert (
+        "核对页面、正文、标题、表格、页眉页脚、目录和题注"
+        not in spec.style_source.summary
+    )
+    assert "编号：" not in spec.style_source.summary
     assert "统一页面、正文、标题、表格和页眉页脚" not in "\n".join(
         first_screen_texts(spec)
     )
@@ -249,8 +246,6 @@ def test_scene_overview_projection_cleans_raw_first_screen_terms():
         template_preview_action="核对 schema / preset / manual_review / content_controls",
     )
     visible_text = "\n".join(first_screen_texts(spec))
-    style_source_row = next(row for row in spec.key_settings if row.key == "style_source")
-
     assert "/" not in visible_text
     assert "schema" not in visible_text.lower()
     assert "preset" not in visible_text.lower()
@@ -262,8 +257,8 @@ def test_scene_overview_projection_cleans_raw_first_screen_terms():
     assert "资料包" in visible_text
     assert "输出版本" not in visible_text
     assert "Word 文档、Excel 表格" in visible_text
-    assert style_source_row.status == "同源预览"
-    assert style_source_row.summary == "使用最终资料规则，无格式例外"
+    assert spec.style_source.status_label == "模板"
+    assert spec.style_source.summary == "模板：最终资料规则"
     assert "宏 会停止执行" not in visible_text
     assert all(row.key != "risk_confirmation" for row in spec.key_settings)
     assert all(row.key != "delivery" for row in spec.key_settings)
@@ -292,7 +287,7 @@ def test_scene_overview_projection_keeps_evidence_out_of_first_screen():
     assert "不判断法律" not in visible_text
     assert not first_screen_forbidden_terms(spec)
     assert spec.evidence_links
-    assert any(link.evidence_key == "sample_fixture_coverage" for link in spec.evidence_links)
+    assert {link.evidence_key for link in spec.evidence_links} == {"coverage_pack"}
 
 
 def test_scene_overview_projection_surfaces_manual_confirmation_as_actionable_text():

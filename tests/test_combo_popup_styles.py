@@ -38,6 +38,9 @@ def test_popup_view_qss_keeps_view_and_viewport_visuals_transparent():
     assert "border: none;" in qss
     assert f"padding: {LIGHT.combo_popup_padding}px;" in qss
     assert f"padding: {LIGHT.combo_popup_item_padding_y}px {LIGHT.combo_popup_item_padding_x}px;" in qss
+    assert "font-size:" not in qss
+    assert "font-weight:" not in qss
+    assert "font-family:" not in qss
 
 
 def test_styled_combo_box_uses_custom_popup_panel_instead_of_native_showpopup():
@@ -210,6 +213,24 @@ def test_wheel_event_scrolls_popup_view_without_dismissing_panel():
     finally:
         combo.hidePopup()
         host.hide()
+        app.processEvents()
+
+
+def test_disabled_popup_row_cannot_be_activated_by_custom_popup_bridge():
+    app = QApplication.instance() or QApplication([])
+    combo = StyledComboBox()
+    combo.addItem("Real option", "real")
+    combo.addItem("Section label", "section")
+    combo.model().item(1).setEnabled(False)
+    combo.setCurrentIndex(0)
+
+    try:
+        combo._on_popup_item_activated(1)
+        app.processEvents()
+
+        assert combo.currentData() == "real"
+    finally:
+        combo.close()
         app.processEvents()
 
 

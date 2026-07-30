@@ -7,7 +7,7 @@ sys.path.insert(0, str(ROOT))
 from src.qt_api import QApplication
 from src.ui.bridge import PanelBridge
 from src.ui.panels.workbench.quick_fill_card import QuickFillCard
-from src.ui.panels.workbench_panel import WorkbenchPanel
+from src.ui.panels.workbench import WorkbenchPanel
 
 
 def _app():

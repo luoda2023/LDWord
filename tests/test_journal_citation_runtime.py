@@ -7,7 +7,7 @@ from src.config.scene import ComplianceProfile, InputSourceProfile
 from src.pipeline.runner import Pipeline
 from src.report_writer import write_json_report, write_markdown_report
 from src.shared.engine.journal_citation_schema import inspect_journal_citations
-from src.ui.panels.workbench.execution_runtime import _pipeline_context_payload
+from src.services.production_runtime.delivery_reporting import pipeline_context_payload
 
 
 def _journal_config(entity_data: dict[str, object]) -> ResolvedConfig:
@@ -111,7 +111,7 @@ def test_pipeline_records_journal_citation_result_and_reports(tmp_path):
     assert result.success is True
     assert result.context is not None
     assert result.context.journal_citations.status == "ok"
-    assert _pipeline_context_payload(result.context)["journal_citations"]["status"] == "ok"
+    assert pipeline_context_payload(result.context)["journal_citations"]["status"] == "ok"
     records = result.tracker.get_by_module("journal_citations")
     assert records
     assert records[0].change_type == "citation_source_validation"

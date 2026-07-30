@@ -14,14 +14,17 @@ from src.config.heading_style_semantics import (
     resolve_heading_style_source,
     resolve_non_numbered_heading_style,
 )
-from src.config.resolver import resolve_config
+from src.config.resolver import resolve_config, resolve_template_baseline
 from src.config.scene import SceneWorkspace
 from src.config.style_semantics import resolve_style_size_pt
 from src.config.template import StyleConfig, TemplateConfig
 from src.modules.basic.paragraph_style import ParagraphStyleModule
+from src.modules.registry import create_all_modules
+from src.pipeline.module_selection import build_module_selection_plan
 from src.pipeline.runner import Pipeline
 from src.ui.adapters.heading_numbering_adapter import HeadingNumberingAdapter
-from src.ui.panels.template_style_preview import _resolve_preview_style
+from src.ui.panels.template_preview.model import PreviewBlockKind, TemplatePreviewMode
+from src.ui.panels.template_preview.projector import build_template_preview_projection
 
 
 def test_resolve_heading_style_uses_shared_fallback_chain():
@@ -98,12 +101,24 @@ def test_preview_adapter_and_runtime_share_heading_body_fallback(tmp_path):
         "body": StyleConfig(size_pt=13.0, bold=True, alignment="center"),
     }
 
-    preview_style = _resolve_preview_style(cfg, "heading1")
+    resolved = resolve_template_baseline(cfg)
+    modules = create_all_modules()
+    selection = build_module_selection_plan(modules, is_requested=lambda _name: True)
+    projection = build_template_preview_projection(
+        resolved,
+        selection,
+        mode=TemplatePreviewMode.TEMPLATE_BASELINE,
+    )
+    preview_style = next(
+        block.style
+        for block in projection.blocks
+        if block.kind is PreviewBlockKind.HEADING and block.level == 1
+    )
     adapter = HeadingNumberingAdapter()
     adapter.set_template(cfg)
     adapter_style = adapter.get_heading_style(1)
 
-    assert resolve_style_size_pt(preview_style) == 13.0
+    assert preview_style.size_pt == 13.0
     assert preview_style.bold is True
     assert preview_style.alignment == "center"
     assert resolve_style_size_pt(adapter_style) == 13.0

@@ -138,6 +138,11 @@ def _assert_scene_matrix_dashboard_release_gate_payload(payload):
         payload["scene_matrix_dashboard"]["counts"],
         EXPECTED_SCENE_MATRIX_DASHBOARD_PAYLOAD_COUNTS,
     )
+    drilldown_payload = payload["scene_matrix_drilldown"]
+    assert drilldown_payload["status"] == "passed"
+    assert len(drilldown_payload["items"]) == 37
+    assert len(drilldown_payload["source_evidence"]) == 107
+    assert payload["checks"]["scene_matrix_drilldown"]["status"] == "passed"
     assert payload["checks"]["scene_matrix_dashboard"]["status"] == "passed"
     assert payload["checks"]["scene_input_source_audit"]["status"] == "passed"
     assert payload["checks"]["scene_material_repair_flow_audit"]["status"] == "passed"
@@ -786,6 +791,7 @@ def _assert_scene_matrix_dashboard_release_gate_payload(payload):
 def _assert_scene_matrix_dashboard_release_gate_human_output(payload, capsys):
     _print_human(payload)
     output = capsys.readouterr().out
+    assert "[OK]" in output
     assert "high_frequency_coverage=12/12" in output
     assert "static_closed_not_green=2/2 governed" in output
     assert "dashboard_warning_projection=3/3 governed" in output
@@ -807,6 +813,13 @@ def _assert_scene_matrix_dashboard_release_gate_human_output(payload, capsys):
     assert "acceptance_receipts=2/2" in output
     assert "drilldown_rows=556/556" in output
     assert "drilldown_sources=107/107 ready" in output
+
+    failed_payload = dict(payload)
+    failed_payload["status"] = "failed"
+    _print_human(failed_payload)
+    failed_output = capsys.readouterr().out
+    assert "[FAILED]" in failed_output
+    assert "[OK]" not in failed_output
 
 
 def run_scene_matrix_dashboard_release_gate_payload_coverage(tmp_path, capsys):

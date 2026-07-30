@@ -27,6 +27,7 @@ def test_natural_request_router_registry_is_complete_and_auditable():
         "chinese_academic_thesis",
         "english_journal_submission",
         "exam_teaching_versions",
+        "bidding_document_authoring",
         "bidding_qualification_archive",
         "technical_long_document",
         "product_sales_document",
@@ -158,6 +159,17 @@ def test_natural_request_router_disambiguates_certificates_and_bilingual_documen
     assert qualification.selected_route_id == "bidding_qualification_archive"
     assert qualification.selected_pack_id == "bidding_materials"
 
+    bid_document = route_natural_scene_request("生成一份投标标书正文")
+    assert bid_document.status == "matched"
+    assert bid_document.selected_route_id == "bidding_document_authoring"
+    assert bid_document.selected_pack_id == "bidding_materials"
+    assert bid_document.selected_route is not None
+    assert bid_document.selected_route.family_id == ""
+    assert bid_document.selected_route.delivery_preset_id == "original"
+
+    generic_report = route_natural_scene_request("生成一份项目报告")
+    assert generic_report.selected_route_id != "bidding_document_authoring"
+
     generated_certificate = route_natural_scene_request("批量生成证书套打")
     assert generated_certificate.status == "matched"
     assert generated_certificate.selected_route_id == "fixed_form_batch_documents"
@@ -193,6 +205,11 @@ def test_natural_request_router_keeps_import_and_professional_boundaries_visible
     assert pdf_thesis.selected_route.plugin_gate_id == "import_ai_conversion_gate"
     assert "handoff=chinese_academic" in build_natural_request_route_summary(pdf_thesis)
 
+    latex_project = route_natural_scene_request("LaTeX转Word完整工程")
+    assert latex_project.status == "matched"
+    assert latex_project.selected_route_id == "import_ai_conversion_boundary"
+    assert latex_project.selected_pack_id == "import_ai_boundary"
+
     patent = route_natural_scene_request("专利说明书权利要求草稿")
 
     assert patent.status == "matched"
@@ -222,4 +239,4 @@ def test_natural_request_router_reports_unmatched_requests_without_guessing():
     unknown = route_natural_scene_request("完全未知的神秘材料")
     assert unknown.status == "unmatched"
     assert unknown.selected_route is None
-    assert "未找到稳定场景落点" in build_natural_request_route_summary(unknown)
+    assert "未找到稳定方案落点" in build_natural_request_route_summary(unknown)

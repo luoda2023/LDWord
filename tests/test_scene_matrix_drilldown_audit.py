@@ -7,8 +7,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.config.scene_matrix_drilldown import (  # noqa: E402
+    REQUIRED_SCENE_MATRIX_DRILLDOWN_IDS,
     SceneMatrixDrilldownItem,
     SceneMatrixDrilldownReport,
+    SceneMatrixDrilldownRow,
+    SceneMatrixDrilldownSourceEvidence,
     audit_scene_matrix_drilldown_report,
     build_scene_matrix_drilldown_report,
 )
@@ -28,6 +31,60 @@ from tests._scene_matrix_drilldown_projection_references import (  # noqa: E402
     _projection_surface_reference_map,
     _projection_target_plugin_reference_map,
 )
+
+
+def _status_test_item(drilldown_id: str) -> SceneMatrixDrilldownItem:
+    row = SceneMatrixDrilldownRow(
+        row_id=drilldown_id,
+        label=drilldown_id,
+        status="ready",
+        source_id="test_source",
+        detail="test",
+    )
+    return SceneMatrixDrilldownItem(
+        drilldown_id=drilldown_id,
+        label=drilldown_id,
+        source_id="test_source",
+        lens_ids=("evidence_chain",),
+        route_hint="test",
+        detail="test",
+        rows=(row,),
+        visible_rows=(row,),
+    )
+
+
+def test_scene_matrix_drilldown_status_uses_real_readiness_facts():
+    source_evidence = SceneMatrixDrilldownSourceEvidence(
+        source_id="test_source",
+        source_path="test_source.py",
+        markers=("marker",),
+        missing_markers=(),
+        status="ready",
+    )
+    items = tuple(
+        _status_test_item(drilldown_id)
+        for drilldown_id in REQUIRED_SCENE_MATRIX_DRILLDOWN_IDS
+    )
+    report = SceneMatrixDrilldownReport(
+        items=items,
+        issues=(),
+        source_evidence=(source_evidence,),
+    )
+
+    assert report.status == "passed"
+
+    broken_row = replace(items[0].rows[0], issue_ids=("broken_chain",))
+    broken_item = replace(
+        items[0],
+        rows=(broken_row,),
+        visible_rows=(broken_row,),
+    )
+    assert replace(report, items=(broken_item, *items[1:])).status == "failed"
+    assert replace(report, source_evidence=()).status == "failed"
+    assert replace(report, items=items[:-1]).status == "failed"
+    assert replace(report, items=(items[0],), source_filter="test_source").status == (
+        "passed"
+    )
 
 
 def test_scene_matrix_drilldown_audit_rejects_duplicate_item_row_and_source_ids():

@@ -31,9 +31,9 @@ def test_scene_delivery_preset_execution_audit_locks_n2_176_channels():
     assert report.runtime_surface_count == 19
     assert report.report_surface_count == 12
     assert report.ui_surface_count == 10
-    assert report.test_evidence_count == 14
-    assert report.covered_pack_count == 10
-    assert report.covered_family_count == 14
+    assert report.test_evidence_count == 13
+    assert report.covered_pack_count == 9
+    assert report.covered_family_count == 11
     assert report.issue_count == 0
     assert report.source_evidence_count == 23
     assert report.missing_source_evidence_count == 0
@@ -71,6 +71,8 @@ def test_scene_delivery_preset_execution_audit_locks_n2_176_channels():
     material_package = rows["material_manifest_package_outputs"]
     assert "material_package_zip" in material_package.required_output_signal_ids
     assert "material_package_paths" in material_package.payload_keys
+    assert "professional_disclosure" not in material_package.pack_ids
+    assert "regulated_disclosure_documents" not in material_package.family_ids
 
     failed_package = rows["failed_run_material_package_outputs"]
     assert "failed_run_material_package" in failed_package.required_output_signal_ids
@@ -85,6 +87,14 @@ def test_scene_delivery_preset_execution_audit_locks_n2_176_channels():
     assert batch.family_ids == ("hr_batch_documents", "form_batch_documents")
     assert "batch_failure_isolation" in batch.required_output_signal_ids
     assert "batch_issue_items" in batch.payload_keys
+    batch_evidence = next(
+        item
+        for item in report.source_evidence
+        if item.evidence_id == "runtime.batch_isolation"
+    )
+    assert batch_evidence.source_path == (
+        "src/services/production_runtime/batch_reporting.py"
+    )
 
     ui_surface = rows["artifact_surface_state_and_logs"]
     assert "quick_execution_log" in ui_surface.required_output_signal_ids
@@ -164,7 +174,7 @@ def test_release_gate_includes_scene_delivery_preset_execution_audit(tmp_path):
     assert payload["counts"]["scene_delivery_execution_runtime_surface_count"] == 19
     assert payload["counts"]["scene_delivery_execution_report_surface_count"] == 12
     assert payload["counts"]["scene_delivery_execution_ui_surface_count"] == 10
-    assert payload["counts"]["scene_delivery_execution_test_evidence_count"] == 14
+    assert payload["counts"]["scene_delivery_execution_test_evidence_count"] == 13
     assert payload["counts"]["scene_delivery_execution_issue_count"] == 0
     assert (
         payload["counts"]["scene_delivery_execution_missing_source_evidence_count"]

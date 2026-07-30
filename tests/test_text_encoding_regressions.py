@@ -20,6 +20,8 @@ class _MissingDependencyModule(BaseModule):
         description="test",
         category="test",
         depends_on=("absent_dependency",),
+        execution_phase="fill",
+        scope_behavior="document_level",
     )
 
     def apply(self, doc, config, tracker, context):
@@ -34,6 +36,8 @@ class _BadContractModule(BaseModule):
         requires_config=("unknown_config_key",),
         consumes=("unknown_context_input",),
         provides=("unknown_context_output",),
+        execution_phase="fill",
+        scope_behavior="document_level",
     )
 
     def apply(self, doc, config, tracker, context):
@@ -46,6 +50,8 @@ class _BadFlowModule(BaseModule):
         description="test",
         category="test",
         consumes=("unknown_flow_key",),
+        execution_phase="fill",
+        scope_behavior="document_level",
     )
 
     def apply(self, doc, config, tracker, context):

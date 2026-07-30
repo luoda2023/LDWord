@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.sizing import control_size_metrics
 from src.shared.ui.theme import LIGHT
 
 
@@ -13,7 +14,14 @@ def test_button_stylesheet_uses_theme_tokens():
 
     assert 'QPushButton[variant="primary"]' in qss
     assert f'border-radius: {LIGHT.button_radius}px;' in qss
-    assert f'min-height: {LIGHT.button_height_md}px;' in qss
+    metrics = control_size_metrics(
+        LIGHT,
+        "md",
+        vertical_padding=LIGHT.button_padding_y,
+        border_width=1,
+    )
+    assert f'min-height: {metrics.content_height}px;' in qss
+    assert f'max-height: {metrics.content_height}px;' in qss
     assert f'padding: {LIGHT.button_padding_y}px {LIGHT.button_padding_x}px;' in qss
     assert f'font-weight: {LIGHT.button_font_weight};' in qss
 

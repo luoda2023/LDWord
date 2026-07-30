@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.ui.adapters.workbench_execution_adapter import WorkbenchIssueItem
+from src.ui.adapters.workbench_issue_models import WorkbenchIssueItem
 from src.ui.adapters.workbench_issue_navigation import (
     audit_workbench_issue_navigation_routes,
     audit_workbench_scene_field_focus_targets,
@@ -19,11 +19,21 @@ from src.ui.adapters.workbench_issue_navigation import (
 )
 
 
+def test_workbench_issue_navigation_uses_issue_owner_modules_directly():
+    source = (
+        ROOT / "src/ui/adapters/workbench_issue_navigation.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from src.ui.adapters.workbench_execution_adapter import" not in source
+    assert "from src.ui.adapters.workbench_issue_models import" in source
+    assert "from src.ui.adapters.workbench_issue_projection import" in source
+
+
 def test_workbench_issue_navigation_registry_maps_targets_to_surfaces():
     cases = {
-        "profile_field": ("material_profile_target", "assets", "", ""),
-        "material": ("material_target", "assets", "", ""),
-        "field": ("material_target", "assets", "", ""),
+        "profile_field": ("material_profile_target", "", "", "content_fill"),
+        "material": ("material_target", "", "", "content_fill"),
+        "field": ("material_target", "", "", "content_fill"),
         "schema": ("scene_panel", "scene", "scn_content", ""),
         "template": ("template_panel", "template", "tpl_overview", ""),
         "template_style_field": ("template_panel", "template", "tpl_style", ""),
@@ -31,8 +41,12 @@ def test_workbench_issue_navigation_registry_maps_targets_to_surfaces():
         "scene": ("scene_panel", "scene", "scn_overview", ""),
         "scene_profile": ("scene_panel", "scene", "scn_overview", ""),
         "count_profile": ("scene_panel", "scene", "scn_overview", ""),
-        "scene_style_field": ("scene_panel", "scene", "scn_rules", ""),
-        "scene_scope_field": ("scene_panel", "scene", "scn_rules", ""),
+        "scene_document_scope_field": (
+            "scene_panel",
+            "scene",
+            "scn_rules",
+            "",
+        ),
         "delivery_preset": ("scene_panel", "scene", "scn_rules", ""),
         "output_target": ("scene_panel", "scene", "scn_rules", ""),
         "coverage_boundary": ("scene_panel", "scene", "scn_overview", ""),
@@ -107,7 +121,10 @@ def test_workbench_issue_navigation_audit_reports_missing_surfaces():
         valid_template_card_ids=("tpl_overview",),
         valid_workbench_feature_card_ids=("content_fill",),
         scene_field_targets=(
-            ("scene_scope_field", "format_scope.sections.not_a_zone"),
+            (
+                "scene_document_scope_field",
+                "scene.document_scope.not_a_field",
+            ),
         ),
         template_field_targets=(
             ("template_page_field", "template.page_setup.margin.not_a_field"),
@@ -119,9 +136,9 @@ def test_workbench_issue_navigation_audit_reports_missing_surfaces():
     assert ("plugin", "quick_execute") in audit.invalid_feature_card_targets
     assert audit.invalid_scene_field_targets == (
         (
-            "scene_scope_field",
-            "format_scope.sections.not_a_zone",
-            "unknown_scope_zone",
+            "scene_document_scope_field",
+            "scene.document_scope.not_a_field",
+            "unknown_document_scope_field",
         ),
     )
     assert audit.invalid_template_field_targets == (
@@ -134,90 +151,23 @@ def test_workbench_issue_navigation_audit_reports_missing_surfaces():
 
 
 def test_workbench_scene_field_focus_projection_normalizes_reusable_controls():
-    scope_projection = workbench_scene_field_focus_projection(
-        "scene_scope_field",
-        "scene.format_scope.sections.references",
+    mode_projection = workbench_scene_field_focus_projection(
+        "scene_document_scope_field",
+        "scene.document_scope.mode",
     )
-    assert scope_projection.valid
-    assert scope_projection.focus_kind == "scope_zone"
-    assert scope_projection.normalized_key == "format_scope.sections.references"
+    assert mode_projection.valid
+    assert mode_projection.focus_kind == "document_scope"
+    assert mode_projection.normalized_key == "scene.document_scope.mode"
+    assert mode_projection.display_label == "处理范围"
 
-    style_projection = workbench_scene_field_focus_projection(
-        "scene_style_field",
-        "scene.section_styles.references_body.font_cn",
+    roles_projection = workbench_scene_field_focus_projection(
+        "scene_document_scope_field",
+        "scene.document_scope.selected_roles",
     )
-    assert style_projection.valid
-    assert style_projection.focus_kind == "style_variant"
-    assert (
-        style_projection.normalized_key
-        == "scene.section_styles.references_body.font_cn"
-    )
-    assert style_projection.display_label == "参考文献正文中文字体"
-    assert style_projection.display_label_with_group == (
-        "文字样式：参考文献正文中文字体"
-    )
-    assert style_projection.layout_item_id == "font_cn"
-    assert style_projection.field_ids == ("font_cn",)
-    assert style_projection.control_contract_key == "body.font_cn"
-
-    style_toggle_projection = workbench_scene_field_focus_projection(
-        "scene_style_field",
-        "references_body",
-    )
-    assert style_toggle_projection.valid
-    assert style_toggle_projection.focus_kind == "style_variant_toggle"
-    assert style_toggle_projection.normalized_key == "scene.section_styles.references_body"
-    assert style_toggle_projection.display_label == "参考文献正文"
-
-    prefixed_toggle_projection = workbench_scene_field_focus_projection(
-        "scene_style_field",
-        "scene.section_styles.references_body",
-    )
-    assert prefixed_toggle_projection.valid
-    assert prefixed_toggle_projection.focus_kind == "style_variant_toggle"
-    assert (
-        prefixed_toggle_projection.normalized_key
-        == "scene.section_styles.references_body"
-    )
-
-    alias_style_projection = workbench_scene_field_focus_projection(
-        "scene_style_field",
-        "section_styles.references_body.line_spacing_value",
-    )
-    assert alias_style_projection.valid
-    assert alias_style_projection.focus_kind == "style_variant"
-    assert (
-        alias_style_projection.normalized_key
-        == "scene.section_styles.references_body.line_spacing_pt"
-    )
-
-    wildcard_projection = workbench_scene_field_focus_projection(
-        "scene_style_field",
-        "scene.section_styles.*.line_spacing_value",
-    )
-    assert wildcard_projection.valid
-    assert wildcard_projection.focus_kind == "style_wildcard"
-    assert (
-        wildcard_projection.normalized_key
-        == "scene.section_styles.*.line_spacing_pt"
-    )
-    assert wildcard_projection.display_label == "所有处理分区行距"
-    assert wildcard_projection.display_label_with_group == (
-        "行距与段距：所有处理分区行距"
-    )
-    assert wildcard_projection.layout_item_id == "line_spacing_pt"
-    assert wildcard_projection.control_contract_key == "body.line_spacing"
-
-    editor_projection = workbench_scene_field_focus_projection(
-        "scene_style_field",
-        "section_style.left_indent_chars",
-    )
-    assert editor_projection.valid
-    assert editor_projection.focus_kind == "style_editor"
-    assert editor_projection.normalized_key == "section_style.left_indent"
-    assert editor_projection.display_label_with_group == "对齐与缩进：左缩进"
-    assert editor_projection.layout_item_id == "left_indent"
-    assert editor_projection.control_contract_key == "body.left_indent"
+    assert roles_projection.valid
+    assert roles_projection.focus_kind == "document_scope"
+    assert roles_projection.normalized_key == "scene.document_scope.selected_roles"
+    assert roles_projection.display_label == "指定区域"
 
     schema_projection = workbench_scene_field_focus_projection(
         "schema",
@@ -242,45 +192,20 @@ def test_workbench_scene_field_focus_projection_normalizes_reusable_controls():
 def test_workbench_scene_field_focus_audit_reports_unknown_controls():
     invalid = audit_workbench_scene_field_focus_targets(
         (
-            ("scene_scope_field", "format_scope.sections.not_a_zone"),
             (
-                "scene_style_field",
-                "scene.section_styles.not_a_variant.font_cn",
-            ),
-            (
-                "scene_style_field",
-                "scene.section_styles.references_body.not_a_field",
+                "scene_document_scope_field",
+                "scene.document_scope.not_a_field",
             ),
         )
     )
 
     assert invalid == (
         (
-            "scene_scope_field",
-            "format_scope.sections.not_a_zone",
-            "unknown_scope_zone",
-        ),
-        (
-            "scene_style_field",
-            "scene.section_styles.not_a_variant.font_cn",
-            "unknown_style_variant",
-        ),
-        (
-            "scene_style_field",
-            "scene.section_styles.references_body.not_a_field",
-            "unknown_style_field",
+            "scene_document_scope_field",
+            "scene.document_scope.not_a_field",
+            "unknown_document_scope_field",
         ),
     )
-
-
-def test_workbench_scene_style_focus_reuses_shared_path_descriptors():
-    source = (ROOT / "src/ui/adapters/workbench_issue_navigation.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert "scene_style_navigation_target_from_field_id" in source
-    assert "src.config.style_variant_semantics" not in source
-    assert "_scene_style_variant_ids" not in source
 
 
 def test_workbench_template_field_focus_projection_normalizes_reusable_controls():
@@ -371,31 +296,24 @@ def test_workbench_issue_parameter_navigation_target_routes_scene_paths_and_fall
 
     assert workbench_issue_parameter_navigation_target(
         fallback_issue,
-        "scene.section_styles.references_body.font_cn",
+        "scene.document_scope.mode",
     ) == (
-        "scene_style_field",
-        "scene.section_styles.references_body.font_cn",
+        "scene_document_scope_field",
+        "scene.document_scope.mode",
     )
     assert workbench_issue_parameter_navigation_target(
         fallback_issue,
-        "section_styles.references_body.font_cn",
+        "scene.document_scope.selected_roles",
     ) == (
-        "scene_style_field",
-        "scene.section_styles.references_body.font_cn",
+        "scene_document_scope_field",
+        "scene.document_scope.selected_roles",
     )
     assert workbench_issue_parameter_navigation_target(
-        fallback_issue,
-        "scene.section_styles.*.line_spacing_value",
+        None,
+        "scene.unowned.path",
     ) == (
-        "scene_style_field",
-        "scene.section_styles.*.line_spacing_pt",
-    )
-    assert workbench_issue_parameter_navigation_target(
-        fallback_issue,
-        "scene.format_scope.sections.references",
-    ) == (
-        "scene_scope_field",
-        "format_scope.sections.references",
+        "parameter_path",
+        "scene.unowned.path",
     )
     assert workbench_issue_parameter_navigation_target(
         fallback_issue,

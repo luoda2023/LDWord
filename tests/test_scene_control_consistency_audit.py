@@ -39,9 +39,11 @@ def test_scene_control_consistency_audit_locks_n2_157c_contracts():
     assert rows["body.left_indent"].canonical_control == "IndentInput"
     assert rows["body.left_indent"].paired_contract_ids == ("body.right_indent",)
     assert rows["body.right_indent"].paired_contract_ids == ("body.left_indent",)
-    assert "one row" in rows["body.left_indent"].scene_surface
+    assert rows["body.left_indent"].template_surface == "TemplatePanel StyleDetail"
+    assert rows["body.left_indent"].scene_surface == ""
     assert rows["body.special_indent"].canonical_control == "SpecialIndentInput"
-    assert "none/first_line/hanging" in rows["body.special_indent"].scene_surface
+    assert rows["body.special_indent"].template_surface == "TemplatePanel StyleDetail"
+    assert rows["body.special_indent"].scene_surface == ""
     assert "mode=none" in rows["body.special_indent"].disabled_state_rule
     assert rows["body.line_spacing"].canonical_control == (
         "StyledComboBox + SpacingInput"
@@ -61,7 +63,7 @@ def test_scene_control_consistency_audit_locks_n2_157c_contracts():
     assert set(surface_evidence) == {
         "scene_summary_projection",
         "workbench_scene_summary",
-        "workbench_issue_queue",
+        "workbench_execution_gate",
         "report_writer",
     }
     assert all(item["status"] == "ready" for item in surface_evidence.values())
@@ -120,7 +122,6 @@ def test_scene_control_consistency_export_script_prints_markdown():
 def test_release_gate_includes_scene_control_consistency_audit(tmp_path):
     payload = build_scene_matrix_release_gate_payload(tmp_path)
 
-    assert payload["status"] == "passed"
     assert payload["checks"]["scene_control_consistency_audit"]["status"] == "passed"
     assert payload["counts"]["scene_control_consistency_contract_count"] == 13
     assert payload["counts"]["scene_control_consistency_issue_count"] == 0

@@ -1,42 +1,42 @@
 import inspect
 import sys
-import json
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.qt_api import QApplication, QLabel, Qt
+from src.qt_api import QApplication, QDesktopServices, QFileDialog
 from src.config.material_context import MaterialExecutionContext
 from src.config.materials import AssetItem
 from src.config.scene import SceneWorkspace
-from src.config.template import StyleConfig
-from src.shared.ui.evidence_widgets import EvidenceActionBar, EvidenceLineList
-from src.shared.ui.issue_detail_section import IssueDetailSection
-from src.shared.ui.style_difference_summary_slot import StyleDifferenceSummarySlot
-from src.shared.ui.style_management_block import StyleManagementBlock
 from src.shared.ui.theme import get_theme
 from src.shared.ui.themed_radio_button import ThemedRadioButton
-from src.ui.panels.workbench.state import ArtifactItemState, ExecutionResultState
-from src.ui.adapters.workbench_execution_adapter import (
-    WorkbenchExecutionAdapter,
-    WorkbenchIssueItem,
-    coverage_boundary_issue_items,
-    material_readiness_issue_items,
+from src.ui.panels.workbench.state import (
+    ArtifactItemState,
+    ExecutionProgressState,
+    ExecutionResultState,
 )
-import src.ui.panels.workbench.quick_execution_detail as quick_execution_detail_module
+from src.ui.adapters.workbench_execution_adapter import WorkbenchExecutionAdapter
+from src.ui.adapters.config_selector_models import plan_selector_options
 from src.ui.panels.workbench.quick_execution_drop_area import QuickExecutionDropArea
 from src.ui.panels.workbench.quick_execution_detail import QuickExecutionDetail
-from src.ui.panels.workbench.scene_presets import (
-    LEGACY_FEATURE_GROUP_MAP,
+from src.ui.panels.workbench.quick_execution_feedback_mixin import (
+    QuickExecutionFeedbackMixin,
+)
+from src.config.scene_engineering_summary import (
     build_scene_control_contract_summary,
     build_scene_parameter_ownership_summary,
     build_scene_product_readiness_summary,
     build_scene_request_cell_summary_text,
     build_scene_sample_coverage_summary_text,
+)
+from src.config.scene_presets import (
+    LEGACY_FEATURE_GROUP_MAP,
     build_scene_summary,
     create_bidding_scene,
+    create_exam_scene,
 )
 
 
@@ -44,16 +44,121 @@ def _app():
     return QApplication.instance() or QApplication([])
 
 
-def test_quick_execution_detail_uses_presenter_module_for_snapshot_and_status_logic():
+def test_quick_execution_detail_uses_presenter_and_authoritative_gate_logic():
     detail_source = inspect.getsource(QuickExecutionDetail)
-    module_source = (ROOT / "src/ui/panels/workbench/quick_execution_detail.py").read_text(encoding="utf-8")
+    module_source = (
+        ROOT / "src/ui/panels/workbench/quick_execution_detail.py"
+    ).read_text(encoding="utf-8")
+    result_presenter_source = (
+        ROOT / "src/ui/panels/workbench/quick_execution_result_presenter.py"
+    ).read_text(encoding="utf-8")
+    feedback_module_source = (
+        ROOT
+        / "src/ui/panels/workbench/quick_execution_feedback_mixin.py"
+    ).read_text(encoding="utf-8")
+    feedback_source = inspect.getsource(QuickExecutionFeedbackMixin)
+    source_presenter_source = (
+        ROOT / "src/ui/panels/workbench/quick_execution_source_presenter.py"
+    ).read_text(encoding="utf-8")
 
     assert "from .quick_execution_presenter import" in module_source
+    assert "from .quick_execution_feedback_mixin import" in module_source
+    assert "from src.ui.panels.workbench.quick_execution_result_presenter import" in (
+        feedback_module_source
+    )
+    assert "from .quick_execution_source_presenter import" in module_source
     assert "from .quick_execution_drop_area import QuickExecutionDropArea" in module_source
+    assert "from src.ui.adapters.workbench_execution_adapter import" not in module_source
+    assert "from src.ui.adapters.workbench_artifact_items import" not in module_source
+    assert "from src.ui.adapters.workbench_artifact_items import" in result_presenter_source
+    assert "parse_exam_markdown_file" not in module_source
+    assert "load_exam_markdown_source" in source_presenter_source
+    assert "from src.ui.adapters.workbench_execution_gate import" in module_source
+    assert "from src.ui.adapters.workbench_material_issues import" in module_source
     assert "build_navigation_snapshot(" in detail_source
     assert "build_feature_navigation_snapshot(" in detail_source
-    assert "build_ready_status(" in detail_source
     assert "build_running_status(" in detail_source
+    assert "build_exam_source_projection(" in detail_source
+    assert "build_official_document_readiness_projection(" in detail_source
+    assert "build_execution_result_presentation(" in feedback_source
+    assert "def set_execution_result(" not in detail_source
+    assert "material_readiness_gate_decision(" in detail_source
+    assert "build_ready_status(" not in detail_source
+
+
+def test_quick_execution_detail_retains_complete_terminal_payload():
+    _app()
+    detail = QuickExecutionDetail()
+    try:
+        state = ExecutionResultState(
+            status="success",
+            summary="done",
+            terminal_payload={
+                "exam_markdown_import": {"summary": {"question_count": 2}},
+                "future_extension": {"kept": True},
+            },
+        )
+        detail.set_execution_result(state)
+        state.terminal_payload["future_extension"]["kept"] = False
+
+        assert detail.last_terminal_payload()["exam_markdown_import"] == {
+            "summary": {"question_count": 2}
+        }
+        assert detail.last_terminal_payload()["future_extension"] == {
+            "kept": True
+        }
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_fails_closed_on_non_plain_terminal_payload():
+    _app()
+    detail = QuickExecutionDetail()
+    try:
+        detail.set_execution_result(
+            ExecutionResultState(
+                status="success",
+                summary="done",
+                terminal_payload={
+                    "status": "success",
+                    "future_extension": {"lock": threading.Lock()},
+                },
+            )
+        )
+
+        payload = detail.last_terminal_payload()
+        assert detail._last_result_status == "failed"
+        assert payload["status"] == "failed"
+        assert "$.future_extension.lock" in payload["error_text"]
+        assert "_thread.lock" in payload["error_text"]
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_fails_closed_on_normalizer_runtime_error():
+    _app()
+
+    class _ExplodingMapping(dict):
+        def items(self):
+            raise RuntimeError("simulated mapping iteration failure")
+
+    detail = QuickExecutionDetail()
+    try:
+        detail.set_execution_result(
+            ExecutionResultState(
+                status="success",
+                summary="done",
+                terminal_payload=_ExplodingMapping(status="success"),
+            )
+        )
+
+        payload = detail.last_terminal_payload()
+        assert detail._last_result_status == "failed"
+        assert payload["status"] == "failed"
+        assert "RuntimeError" in payload["error_text"]
+        assert "simulated mapping iteration failure" in payload["error_text"]
+    finally:
+        detail.close()
 
 
 def test_quick_execution_detail_uses_dedicated_drop_area_widget():
@@ -81,6 +186,7 @@ def test_quick_execution_detail_card_spacing_uses_template_detail_gap():
         widgets = [
             detail._drop_area,
             detail._scene_card,
+            detail._material_preview,
             detail._output_card,
             detail._execution_card,
         ]
@@ -91,20 +197,43 @@ def test_quick_execution_detail_card_spacing_uses_template_detail_gap():
         app.processEvents()
 
 
-def test_quick_execution_detail_keeps_batch_generation_out_of_execute_area():
+def test_quick_execution_detail_only_owns_single_document_execution():
     _app()
-    source = (
-        ROOT / "src/ui/panels/workbench/quick_execution_detail.py"
-    ).read_text(encoding="utf-8")
     detail = QuickExecutionDetail()
     try:
-        assert "wb_v2_batch_execute_btn" not in source
-        assert "batch_execute_requested" not in source
+        assert detail._execute_btn.text() == "选择文档并生成"
+        assert not hasattr(detail, "_assistant_btn")
         assert not hasattr(detail, "_batch_execute_btn")
+        assert not hasattr(detail, "_batch_retry_btn")
+        assert not hasattr(detail, "assistant_requested")
+        assert not hasattr(detail, "batch_execute_requested")
         assert detail._exec_status_area.minimumHeight() == detail._execute_btn.minimumHeight()
         assert detail._exec_status_area.maximumHeight() == detail._execute_btn.maximumHeight()
     finally:
         detail.close()
+
+
+def test_quick_execution_detail_keeps_current_mode_authoritative_for_custom_scene():
+    app = _app()
+    detail = QuickExecutionDetail()
+    try:
+        detail.set_work_mode("official")
+        detail.set_scene_context(
+            SceneWorkspace(
+                scene_id="custom",
+                category="custom",
+                mode_id="custom",
+                template_id="default",
+            )
+        )
+        app.processEvents()
+
+        assert detail._work_mode_id == "official"
+        assert detail._is_official_document_scene() is True
+        assert detail._is_exam_scene() is False
+    finally:
+        detail.close()
+        app.processEvents()
 
 
 def test_quick_execution_detail_uses_shared_radio_controls():
@@ -139,150 +268,221 @@ def test_quick_execution_detail_uses_shared_radio_controls():
         detail.close()
 
 
-def test_quick_execution_detail_uses_selector_row_without_style_source_row():
-    source = (
-        ROOT / "src/ui/panels/workbench/quick_execution_detail.py"
-    ).read_text(encoding="utf-8")
+def test_quick_execution_detail_invalidates_stale_result_when_input_changes(tmp_path):
     _app()
-    scene = SceneWorkspace(scene_id="custom", template_id="default")
-    scene.section_styles["references_body"] = StyleConfig()
     detail = QuickExecutionDetail()
+    first = tmp_path / "first.docx"
+    second = tmp_path / "second.docx"
+    output = tmp_path / "output" / "final.docx"
+    output.parent.mkdir()
+    output.write_bytes(b"result")
     try:
-        detail._apply_scene(scene)
+        detail.set_document_path(str(first))
+        detail.set_execution_result(
+            ExecutionResultState(
+                status="success",
+                summary="执行完成",
+                output_path=str(output),
+            )
+        )
+        assert detail._last_result_status == "success"
+        assert detail._result_receipt.isHidden() is False
+        assert detail._exec_log.toPlainText()
 
-        selector = detail._scene_template_selector_row
-        slot = detail._style_difference_slot
+        detail.set_document_path(str(second))
 
-        assert not hasattr(detail, "_style_source_row")
-        assert not hasattr(detail, "_style_prereview_source_slot")
-        assert not hasattr(detail, "_style_prereview_preview_slot")
-        assert not hasattr(detail, "_style_prereview_preview")
-        assert selector.objectName() == "wb_execution_prereview_selector_row"
-        assert isinstance(slot, StyleDifferenceSummarySlot)
-        assert isinstance(detail._scene_card, StyleManagementBlock)
-        assert detail._scene_card.source_slot is selector
-        assert detail._scene_card.scope_slot is selector
-        assert detail._scene_card.rule_control is None
-        assert detail._scene_card.difference_slot is slot
-        assert detail._scene_card.preview_slot is None
-        assert detail._scene_card.property("style_management_mode") == "execution_prereview"
-        assert detail._scene_card.property("style_management_content_plan") == (
-            "source|scope|difference"
-        )
-        assert detail._scene_card.property("style_management_slot_plan") == (
-            "source|scope|difference"
-        )
-        assert detail._scene_card.property("style_management_has_source_slot") is True
-        assert detail._scene_card.property("style_management_has_scope_slot") is True
-        assert detail._scene_card.property("style_management_has_rules") is False
-        assert detail._scene_card.property("style_management_has_policy") is False
-        assert detail._scene_card.property("style_management_has_policy_slot") is False
-        assert detail._scene_card.property("style_management_rule_control_protocol") == "none"
-        assert detail._scene_card.property("style_management_rule_control_ready") is False
-        assert detail._scene_card.property(
-            "style_management_policy_control_protocol"
-        ) == "none"
-        assert detail._scene_card.property(
-            "style_management_policy_control_ready"
-        ) is False
-        assert detail._scene_card.property("style_management_has_difference_slot") is True
-        assert detail._scene_card.property("style_management_has_preview_slot") is False
-        assert detail._scene_card.property("style_management_preview_slot_protocol") == (
-            "none"
-        )
-        assert detail._scene_card.property("style_management_preview_slot_ready") is False
-        assert detail._scene_card.effective_preview_slot is None
-        assert detail._scene_card.property("style_management_effective_preview_protocol") == (
-            "none"
-        )
-        assert detail._scene_card.property("style_management_effective_preview_ready") is False
-        assert detail._scene_card.property("style_object_kind") == (
-            "execution_prereview_style"
-        )
-        assert detail._scene_card.property("style_object_label") == "执行前复核"
-        assert detail._scene_card.property("style_object_source_label") == "有格式例外"
-        assert detail._scene_card.property("style_object_scope_label") == (
-            "1 个格式例外：参考文献"
-        )
-        assert detail._scene_card.property("style_object_edit_state_label") == "只读"
-        assert not hasattr(detail, "_style_prereview_policy_deck")
-        assert slot.objectName() == "wb_style_difference_difference_slot"
-        assert slot.property("style_difference_review_mode") == "execution_prereview"
-        assert slot.isHidden() is False
-        assert slot.property("style_difference_current_status") == "参考文献 独立样式"
-        assert slot.property("style_difference_status") == "待比较"
-        assert slot.property("style_difference_detail") == "需要模板基线后比较字段差异。"
+        assert detail._last_result_status == "idle"
+        assert detail._result_receipt.isHidden() is True
+        assert detail._exec_log.toPlainText() == ""
+        assert detail._log_toggle_btn.isHidden() is True
+        assert detail._execute_btn.text() == "生成文档"
 
-        assert "build_execution_prereview_style_projection" in source
-        assert "apply_style_object_projection(style_projection)" in source
-        assert "build_style_source_projection" not in source
-        assert "build_style_difference_summary_projection" not in source
-        assert "_style_source_row" not in source
-        assert "_style_prereview_source_slot" not in source
-        assert "_on_style_source_navigation_requested" not in source
-        assert "_style_difference_slot.apply_projection" not in source
-        assert "StyleSourceSlot(" not in source
-        assert "source_slot=self._scene_template_selector_row" in source
-        assert "scope_slot=self._scene_template_selector_row" in source
-        assert "StylePolicyControlDeck(" not in source
-        assert "policy_selected.connect" not in source
-        assert "_on_style_policy_selected" not in source
-        assert "rule_control=self._style_prereview_policy_deck" not in source
-        assert "StylePreviewSurface(" not in source
-        assert "preview_slot=self._style_prereview_preview_slot" not in source
-        assert "_style_prereview_preview" not in source
+        detail.set_execution_result(
+            ExecutionResultState(
+                status="success",
+                summary="第二次执行完成",
+                output_path=str(output),
+            )
+        )
+        detail._on_floating_field_changed("title", "新标题")
+
+        assert detail._last_result_status == "idle"
+        assert detail._result_receipt.isHidden() is True
+        assert detail._exec_log.toPlainText() == ""
     finally:
         detail.close()
 
 
-def test_quick_execution_detail_hides_style_difference_without_independent_sections():
+def test_quick_execution_detail_shows_compact_result_receipt(
+    monkeypatch,
+    tmp_path,
+):
     _app()
-    scene = SceneWorkspace(scene_id="custom", template_id="default")
+    detail = QuickExecutionDetail()
+    output = tmp_path / "final.docx"
+    output.write_bytes(b"result")
+    opened: list[str] = []
+    monkeypatch.setattr(
+        QDesktopServices,
+        "openUrl",
+        lambda url: opened.append(url.toLocalFile()) or True,
+    )
+    try:
+        detail.set_execution_result(
+            ExecutionResultState(
+                status="success",
+                summary="执行完成",
+                output_path=str(output),
+            )
+        )
+
+        assert detail._result_receipt.isHidden() is False
+        assert detail._result_receipt_label.text() == "已生成：final.docx"
+        assert detail._result_receipt_label.toolTip() == str(output)
+        assert detail._open_result_btn.isEnabled() is True
+        assert detail._open_result_folder_btn.isEnabled() is True
+        assert detail._log_toggle_btn.text() == "查看全部产物与日志"
+
+        detail._open_result_btn.click()
+        detail._open_result_folder_btn.click()
+
+        assert [Path(path) for path in opened] == [output, tmp_path]
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_shows_exam_source_assembly_card_only_for_exam_scene():
+    _app()
     detail = QuickExecutionDetail()
     try:
-        detail._apply_scene(scene)
+        detail._apply_scene(SceneWorkspace(scene_id="custom", template_id="default"))
+        assert detail._exam_source_card.isHidden()
 
-        assert isinstance(detail._style_difference_slot, StyleDifferenceSummarySlot)
-        assert detail._style_difference_slot.isHidden() is True
-        assert (
-            detail._style_difference_slot.property("style_difference_has_projection")
-            is False
+        detail._apply_scene(create_exam_scene())
+        assert not detail._exam_source_card.isHidden()
+        assert detail._exam_source_summary.text() == "等待题稿"
+        assert detail._exam_source_rows["source"][1].text() == "待上传 Markdown 题稿"
+        assert detail._exam_source_rows["assembly"][1].text() == "按 Markdown 标题装配"
+        assert detail._exam_source_rows["delivery"][1].text() == "学生卷 + 答案版"
+        assert detail._exam_source_rows["fields"][1].text() == (
+            "标题、科目、年级、考试时间、满分"
+        )
+        assert detail._exam_source_rows["fields"][0].text() == "状态"
+        assert detail._drop_area._accepted_suffixes == (".md", ".markdown")
+        assert detail._drop_area._hint_title.text() == (
+            "上传 Markdown 题稿（支持格式：.md / .markdown）"
         )
     finally:
         detail.close()
 
 
-def test_quick_execution_detail_style_prereview_uses_summary_without_policy_or_preview():
+def test_quick_execution_primary_picker_uses_active_scene_file_policy(
+    monkeypatch,
+    tmp_path,
+):
     _app()
-    scene = SceneWorkspace(scene_id="custom", template_id="default")
-    scene.section_styles["references_body"] = StyleConfig(font_cn="黑体")
-    scene.section_styles["acknowledgment_body"] = StyleConfig(font_cn="楷体")
     detail = QuickExecutionDetail()
-    try:
-        detail._apply_scene(scene)
+    source = tmp_path / "paper.md"
+    source.write_text("# 试卷", encoding="utf-8")
+    observed_filters: list[str] = []
 
-        assert not hasattr(detail, "_style_source_row")
-        assert not hasattr(detail, "_style_prereview_source_slot")
-        assert not hasattr(detail, "_style_prereview_policy_deck")
-        assert not hasattr(detail, "_style_prereview_preview_slot")
-        assert not hasattr(detail, "_style_prereview_preview")
-        assert detail._scene_card.property("style_management_has_policy") is False
-        assert detail._scene_card.property("style_management_has_preview_slot") is False
-        assert detail._scene_card.property("style_management_slot_plan") == (
-            "source|scope|difference"
-        )
-        assert detail._scene_card.preview_slot is None
-        assert detail._scene_card.effective_preview_slot is None
-        assert detail._style_difference_slot.isHidden() is False
+    def _pick(*args):
+        observed_filters.append(str(args[3]))
+        return str(source), args[3]
+
+    try:
+        detail._apply_scene(create_exam_scene())
+        monkeypatch.setattr(QFileDialog, "getOpenFileName", _pick)
+
+        assert detail.pick_document_path() == str(source)
+        assert detail.document_path() == str(source)
+        assert len(observed_filters) == 1
+        assert observed_filters[0].startswith("Markdown 文件 (*.md *.markdown)")
     finally:
         detail.close()
 
 
-def test_quick_execution_detail_reports_presenter_derived_status_and_snapshot():
+def test_quick_execution_detail_exam_source_card_avoids_unverified_question_counts():
     _app()
     detail = QuickExecutionDetail()
     try:
-        assert detail._status_label.text() == "请先选择输入文档"
+        detail._apply_scene(create_exam_scene())
+        detail.set_document_path("C:/docs/final_exam.docx")
+
+        source_text = detail._exam_source_rows["source"][1].text()
+        card_text = "\n".join(
+            [detail._exam_source_summary.text()]
+            + [
+                value.text()
+                for _key, value in detail._exam_source_rows.values()
+            ]
+        )
+
+        assert "当前试卷入口仅支持 Markdown 题稿" in source_text
+        assert "大题" not in card_text
+        assert "小题" not in card_text
+        assert "已识别" not in card_text
+
+        detail.set_document_path("C:/docs/final_exam.json")
+        assert detail._exam_source_rows["source"][1].text() == (
+            "当前试卷入口仅支持 Markdown 题稿：final_exam.json"
+        )
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_exam_source_card_shows_markdown_counts(tmp_path):
+    _app()
+    source = tmp_path / "final_exam.md"
+    source.write_text(
+        """# 七年级数学单元测试
+
+> 科目：数学　年级：七年级　考试时间：45 分钟　满分：10 分
+
+## 一、选择题
+
+1. 1 + 1 = （　　）（5 分）
+   A. 1
+   B. 2
+
+## 二、填空题
+
+1. 3 + 4 = ______。（5 分）
+
+## 答案速查
+
+一、选择题
+1. B
+
+二、填空题
+1. 7
+""",
+        encoding="utf-8",
+    )
+    detail = QuickExecutionDetail()
+    try:
+        detail._apply_scene(create_exam_scene())
+        detail.set_document_path(str(source))
+
+        assert detail._exam_source_summary.text() == "已识别 2 大题 / 2 小题"
+        assert detail._exam_source_rows["source"][1].text() == (
+            "Markdown 题稿：final_exam.md"
+        )
+        assert "2 大题 / 2 小题" in detail._exam_source_rows["assembly"][1].text()
+        assert "分值：声明 10 / 计算 10" in detail._exam_source_rows["assembly"][1].text()
+        assert detail._exam_source_rows["fields"][1].text() == (
+            "答案 2/2；解析 0/2；可生成"
+        )
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_reports_compact_ready_status_and_navigation_snapshot():
+    _app()
+    detail = QuickExecutionDetail()
+    try:
+        assert detail._status_label is detail._exec_status_label
+        assert detail._status_label.text() == "请选择或拖入输入文档"
         assert detail.navigation_snapshot() == {
             "subtitle": "未选择文档 · 默认流程",
             "badge_text": "待补充",
@@ -294,7 +494,8 @@ def test_quick_execution_detail_reports_presenter_derived_status_and_snapshot():
         detail.set_feature_enabled("content_fill", True)
 
         assert detail._active_template_label() == "汇报演示"
-        assert detail._status_label.text() == "就绪：report.docx · 汇报演示 · 标准模式"
+        assert detail._status_label.text() == "可生成"
+        assert detail._execute_btn.isEnabled() is True
         assert detail.navigation_snapshot() == {
             "subtitle": "report.docx · 汇报演示",
             "badge_text": "1 项增强",
@@ -309,15 +510,336 @@ def test_quick_execution_detail_reports_presenter_derived_status_and_snapshot():
         detail.close()
 
 
-def test_quick_execution_detail_reports_material_schema_readiness_warning():
+def test_quick_execution_default_plan_never_projects_an_empty_template():
+    _app()
+    detail = QuickExecutionDetail()
+    try:
+        detail.set_work_mode("custom")
+
+        assert detail._scene_combo.currentText().strip()
+        assert detail._template_combo.count() >= 1
+        assert detail._template_combo.currentText().strip() == "默认格式"
+        assert detail.current_template_id() == "default"
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_reports_material_schema_as_nonblocking_warning():
     _app()
     detail = QuickExecutionDetail()
     try:
         detail.set_document_path("C:/docs/report.docx")
-        detail.current_scene().input_source_profile.material_schema_id = "missing_schema_v1"
+        detail.current_scene().input_source_profile.material_schema_id = (
+            "missing_schema_v1"
+        )
+        detail.current_scene().input_source_profile.failure_policy = "warn"
         detail._emit_summary_changed()
 
-        assert detail._status_label.text() == "资料 Schema 未注册：missing_schema_v1"
+        decision = detail.current_execution_gate_decision()
+        assert decision.state == "warning"
+        assert decision.can_run is True
+        assert decision.blocking_reasons == ()
+        assert decision.warning_reasons == (
+            "资料 Schema 未注册：missing_schema_v1",
+        )
+        assert detail._status_label.text() == "可生成；部分信息将使用默认值"
+        assert detail._status_label.toolTip() == (
+            "资料 Schema 未注册：missing_schema_v1"
+        )
+        assert detail._execute_btn.isEnabled() is True
+        assert detail._material_repair_btn.text() == "补充信息（可选）"
+    finally:
+        detail.close()
+
+def test_quick_execution_detail_official_readiness_shows_plan_profile_master_template_and_fields():
+    _app()
+    detail = QuickExecutionDetail()
+    try:
+        detail.set_work_mode("official")
+
+        assert detail._exam_source_card.isHidden() is False
+        assert detail._exam_source_card._title_label.text() == "公文资料与装配"
+        assert detail._exam_source_summary.text() == "公文执行前检查：5 个方案字段未绑定"
+
+        row_labels = {
+            key: label.text()
+            for key, (label, _value) in detail._exam_source_rows.items()
+        }
+        row_values = {
+            key: value.text()
+            for key, (_label, value) in detail._exam_source_rows.items()
+        }
+
+        assert row_labels == {
+            "source": "处理方案",
+            "assembly": "文种",
+            "delivery": "版式 / 模板",
+            "fields": "资料字段",
+        }
+        assert row_values["source"] == "公文基础方案"
+        assert row_values["assembly"] == "通知 (notice)"
+        assert "GB/T 9704 通用红头公文版式" in row_values["delivery"]
+        assert "GB/T 9704 公文格式" in row_values["delivery"]
+        assert row_values["fields"] == (
+            "当前方案需要 5 项 · 已映射 0 项 · 已填写 0 项 · "
+            "未绑定 5 项：标题、正文、发文机关、发文字号、成文日期"
+        )
+
+        detail.set_material_context(
+            MaterialExecutionContext(
+                profile_id="official:notice",
+                field_scopes={
+                    "organization": "fixed",
+                    "title": "floating",
+                    "body": "floating",
+                    "document_no": "floating",
+                    "issue_date": "floating",
+                },
+                entity_data={
+                    "document_type": "notice",
+                    "title": "关于召开项目推进会的通知",
+                    "body": "请各单位按时参会。",
+                    "organization": "示例办公室",
+                    "document_no": "示办发〔2026〕1号",
+                    "issue_date": "2026年7月10日",
+                },
+            )
+        )
+
+        assert detail._exam_source_summary.text() == "公文执行前检查：必填字段已齐"
+        assert (
+            detail._exam_source_rows["fields"][1].text()
+            == "当前方案需要 5 项 · 已映射 5 项 · 已填写 5 项 · "
+            "自由字段 4/4 已填写"
+        )
+        assert detail._floating_fields_card.isHidden() is False
+        assert list(detail._floating_field_inputs) == [
+            "title",
+            "body",
+            "document_no",
+            "issue_date",
+        ]
+        assert detail._floating_field_name_labels["title"].text() == "{{@text:标题1}}"
+        assert detail._floating_fields_progress.text() == "已完成 4/4"
+        assert detail._floating_field_inputs["body"]._editor_kind == "multiline"
+        assert detail._floating_field_inputs["issue_date"]._editor_kind == "date"
+
+        changed_contexts = []
+        detail.material_context_changed.connect(changed_contexts.append)
+        detail._floating_field_inputs["title"].setText("新的通知标题")
+        assert detail._floating_field_name_labels["title"].text() == "{{@text:标题1}}"
+        assert changed_contexts[-1].entity_data["title"] == "新的通知标题"
+    finally:
+        detail.close()
+
+
+def test_quick_execution_free_fields_keep_same_rows_when_context_values_refresh():
+    app = _app()
+    detail = QuickExecutionDetail()
+    try:
+        detail.set_work_mode("official")
+        detail.set_material_context(
+            MaterialExecutionContext(
+                profile_id="official:notice",
+                field_scopes={"title": "floating", "body": "floating"},
+                entity_data={"title": "旧标题", "body": "旧正文"},
+            )
+        )
+        app.processEvents()
+
+        original_rows = dict(detail._floating_field_rows)
+        original_inputs = dict(detail._floating_field_inputs)
+        original_labels = dict(detail._floating_field_name_labels)
+
+        detail.set_material_context(
+            MaterialExecutionContext(
+                profile_id="official:notice",
+                field_scopes={"title": "floating", "body": "floating"},
+                entity_data={"title": "新标题", "body": "新正文"},
+            )
+        )
+        app.processEvents()
+
+        assert list(detail._floating_field_rows) == ["title", "body"]
+        assert all(
+            detail._floating_field_rows[key] is original_rows[key]
+            for key in original_rows
+        )
+        assert all(
+            detail._floating_field_inputs[key] is original_inputs[key]
+            for key in original_inputs
+        )
+        assert all(
+            detail._floating_field_name_labels[key] is original_labels[key]
+            for key in original_labels
+        )
+        assert detail._floating_field_inputs["title"].text() == "新标题"
+        assert detail._floating_field_inputs["body"].text() == "新正文"
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_official_document_type_is_independent_from_plan():
+    app = _app()
+    detail = QuickExecutionDetail()
+    try:
+        detail.set_work_mode("official")
+
+        official_index = detail._scene_combo.findData("official")
+        assert official_index >= 0
+        detail._scene_combo.setCurrentIndex(official_index)
+        app.processEvents()
+        assert detail._scene_combo.currentData() == "official"
+        assert [
+            detail._document_type_combo.itemData(index)
+            for index in range(detail._document_type_combo.count())
+        ] == ["notice", "letter", "minutes", "report", "request", "approval"]
+
+        letter_index = detail._document_type_combo.findData("letter")
+        assert letter_index >= 0
+        detail._document_type_combo.setCurrentIndex(letter_index)
+        app.processEvents()
+
+        assert detail.current_scene().scene_id == "official"
+        assert detail._exam_source_rows["source"][1].text() == "公文基础方案"
+        assert detail._exam_source_rows["assembly"][1].text() == "函 (letter)"
+
+        minutes_index = detail._document_type_combo.findData("minutes")
+        assert minutes_index >= 0
+        detail._document_type_combo.setCurrentIndex(minutes_index)
+        app.processEvents()
+
+        assert detail.current_scene().scene_id == "official"
+        assert detail._exam_source_rows["source"][1].text() == "公文基础方案"
+        assert detail._exam_source_rows["assembly"][1].text() == "纪要 (minutes)"
+        assert "GB/T 9704 纪要格式" in detail._exam_source_rows["delivery"][1].text()
+
+        for profile_id, profile_label in (
+            ("report", "报告"),
+            ("request", "请示"),
+            ("approval", "批复"),
+        ):
+            index = detail._document_type_combo.findData(profile_id)
+            assert index >= 0
+            detail._document_type_combo.setCurrentIndex(index)
+            app.processEvents()
+
+            assert detail.current_scene().scene_id == "official"
+            assert detail._exam_source_rows["source"][1].text() == "公文基础方案"
+            assert detail._exam_source_rows["assembly"][1].text() == (
+                f"{profile_label} ({profile_id})"
+            )
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_material_profile_does_not_override_task_document_type():
+    _app()
+    detail = QuickExecutionDetail()
+    try:
+        detail.set_work_mode("official")
+        scene = detail.current_scene()
+
+        assert scene.scene_id == "official"
+        assert scene.default_material_profile_id == "official:notice"
+
+        detail.set_material_context(
+            MaterialExecutionContext(
+                profile_id="official:letter",
+                field_scopes={
+                    "title": "floating",
+                    "body": "floating",
+                    "organization": "fixed",
+                    "document_no": "floating",
+                    "issue_date": "floating",
+                },
+                entity_data={
+                    "document_type": "letter",
+                    "title": "Letter title",
+                    "body": "Letter body",
+                    "organization": "Archive Office",
+                    "document_no": "A-2026-1",
+                    "issue_date": "2026-07-10",
+                    "recipient": "Project unit",
+                },
+            )
+        )
+
+        assert detail.current_scene() is scene
+        assert detail.current_scene().scene_id == "official"
+        assert detail.current_scene().default_material_profile_id == "official:notice"
+        assert detail._exam_source_rows["source"][1].text() == "公文基础方案"
+        assert detail._exam_source_rows["assembly"][1].text() == "通知 (notice)"
+        assert detail._exam_source_summary.text() == "公文执行前检查：必填字段已齐"
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_does_not_treat_unscoped_entity_values_as_mapped_fields():
+    _app()
+    detail = QuickExecutionDetail()
+    try:
+        detail.set_work_mode("official")
+        detail.set_material_context(
+            MaterialExecutionContext(
+                profile_id="official:notice",
+                entity_data={
+                    "title": "Unscoped title",
+                    "body": "Unscoped body",
+                    "organization": "Unscoped office",
+                    "document_no": "UNSCOPED-1",
+                    "issue_date": "2026-07-14",
+                },
+            )
+        )
+
+        assert detail._exam_source_summary.text() == "公文执行前检查：5 个方案字段未绑定"
+        assert "已映射 0 项" in detail._exam_source_rows["fields"][1].text()
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_official_missing_fields_use_compact_warn_gate():
+    _app()
+    detail = QuickExecutionDetail()
+    try:
+        detail.set_work_mode("official")
+        detail.set_document_path("C:/docs/notice.docx")
+
+        decision = detail.current_execution_gate_decision()
+        assert decision.state == "warning"
+        assert decision.can_run is True
+        assert decision.blocking_reasons == ()
+        assert decision.primary_action is not None
+        assert decision.primary_action.target_type == "field"
+        assert decision.primary_action.target_key == "title"
+        assert decision.warning_reasons == (
+            "资料字段缺失：title, body, organization, document_no, issue_date",
+        )
+        assert detail._exec_status_label.text() == "可生成；部分信息将使用默认值"
+        assert detail._execute_btn.isEnabled() is True
+        assert detail._material_repair_btn.text() == "补充信息（可选）"
+        assert "字段：title, body, organization, document_no, issue_date" in (
+            detail._material_repair_btn.toolTip()
+        )
+    finally:
+        detail.close()
+
+def test_quick_execution_detail_plan_combo_uses_current_work_mode_options():
+    _app()
+    detail = QuickExecutionDetail()
+    try:
+        for mode_id in ("exam", "official", "bidding", "thesis"):
+            detail.set_work_mode(mode_id)
+            actual_values = [
+                detail._scene_combo.itemData(index)
+                for index in range(detail._scene_combo.count())
+            ]
+            expected_values = [
+                option.value for option in plan_selector_options(mode_id)
+            ]
+
+            assert actual_values == expected_values
     finally:
         detail.close()
 
@@ -342,1089 +864,336 @@ def test_quick_execution_detail_shows_schema_replacement_recommendation_in_repai
         detail.close()
 
 
-def test_quick_execution_detail_exposes_material_readiness_issue_queue():
+def test_quick_execution_detail_compact_gate_covers_ready_warn_block_and_confirm():
     _app()
-    scene = create_bidding_scene()
     detail = QuickExecutionDetail()
     try:
-        detail._apply_scene(scene)
-        detail.set_document_path("C:/docs/bid.docx")
+        ready_scene = SceneWorkspace(scene_id="custom", template_id="default")
+        detail._apply_scene(ready_scene)
+        detail.set_document_path("C:/docs/ready.docx")
+        decision = detail.current_execution_gate_decision()
+        assert decision.state == "ready"
+        assert decision.ready_to_start is True
+        assert detail._exec_status_label.text() == "可生成"
+        assert detail._execute_btn.isEnabled() is True
+        assert detail._material_repair_btn.isHidden() is True
 
-        items = detail.current_issue_items()
+        warn_scene = create_exam_scene()
+        warn_scene.input_source_profile.material_schema_id = "exam_items_v1"
+        warn_scene.input_source_profile.failure_policy = "warn"
+        detail._apply_scene(warn_scene)
+        detail.set_document_path("C:/docs/warn.docx")
+        decision = detail.current_execution_gate_decision()
+        assert decision.state == "warning"
+        assert decision.can_run is True
+        assert decision.warning_reasons
+        assert detail._exec_status_label.text() == "可生成；部分信息将使用默认值"
+        assert detail._execute_btn.isEnabled() is True
+        assert detail._material_repair_btn.text() == "补充信息（可选）"
 
-        assert [item.issue_id for item in items] == [
-            "material.fields.missing",
-            "material.assets.missing",
-        ]
-        assert items[0].repair_target_type == "field"
-        assert items[0].repair_target_key == "company_name"
-        assert items[1].repair_target_type == "asset"
-        assert items[1].repair_target_key == "logo"
-        assert not detail._issue_queue_label.isHidden()
-        assert not detail._issue_panel.isHidden()
-        assert detail._issue_panel_title.text() == "问题处理"
-        assert detail._issue_panel_count.text() == "2 项，2 项阻断"
-        assert detail._issue_list.count() == 2
-        assert detail._issue_list.currentItem().data(Qt.UserRole) == (
-            "material.fields.missing"
-        )
-        assert detail._issue_queue_label.text().startswith("运行前问题 2 项：")
-        assert "先处理 2" in detail._issue_queue_label.text()
-        assert "资料字段缺失：company_name, project_name, legal_person" in (
-            detail._issue_queue_label.text()
-        )
-        assert "问题处理" in detail._issue_queue_label.toolTip()
-        assert "行动：先处理 2" in detail._issue_queue_label.toolTip()
+        detail._apply_scene(create_bidding_scene())
+        detail.set_document_path("C:/docs/block.docx")
+        decision = detail.current_execution_gate_decision()
+        assert decision.state == "blocked"
+        assert decision.can_run is False
+        assert decision.blocking_reasons
+        assert detail._exec_status_label.text() == "无法生成：缺少必需资料"
+        assert detail._execute_btn.isEnabled() is False
+        assert detail._material_repair_btn.text() == "去补齐"
 
-        detail._issue_panel_toggle_btn.click()
-
-        assert detail._issue_panel.isHidden() is False
-        assert detail._issue_panel_body.isHidden() is True
-        assert detail._issue_panel_toggle_btn.text() == "展开"
-
-        detail._issue_panel_toggle_btn.click()
-
-        assert detail._issue_panel_body.isHidden() is False
-        assert detail._issue_panel_toggle_btn.text() == "收起"
-
-        detail.set_material_context(
-            MaterialExecutionContext(
-                entity_data={
-                    "company_name": "测试公司",
-                    "project_name": "示例项目",
-                    "legal_person": "张三",
-                },
-                asset_items=[
-                    AssetItem(role="logo", path="C:/assets/logo.png"),
-                    AssetItem(role="seal", path="C:/assets/seal.png"),
-                ],
-            )
-        )
-
-        assert detail.current_issue_items() == []
-        assert detail._issue_queue_label.isHidden()
-        assert detail._issue_panel.isHidden()
+        confirm_scene = create_bidding_scene()
+        confirm_scene.input_source_profile.failure_policy = "confirm"
+        detail._apply_scene(confirm_scene)
+        detail.set_document_path("C:/docs/confirm.docx")
+        decision = detail.current_execution_gate_decision()
+        assert decision.state == "confirmation"
+        assert decision.can_run is True
+        assert decision.requires_confirmation is True
+        assert detail._exec_status_label.text() == "生成前需确认资料缺口"
+        assert detail._execute_btn.text() == "确认并生成"
+        assert detail._execute_btn.isEnabled() is True
     finally:
         detail.close()
 
 
-def test_quick_execution_detail_issue_panel_shows_detail_and_rechecks_current_issue():
+def test_quick_execution_detail_static_audits_do_not_enter_execution_gate():
+    module_source = (
+        ROOT / "src/ui/panels/workbench/quick_execution_detail.py"
+    ).read_text(encoding="utf-8")
+    static_audit_builders = (
+        "coverage_boundary_issue_items",
+        "parameter_ownership_issue_items",
+        "sample_fixture_issue_items",
+        "control_contract_issue_items",
+    )
+    assert all(name not in module_source for name in static_audit_builders)
+
+    _app()
+    detail = QuickExecutionDetail()
+    try:
+        scene = SceneWorkspace(
+            scene_id="exam_teaching",
+            category="exam_teaching",
+            template_id="default",
+        )
+        detail._apply_scene(scene)
+        detail.set_document_path("C:/docs/exam.docx")
+        decision = detail.current_execution_gate_decision()
+        assert decision.state == "ready"
+        assert detail._exec_status_label.text() == "可生成"
+        assert "插件" not in detail._exec_status_label.text()
+        assert "边界" not in detail._exec_status_label.toolTip()
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_removes_inline_issue_management_controls():
+    module_source = (
+        ROOT / "src/ui/panels/workbench/quick_execution_detail.py"
+    ).read_text(encoding="utf-8")
+    removed_members = (
+        "_issue_panel",
+        "_issue_panel_body",
+        "_issue_list",
+        "_issue_detail_panel",
+        "_issue_filter_combo",
+        "_issue_action_group_combo",
+        "_issue_resolve_btn",
+        "_issue_ignore_btn",
+        "issue_repair_requested",
+        "current_issue_items",
+        "set_issue_queue_filter",
+    )
+
+    _app()
+    detail = QuickExecutionDetail()
+    try:
+        assert all(not hasattr(detail, name) for name in removed_members)
+        assert all(name not in module_source for name in removed_members)
+        assert "已处理" not in module_source
+        assert "忽略" not in module_source
+    finally:
+        detail.close()
+
+
+def test_quick_execution_detail_preflight_does_not_expand_execution_card_inline():
     app = _app()
-    scene = create_bidding_scene()
     detail = QuickExecutionDetail()
     try:
-        detail._apply_scene(scene)
-        detail.set_document_path("C:/docs/bid.docx")
-
-        assert not detail._issue_detail_panel.isHidden()
-        assert detail._issue_detail_title.text().startswith("资料字段缺失")
-        assert detail._issue_detail_impact_title.text() == "影响"
-        assert detail._issue_detail_action_title.text() == "动作"
-        assert detail._issue_detail_evidence_title.text() == "证据"
-        assert isinstance(detail._issue_detail_impact_section, IssueDetailSection)
-        assert detail._issue_detail_impact_section.tone() == "error"
-        assert detail._issue_detail_action_section.tone() == "primary"
-        assert detail._issue_detail_evidence_section.tone() == "neutral"
-        assert detail._issue_detail_impact.text() == "会阻断本次运行，需要先处理。"
-        assert detail._issue_detail_advice.text().startswith("处理：")
-        assert "去资料页补齐公司名称" in detail._issue_detail_advice.text()
-        assert "建议：" not in detail._issue_detail_advice.text()
-        assert "field:company_name" not in detail._issue_detail_advice.text()
-        assert "来源：" in detail._issue_detail_body.text()
-
-        detail._issue_list.setCurrentRow(1)
+        detail.resize(1080, 900)
+        detail.show()
         app.processEvents()
+        before_height = detail._execution_card.sizeHint().height()
 
-        assert detail.current_active_issue_id() == "material.assets.missing"
-        assert detail._issue_detail_title.text().startswith("资料资产缺失")
-        assert detail._issue_detail_action_title.text() == "动作"
-        assert detail._issue_detail_evidence_title.text() == "证据"
-        assert "去资料页补齐企业标志" in detail._issue_action_btn.toolTip()
-        assert "asset:logo" not in detail._issue_action_btn.toolTip()
+        detail._apply_scene(create_bidding_scene())
+        detail.set_document_path("C:/docs/bid.docx")
+        app.processEvents()
+        after_height = detail._execution_card.sizeHint().height()
 
-        detail._material_context = MaterialExecutionContext(
-            entity_data={
-                "company_name": "测试公司",
-                "project_name": "示例项目",
-                "legal_person": "张三",
-            },
-            asset_items=[
-                AssetItem(role="logo", path="C:/assets/logo.png"),
-                AssetItem(role="seal", path="C:/assets/seal.png"),
-            ],
-        )
-
-        detail._issue_recheck_btn.click()
-
-        assert detail.current_issue_items() == []
-        assert detail._issue_panel.isHidden()
+        assert detail.current_execution_gate_decision().state == "blocked"
+        assert after_height <= before_height + get_theme().control_height_sm
+        assert detail._exec_log.isHidden() is True
+        assert not hasattr(detail, "_issue_panel")
     finally:
         detail.close()
 
 
-def test_quick_execution_detail_exposes_question_figure_comparison_issue_queue(monkeypatch):
+def test_quick_execution_detail_markdown_metadata_satisfies_exam_gate(tmp_path):
+    source = tmp_path / "exam.md"
+    source.write_text(
+        """# 七年级数学单元测试
+
+> 科目：数学　年级：七年级　考试时间：45 分钟　满分：10 分
+
+## 一、选择题
+
+1. 1 + 1 = （　　）（10 分）
+   A. 1
+   B. 2
+""",
+        encoding="utf-8",
+    )
     _app()
     detail = QuickExecutionDetail()
     try:
-        monkeypatch.setattr(
-            quick_execution_detail_module,
-            "coverage_boundary_issue_items",
-            lambda _scene: [],
-        )
-        monkeypatch.setattr(
-            quick_execution_detail_module,
-            "parameter_ownership_issue_items",
-            lambda _scene: [],
-        )
-        monkeypatch.setattr(
-            quick_execution_detail_module,
-            "sample_fixture_issue_items",
-            lambda _scene: [],
-        )
-        monkeypatch.setattr(
-            quick_execution_detail_module,
-            "control_contract_issue_items",
-            lambda: [],
-        )
-        detail._apply_scene(SceneWorkspace(scene_id="exam_education"))
-        detail.set_document_path("C:/docs/exam.docx")
-        detail.set_material_context(
-            MaterialExecutionContext(
-                profile_id="exam_a",
-                profile_name="Exam A",
-                asset_items=[
-                    AssetItem(
-                        item_id="question_figure_2",
-                        label="Question 2 figure",
-                        role="question_figure",
-                        path="C:/exam/question_2.png",
-                        metadata={
-                            "question_index": "2",
-                            "comparison_issue_status": "flagged",
-                            "comparison_issue_type": "manual_compare",
-                            "comparison_issue_reference": "C:/exam/question_1.png",
-                            "comparison_issue_display_name": "question_1.png",
-                            "comparison_issue_kind": "题图对比",
-                            "comparison_issue_summary": "题2 题图对比: question_1.png",
-                        },
-                    )
-                ],
-            )
-        )
-
-        items = detail.current_issue_items()
-
-        assert len(items) == 1
-        assert items[0].category == "material_asset_comparison"
-        assert items[0].repair_target_type == "question_figure_item"
-        assert detail.current_issue_action_targets()[0][0] == "profile_question_figure_item"
-        assert not detail._issue_queue_label.isHidden()
-        assert detail._issue_queue_label.text().startswith("运行前问题 1 项：")
-        assert "题图对比问题：题2 题图对比: question_1.png" in (
-            detail._issue_queue_label.text()
-        )
-        assert "分类：题图对比 1" in detail._issue_queue_label.toolTip()
-        assert "人工标注" not in detail._issue_queue_label.text()
-
-        detail.set_issue_queue_filter("material_asset_comparison")
-
-        assert detail.current_filtered_issue_items()[0].issue_id == items[0].issue_id
-        assert "当前筛选：题图对比" in detail._issue_queue_label.toolTip()
+        exam_scene = create_exam_scene()
+        exam_scene.input_source_profile.material_schema_id = "exam_items_v1"
+        exam_scene.input_source_profile.failure_policy = "warn"
+        detail._apply_scene(exam_scene)
+        detail.set_document_path(str(source))
+        decision = detail.current_execution_gate_decision()
+        assert decision.state == "ready"
+        assert decision.warning_reasons == ()
+        assert decision.blocking_reasons == ()
+        assert detail._material_readiness_issues.has_issues is False
+        assert detail._exec_status_label.text() == "可生成"
+        assert detail._execute_btn.isEnabled() is True
+        assert detail._material_repair_btn.isHidden() is True
     finally:
         detail.close()
 
 
-def test_quick_execution_detail_exposes_parameter_ownership_issue_queue():
-    @dataclass
-    class FutureSceneWorkspace(SceneWorkspace):
-        experimental_knob: str = ""
-
-    _app()
-    scene = FutureSceneWorkspace(scene_id="future")
-    detail = QuickExecutionDetail()
-    try:
-        detail._apply_scene(scene)
-        detail.set_document_path("C:/docs/future.docx")
-
-        items = detail.current_issue_items()
-
-        assert [item.issue_id for item in items] == [
-            "scene.parameter_ownership.audit",
-        ]
-        assert items[0].category == "parameter_ownership"
-        assert items[0].repair_target_type == "parameter_ownership"
-        assert items[0].repair_target_key == "registry"
-        assert items[0].owner == "scene"
-        assert detail.current_issue_action_targets() == [
-            ("parameter_ownership", "registry")
-        ]
-        assert not detail._issue_queue_label.isHidden()
-        assert detail._issue_queue_label.text().startswith("运行前问题 1 项：")
-        assert "参数归属缺口：1 类缺口" in detail._issue_queue_label.text()
-        assert "分类：参数归属 1" in detail._issue_queue_label.toolTip()
-        assert "负责人：场景配置 1" in detail._issue_queue_label.toolTip()
-        assert "缺少顶层字段归属：experimental_knob" in (
-            detail._issue_queue_label.toolTip()
-        )
-
-        detail.set_issue_queue_filter("parameter_ownership")
-
-        assert detail.current_filtered_issue_items()[0].issue_id == (
-            "scene.parameter_ownership.audit"
-        )
-        assert "当前筛选：参数归属" in detail._issue_queue_label.toolTip()
-    finally:
-        detail.close()
-
-
-def test_quick_execution_detail_exposes_control_contract_issue_queue(monkeypatch):
+def test_quick_execution_detail_exposes_one_material_cta_only():
     _app()
     detail = QuickExecutionDetail()
+    requested: list[tuple[str, str]] = []
     try:
-        requested_targets = []
-        opened_paths = []
-        detail.issue_repair_requested.connect(
-            lambda target_type, target_key: requested_targets.append(
+        detail.material_repair_requested.connect(
+            lambda target_type, target_key: requested.append(
                 (target_type, target_key)
             )
         )
-        detail._open_local_path_handler = (
-            lambda path: opened_paths.append(Path(path)) or True
-        )
-        monkeypatch.setattr(
-            quick_execution_detail_module,
-            "control_contract_issue_items",
-            lambda: [
-                WorkbenchIssueItem(
-                    issue_id="ui.control_contract.required.body_special_indent",
-                    category="control_contract",
-                    severity="warning",
-                    title="控件契约缺失",
-                    summary="body.special_indent",
-                    details=(
-                        "缺少必审控件契约：body.special_indent",
-                        "规范控件：SpecialIndentInput",
-                        "参数路径：body.special_indent",
-                        "证据：src/shared/ui/paragraph_style_inputs.py:120#class SpecialIndentInput",
-                    ),
-                    source_notes=("control_contract_registry",),
-                    repair_target_type="control_contract",
-                    repair_target_key="body.special_indent",
-                    owner="scene",
-                )
-            ],
-        )
-        detail._apply_scene(SceneWorkspace(scene_id="report"))
-        detail.set_document_path("C:/docs/report.docx")
+        detail._apply_scene(create_bidding_scene())
+        detail.set_document_path("C:/docs/bid.docx")
+        assert detail._material_repair_btn.text() == "去补齐"
+        assert detail._material_repair_btn.isHidden() is False
+        assert not hasattr(detail, "_result_details_btn")
+        assert detail._object_preflight_cancel_btn.isHidden() is True
+        assert not hasattr(detail, "_issue_action_btn")
 
-        items = detail.current_issue_items()
-
-        assert [item.issue_id for item in items] == [
-            "ui.control_contract.required.body_special_indent"
-        ]
-        assert items[0].category == "control_contract"
-        assert items[0].repair_target_type == "control_contract"
-        assert items[0].repair_target_key == "body.special_indent"
-        assert items[0].owner == "scene"
-        assert detail.current_issue_action_targets() == [
-            ("control_contract", "body.special_indent")
-        ]
-        assert not detail._issue_queue_label.isHidden()
-        assert detail._issue_queue_label.text().startswith("运行前问题 1 项：")
-        assert "控件契约缺失：正文特殊缩进" in detail._issue_queue_label.text()
-        assert "body.special_indent" not in detail._issue_queue_label.text()
-        assert "分类：控件契约 1" in detail._issue_queue_label.toolTip()
-        assert "负责人：场景配置 1" in detail._issue_queue_label.toolTip()
-        assert "缺少必审控件契约：正文特殊缩进（body.special_indent）" in (
-            detail._issue_queue_label.toolTip()
-        )
-        assert "规范控件：SpecialIndentInput" in detail._issue_queue_label.toolTip()
-        assert "paragraph_style_inputs.py:120#class SpecialIndentInput" in (
-            detail._issue_queue_label.toolTip()
-        )
-        assert "来源：控件边界登记" in detail._issue_queue_label.toolTip()
-        assert "control_contract_registry" not in detail._issue_queue_label.toolTip()
-        assert detail._issue_detail_action_title.text() == "动作"
-        assert detail._issue_detail_evidence_title.text() == "证据"
-        assert "说明：缺少必审控件契约：正文特殊缩进（body.special_indent）" in (
-            detail._issue_detail_body.text()
-        )
-        assert "参数：正文特殊缩进" in detail._issue_detail_body.text()
-        assert "证据文件：src/shared/ui/paragraph_style_inputs.py:120#class SpecialIndentInput" in (
-            detail._issue_detail_body.text()
-        )
-        assert "来源：控件边界登记" in detail._issue_detail_body.text()
-        assert "control_contract_registry" not in detail._issue_detail_body.text()
-        assert detail.current_issue_evidence_actions() == [
-            ("parameter_path", "navigate_parameter", "body.special_indent"),
-            (
-                "evidence_file",
-                "open_evidence",
-                "src/shared/ui/paragraph_style_inputs.py:120#class SpecialIndentInput",
-            ),
-        ]
-        assert isinstance(detail._issue_evidence_line_list, EvidenceLineList)
-        assert isinstance(detail._issue_evidence_action_bar, EvidenceActionBar)
-        assert detail._issue_detail_body.isHidden()
-        assert not detail._issue_evidence_line_list.isHidden()
-        assert detail._issue_evidence_line_list.line_count() == 5
-        assert detail._issue_evidence_line_list.text_at(2) == (
-            "参数：正文特殊缩进"
-        )
-        assert detail._issue_evidence_action_bar.current_actions() == [
-            ("parameter_path", "navigate_parameter", "body.special_indent"),
-            (
-                "evidence_file",
-                "open_evidence",
-                "src/shared/ui/paragraph_style_inputs.py:120#class SpecialIndentInput",
-            ),
-        ]
-        assert not detail._issue_evidence_action_row.isHidden()
-        assert detail._issue_evidence_parameter_btn.text() == "定位参数"
-        assert detail._issue_evidence_parameter_btn.isEnabled()
-        assert "body.special_indent" in detail._issue_evidence_parameter_btn.toolTip()
-        assert detail._issue_evidence_file_btn.text() == "打开证据"
-        assert detail._issue_evidence_file_btn.isEnabled()
-        assert "paragraph_style_inputs.py" in detail._issue_evidence_file_btn.toolTip()
-
-        detail._issue_evidence_parameter_btn.click()
-        assert requested_targets[-1] == ("control_contract", "body.special_indent")
-
-        detail._issue_evidence_file_btn.click()
-        assert opened_paths
-        assert opened_paths[-1].name == "paragraph_style_inputs.py"
-        assert opened_paths[-1].is_absolute()
-        assert "已打开证据" in detail._exec_log.toPlainText()
-
-        detail.set_issue_queue_filter("control_contract")
-
-        assert detail.current_filtered_issue_items()[0].issue_id == (
-            "ui.control_contract.required.body_special_indent"
-        )
-        assert "当前筛选：控件契约" in detail._issue_queue_label.toolTip()
+        detail._material_repair_btn.click()
+        assert requested == [("field", "company_name")]
     finally:
         detail.close()
 
 
-def test_quick_execution_detail_evidence_parameter_action_routes_scene_style():
+def test_quick_execution_detail_log_is_collapsed_until_requested_or_failed():
     _app()
     detail = QuickExecutionDetail()
     try:
-        requested_targets = []
-        detail.issue_repair_requested.connect(
-            lambda target_type, target_key: requested_targets.append(
-                (target_type, target_key)
+        assert detail._exec_log.isHidden() is True
+        assert detail._log_toggle_btn.isHidden() is True
+        detail.set_execution_progress(
+            ExecutionProgressState(
+                stage_text="解析文档",
+                current_step=1,
+                total_steps=2,
             )
         )
-        item = WorkbenchIssueItem(
-            issue_id="scene.style.references_body.font_cn",
-            category="scene_style",
-            severity="warning",
-            title="样式参数不一致",
-            summary="参考文献正文中文字体",
-            details=("参数路径：scene.section_styles.references_body.font_cn",),
-            owner="scene",
-        )
-        detail._workbench_issue_items = [item]
-        detail._issue_panel_expanded = True
-        detail._set_issue_queue_visible(True, [item])
-
-        assert not detail._issue_evidence_action_row.isHidden()
-        assert detail.current_issue_evidence_actions() == [
-            (
-                "parameter_path",
-                "navigate_parameter",
-                "scene.section_styles.references_body.font_cn",
+        detail.set_execution_progress(
+            ExecutionProgressState(
+                stage_text="解析文档",
+                current_step=2,
+                total_steps=3,
             )
-        ]
-        assert detail._issue_evidence_line_list.text_at(0) == (
-            "参数：参考文献正文中文字体"
         )
+        assert detail._log_toggle_btn.isHidden() is False
+        assert detail._exec_log.isHidden() is True
+        assert detail._log_toggle_btn.text() == "查看执行日志"
+        assert detail._exec_log.toPlainText().count("执行阶段：解析文档") == 1
 
-        detail._issue_evidence_parameter_btn.click()
+        detail._log_toggle_btn.click()
+        assert detail._exec_log.isHidden() is False
+        assert detail._log_toggle_btn.text() == "收起执行日志"
 
-        assert requested_targets[-1] == (
-            "scene_style_field",
-            "scene.section_styles.references_body.font_cn",
+        detail._log_toggle_btn.click()
+        detail.set_execution_result(
+            ExecutionResultState(status="success", summary="执行完成")
         )
+        assert detail._exec_log.isHidden() is True
+
+        detail.set_execution_result(
+            ExecutionResultState(
+                status="failed",
+                summary="执行失败",
+                error_text="模板不可用",
+            )
+        )
+        assert detail._exec_log.isHidden() is False
+        assert detail._log_toggle_btn.text() == "收起执行日志"
     finally:
         detail.close()
 
 
-def test_quick_execution_detail_action_copy_includes_style_layout_group():
+def test_quick_execution_detail_runtime_cancel_is_one_shot_and_neutral():
     _app()
     detail = QuickExecutionDetail()
+    runtime_cancelled: list[bool] = []
+    preflight_cancelled: list[bool] = []
     try:
-        item = WorkbenchIssueItem(
-            issue_id="template.style.body.bold",
-            category="template_style",
-            severity="warning",
-            title="模板样式不一致",
-            summary="template.styles.body.bold",
-            details=("参数路径：template.styles.body.bold",),
-            repair_target_type="template_style_field",
-            repair_target_key="template.styles.body.bold",
-            owner="template",
+        detail.cancel_requested.connect(lambda: runtime_cancelled.append(True))
+        detail.object_preflight_cancel_requested.connect(
+            lambda: preflight_cancelled.append(True)
         )
-        detail._workbench_issue_items = [item]
-        detail._issue_panel_expanded = True
-        detail._set_issue_queue_visible(True, [item])
 
-        assert "处理：去模板页调整文字样式：正文字形" in (
-            detail._issue_detail_advice.text()
+        assert detail._execution_cancel_btn.isHidden() is True
+        assert detail._object_preflight_cancel_btn.isHidden() is True
+
+        detail.set_execution_progress(
+            ExecutionProgressState(
+                stage_text="解析文档",
+                current_step=1,
+                total_steps=3,
+            )
         )
-        assert "处理当前问题：去模板页调整文字样式：正文字形" in (
-            detail._issue_action_btn.toolTip()
+
+        assert detail._execution_cancel_btn.isHidden() is False
+        assert detail._execution_cancel_btn.isEnabled() is True
+        assert detail._execution_cancel_btn.text() == "取消生成"
+        assert detail._object_preflight_cancel_btn.isHidden() is True
+
+        detail._execution_cancel_btn.click()
+        detail._execution_cancel_btn.click()
+
+        assert runtime_cancelled == [True]
+        assert preflight_cancelled == []
+        assert detail._execution_cancel_btn.isEnabled() is False
+        assert detail._execution_cancel_btn.text() == "正在取消..."
+        assert detail._exec_status_label.text() == "正在取消，请稍候…"
+
+        # Late progress must not make cancellation appear reversible.
+        detail.set_execution_progress(
+            ExecutionProgressState(
+                stage_text="写入临时产物",
+                current_step=2,
+                total_steps=3,
+            )
         )
-        assert "可处理目标：模板样式：文字样式：正文字形 1" in (
-            detail._issue_queue_label.toolTip()
+        assert detail._execution_cancel_btn.isEnabled() is False
+        assert detail._execution_cancel_btn.text() == "正在取消..."
+        assert detail._exec_status_label.text() == "正在取消，请稍候…"
+
+        detail.set_execution_result(
+            ExecutionResultState(
+                status="cancelled",
+                summary="已取消",
+                error_text="cancelled by user",
+            )
         )
-        assert detail.current_issue_evidence_actions() == [
-            ("parameter_path", "navigate_parameter", "template.styles.body.bold")
-        ]
-        navigation_context = detail.current_issue_navigation_context()
-        assert navigation_context["issue_target_type"] == "template_style_field"
-        assert navigation_context["issue_target_key"] == "template.styles.body.bold"
-        assert navigation_context["issue_target_label"] == "正文字形"
-        assert navigation_context["issue_target_label_with_group"] == (
-            "文字样式：正文字形"
-        )
-        assert navigation_context["issue_target_layout_item_id"] == "emphasis"
-        assert navigation_context["issue_target_field_ids"] == "bold,italic"
-        assert navigation_context["issue_target_control_contract_key"] == ""
-    finally:
-        detail.close()
 
+        assert detail._exec_status_label.text() == "已取消"
+        assert detail._execution_cancel_btn.isHidden() is True
+        assert detail._exec_error_count == 0
+        assert detail._exec_log.isHidden() is True
+        assert detail.navigation_snapshot()["badge_text"] == "已取消"
+        assert detail.navigation_snapshot()["badge_variant"] == "neutral"
 
-def test_quick_execution_detail_exposes_contract_boundary_and_sample_fixture_issue_queue(
-    monkeypatch,
-):
-    _app()
-    detail = QuickExecutionDetail()
-    try:
-        monkeypatch.setattr(
-            quick_execution_detail_module,
-            "sample_fixture_issue_items",
-            lambda _scene: [
-                WorkbenchIssueItem(
-                    issue_id="sample_fixture.contract_delivery_missing_surfaces_contract_delivery_revisions",
-                    category="sample_fixture",
-                    severity="error",
-                    title="样本覆盖缺口",
-                    summary="contract_delivery: missing_surfaces",
-                    details=(
-                        "覆盖 pack：contract_delivery",
-                        "缺口类型：missing_surfaces",
-                        "Sample fixture must declare at least one DOCX surface.",
-                    ),
-                    source_notes=("scene_sample_fixture_registry",),
-                    repair_target_type="sample_fixture",
-                    repair_target_key="contract_delivery",
-                    owner="scene",
-                )
-            ],
-        )
-        detail._apply_scene(
-            SceneWorkspace(scene_id="contract_delivery", category="contract_delivery")
-        )
-        detail.set_document_path("C:/docs/contract.docx")
-
-        items = detail.current_issue_items()
-
-        assert [item.issue_id for item in items] == [
-            "coverage.contract_delivery.coverage_boundary",
-            "sample_fixture.contract_delivery_missing_surfaces_contract_delivery_revisions"
-        ]
-        assert items[0].category == "coverage_boundary"
-        assert items[0].repair_target_type == "coverage_boundary"
-        assert items[0].repair_target_key == "contract_delivery"
-        assert items[1].category == "sample_fixture"
-        assert items[1].repair_target_type == "sample_fixture"
-        assert items[1].repair_target_key == "contract_delivery"
-        assert detail.current_issue_action_targets() == [
-            ("sample_fixture", "contract_delivery"),
-            ("coverage_boundary", "contract_delivery"),
-        ]
-        assert not detail._issue_queue_label.isHidden()
-        assert detail._issue_queue_label.text().startswith("运行前问题 2 项：")
-        assert "法律/交付边界：合同交付" in (
-            detail._issue_queue_label.text()
-        )
-        assert "样本覆盖缺口：合同交付：样本缺少 Word 对象" in (
-            detail._issue_queue_label.text()
-        )
-        assert "分类：边界覆盖 1 / 样本覆盖 1" in detail._issue_queue_label.toolTip()
-        assert "负责人：场景配置 2" in detail._issue_queue_label.toolTip()
-        assert "不提供法律意见" in detail._issue_queue_label.toolTip()
-        assert "覆盖资料包：合同交付" in detail._issue_queue_label.toolTip()
-        assert "来源：样本覆盖登记" in detail._issue_queue_label.toolTip()
-        assert "覆盖 pack：contract_delivery" not in detail._issue_queue_label.toolTip()
-        assert "scene_sample_fixture_registry" not in detail._issue_queue_label.toolTip()
-        assert "missing_surfaces" not in detail._issue_queue_label.text()
-
-        detail.set_issue_queue_filter("sample_fixture")
-
-        assert detail.current_filtered_issue_items()[0].repair_target_type == (
-            "sample_fixture"
-        )
-        assert "当前筛选：样本覆盖" in detail._issue_queue_label.toolTip()
-    finally:
-        detail.close()
-
-
-def test_quick_execution_detail_filters_issue_queue_by_category():
-    _app()
-    scene = create_bidding_scene()
-    detail = QuickExecutionDetail()
-    requested: list[tuple[str, str]] = []
-    try:
-        detail.issue_repair_requested.connect(
-            lambda target_type, target_key: requested.append((target_type, target_key))
-        )
-        detail._apply_scene(scene)
-        detail.set_document_path("C:/docs/bid.docx")
-
-        assert len(detail.current_issue_items()) == 2
-        assert not detail._issue_filter_row.isHidden()
-        assert not detail._issue_action_btn.isHidden()
-        assert detail._issue_filter_combo.count() == 3
-        assert detail._issue_filter_combo.itemText(0) == "全部问题 (2)"
-        assert detail._issue_filter_combo.itemData(1) == "material_field"
-        assert detail._issue_filter_combo.itemData(2) == "material_asset"
-        assert detail.current_issue_action_targets() == [
-            ("field", "company_name"),
-            ("asset", "logo"),
-        ]
-        assert "去资料页补齐公司名称" in detail._issue_action_btn.toolTip()
-        assert "field:company_name" not in detail._issue_action_btn.toolTip()
-
-        detail.set_issue_queue_filter("material_asset")
-
-        assert len(detail.current_issue_items()) == 2
-        filtered_items = detail.current_filtered_issue_items()
-        assert [item.category for item in filtered_items] == ["material_asset"]
-        assert detail.current_issue_action_targets() == [("asset", "logo")]
-        assert "去资料页补齐企业标志" in detail._issue_action_btn.toolTip()
-        assert "asset:logo" not in detail._issue_action_btn.toolTip()
-        assert detail._issue_queue_label.text().startswith(
-            "运行前问题 2 项（资料资产 1/2）："
-        )
-        assert "先处理 1" in detail._issue_queue_label.text()
-        assert "资料资产缺失：logo, seal" in detail._issue_queue_label.text()
-        assert "资料字段缺失：company_name" not in detail._issue_queue_label.text()
-        assert "行动：先处理 1" in detail._issue_queue_label.toolTip()
-        assert "分类：资料字段 1 / 资料资产 1" in detail._issue_queue_label.toolTip()
-        assert "状态：待处理 2" in detail._issue_queue_label.toolTip()
-        assert "负责人：工作台 2" in detail._issue_queue_label.toolTip()
-        assert "资料素材：企业标志" in detail._issue_queue_label.toolTip()
-        assert "asset:logo" not in detail._issue_queue_label.toolTip()
-        assert "当前筛选：资料资产" in detail._issue_queue_label.toolTip()
-        assert "1. 资料资产缺失：logo, seal" in detail._issue_queue_label.toolTip()
-
-        detail._issue_action_btn.click()
-
-        assert requested == [("asset", "logo")]
-
-        detail._issue_filter_combo.setCurrentIndex(1)
-
-        assert [item.category for item in detail.current_filtered_issue_items()] == [
-            "material_field",
-        ]
-        assert detail.current_issue_action_targets() == [("field", "company_name")]
-        assert "资料字段 1/2" in detail._issue_queue_label.text()
-
-        detail._issue_filter_combo.setCurrentIndex(0)
-
-        assert [item.category for item in detail.current_filtered_issue_items()] == [
-            "material_field",
-            "material_asset",
-        ]
-        assert detail._issue_queue_label.text().startswith("运行前问题 2 项：")
-    finally:
-        detail.close()
-
-
-def test_quick_execution_detail_filters_issue_queue_by_action_group():
-    _app()
-    scene = create_bidding_scene()
-    detail = QuickExecutionDetail()
-    requested: list[tuple[str, str]] = []
-    try:
-        detail.issue_repair_requested.connect(
-            lambda target_type, target_key: requested.append((target_type, target_key))
-        )
-        items = [
-            *coverage_boundary_issue_items(
-                SceneWorkspace(scene_id="exam_teaching", category="exam_teaching")
+        detail.set_object_preflight_confirmation(
+            ExecutionResultState(
+                status="failed",
+                summary="对象预检需确认",
+                object_preflight={"findings_count": 1},
             ),
-            *material_readiness_issue_items(scene, MaterialExecutionContext()),
-        ]
-        detail._workbench_issue_items = list(items)
-        detail._set_issue_queue_visible(True, detail._workbench_issue_items)
-
-        assert detail._issue_list.count() == 3
-        assert detail._issue_list.item(0).text().startswith("先处理 ·")
-        assert detail._issue_list.item(0).data(Qt.UserRole) == "material.fields.missing"
-        first_widget = detail._issue_list.itemWidget(detail._issue_list.item(0))
-        first_badge = first_widget.findChild(QLabel, "wb_v2_issue_action_badge")
-        assert first_badge.text() == "先处理"
-        assert first_badge.property("issue_action_group") == "handle_first"
-        assert first_badge.property("issue_action_tone") == "error"
-        assert not detail._issue_action_group_combo.isHidden()
-        assert detail._issue_action_group_combo.itemText(0) == "全部动作 (3)"
-        assert detail._issue_action_group_combo.itemData(1) == "handle_first"
-        assert detail._issue_action_group_combo.itemData(2) == "confirm"
-
-        detail.set_issue_queue_action_filter("confirm")
-
-        filtered_items = detail.current_filtered_issue_items()
-        assert [item.issue_id for item in filtered_items] == [
-            "coverage.exam_education.plugin_boundary"
-        ]
-        assert detail._issue_list.count() == 1
-        assert detail._issue_list.item(0).text().startswith("建议确认 ·")
-        confirm_widget = detail._issue_list.itemWidget(detail._issue_list.item(0))
-        confirm_badge = confirm_widget.findChild(QLabel, "wb_v2_issue_action_badge")
-        assert confirm_badge.text() == "建议确认"
-        assert confirm_badge.property("issue_action_group") == "confirm"
-        assert confirm_badge.property("issue_action_tone") == "info"
-        assert "运行前问题 3 项（建议确认 1/3）：" in (
-            detail._issue_queue_label.text()
+            blocked=False,
         )
-        assert "当前筛选：建议确认" in detail._issue_queue_label.toolTip()
-        assert "行动：建议确认" in detail._issue_list.item(0).toolTip()
-        assert detail._issue_detail_impact.text() == (
-            "不一定阻断运行，但会影响边界判断或修复选择。"
-        )
-        assert detail._issue_detail_impact_section.tone() == "info"
-        assert detail._issue_detail_action_title.text() == "动作"
-        assert detail._issue_detail_advice.text() == "处理：去高级证据核对人工确认"
-
-        detail._request_current_issue_action()
-
-        assert requested == [
-            ("plugin_manual_gate", "exam_ai_complex_diagram_gate")
-        ]
-
-        detail.set_issue_queue_filter("material_field")
-
-        assert detail.current_filtered_issue_items() == []
-        assert detail._issue_list.count() == 0
-        assert "运行前问题 3 项（资料字段 / 建议确认 0/3）：" in (
-            detail._issue_queue_label.text()
-        )
-        assert "当前筛选没有问题" in detail._issue_queue_label.text()
-        assert "当前筛选：资料字段 / 建议确认" in (
-            detail._issue_queue_label.toolTip()
-        )
-
-        detail.set_issue_queue_action_filter("")
-
-        assert [item.category for item in detail.current_filtered_issue_items()] == [
-            "material_field"
-        ]
-        assert detail._issue_list.item(0).text().startswith("先处理 ·")
-        assert "资料字段 1/3" in detail._issue_queue_label.text()
+        assert detail._execution_cancel_btn.isHidden() is True
+        assert detail._object_preflight_cancel_btn.isHidden() is False
+        detail._object_preflight_cancel_btn.click()
+        assert runtime_cancelled == [True]
+        assert preflight_cancelled == [True]
     finally:
         detail.close()
 
-
-def test_quick_execution_detail_consumes_batch_issue_items_from_result_state():
+def test_quick_execution_detail_updates_compact_gate_from_material_context():
     _app()
     detail = QuickExecutionDetail()
-    adapter = WorkbenchExecutionAdapter()
-    requested: list[tuple[str, str]] = []
     try:
-        detail.issue_repair_requested.connect(
-            lambda target_type, target_key: requested.append((target_type, target_key))
-        )
-        state = adapter.build_result_state(
-            status="partial_success",
-            output_path="",
-            report_paths=["C:/tmp/source_batch_report.json"],
-            failed_count=1,
-            error_text="",
-            batch_isolation={
-                "kind": "batch_failure_isolation",
-                "total_count": 2,
-                "success_count": 1,
-                "warning_count": 0,
-                "failed_count": 1,
-                "profiles": [
-                    {"profile_id": "ok", "profile_name": "完整员工", "status": "success"},
-                    {
-                        "profile_id": "missing",
-                        "profile_name": "缺编号员工",
-                        "status": "failed",
-                        "missing_field_keys": ["employee_id"],
-                        "missing_asset_roles": [],
-                        "summary": "Missing required material fields: employee_id",
-                    },
-                ],
-            },
-            batch_issue_items=[
-                {
-                    "issue_id": "batch:missing:preflight_missing_material_fields:1",
-                    "profile_id": "missing",
-                    "profile_name": "缺编号员工",
-                    "status": "failed",
-                    "kind": "preflight_missing_material_fields",
-                    "severity": "error",
-                    "summary": "Missing required material fields: employee_id",
-                    "missing_field_keys": ["employee_id"],
-                    "repair_target_type": "field",
-                    "repair_target_key": "employee_id",
-                }
-            ],
-        )
-
-        detail.set_execution_result(state)
-
-        items = detail.current_issue_items()
-        assert len(items) == 1
-        assert items[0].category == "batch_issue"
-        assert items[0].repair_target_key == "employee_id"
-        action_targets = detail.current_issue_action_targets()
-        assert action_targets[0][0] == "profile_field"
-        action_payload = json.loads(action_targets[0][1])
-        assert action_payload["profile_id"] == "missing"
-        assert action_payload["target_key"] == "employee_id"
-        assert "Batch isolation: total=2; success=1; warning=0; failed=1" in (
-            detail._exec_log.toPlainText()
-        )
-        assert not detail._issue_queue_label.isHidden()
-        assert detail._issue_queue_label.text().startswith("运行前问题 1 项：")
-        assert "批量记录问题：Missing required material fields: employee_id" in (
-            detail._issue_queue_label.text()
-        )
-        assert "分类：批量记录 1" in detail._issue_queue_label.toolTip()
-        assert "记录名称：缺编号员工" in detail._issue_queue_label.toolTip()
-
-        detail.set_issue_queue_filter("batch_issue")
-
-        assert detail.current_filtered_issue_items()[0].issue_id == (
-            "batch:missing:preflight_missing_material_fields:1"
-        )
-        assert "当前筛选：批量记录" in detail._issue_queue_label.toolTip()
-
-        detail._request_current_issue_action()
-
-        assert requested[0][0] == "profile_field"
-        assert json.loads(requested[0][1])["profile_id"] == "missing"
-    finally:
-        detail.close()
-
-
-def test_quick_execution_detail_emits_question_figure_repair_candidate_action():
-    _app()
-    detail = QuickExecutionDetail()
-    adapter = WorkbenchExecutionAdapter()
-    requested: list[tuple[str, str]] = []
-    target_key = json.dumps(
-        {
-            "role": "question_figure",
-            "item_id": "question_figure_2",
-            "question_index": "2",
-            "path": "current_question_2.png",
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    try:
-        detail.issue_repair_requested.connect(
-            lambda target_type, target_key: requested.append((target_type, target_key))
-        )
-        state = adapter.build_result_state(
-            status="partial_success",
-            output_path="",
-            report_paths=["C:/tmp/source_batch_report.md"],
-            failed_count=0,
-            error_text="",
-            question_figure_repair_queue={
-                "kind": "question_figure_repair_queue",
-                "queue_count": 1,
-                "entries": [
-                    {
-                        "queue_id": "repair:question_figure:exam_a:q2:abc",
-                        "status": "candidate",
-                        "profile_id": "exam_a",
-                        "profile_name": "Exam A",
-                        "question_index": "2",
-                        "repair_target_type": "question_figure_item",
-                        "repair_target_key": target_key,
-                        "confirmation_apply_supported": True,
-                        "confirmation_status": "ready",
-                        "replacement_source_path": "C:/tmp/question_2_expected.png",
-                    }
-                ],
-            },
-        )
-
-        detail.set_execution_result(state)
-        detail.set_issue_queue_filter("question_figure_repair_queue")
-
-        action_targets = detail.current_issue_action_targets()
-        assert action_targets[0][0] == "profile_question_figure_repair_candidate"
-
-        detail._issue_action_btn.click()
-
-        assert requested
-        action_type, action_payload = requested[0]
-        action_data = json.loads(action_payload)
-        assert action_type == "profile_question_figure_repair_candidate"
-        assert action_data["profile_id"] == "exam_a"
-        assert action_data["candidate"]["confirmation_status"] == "ready"
-        assert action_data["candidate"]["repair_target_key"] == target_key
-    finally:
-        detail.close()
-
-
-def test_quick_execution_detail_emits_transaction_task_summary_action():
-    _app()
-    detail = QuickExecutionDetail()
-    adapter = WorkbenchExecutionAdapter()
-    requested: list[tuple[str, str]] = []
-    try:
-        detail.issue_repair_requested.connect(
-            lambda target_type, target_key: requested.append((target_type, target_key))
-        )
-        state = adapter.build_result_state(
-            status="partial_success",
-            output_path="",
-            report_paths=["C:/tmp/source_batch_report.md"],
-            failed_count=0,
-            error_text="",
-            question_figure_repair_queue={
-                "kind": "question_figure_repair_queue",
-                "queue_count": 1,
-                "batch_apply_transaction_manifest": {
-                    "kind": "question_figure_repair_batch_apply_transaction_manifest",
-                    "status": "tracked",
-                    "artifact_path": (
-                        "C:/tmp/question_figure_batch_apply_transaction_manifest.json"
-                    ),
-                    "report_path": (
-                        "C:/tmp/question_figure_batch_apply_transaction_manifest.md"
-                    ),
-                    "task_summary": {
-                        "kind": (
-                            "question_figure_repair_batch_apply_transaction_task_summary"
-                        ),
-                        "status": "active",
-                        "next_action": "review_active_transaction",
-                        "transaction_count": 1,
-                        "active_count": 1,
-                        "rolled_back_count": 0,
-                        "rollback_available_count": 1,
-                        "active_transaction_ids": ["tx-active"],
-                        "rollback_available_transaction_ids": ["tx-active"],
-                        "latest_transaction_id": "tx-active",
-                        "latest_apply_audit_id": "apply-1",
-                    },
-                },
-                "entries": [],
-            },
-        )
-
-        detail.set_execution_result(state)
-        detail.set_issue_queue_filter("question_figure_batch_apply_transaction_task")
-
-        action_targets = detail.current_issue_action_targets()
-        assert len(action_targets) == 1
-        assert action_targets[0][0] == (
-            "question_figure_batch_apply_transaction_task_summary"
-        )
-        action_data = json.loads(action_targets[0][1])
-        assert action_data["status"] == "active"
-        assert action_data["fragment"] == (
-            "question-figure-batch-apply-transaction-task-summary"
-        )
-
-        detail._issue_action_btn.click()
-
-        assert requested
-        action_type, action_payload = requested[0]
-        emitted_data = json.loads(action_payload)
-        assert action_type == "question_figure_batch_apply_transaction_task_summary"
-        assert emitted_data["next_action"] == "review_active_transaction"
-        assert emitted_data["rollback_available_count"] == 1
-    finally:
-        detail.close()
-
-
-def test_quick_execution_detail_emits_question_figure_conflict_selection_action():
-    _app()
-    detail = QuickExecutionDetail()
-    adapter = WorkbenchExecutionAdapter()
-    requested: list[tuple[str, str]] = []
-    target_key = json.dumps(
-        {
-            "role": "question_figure",
-            "item_id": "question_figure_2",
-            "question_index": "2",
-            "path": "current_question_2.png",
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    try:
-        detail.issue_repair_requested.connect(
-            lambda target_type, target_key: requested.append((target_type, target_key))
-        )
-        state = adapter.build_result_state(
-            status="partial_success",
-            output_path="",
-            report_paths=["C:/tmp/source_batch_report.md"],
-            failed_count=0,
-            error_text="",
-            question_figure_repair_queue={
-                "kind": "question_figure_repair_queue",
-                "queue_count": 2,
-                "entries": [
-                    {
-                        "queue_id": "repair:question_figure:exam_a:q2:conflict-a",
-                        "status": "candidate",
-                        "profile_id": "exam_a",
-                        "profile_name": "Exam A",
-                        "question_index": "2",
-                        "repair_target_type": "question_figure_item",
-                        "repair_target_key": target_key,
-                        "confirmation_action": (
-                            "resolve_question_figure_replacement_conflict"
-                        ),
-                        "confirmation_apply_supported": False,
-                        "confirmation_status": "conflict",
-                        "replacement_source_path": "C:/tmp/question_2_expected_a.png",
-                        "replacement_source_kind": "local_file",
-                        "conflict_group_id": "repair-conflict:1:abc",
-                        "conflict_candidate_queue_ids": [
-                            "repair:question_figure:exam_a:q2:conflict-a",
-                            "repair:question_figure:exam_a:q2:conflict-b",
-                        ],
-                        "conflict_resolution_select_supported": True,
-                        "conflict_resolution_action": (
-                            "select_question_figure_replacement_conflict_candidate"
-                        ),
-                        "apply_blockers": ["candidate_conflict_same_repair_target"],
-                    }
-                ],
-            },
-        )
-
-        detail.set_execution_result(state)
-        detail.set_issue_queue_filter("question_figure_repair_queue")
-
-        action_targets = detail.current_issue_action_targets()
-        assert action_targets[0][0] == (
-            "profile_question_figure_repair_conflict_selection"
-        )
-
-        detail._issue_action_btn.click()
-
-        assert requested
-        action_type, action_payload = requested[0]
-        action_data = json.loads(action_payload)
-        assert action_type == "profile_question_figure_repair_conflict_selection"
-        assert action_data["profile_id"] == "exam_a"
-        assert action_data["candidate"]["confirmation_status"] == "ready"
-        assert action_data["candidate"]["conflict_resolution_status"] == "selected"
-        assert action_data["candidate"]["repair_target_key"] == target_key
-    finally:
-        detail.close()
-
-
-def test_quick_execution_detail_marks_filtered_issue_status():
-    _app()
-    scene = create_bidding_scene()
-    detail = QuickExecutionDetail()
-    try:
-        detail._apply_scene(scene)
+        detail._apply_scene(create_bidding_scene())
         detail.set_document_path("C:/docs/bid.docx")
-
-        detail.set_issue_queue_filter("material_asset")
-
-        assert not detail._issue_resolve_btn.isHidden()
-        assert not detail._issue_ignore_btn.isHidden()
-        assert "资料资产缺失" in detail._issue_resolve_btn.toolTip()
-
-        detail._issue_resolve_btn.click()
-
-        items = {item.issue_id: item for item in detail.current_issue_items()}
-        assert items["material.assets.missing"].status == "resolved"
-        assert items["material.fields.missing"].status == "open"
-        assert "状态：待处理 1 / 已处理 1" in detail._issue_queue_label.toolTip()
-        assert detail._issue_resolve_btn.isHidden()
-        assert detail._issue_ignore_btn.isHidden()
-
-        detail.set_issue_queue_filter("material_field")
-
-        assert not detail._issue_ignore_btn.isHidden()
-        assert "资料字段缺失" in detail._issue_ignore_btn.toolTip()
-
-        detail._issue_ignore_btn.click()
-
-        items = {item.issue_id: item for item in detail.current_issue_items()}
-        assert items["material.fields.missing"].status == "ignored"
-        assert items["material.assets.missing"].status == "resolved"
-        assert "状态：已忽略 1 / 已处理 1" in detail._issue_queue_label.toolTip()
-        assert detail._issue_resolve_btn.isHidden()
-        assert detail._issue_ignore_btn.isHidden()
-    finally:
-        detail.close()
-
-
-def test_quick_execution_detail_exposes_coverage_boundary_issue_queue():
-    _app()
-    scene = SceneWorkspace(scene_id="exam_teaching", template_id="default")
-    scene.category = "exam_teaching"
-    detail = QuickExecutionDetail()
-    try:
-        detail._apply_scene(scene)
-        detail.set_document_path("C:/docs/exam.docx")
-
-        items = detail.current_issue_items()
-
-        assert [item.issue_id for item in items] == [
-            "coverage.exam_education.plugin_boundary"
-        ]
-        assert items[0].category == "plugin_boundary"
-        assert items[0].blocking is False
-        assert not detail._issue_queue_label.isHidden()
-        assert detail._issue_queue_label.text().startswith("运行前问题 1 项：")
-        assert "建议确认 1" in detail._issue_queue_label.text()
-        assert "插件/专业边界：试卷/教学资料" in (
-            detail._issue_queue_label.text()
-        )
-        assert "行动：建议确认 1" in detail._issue_queue_label.toolTip()
-        assert "不保证 AI 内容质量或复杂图生成" in (
-            detail._issue_queue_label.toolTip()
-        )
-        assert "试卷 AI/复杂图插件" in (
-            detail._issue_queue_label.toolTip()
-        )
-        assert "复杂图生成" in detail._issue_queue_label.toolTip()
-        assert "内容显隐规则" in detail._issue_queue_label.toolTip()
-        assert "does not guarantee AI content quality" not in (
-            detail._issue_queue_label.toolTip()
-        )
-        assert "geometry_diagram_generation" not in detail._issue_queue_label.toolTip()
-        assert "plugin_manual_gate:" not in detail._issue_queue_label.toolTip()
-    finally:
-        detail.close()
-
-
-def test_quick_execution_detail_updates_material_readiness_from_context():
-    _app()
-    scene = create_bidding_scene()
-    detail = QuickExecutionDetail()
-    try:
-        detail._apply_scene(scene)
-        detail.set_document_path("C:/docs/bid.docx")
-
-        assert detail._status_label.text() == (
-            "资料字段缺失：company_name, project_name, legal_person；"
-            "资料资产缺失：logo, seal"
-        )
+        before = detail.current_execution_gate_decision()
+        assert before.state == "blocked"
+        assert detail._status_label.text() == "无法生成：缺少必需资料"
+        assert detail._execute_btn.isEnabled() is False
 
         detail.set_material_context(
             MaterialExecutionContext(
@@ -1439,11 +1208,13 @@ def test_quick_execution_detail_updates_material_readiness_from_context():
                 ],
             )
         )
-
-        assert detail._status_label.text() == "就绪：bid.docx · 工程类投标文件 · 严格模式"
+        after = detail.current_execution_gate_decision()
+        assert after.state == "ready"
+        assert detail._status_label.text() == "可生成"
+        assert detail._execute_btn.isEnabled() is True
+        assert detail._material_repair_btn.isHidden() is True
     finally:
         detail.close()
-
 
 def test_quick_execution_detail_routes_field_material_repair_action_to_field_target():
     _app()
@@ -1528,7 +1299,7 @@ def test_quick_execution_detail_routes_asset_material_repair_action_to_asset_tar
         detail.close()
 
 
-def test_quick_execution_scene_summary_includes_profile_contracts():
+def test_quick_execution_scene_summary_separates_product_and_engineering_details():
     _app()
     scene = create_bidding_scene()
     detail = QuickExecutionDetail()
@@ -1541,14 +1312,11 @@ def test_quick_execution_scene_summary_includes_profile_contracts():
         assert "合规 bid_package" in shared_summary
         assert "交付 original+2" in shared_summary
         assert "严格保护" in shared_summary
-        assert "参数归属已守门" in shared_summary
-        assert "template/scene/material/output" in shared_summary
-        assert "控件契约已守门" in shared_summary
-        assert "template/scene" in shared_summary
-        assert "产品成熟度Green/L5" in shared_summary
-        assert "非Green0" in shared_summary
-        assert "样本覆盖已守门" in shared_summary
-        assert "常见说法已守门" in shared_summary
+        assert "参数归属" not in shared_summary
+        assert "控件契约" not in shared_summary
+        assert "产品成熟度" not in shared_summary
+        assert "样本覆盖" not in shared_summary
+        assert "常见说法" not in shared_summary
 
         ownership_summary = build_scene_parameter_ownership_summary(scene)
         assert ownership_summary.startswith("参数归属已守门")
@@ -1563,7 +1331,11 @@ def test_quick_execution_scene_summary_includes_profile_contracts():
         assert "4样本/9类OOXML" in sample_summary
 
         request_cell_summary = build_scene_request_cell_summary_text(scene)
-        assert request_cell_summary.startswith("常见说法已守门")
+        assert request_cell_summary.startswith("常见说法")
+        assert (
+            "已守门" in request_cell_summary
+            or "个缺口" in request_cell_summary
+        )
         assert "5请求/5证据/0借用" in request_cell_summary
         assert "0proxy" not in request_cell_summary
         assert "1容易误解" in request_cell_summary
@@ -1622,15 +1394,13 @@ def test_quick_execution_detail_does_not_expose_advanced_scene_controls():
     _app()
     detail = QuickExecutionDetail()
     try:
-        original_scope = dict(detail.current_scene().format_scope.sections)
-
         assert not hasattr(detail, "_advanced_card")
         assert not hasattr(detail, "_zone_checks")
+        assert not hasattr(detail.current_scene(), "format_scope")
         assert not hasattr(detail, "_strategy_rebuild")
 
         detail.set_feature_enabled("content_fill", True)
 
-        assert detail.current_scene().format_scope.sections == original_scope
         assert detail.current_scene().is_module_enabled("entity_fill") is True
     finally:
         detail.close()
@@ -1676,54 +1446,91 @@ def test_quick_execution_detail_logs_delivery_artifacts():
         detail.close()
 
 
-def test_quick_execution_detail_exposes_output_target_issue_queue_on_result():
+def test_quick_execution_detail_warns_when_optional_review_pdf_is_unavailable():
     _app()
     detail = QuickExecutionDetail()
     adapter = WorkbenchExecutionAdapter()
     try:
         state = adapter.build_result_state(
-            status="success",
-            output_path="C:/tmp/source.docx",
-            output_paths={"review": "C:/tmp/review.docx"},
-            report_paths=[],
-            failed_count=0,
-            error_text="",
-            output_target_preflight={
-                "items": [
-                    {
-                        "preset_id": "review",
-                        "path": "C:/tmp/review.docx",
-                        "issues": [
-                            {
-                                "kind": "target_exists",
-                                "message": "review 输出文件已存在，将被覆盖: C:/tmp/review.docx",
-                            }
-                        ],
-                    }
-                ]
+            terminal_payload={
+                "status": "success",
+                "output_path": "C:/tmp/official.docx",
+                "output_paths": {"official_docx": "C:/tmp/official.docx"},
+                "report_paths": [],
+                "failed_count": 0,
+                "error_text": "",
+                "official_document_assembly": {
+                    "status": "ok",
+                    "review_pdf_status": "renderer_unavailable",
+                    "review_pdf_path": "",
+                    "review_pdf_renderer": "",
+                    "review_pdf_issue": "docx_to_pdf_renderer_unavailable",
+                },
             },
         )
 
-        detail.set_execution_result(state)
-
-        items = detail.current_issue_items()
-        assert len(items) == 1
-        assert items[0].issue_id == "output_target.review.warning"
-        assert items[0].category == "output_target"
-        assert items[0].summary.startswith("审阅稿：输出文件已存在")
-        assert items[0].repair_target_key == "review"
-        assert not detail._issue_queue_label.isHidden()
-        assert detail._issue_queue_label.text().startswith("运行前问题 1 项：")
-        assert "输出目标预检：审阅稿：输出文件已存在" in (
-            detail._issue_queue_label.text()
+        warning = next(
+            item for item in state.artifact_items if item.group_id == "review_pdf"
         )
-        assert "输出文件已存在，将被覆盖" in detail._issue_queue_label.toolTip()
-        assert "来源：交付版本 ID：review" in detail._issue_queue_label.toolTip()
-        assert "review 输出文件已存在" not in detail._issue_queue_label.text()
-        assert "review 输出文件已存在" not in detail._issue_queue_label.toolTip()
+        assert warning.label == "审阅 PDF"
+        assert warning.path == ""
+        assert warning.status == "warning"
+        assert "当前环境没有可用" in warning.detail
+        assert "正式公文仍已生成" in warning.detail
+
+        detail.set_execution_result(state)
+        log_text = detail._exec_log.toPlainText()
+        assert "输出文件[正式公文]：C:/tmp/official.docx" in log_text
+        assert "产物预检[审阅 PDF]" in log_text
+        assert "当前环境没有可用" in log_text
     finally:
         detail.close()
 
+
+def test_quick_execution_detail_keeps_result_feedback_inline():
+    _app()
+    detail = QuickExecutionDetail()
+    adapter = WorkbenchExecutionAdapter()
+    try:
+        state = adapter.build_result_state(
+            terminal_payload={
+                "status": "success",
+                "output_path": "C:/tmp/source.docx",
+                "output_paths": {"review": "C:/tmp/review.docx"},
+                "report_paths": [],
+                "failed_count": 0,
+                "error_text": "",
+                "output_target_preflight": {
+                    "items": [
+                        {
+                            "preset_id": "review",
+                            "path": "C:/tmp/review.docx",
+                            "issues": [
+                                {
+                                    "kind": "target_exists",
+                                    "message": (
+                                        "review 输出文件已存在，将被覆盖: "
+                                        "C:/tmp/review.docx"
+                                    ),
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+        )
+        detail.set_execution_result(state)
+
+        assert detail._exec_status_label.text() == "✓ 本次生成完成；1 项提醒"
+        assert detail._exec_bar.isHidden() is True
+        assert detail._execute_btn.text() == "重新生成"
+        assert not hasattr(detail, "_result_details_btn")
+        assert not hasattr(detail, "result_details_requested")
+        assert detail._material_repair_btn.isHidden() is True
+        assert not hasattr(detail, "current_issue_items")
+
+    finally:
+        detail.close()
 
 def test_quick_execution_detail_logs_object_preflight_details():
     _app()
@@ -1756,73 +1563,58 @@ def test_quick_execution_detail_logs_object_preflight_details():
         detail.close()
 
 
-def test_quick_execution_detail_exposes_object_preflight_issue_queue_on_confirmation():
+def test_quick_execution_detail_uses_compact_object_preflight_confirmation():
     _app()
     detail = QuickExecutionDetail()
+    cancelled: list[bool] = []
+    state = ExecutionResultState(
+        status="failed",
+        summary="对象预检需确认",
+        object_preflight_summary="对象预检：1 项风险 · 跳过 1 个模块",
+        object_preflight_details=[
+            "风险[warning] comments @ word/comments.xml: Comments are present.",
+            "跳过模块 section_format <- comments",
+        ],
+        object_preflight={
+            "enabled": True,
+            "preservation_mode": "warn",
+            "findings_count": 1,
+            "blocking_findings_count": 0,
+            "module_skips_count": 1,
+        },
+    )
     try:
-        detail.set_object_preflight_confirmation(
-            ExecutionResultState(
-                status="failed",
-                summary="对象预检需确认",
-                object_preflight_summary="对象预检：1 项风险 · 跳过 1 个模块",
-                object_preflight_details=[
-                    "风险[error] macros @ word/vbaProject.bin: Macros are present.",
-                    "跳过模块 section_format <- macros",
-                ],
-                object_preflight={
-                    "enabled": True,
-                    "preservation_mode": "strict",
-                    "scan_targets": ["macros"],
-                    "findings_count": 1,
-                    "blocking_findings_count": 1,
-                    "findings": [
-                        {
-                            "kind": "macros",
-                            "severity": "error",
-                            "location": "word/vbaProject.bin",
-                            "message": "Macros are present.",
-                        }
-                    ],
-                    "module_skips_count": 1,
-                    "module_skips": [
-                        {
-                            "module_name": "section_format",
-                            "finding_kinds": ["macros"],
-                        }
-                    ],
-                },
-            ),
-            blocked=True,
+        detail.object_preflight_cancel_requested.connect(
+            lambda: cancelled.append(True)
         )
+        detail.set_object_preflight_confirmation(state, blocked=False)
+        assert detail._exec_status_label.text() == (
+            "检测到 1 个对象风险，继续后将跳过 1 个模块"
+        )
+        assert detail._execute_btn.text() == "确认并继续"
+        assert detail._execute_btn.isEnabled() is True
+        assert detail._object_preflight_cancel_btn.isHidden() is False
+        assert detail._log_toggle_btn.text() == "查看 1 项对象风险"
+        assert detail._material_repair_btn.isHidden() is True
+        assert not hasattr(detail, "_result_details_btn")
+        assert not hasattr(detail, "_issue_panel")
+        assert not hasattr(detail, "current_issue_items")
 
-        items = detail.current_issue_items()
+        detail._object_preflight_cancel_btn.click()
+        assert cancelled == [True]
 
-        assert len(items) == 1
-        assert items[0].issue_id == "object_preflight.finding.1.macros"
-        assert items[0].severity == "error"
-        assert items[0].blocking is True
-        assert items[0].repair_target_type == "object_preflight"
-        assert items[0].repair_target_key == "macros@word/vbaProject.bin"
-        assert detail.current_issue_action_targets() == [
-            ("object_preflight", "macros@word/vbaProject.bin")
-        ]
-        assert not detail._issue_queue_label.isHidden()
-        assert detail._issue_queue_label.text().startswith("运行前问题 1 项：")
-        assert "对象风险：macros：word/vbaProject.bin: Macros are present." in (
-            detail._issue_queue_label.text()
+        blocked_state = ExecutionResultState(
+            status="failed",
+            summary="对象预检未通过",
+            object_preflight={"findings_count": 1},
         )
-        assert "查看对象预检结果并确认处理方式" in (
-            detail._issue_action_btn.toolTip()
-        )
-        assert "object_preflight:macros@word/vbaProject.bin" not in (
-            detail._issue_action_btn.toolTip()
-        )
-        assert "风险[error] macros @ word/vbaProject.bin" in (
-            detail._issue_queue_label.toolTip()
-        )
+        detail.set_object_preflight_confirmation(blocked_state, blocked=True)
+        assert detail._exec_status_label.text() == "无法生成：检测到 1 个高风险对象"
+        assert detail._execute_btn.text() == "重新检查"
+        assert detail._execute_btn.isEnabled() is True
+        assert detail._object_preflight_cancel_btn.isHidden() is True
     finally:
         detail.close()
-
 
 def test_quick_execution_detail_runtime_template_overrides_stay_empty_without_advanced_controls():
     _app()

@@ -118,14 +118,14 @@ def test_paragraph_style_editor_resolves_shared_field_contracts():
     try:
         assert canonical_paragraph_style_field_id("body.font_name") == "font_cn"
         assert canonical_paragraph_style_field_id("template.styles.body.font_en") == "font_en"
-        assert canonical_paragraph_style_field_id("scene.section_styles.references_body.size_pt") == "size_pt"
-        assert canonical_paragraph_style_field_id("section_styles.*.special_indent_value") == "special_indent"
+        assert canonical_paragraph_style_field_id("template.styles.references_body.size_pt") == "size_pt"
+        assert canonical_paragraph_style_field_id("template.styles.*.special_indent_value") == "special_indent"
         assert canonical_paragraph_style_field_id("body.space_after_unit") == "space_after"
 
         assert editor.widget_for_field("body.font_name") is editor.font_cn
         assert editor.widget_for_field("template.styles.body.font_en") is editor.font_en
-        assert editor.widget_for_field("scene.section_styles.references_body.size_pt") is editor.size_combo
-        assert editor.widget_for_field("section_styles.*.special_indent_value") is editor.special_indent
+        assert editor.widget_for_field("template.styles.references_body.size_pt") is editor.size_combo
+        assert editor.widget_for_field("template.styles.*.special_indent_value") is editor.special_indent
         assert editor.widget_for_field("body.line_spacing_pt") is editor.line_value
         assert editor.widget_for_field("unknown.field") is None
     finally:
@@ -169,22 +169,22 @@ def test_style_control_surface_projects_descriptor_rows_to_shared_cards():
 
         surface.apply_state(
             StyleControlSurfaceState(
-                owner_kind="scene_section_style",
-                active_label="参考文献",
-                source_label="跟随模板",
-                detail="使用模板样式。",
+                owner_kind="template_body_style",
+                active_label="正文排版",
+                source_label="模板默认样式",
+                detail="模板样式。",
                 editable=False,
                 style=style,
-                readonly_reason="开启覆盖后可编辑",
+                readonly_reason="未选择模板",
             )
         )
 
-        assert surface.state().owner_kind == "scene_section_style"
-        assert surface.property("style_surface_owner_kind") == "scene_section_style"
-        assert surface.property("style_surface_active_label") == "参考文献"
-        assert surface.property("style_surface_source_label") == "跟随模板"
+        assert surface.state().owner_kind == "template_body_style"
+        assert surface.property("style_surface_owner_kind") == "template_body_style"
+        assert surface.property("style_surface_active_label") == "正文排版"
+        assert surface.property("style_surface_source_label") == "模板默认样式"
         assert surface.property("style_surface_editable") is False
-        assert surface.property("style_surface_readonly_reason") == "开启覆盖后可编辑"
+        assert surface.property("style_surface_readonly_reason") == "未选择模板"
         assert surface.editor.font_cn.isEnabled() is False
     finally:
         surface.close()

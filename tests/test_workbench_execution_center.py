@@ -1,6 +1,5 @@
 import sys
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -9,49 +8,57 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.qt_api import QApplication
-from src.config.control_contract_registry import ControlContractAuditResult
 from src.config.material_context import MaterialExecutionContext
+from src.config.object_preflight_evidence import build_object_preflight_evidence
 from src.config.materials import AssetItem
-from src.config.scene import SceneWorkspace
+from src.config.scene import ExamPaperConfig, InputSourceProfile, SceneWorkspace
 from src.config.scene_sample_fixture_registry import SceneSampleFixtureAuditIssue
-from src.config.style_difference_projection import StyleDifferenceSummaryProjection
-from src.shared.ui.style_difference_summary_slot import StyleDifferenceSummarySlot
+from src.config.template import TemplateConfig
+from src.shared.engine.material_timeline import default_timeline_plan
 from src.shared.ui.style_management_block import StyleManagementBlock
 from src.shared.ui.style_presentation_envelope import StylePresentationEnvelope
 from src.shared.ui.style_receipt_slot_frame import StyleReceiptSlotFrame
 from src.ui.adapters.workbench_execution_adapter import (
     WorkbenchExecutionAdapter,
-    WorkbenchIssueItem,
     batch_execution_issue_items,
-    control_contract_issue_items,
-    coverage_boundary_issue_items,
     execution_diagnostic_issue_items,
-    material_asset_comparison_issue_items,
-    material_readiness_issue_items,
-    material_readiness_issue_groups,
-    material_readiness_reasons,
-    material_schema_readiness_reasons,
-    object_preflight_issue_items,
     output_target_preflight_issue_items,
-    parameter_ownership_issue_items,
     question_figure_repair_queue_issue_items,
     question_figure_transaction_task_issue_items,
+)
+from src.ui.adapters.workbench_boundary_issues import (
+    coverage_boundary_issue_items,
     sample_fixture_issue_items,
-    summarize_workbench_issue_queue,
-    update_workbench_issue_status,
-    workbench_issue_action_group,
+)
+from src.ui.adapters.workbench_issue_models import WorkbenchIssueItem
+from src.ui.adapters.workbench_issue_projection import (
     workbench_issue_action_target,
-    workbench_issue_action_visual,
-    workbench_issue_action_visual_for_item,
     workbench_issue_display_text,
     workbench_issue_evidence_actions,
     workbench_issue_evidence_body_text,
     workbench_issue_evidence_lines,
     workbench_issue_source_note_label,
 )
+from src.ui.adapters.workbench_material_issues import (
+    material_asset_comparison_issue_items,
+    material_readiness_issue_groups,
+    material_readiness_issue_items,
+    material_readiness_reasons,
+    material_schema_readiness_reasons,
+)
 from src.ui.panels.workbench.execution_center import ExecutionCenter
-from src.ui.panels.workbench.execution_runtime import _batch_issue_items_for_result
-from src.ui.panels.workbench.scene_presets import create_bidding_scene
+from src.services.production_runtime.execution_runtime import (
+    WorkbenchProductionRunner,
+)
+from src.services.execution_session import (
+    build_execution_session_snapshot,
+    cleanup_execution_session_resources,
+)
+from src.services.production_runtime.batch_reporting import (
+    build_batch_issue_items_for_result,
+)
+from src.services.production_runtime import material_preflight_reporting
+from src.config.scene_presets import create_bidding_scene
 from src.ui.panels.workbench.state import (
     ExecutionProgressState,
     ExecutionResultState,
@@ -64,6 +71,30 @@ def _app():
     return QApplication.instance() or QApplication([])
 
 
+def _build_exam_execution_session(
+    *,
+    scene: SceneWorkspace,
+    template: TemplateConfig,
+    input_path: Path,
+    output_root: Path,
+    material_context: MaterialExecutionContext | None = None,
+):
+    context = material_context or MaterialExecutionContext(mode_id="exam")
+    evidence = build_object_preflight_evidence(scene, input_path)
+    return build_execution_session_snapshot(
+        mode_id="exam",
+        scene=scene,
+        template=template,
+        material_context=context,
+        input_path=input_path,
+        output_root=output_root,
+        plan_id="exam",
+        template_id="default",
+        object_preflight_confirmation_revision=evidence.source_revision,
+        object_preflight_confirmation_digest=evidence.evidence_digest,
+    )
+
+
 def test_execution_center_routes_style_receipt_through_style_object_projection():
     source = (ROOT / "src/ui/panels/workbench/execution_center.py").read_text(
         encoding="utf-8"
@@ -73,7 +104,6 @@ def test_execution_center_routes_style_receipt_through_style_object_projection()
     assert "apply_style_object_projection(style_projection)" in source
     assert "effective_style_source_envelope" not in source
     assert "_style_receipt_slot.apply_envelope" not in source
-    assert "_style_difference_slot.apply_projection" not in source
 
 
 def test_execution_progress_state_defaults_are_safe():
@@ -101,7 +131,6 @@ def test_execution_result_state_defaults_are_safe():
     assert state.diagnostics_count == 0
     assert state.diagnostics_summary == ""
     assert state.style_source_envelope.is_empty() is True
-    assert state.style_difference_summary is None
     assert state.object_preflight == {}
     assert state.object_preflight_summary == ""
     assert state.object_preflight_details == []
@@ -123,7 +152,6 @@ def test_recent_run_state_defaults_are_safe():
     assert state.diagnostics_count == 0
     assert state.diagnostics_summary == ""
     assert state.style_source_envelope.is_empty() is True
-    assert state.style_difference_summary is None
     assert state.object_preflight == {}
     assert state.object_preflight_summary == ""
     assert state.object_preflight_details == []
@@ -152,11 +180,8 @@ def test_execution_center_defaults_to_canonical_readiness_state():
         "execution_receipt_review"
     )
     assert center._style_receipt_block.property("style_management_content_plan") == (
-        "difference|receipt"
+        "receipt"
     )
-    assert isinstance(center._style_difference_slot, StyleDifferenceSummarySlot)
-    assert center._style_difference_slot.isHidden() is True
-    assert center._style_receipt_block.difference_slot is center._style_difference_slot
     assert isinstance(center._style_receipt_slot, StyleReceiptSlotFrame)
     assert center._style_receipt_slot.property("style_management_content_plan") == (
         "receipt"
@@ -268,8 +293,8 @@ def test_material_readiness_issue_items_expose_schema_recommendation_for_workben
     item = items[0]
     assert item.issue_id == "material.schema.unregistered"
     assert item.category == "material_schema"
-    assert item.severity == "error"
-    assert item.blocking is True
+    assert item.severity == "warning"
+    assert item.blocking is False
     assert item.summary == "signature_assets_v2"
     assert item.repair_target_type == "schema"
     assert item.repair_target_key == "signature_assets_v2"
@@ -352,134 +377,7 @@ def test_material_asset_comparison_issue_items_route_question_figure_targets():
     assert json.loads(action_data["target_key"])["item_id"] == "question_figure_2"
 
 
-def test_workbench_issue_queue_summary_filters_by_category():
-    scene = create_bidding_scene()
-    items = [
-        *material_readiness_issue_items(scene, MaterialExecutionContext()),
-        *coverage_boundary_issue_items(
-            SceneWorkspace(scene_id="exam_teaching", category="exam_teaching")
-        ),
-    ]
-
-    summary = summarize_workbench_issue_queue(items)
-
-    assert summary.total_count == 3
-    assert summary.visible_count == 3
-    assert summary.blocking_count == 2
-    assert summary.actionable_count == 3
-    assert summary.category_counts == (
-        ("material_field", 1),
-        ("material_asset", 1),
-        ("plugin_boundary", 1),
-    )
-    assert summary.severity_counts == (("warning", 3),)
-    assert summary.status_counts == (("open", 3),)
-    assert summary.owner_counts == (
-        ("workbench", 2),
-        ("plugin", 1),
-    )
-    assert summary.action_group_counts == (
-        ("handle_first", 2),
-        ("confirm", 1),
-    )
-    assert summary.visible_action_group_counts == (
-        ("handle_first", 2),
-        ("confirm", 1),
-    )
-    assert summary.repair_target_counts == (
-        ("field:company_name", 1),
-        ("asset:logo", 1),
-        ("plugin_manual_gate:exam_ai_complex_diagram_gate", 1),
-    )
-
-    filtered = summarize_workbench_issue_queue(items, category="plugin_boundary")
-
-    assert filtered.total_count == 3
-    assert filtered.visible_count == 1
-    assert filtered.actionable_count == 1
-    assert filtered.active_category == "plugin_boundary"
-    assert filtered.status_counts == (("open", 3),)
-    assert filtered.owner_counts == (
-        ("workbench", 2),
-        ("plugin", 1),
-    )
-    assert filtered.action_group_counts == (
-        ("handle_first", 2),
-        ("confirm", 1),
-    )
-    assert filtered.visible_action_group_counts == (("confirm", 1),)
-    assert filtered.repair_target_counts == (
-        ("plugin_manual_gate:exam_ai_complex_diagram_gate", 1),
-    )
-    assert filtered.visible_items[0].issue_id == "coverage.exam_education.plugin_boundary"
-
-    action_filtered = summarize_workbench_issue_queue(
-        items,
-        action_group="confirm",
-    )
-
-    assert action_filtered.total_count == 3
-    assert action_filtered.visible_count == 1
-    assert action_filtered.active_action_group == "confirm"
-    assert action_filtered.visible_action_group_counts == (("confirm", 1),)
-    assert action_filtered.visible_items[0].issue_id == (
-        "coverage.exam_education.plugin_boundary"
-    )
-
-    combined_empty = summarize_workbench_issue_queue(
-        items,
-        category="material_field",
-        action_group="confirm",
-    )
-
-    assert combined_empty.visible_count == 0
-    assert combined_empty.active_category == "material_field"
-    assert combined_empty.active_action_group == "confirm"
-    assert combined_empty.visible_action_group_counts == ()
-    assert combined_empty.visible_items == ()
-
-
-def test_workbench_issue_action_group_keeps_user_action_language_stable():
-    open_blocker = material_readiness_issue_items(
-        create_bidding_scene(),
-        MaterialExecutionContext(),
-    )[0]
-    confirmable = coverage_boundary_issue_items(
-        SceneWorkspace(scene_id="exam_teaching", category="exam_teaching")
-    )[0]
-    view_only = update_workbench_issue_status(
-        [confirmable],
-        confirmable.issue_id,
-        "resolved",
-    )[0]
-
-    assert workbench_issue_action_group(open_blocker) == "handle_first"
-    assert workbench_issue_action_group(confirmable) == "confirm"
-    assert workbench_issue_action_group(view_only) == "view_only"
-
-    blocker_visual = workbench_issue_action_visual_for_item(open_blocker)
-    confirm_visual = workbench_issue_action_visual_for_item(confirmable)
-    resolved_visual = workbench_issue_action_visual_for_item(view_only)
-
-    assert (blocker_visual.label, blocker_visual.rank, blocker_visual.badge_tone) == (
-        "先处理",
-        0,
-        "error",
-    )
-    assert (confirm_visual.label, confirm_visual.rank, confirm_visual.detail_tone) == (
-        "建议确认",
-        1,
-        "info",
-    )
-    assert (resolved_visual.label, resolved_visual.rank, resolved_visual.detail_tone) == (
-        "仅查看",
-        2,
-        "success",
-    )
-    assert workbench_issue_action_visual("unknown").label == "仅查看"
-
-
-def test_workbench_issue_evidence_projection_keeps_ui_semantics_in_adapter():
+def test_workbench_issue_evidence_projection_keeps_ui_semantics_in_owner():
     item = WorkbenchIssueItem(
         issue_id="ui.control_contract.required.body_special_indent",
         category="control_contract",
@@ -574,33 +472,7 @@ def test_workbench_issue_evidence_projection_keeps_ui_semantics_in_adapter():
     ) == "模板样式不一致：正文字形"
 
 
-def test_parameter_ownership_issue_items_expose_audit_gaps_for_workbench_queue():
-    @dataclass
-    class FutureSceneWorkspace(SceneWorkspace):
-        experimental_knob: str = ""
-
-    items = parameter_ownership_issue_items(FutureSceneWorkspace(scene_id="future"))
-
-    assert len(items) == 1
-    item = items[0]
-    assert item.issue_id == "scene.parameter_ownership.audit"
-    assert item.category == "parameter_ownership"
-    assert item.severity == "warning"
-    assert item.title == "参数归属缺口"
-    assert item.summary == "1 类缺口"
-    assert item.details == ("缺少顶层字段归属：experimental_knob",)
-    assert item.repair_target_type == "parameter_ownership"
-    assert item.repair_target_key == "registry"
-    assert item.owner == "scene"
-    assert item.blocking is False
-
-    summary = summarize_workbench_issue_queue(items)
-    assert summary.category_counts == (("parameter_ownership", 1),)
-    assert summary.owner_counts == (("scene", 1),)
-    assert summary.repair_target_counts == (("parameter_ownership:registry", 1),)
-
-
-def test_sample_fixture_issue_items_expose_audit_gaps_for_workbench_queue():
+def test_sample_fixture_issue_items_keep_structured_repair_target():
     scene = SceneWorkspace(scene_id="contract_delivery", category="contract_delivery")
     items = sample_fixture_issue_items(
         scene,
@@ -632,117 +504,6 @@ def test_sample_fixture_issue_items_expose_audit_gaps_for_workbench_queue():
         "sample_fixture",
         "contract_delivery",
     )
-
-    summary = summarize_workbench_issue_queue(items)
-    assert summary.category_counts == (("sample_fixture", 1),)
-    assert summary.owner_counts == (("scene", 1),)
-    assert summary.repair_target_counts == (
-        ("sample_fixture:contract_delivery", 1),
-    )
-
-
-def test_control_contract_issue_items_expose_audit_gaps_for_workbench_queue():
-    audit = ControlContractAuditResult(
-        missing_required_contracts=("body.special_indent",),
-        invalid_owner_layers=(("body.left_indent", "loose"),),
-        missing_paired_contracts=(("body.left_indent", "body.right_indent"),),
-        missing_evidence_files=(("body.font_cn", "src/missing.py"),),
-        missing_evidence_markers=(
-            ("body.font_en", "src/ui/panels/template_style_detail.py", "FontCombo"),
-        ),
-    )
-
-    items = control_contract_issue_items(audit)
-
-    assert [item.issue_id for item in items] == [
-        "ui.control_contract.required.body_special_indent",
-        "ui.control_contract.owner.body_left_indent",
-        "ui.control_contract.pair.body_left_indent.body_right_indent",
-        "ui.control_contract.evidence_file.body_font_cn.src_missing_py",
-        "ui.control_contract.evidence_marker.body_font_en.fontcombo",
-    ]
-    by_id = {item.issue_id: item for item in items}
-    missing = by_id["ui.control_contract.required.body_special_indent"]
-    assert missing.category == "control_contract"
-    assert missing.severity == "warning"
-    assert missing.title == "控件契约缺失"
-    assert missing.summary == "body.special_indent"
-    assert missing.repair_target_type == "control_contract"
-    assert missing.repair_target_key == "body.special_indent"
-    assert missing.owner == "scene"
-    assert missing.blocking is False
-    assert missing.details[0] == "缺少必审控件契约：body.special_indent"
-    assert "契约：特殊缩进 (body.special_indent)" in missing.details
-    assert "规范控件：SpecialIndentInput" in missing.details
-    assert "归属层：template" in missing.details
-    assert any(line.startswith("参数路径：") for line in missing.details)
-    evidence_lines = [line for line in missing.details if line.startswith("证据：")]
-    assert any(
-        line.startswith("证据：src/shared/ui/paragraph_style_inputs.py:")
-        and "#class SpecialIndentInput" in line
-        and ":0#" not in line
-        for line in evidence_lines
-    )
-    assert "control_contract_registry" in missing.source_notes
-    assert by_id["ui.control_contract.owner.body_left_indent"].details[0] == (
-        "非法控件归属层：body.left_indent:loose"
-    )
-    assert by_id[
-        "ui.control_contract.pair.body_left_indent.body_right_indent"
-    ].details[0] == "配对控件缺失：body.left_indent->body.right_indent"
-    assert by_id[
-        "ui.control_contract.evidence_file.body_font_cn.src_missing_py"
-    ].details[0] == "证据文件缺失：body.font_cn:src/missing.py"
-    marker_details = by_id[
-        "ui.control_contract.evidence_marker.body_font_en.fontcombo"
-    ].details
-    assert marker_details[0].startswith("证据 marker 缺失：body.font_en")
-
-    summary = summarize_workbench_issue_queue(items)
-    assert summary.category_counts == (("control_contract", 5),)
-    assert summary.owner_counts == (("scene", 5),)
-    assert summary.repair_target_counts == (
-        ("control_contract:body.special_indent", 1),
-        ("control_contract:body.left_indent", 2),
-        ("control_contract:body.font_cn", 1),
-        ("control_contract:body.font_en", 1),
-    )
-
-
-def test_workbench_issue_status_update_returns_new_queue_items():
-    scene = create_bidding_scene()
-    items = [
-        *material_readiness_issue_items(scene, MaterialExecutionContext()),
-        *coverage_boundary_issue_items(
-            SceneWorkspace(scene_id="exam_teaching", category="exam_teaching")
-        ),
-    ]
-
-    updated = update_workbench_issue_status(
-        items,
-        "material.assets.missing",
-        "resolved",
-    )
-    updated = update_workbench_issue_status(
-        updated,
-        "coverage.exam_education.plugin_boundary",
-        "ignored",
-    )
-    unchanged = update_workbench_issue_status(
-        updated,
-        "material.fields.missing",
-        "done",
-    )
-
-    assert [item.status for item in updated] == ["open", "resolved", "ignored"]
-    assert [item.status for item in items] == ["open", "open", "open"]
-    assert unchanged == updated
-    assert summarize_workbench_issue_queue(updated).status_counts == (
-        ("open", 1),
-        ("resolved", 1),
-        ("ignored", 1),
-    )
-
 
 def test_coverage_boundary_issue_items_expose_plugin_boundary_for_planned_family():
     scene = SceneWorkspace(scene_id="exam_teaching")
@@ -788,7 +549,7 @@ def test_coverage_boundary_issue_items_support_direct_import_gate_scene():
     assert any("lossless_pdf_to_word" in line for line in item.details)
 
 
-def test_coverage_boundary_issue_items_expose_contract_legal_boundary_banner():
+def test_coverage_boundary_issue_items_expose_contract_legal_boundary():
     scene = SceneWorkspace(scene_id="contract_delivery", category="contract_delivery")
 
     items = coverage_boundary_issue_items(scene)
@@ -806,14 +567,6 @@ def test_coverage_boundary_issue_items_expose_contract_legal_boundary_banner():
     assert "does not provide legal advice" in item.summary
     assert any("material_schema" in line for line in item.details)
     assert any("ObjectPreflight" in line for line in item.details)
-
-    summary = summarize_workbench_issue_queue(items)
-    assert summary.category_counts == (("coverage_boundary", 1),)
-    assert summary.owner_counts == (("scene", 1),)
-    assert summary.repair_target_counts == (
-        ("coverage_boundary:contract_delivery", 1),
-    )
-
 
 def test_coverage_boundary_issue_items_do_not_warn_for_normal_p0_report_scene():
     scene = SceneWorkspace(scene_id="report")
@@ -840,16 +593,16 @@ def test_material_readiness_issue_groups_report_structured_missing_materials():
     assert groups.asset_roles == ("logo", "seal")
     assert groups.source_notes == (
         "Schema：Bidding materials (bid_materials_v1)",
-        "场景字段：company_name, project_name, legal_person",
-        "场景资产：logo, seal",
+        "方案字段：company_name, project_name, legal_person",
+        "方案资产：logo, seal",
         "当前资料：未配置",
     )
     assert groups.detail_lines() == [
         "字段：company_name, project_name, legal_person",
         "资产：logo, seal",
         "来源：Schema：Bidding materials (bid_materials_v1)",
-        "来源：场景字段：company_name, project_name, legal_person",
-        "来源：场景资产：logo, seal",
+        "来源：方案字段：company_name, project_name, legal_person",
+        "来源：方案资产：logo, seal",
         "来源：当前资料：未配置",
     ]
 
@@ -869,6 +622,59 @@ def test_material_readiness_reasons_clears_when_context_satisfies_requirements()
     )
 
     assert material_readiness_reasons(scene, context) == []
+
+
+def test_material_readiness_blocks_package_schema_mismatch_before_session_build():
+    scene = create_bidding_scene()
+    context = MaterialExecutionContext(
+        package_id="wrong-package",
+        material_schema_ids=("official_document_v1",),
+        entity_data={
+            "company_name": "测试公司",
+            "project_name": "示例项目",
+            "legal_person": "张三",
+        },
+        asset_items=[
+            AssetItem(role="logo", path="C:/assets/logo.png"),
+            AssetItem(role="seal", path="C:/assets/seal.png"),
+        ],
+    )
+
+    groups = material_readiness_issue_groups(scene, context)
+    items = material_readiness_issue_items(scene, context)
+
+    assert groups.incompatible_schema_ids == ("official_document_v1",)
+    assert groups.field_keys == ()
+    assert groups.asset_roles == ()
+    assert material_readiness_reasons(scene, context) == [
+        "资料包 Schema 与当前方案不兼容：official_document_v1"
+    ]
+    assert [item.issue_id for item in items] == [
+        "material.schema.incompatible"
+    ]
+    assert items[0].blocking is True
+    assert items[0].repair_target_type == "material_package"
+
+
+def test_material_readiness_blocks_named_package_without_schema_declaration():
+    scene = create_bidding_scene()
+    context = MaterialExecutionContext(
+        package_id="legacy-package",
+        entity_data={
+            "company_name": "测试公司",
+            "project_name": "示例项目",
+            "legal_person": "张三",
+        },
+        asset_items=[
+            AssetItem(role="logo", path="C:/assets/logo.png"),
+            AssetItem(role="seal", path="C:/assets/seal.png"),
+        ],
+    )
+
+    groups = material_readiness_issue_groups(scene, context)
+
+    assert groups.incompatible_schema_ids == ("未声明",)
+    assert "资料包 Schema：未声明" in groups.source_notes
 
 
 def test_execution_adapter_build_readiness_blocks_unknown_material_schema():
@@ -1065,17 +871,7 @@ def test_execution_center_result_state_renders_style_source_receipt():
         style_source_envelope=StylePresentationEnvelope(
             kind="execution_receipt",
             title="样式来源",
-            summary="本次按模板“默认格式”处理",
-            detail="参考文献（行距）使用场景独立样式。",
-        ),
-        style_difference_summary=StyleDifferenceSummaryProjection(
-            template_status="模板基线",
-            current_status="参考文献 独立样式",
-            difference_status="已调整 1 项",
-            detail="不同：行距",
-            variant="warning",
-            section_count=1,
-            changed_section_count=1,
+            summary="本次使用模板“默认格式”。",
         ),
     )
 
@@ -1089,24 +885,17 @@ def test_execution_center_result_state_renders_style_source_receipt():
     assert center._style_receipt_block.property("style_object_scope_label") == "执行结果"
     assert center._style_receipt_block.property("style_object_edit_state_label") == "只读"
     assert center._style_receipt_block.property("style_management_content_plan") == (
-        "difference|receipt"
-    )
-    assert center._style_difference_slot.isHidden() is False
-    assert center._style_difference_slot.property("style_difference_status") == (
-        "已调整 1 项"
-    )
-    assert center._style_difference_slot.property("style_difference_current_status") == (
-        "参考文献 独立样式"
+        "receipt"
     )
     assert center._style_receipt_row.isHidden() is False
     assert center._style_receipt_row.summary_text() == (
-        "样式来源：本次按模板“默认格式”处理；参考文献（行距）使用场景独立样式。"
+        "样式来源：本次使用模板“默认格式”。"
     )
     assert center._style_receipt_row.property("style_presentation_kind") == (
         "execution_receipt"
     )
     assert center._style_receipt_row.detail.text() == (
-        "本次按模板“默认格式”处理；参考文献（行距）使用场景独立样式。"
+        "本次使用模板“默认格式”。"
     )
 
 
@@ -1122,39 +911,9 @@ def test_execution_center_hides_receipt_block_without_style_source():
     )
 
     assert center._summary_box.toPlainText() == "本次执行已完成"
-    assert center._style_difference_slot.isHidden() is True
     assert center._style_receipt_row.isHidden() is True
     assert center._style_receipt_block.isHidden() is True
     assert center._style_receipt_block.property("style_object_kind") == "execution_style"
-
-
-def test_execution_center_shows_style_difference_without_receipt():
-    _app()
-    center = ExecutionCenter()
-
-    center.set_result_state(
-        ExecutionResultState(
-            status="success",
-            summary="本次执行已完成",
-            style_difference_summary=StyleDifferenceSummaryProjection(
-                template_status="模板基线",
-                current_status="2 个格式例外",
-                difference_status="1 个格式例外已调整",
-                detail="不同：参考文献改了行距",
-                variant="warning",
-                section_count=2,
-                changed_section_count=1,
-            ),
-        )
-    )
-
-    assert center._style_receipt_block.isHidden() is False
-    assert center._style_receipt_block.property("style_object_kind") == "execution_style"
-    assert center._style_receipt_row.isHidden() is True
-    assert center._style_difference_slot.isHidden() is False
-    assert center._style_difference_slot.property("style_difference_detail") == (
-        "不同：参考文献改了行距"
-    )
 
 
 def test_execution_adapter_builds_progress_state_from_step_counts():
@@ -1207,29 +966,18 @@ def test_execution_adapter_builds_success_result_state():
     adapter = WorkbenchExecutionAdapter()
 
     state = adapter.build_result_state(
-        status="success",
-        output_path="C:/tmp/out.docx",
-        report_paths=["C:/tmp/report.json", "C:/tmp/report.md"],
-        failed_count=0,
-        error_text="",
-        diagnostics_count=1,
-        diagnostics_summary="诊断提示（1）\n- [equation_table_format] 1 个公式编号: skipped",
-        style_source={
-            "template_label": "默认格式",
-            "summary": "本次按模板“默认格式”处理；参考文献（行距）使用场景独立样式。",
-            "section_status": "1 个格式例外",
-            "sections": [
-                {
-                    "variant_key": "references_body",
-                    "label": "参考文献",
-                    "current_status": "独立样式",
-                    "difference_status": "已调整 1 项",
-                    "detail": "不同：行距",
-                    "changed_labels": ["行距"],
-                    "overridden": True,
-                    "follows_template": False,
-                }
-            ],
+        terminal_payload={
+            "status": "success",
+            "output_path": "C:/tmp/out.docx",
+            "report_paths": ["C:/tmp/report.json", "C:/tmp/report.md"],
+            "failed_count": 0,
+            "error_text": "",
+            "diagnostics_count": 1,
+            "diagnostics_summary": "诊断提示（1）\n- [equation_table_format] 1 个公式编号: skipped",
+            "style_source": {
+                "template_label": "默认格式",
+                "summary": "本次使用模板“默认格式”。",
+            },
         },
     )
 
@@ -1243,64 +991,78 @@ def test_execution_adapter_builds_success_result_state():
     assert "诊断提示（1）" in state.diagnostics_summary
     assert state.style_source["template_label"] == "默认格式"
     assert state.style_source_summary == (
-        "样式来源：本次按模板“默认格式”处理；参考文献（行距）使用场景独立样式。"
+        "样式来源：本次使用模板“默认格式”。"
     )
     assert state.style_source_envelope.kind == "execution_receipt"
     assert state.style_source_envelope.receipt_summary(title_fallback="样式来源") == (
         state.style_source_summary
     )
-    assert isinstance(state.style_difference_summary, StyleDifferenceSummaryProjection)
-    assert state.style_difference_summary.current_status == "参考文献 独立样式"
-    assert state.style_difference_summary.difference_status == "已调整 1 项"
-    assert state.style_difference_summary.detail == "不同：行距"
-
     recent = adapter.build_recent_run_state(state)
     assert recent.style_source_summary == state.style_source_summary
     assert recent.style_source_envelope == state.style_source_envelope
-    assert recent.style_difference_summary == state.style_difference_summary
+
+
+def test_execution_adapter_separates_artifact_failures_from_business_failures():
+    state = WorkbenchExecutionAdapter().build_result_state(
+        terminal_payload={
+            "status": "partial_success",
+            "output_path": "out.docx",
+            "report_paths": [],
+            "failed_count": 0,
+            "artifact_failure_count": 1,
+            "error_text": "report write failed",
+        },
+    )
+
+    assert state.failed_count == 0
+    assert state.artifact_failure_count == 1
+    assert "辅助产物" in state.summary
+    assert "0 个模块" not in state.summary
 
 
 def test_execution_adapter_converts_batch_issue_payloads_to_workbench_issues():
     adapter = WorkbenchExecutionAdapter()
 
     state = adapter.build_result_state(
-        status="partial_success",
-        output_path="",
-        report_paths=["C:/tmp/batch_report.json"],
-        failed_count=1,
-        error_text="",
-        batch_isolation={
-            "kind": "batch_failure_isolation",
-            "total_count": 2,
-            "success_count": 1,
-            "warning_count": 0,
+        terminal_payload={
+            "status": "partial_success",
+            "output_path": "",
+            "report_paths": ["C:/tmp/batch_report.json"],
             "failed_count": 1,
-            "profiles": [
-                {"profile_id": "ok", "profile_name": "完整员工", "status": "success"},
+            "error_text": "",
+            "batch_isolation": {
+                "kind": "batch_failure_isolation",
+                "total_count": 2,
+                "success_count": 1,
+                "warning_count": 0,
+                "failed_count": 1,
+                "profiles": [
+                    {"profile_id": "ok", "profile_name": "完整员工", "status": "success"},
+                    {
+                        "profile_id": "missing",
+                        "profile_name": "缺编号员工",
+                        "status": "failed",
+                        "missing_field_keys": ["employee_id"],
+                        "missing_asset_roles": [],
+                        "summary": "Missing required material fields: employee_id",
+                    },
+                ],
+            },
+            "batch_issue_items": [
                 {
+                    "issue_id": "batch:missing:preflight_missing_material_fields:1",
                     "profile_id": "missing",
                     "profile_name": "缺编号员工",
                     "status": "failed",
-                    "missing_field_keys": ["employee_id"],
-                    "missing_asset_roles": [],
+                    "kind": "preflight_missing_material_fields",
+                    "severity": "error",
                     "summary": "Missing required material fields: employee_id",
-                },
+                    "missing_field_keys": ["employee_id"],
+                    "repair_target_type": "field",
+                    "repair_target_key": "employee_id",
+                }
             ],
         },
-        batch_issue_items=[
-            {
-                "issue_id": "batch:missing:preflight_missing_material_fields:1",
-                "profile_id": "missing",
-                "profile_name": "缺编号员工",
-                "status": "failed",
-                "kind": "preflight_missing_material_fields",
-                "severity": "error",
-                "summary": "Missing required material fields: employee_id",
-                "missing_field_keys": ["employee_id"],
-                "repair_target_type": "field",
-                "repair_target_key": "employee_id",
-            }
-        ],
     )
 
     assert len(state.issue_items) == 1
@@ -1400,82 +1162,36 @@ def test_batch_execution_issue_items_infer_scene_field_targets_from_parameter_pa
             {
                 "profile_id": "thesis_a",
                 "profile_name": "论文 A",
-                "kind": "scene_style_diagnostic",
-                "summary": "参考文献字体需要场景级检查",
-                "parameter_path": "scene.section_styles.references_body.font_cn",
+                "kind": "scene_document_scope_diagnostic",
+                "summary": "方案处理范围需要确认",
+                "parameter_path": "scene.document_scope.mode",
             },
             {
                 "profile_id": "thesis_a",
                 "profile_name": "论文 A",
-                "kind": "scene_scope_diagnostic",
-                "summary": "参考文献范围未纳入处理",
-                "parameter_paths": ["scene.format_scope.sections.references"],
-            },
-            {
-                "profile_id": "thesis_a",
-                "profile_name": "论文 A",
-                "kind": "scene_style_wildcard_diagnostic",
-                "summary": "场景分区行距需要检查",
-                "parameter_path": "scene.section_styles.*.line_spacing_pt",
-            },
-            {
-                "profile_id": "thesis_a",
-                "profile_name": "论文 A",
-                "kind": "scene_style_alias_diagnostic",
-                "summary": "参考文献行距需要场景级检查",
-                "parameter_path": "section_styles.references_body.line_spacing_value",
+                "kind": "scene_document_scope_roles_diagnostic",
+                "summary": "指定区域需要确认",
+                "parameter_paths": ["scene.document_scope.selected_roles"],
             },
         ]
     )
 
-    style_item, scope_item, wildcard_item, alias_item = items
-    assert style_item.category == "batch_issue"
-    assert style_item.repair_target_type == "scene_style_field"
-    assert style_item.repair_target_key == "scene.section_styles.references_body.font_cn"
-    assert "参数路径：scene.section_styles.references_body.font_cn" in style_item.details
-    assert workbench_issue_action_target(style_item) == (
-        "scene_style_field",
-        "scene.section_styles.references_body.font_cn",
-    )
-
-    assert scope_item.category == "batch_issue"
-    assert scope_item.repair_target_type == "scene_scope_field"
-    assert scope_item.repair_target_key == "format_scope.sections.references"
-    assert "参数路径：scene.format_scope.sections.references" in scope_item.details
-    assert workbench_issue_action_target(scope_item) == (
-        "scene_scope_field",
-        "format_scope.sections.references",
-    )
-
-    assert wildcard_item.repair_target_type == "scene_style_field"
-    assert wildcard_item.repair_target_key == "scene.section_styles.*.line_spacing_pt"
-    assert "参数路径：scene.section_styles.*.line_spacing_pt" in wildcard_item.details
-    assert workbench_issue_action_target(wildcard_item) == (
-        "scene_style_field",
-        "scene.section_styles.*.line_spacing_pt",
-    )
-
-    assert alias_item.repair_target_type == "scene_style_field"
-    assert (
-        alias_item.repair_target_key
-        == "scene.section_styles.references_body.line_spacing_pt"
-    )
-    assert workbench_issue_action_target(alias_item) == (
-        "scene_style_field",
-        "scene.section_styles.references_body.line_spacing_pt",
-    )
+    mode_item, roles_item = items
+    for item, target in (
+        (mode_item, "scene.document_scope.mode"),
+        (roles_item, "scene.document_scope.selected_roles"),
+    ):
+        assert item.category == "batch_issue"
+        assert item.repair_target_type == "scene_document_scope_field"
+        assert item.repair_target_key == target
+        assert f"参数路径：{target}" in item.details
+        assert workbench_issue_action_target(item) == (
+            "scene_document_scope_field",
+            target,
+        )
 
 
-def test_workbench_execution_adapter_reuses_scene_style_path_descriptors():
-    source = (ROOT / "src/ui/adapters/workbench_execution_adapter.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert "scene_style_navigation_target_from_field_id" in source
-    assert "canonical_paragraph_style_field_id" in source
-
-
-def test_workbench_execution_adapter_reexports_issue_models_from_model_module():
+def test_workbench_execution_adapter_uses_only_current_issue_model():
     adapter_source = (ROOT / "src/ui/adapters/workbench_execution_adapter.py").read_text(
         encoding="utf-8"
     )
@@ -1487,11 +1203,12 @@ def test_workbench_execution_adapter_reexports_issue_models_from_model_module():
     assert "class WorkbenchIssueItem" not in adapter_source
     assert "class MaterialReadinessIssueGroups" in model_source
     assert "class WorkbenchIssueItem" in model_source
-    assert "class WorkbenchIssueQueueSummary" in model_source
+    assert "class WorkbenchIssueQueueSummary" not in model_source
+    assert "ISSUE_STATUS_VALUES" not in model_source
     assert "ISSUE_TERMINAL_STATUS_VALUES" in model_source
 
 
-def test_workbench_execution_adapter_reexports_issue_projection_from_projection_module():
+def test_workbench_issue_projection_owns_issue_actions_without_adapter_reexport():
     adapter_source = (ROOT / "src/ui/adapters/workbench_execution_adapter.py").read_text(
         encoding="utf-8"
     )
@@ -1499,12 +1216,13 @@ def test_workbench_execution_adapter_reexports_issue_projection_from_projection_
         ROOT / "src/ui/adapters/workbench_issue_projection.py"
     ).read_text(encoding="utf-8")
 
-    assert "from src.ui.adapters.workbench_issue_projection import" in adapter_source
+    assert "from src.ui.adapters.workbench_issue_projection import" not in adapter_source
     assert "COVERAGE_PACK_DISPLAY_LABELS =" not in adapter_source
     assert "BOUNDARY_TEXT_DISPLAY_LABELS =" not in adapter_source
     assert "COVERAGE_PACK_DISPLAY_LABELS =" in projection_source
     assert "BOUNDARY_TEXT_DISPLAY_LABELS =" in projection_source
     for function_name in (
+        "workbench_issue_action_target",
         "workbench_issue_action_visual",
         "workbench_issue_evidence_lines",
         "workbench_issue_evidence_actions",
@@ -1516,7 +1234,7 @@ def test_workbench_execution_adapter_reexports_issue_projection_from_projection_
         assert f"def {function_name}(" in projection_source
 
 
-def test_workbench_execution_adapter_reexports_boundary_issue_family_module():
+def test_boundary_issue_family_has_no_execution_adapter_reexport():
     adapter_source = (ROOT / "src/ui/adapters/workbench_execution_adapter.py").read_text(
         encoding="utf-8"
     )
@@ -1524,7 +1242,7 @@ def test_workbench_execution_adapter_reexports_boundary_issue_family_module():
         ROOT / "src/ui/adapters/workbench_boundary_issues.py"
     ).read_text(encoding="utf-8")
 
-    assert "from src.ui.adapters.workbench_boundary_issues import" in adapter_source
+    assert "from src.ui.adapters.workbench_boundary_issues import" not in adapter_source
     for function_name in (
         "coverage_boundary_issue_items",
         "sample_fixture_issue_items",
@@ -1541,7 +1259,7 @@ def test_workbench_execution_adapter_reexports_boundary_issue_family_module():
         assert f"def {helper_name}(" in boundary_source
 
 
-def test_workbench_execution_adapter_reexports_material_issue_family_module():
+def test_material_issue_family_has_no_execution_adapter_reexport():
     adapter_source = (ROOT / "src/ui/adapters/workbench_execution_adapter.py").read_text(
         encoding="utf-8"
     )
@@ -1549,7 +1267,7 @@ def test_workbench_execution_adapter_reexports_material_issue_family_module():
         ROOT / "src/ui/adapters/workbench_material_issues.py"
     ).read_text(encoding="utf-8")
 
-    assert "from src.ui.adapters.workbench_material_issues import" in adapter_source
+    assert "from src.ui.adapters.workbench_material_issues import" not in adapter_source
     for function_name in (
         "material_schema_readiness_reasons",
         "material_readiness_reasons",
@@ -1573,16 +1291,16 @@ def test_execution_diagnostic_issue_items_infer_scene_field_targets():
     items = execution_diagnostic_issue_items(
         [
             {
-                "rule_name": "section_style",
-                "change_type": "preflight_scene_style",
-                "reason": "参考文献字体需要确认",
-                "parameter_path": "scene.section_styles.references_body.font_cn",
+                "rule_name": "document_scope",
+                "change_type": "preflight_document_scope",
+                "reason": "处理范围需要确认",
+                "parameter_path": "scene.document_scope.mode",
             },
             {
-                "rule_name": "format_scope",
-                "change_type": "preflight_scene_scope",
-                "reason": "参考文献范围未纳入处理",
-                "parameter_paths": ["scene.format_scope.sections.references"],
+                "rule_name": "document_scope",
+                "change_type": "preflight_document_scope_roles",
+                "reason": "指定区域需要确认",
+                "parameter_paths": ["scene.document_scope.selected_roles"],
             },
             {
                 "rule_name": "plain_warning",
@@ -1593,68 +1311,63 @@ def test_execution_diagnostic_issue_items_infer_scene_field_targets():
     )
 
     assert len(items) == 2
-    style_item, scope_item = items
-    assert style_item.category == "scene_style"
-    assert style_item.title == "场景样式需要确认"
-    assert style_item.owner == "scene"
-    assert style_item.repair_target_type == "scene_style_field"
-    assert style_item.repair_target_key == "scene.section_styles.references_body.font_cn"
-    assert "参数路径：scene.section_styles.references_body.font_cn" in style_item.details
-    assert workbench_issue_action_target(style_item) == (
-        "scene_style_field",
-        "scene.section_styles.references_body.font_cn",
-    )
-
-    assert scope_item.category == "scene_scope"
-    assert scope_item.title == "场景处理范围需要确认"
-    assert scope_item.repair_target_type == "scene_scope_field"
-    assert scope_item.repair_target_key == "format_scope.sections.references"
-    assert "参数路径：scene.format_scope.sections.references" in scope_item.details
-    assert workbench_issue_action_target(scope_item) == (
-        "scene_scope_field",
-        "format_scope.sections.references",
-    )
+    for item, target in zip(
+        items,
+        ("scene.document_scope.mode", "scene.document_scope.selected_roles"),
+    ):
+        assert item.category == "scene_document_scope"
+        assert item.title == "方案处理范围需要确认"
+        assert item.owner == "scene"
+        assert item.repair_target_type == "scene_document_scope_field"
+        assert item.repair_target_key == target
+        assert f"参数路径：{target}" in item.details
+        assert workbench_issue_action_target(item) == (
+            "scene_document_scope_field",
+            target,
+        )
 
 
 def test_result_state_includes_routable_execution_diagnostic_issues():
     adapter = WorkbenchExecutionAdapter()
 
     state = adapter.build_result_state(
-        status="success",
-        output_path="out.docx",
-        report_paths=[],
-        failed_count=0,
-        error_text="",
-        diagnostics_count=1,
-        diagnostics_summary="诊断提示（1）",
-        diagnostics_items=[
-            {
-                "rule_name": "section_style",
-                "reason": "行距需要确认",
-                "parameter_path": "scene.section_styles.*.line_spacing_pt",
-            }
-        ],
+        terminal_payload={
+            "status": "success",
+            "output_path": "out.docx",
+            "report_paths": [],
+            "failed_count": 0,
+            "error_text": "",
+            "diagnostics_count": 1,
+            "diagnostics_summary": "诊断提示（1）",
+            "diagnostics_items": [
+                {
+                    "rule_name": "document_scope",
+                    "reason": "指定区域需要确认",
+                    "parameter_path": "scene.document_scope.selected_roles",
+                }
+            ],
+        },
     )
 
     assert len(state.issue_items) == 1
     item = state.issue_items[0]
-    assert item.category == "scene_style"
-    assert item.repair_target_type == "scene_style_field"
-    assert item.repair_target_key == "scene.section_styles.*.line_spacing_pt"
+    assert item.category == "scene_document_scope"
+    assert item.repair_target_type == "scene_document_scope_field"
+    assert item.repair_target_key == "scene.document_scope.selected_roles"
 
 
 def test_runtime_batch_issue_payload_preserves_scene_parameter_paths():
-    payloads = _batch_issue_items_for_result(
+    payloads = build_batch_issue_items_for_result(
         {
             "profile_id": "thesis_a",
             "profile_name": "论文 A",
             "status": "partial_success",
             "material_diagnostics": [
                 {
-                    "change_type": "scene_scope_diagnostic",
-                    "reason": "参考文献范围未纳入处理",
+                    "change_type": "scene_document_scope_diagnostic",
+                    "reason": "方案处理范围需要确认",
                     "level": "warning",
-                    "parameter_path": "scene.format_scope.sections.references",
+                    "parameter_path": "scene.document_scope.mode",
                 }
             ],
         }
@@ -1662,12 +1375,12 @@ def test_runtime_batch_issue_payload_preserves_scene_parameter_paths():
 
     assert len(payloads) == 1
     assert payloads[0]["parameter_paths"] == [
-        "scene.format_scope.sections.references"
+        "scene.document_scope.mode"
     ]
 
     item = batch_execution_issue_items(payloads)[0]
-    assert item.repair_target_type == "scene_scope_field"
-    assert item.repair_target_key == "format_scope.sections.references"
+    assert item.repair_target_type == "scene_document_scope_field"
+    assert item.repair_target_key == "scene.document_scope.mode"
 
 
 def test_question_figure_repair_queue_issue_items_route_candidates_to_rows():
@@ -2143,19 +1856,21 @@ def test_execution_adapter_preserves_material_field_consistency_summary():
     adapter = WorkbenchExecutionAdapter()
 
     state = adapter.build_result_state(
-        status="success",
-        output_path="C:/tmp/out.docx",
-        report_paths=["C:/tmp/report.json"],
-        failed_count=0,
-        error_text="",
-        material_field_consistency={
-            "schema_id": "contract_parties_v1",
-            "family_id": "contract_delivery",
-            "status": "warning",
-            "field_count": 4,
-            "issue_count": 1,
-            "items": [],
-            "issues": [{"kind": "label_value_conflict"}],
+        terminal_payload={
+            "status": "success",
+            "output_path": "C:/tmp/out.docx",
+            "report_paths": ["C:/tmp/report.json"],
+            "failed_count": 0,
+            "error_text": "",
+            "material_field_consistency": {
+                "schema_id": "contract_parties_v1",
+                "family_id": "contract_delivery",
+                "status": "warning",
+                "field_count": 4,
+                "issue_count": 1,
+                "items": [],
+                "issues": [{"kind": "label_value_conflict"}],
+            },
         },
     )
     recent = adapter.build_recent_run_state(state)
@@ -2172,38 +1887,40 @@ def test_execution_adapter_preserves_object_preflight_summary():
     adapter = WorkbenchExecutionAdapter()
 
     state = adapter.build_result_state(
-        status="success",
-        output_path="C:/tmp/out.docx",
-        report_paths=["C:/tmp/report.json"],
-        failed_count=0,
-        error_text="",
-        object_preflight={
-            "enabled": True,
-            "preservation_mode": "warn",
-            "scan_targets": ["ole_objects", "fields"],
-            "findings_count": 2,
-            "findings": [
-                {
-                    "kind": "ole_objects",
-                    "severity": "warning",
-                    "location": "word/document.xml",
-                    "message": "OLE object markup is present.",
-                },
-                {
-                    "kind": "fields",
-                    "severity": "warning",
-                    "location": "word/header1.xml",
-                    "message": "Word field instructions are present.",
-                },
-            ],
-            "module_skips_count": 1,
-            "module_skips": [
-                {
-                    "module_name": "section_format",
-                    "finding_kinds": ["ole_objects"],
-                    "reason": "High-risk objects require preservation.",
-                }
-            ],
+        terminal_payload={
+            "status": "success",
+            "output_path": "C:/tmp/out.docx",
+            "report_paths": ["C:/tmp/report.json"],
+            "failed_count": 0,
+            "error_text": "",
+            "object_preflight": {
+                "enabled": True,
+                "preservation_mode": "warn",
+                "scan_targets": ["ole_objects", "fields"],
+                "findings_count": 2,
+                "findings": [
+                    {
+                        "kind": "ole_objects",
+                        "severity": "warning",
+                        "location": "word/document.xml",
+                        "message": "OLE object markup is present.",
+                    },
+                    {
+                        "kind": "fields",
+                        "severity": "warning",
+                        "location": "word/header1.xml",
+                        "message": "Word field instructions are present.",
+                    },
+                ],
+                "module_skips_count": 1,
+                "module_skips": [
+                    {
+                        "module_name": "section_format",
+                        "finding_kinds": ["ole_objects"],
+                        "reason": "High-risk objects require preservation.",
+                    }
+                ],
+            },
         },
     )
     recent = adapter.build_recent_run_state(state)
@@ -2220,69 +1937,16 @@ def test_execution_adapter_preserves_object_preflight_summary():
     assert recent.object_preflight_details == state.object_preflight_details
 
 
-def test_object_preflight_issue_items_expose_risks_for_workbench_queue():
-    items = object_preflight_issue_items(
-        {
-            "enabled": True,
-            "preservation_mode": "strict",
-            "scan_targets": ["comments", "fields"],
-            "findings_count": 2,
-            "blocking_findings_count": 1,
-            "findings": [
-                {
-                    "kind": "comments",
-                    "severity": "warning",
-                    "location": "word/comments.xml",
-                    "message": "Comments are present.",
-                },
-                {
-                    "kind": "macros",
-                    "severity": "error",
-                    "location": "word/vbaProject.bin",
-                    "message": "Macros are present.",
-                },
-            ],
-            "module_skips_count": 1,
-            "module_skips": [
-                {
-                    "module_name": "section_format",
-                    "finding_kinds": ["macros"],
-                    "reason": "protected object",
-                }
-            ],
-        }
-    )
-
-    assert len(items) == 2
-    comments_item, macros_item = items
-    assert comments_item.issue_id == "object_preflight.finding.1.comments"
-    assert comments_item.category == "object_preflight"
-    assert comments_item.severity == "warning"
-    assert comments_item.blocking is False
-    assert comments_item.repair_target_key == "comments@word/comments.xml"
-    assert comments_item.summary == "word/comments.xml: Comments are present."
-
-    assert macros_item.issue_id == "object_preflight.finding.2.macros"
-    assert macros_item.category == "object_preflight"
-    assert macros_item.severity == "error"
-    assert macros_item.blocking is True
-    assert macros_item.repair_target_type == "object_preflight"
-    assert macros_item.repair_target_key == "macros@word/vbaProject.bin"
-    assert macros_item.summary == "word/vbaProject.bin: Macros are present."
-    assert "风险[error] macros @ word/vbaProject.bin: Macros are present." in macros_item.details
-    assert "跳过模块 section_format <- macros: protected object" in macros_item.details
-    assert "保护模式：strict" in macros_item.source_notes
-    assert "扫描对象：comments, fields" in macros_item.source_notes
-
-
 def test_execution_adapter_builds_recent_run_state_from_result():
     adapter = WorkbenchExecutionAdapter()
     result_state = adapter.build_result_state(
-        status="partial_success",
-        output_path="C:/tmp/out.docx",
-        report_paths=["C:/tmp/report.json"],
-        failed_count=2,
-        error_text="",
+        terminal_payload={
+            "status": "partial_success",
+            "output_path": "C:/tmp/out.docx",
+            "report_paths": ["C:/tmp/report.json"],
+            "failed_count": 2,
+            "error_text": "",
+        },
     )
 
     recent = adapter.build_recent_run_state(result_state)
@@ -2298,19 +1962,21 @@ def test_execution_adapter_preserves_delivery_artifact_paths():
     adapter = WorkbenchExecutionAdapter()
 
     state = adapter.build_result_state(
-        status="success",
-        output_path="C:/tmp/out.docx",
-        output_paths={"final": "C:/tmp/out.docx", "review": "C:/tmp/review.docx"},
-        compare_paths={"review": "C:/tmp/review_compare.docx"},
-        report_paths=["C:/tmp/source_review_changes.md"],
-        intermediate_paths={"review": "C:/tmp/review_intermediate.json"},
-        material_manifest_paths={"material": "C:/tmp/material_manifest.json"},
-        material_package_paths={
-            "zip": "C:/tmp/material_package.zip",
-            "report": "C:/tmp/archive_report.md",
+        terminal_payload={
+            "status": "success",
+            "output_path": "C:/tmp/out.docx",
+            "output_paths": {"final": "C:/tmp/out.docx", "review": "C:/tmp/review.docx"},
+            "compare_paths": {"review": "C:/tmp/review_compare.docx"},
+            "report_paths": ["C:/tmp/source_review_changes.md"],
+            "intermediate_paths": {"review": "C:/tmp/review_intermediate.json"},
+            "material_manifest_paths": {"material": "C:/tmp/material_manifest.json"},
+            "material_package_paths": {
+                "zip": "C:/tmp/material_package.zip",
+                "report": "C:/tmp/archive_report.md",
+            },
+            "failed_count": 0,
+            "error_text": "",
         },
-        failed_count=0,
-        error_text="",
     )
     recent = adapter.build_recent_run_state(state)
 
@@ -2366,14 +2032,16 @@ def test_execution_adapter_recent_run_uses_shared_delivery_display_name_for_stan
     adapter = WorkbenchExecutionAdapter()
 
     state = adapter.build_result_state(
-        status="success",
-        output_path="C:/tmp/answer.docx",
-        output_paths={"answer_key": "C:/tmp/answer.docx"},
-        compare_paths={"answer_key": "C:/tmp/answer_compare.docx"},
-        report_paths=[],
-        intermediate_paths={"answer_key": "C:/tmp/answer_intermediate.json"},
-        failed_count=0,
-        error_text="",
+        terminal_payload={
+            "status": "success",
+            "output_path": "C:/tmp/answer.docx",
+            "output_paths": {"answer_key": "C:/tmp/answer.docx"},
+            "compare_paths": {"answer_key": "C:/tmp/answer_compare.docx"},
+            "report_paths": [],
+            "intermediate_paths": {"answer_key": "C:/tmp/answer_intermediate.json"},
+            "failed_count": 0,
+            "error_text": "",
+        },
     )
     recent = adapter.build_recent_run_state(state)
 
@@ -2390,23 +2058,333 @@ def test_execution_adapter_labels_exam_student_and_answer_key_outputs():
     adapter = WorkbenchExecutionAdapter()
 
     state = adapter.build_result_state(
-        status="success",
-        output_path="C:/tmp/student.docx",
-        output_paths={
-            "student": "C:/tmp/student.docx",
-            "answer_key": "C:/tmp/answer.docx",
+        terminal_payload={
+            "status": "success",
+            "output_path": "C:/tmp/student.docx",
+            "output_paths": {
+                "student": "C:/tmp/student.docx",
+                "answer_key": "C:/tmp/answer.docx",
+            },
+            "compare_paths": {},
+            "report_paths": [],
+            "intermediate_paths": {},
+            "failed_count": 0,
+            "error_text": "",
         },
-        compare_paths={},
-        report_paths=[],
-        intermediate_paths={},
-        failed_count=0,
-        error_text="",
     )
     recent = adapter.build_recent_run_state(state)
 
     assert "学生卷: C:/tmp/student.docx" in recent.output_label
     assert "答案速查: C:/tmp/answer.docx" in recent.output_label
     assert [item.label for item in recent.artifact_items[:2]] == ["学生卷", "答案速查"]
+
+
+def test_workbench_runner_executes_exam_markdown_source_without_docx_pipeline(tmp_path):
+    source = tmp_path / "exam_source.md"
+    source.write_text(
+        """# 七年级数学单元测试
+
+> 科目：数学　年级：七年级　考试时间：45 分钟　满分：10 分
+
+## 一、选择题
+
+1. 1 + 1 = （　　）（5 分）
+   A. 1
+   B. 2
+   C. 3
+   D. 4
+
+## 二、填空题
+
+1. 3 + 4 = ______。（5 分）
+
+## 答案速查
+
+一、选择题
+1. B
+
+二、填空题
+1. 7
+""",
+        encoding="utf-8",
+    )
+    scene = SceneWorkspace(
+        scene_id="exam",
+        mode_id="exam",
+        category="exam_paper",
+        template_id="default",
+        compatible_template_ids=["default"],
+        master_id="default_exam",
+        input_source_profile=InputSourceProfile(
+            accepted_formats=["markdown"],
+            structured_formats=["json"],
+        ),
+        exam_paper=ExamPaperConfig(
+            answer_policy="student_plus_answer",
+        ),
+    )
+    progress: list[tuple[int, int, str]] = []
+    template = TemplateConfig()
+    material_context = MaterialExecutionContext(mode_id="exam")
+    execution_session = _build_exam_execution_session(
+        scene=scene,
+        template=template,
+        input_path=source,
+        output_root=tmp_path / "runs",
+        material_context=material_context,
+    )
+    runner = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=template,
+        scene=scene,
+        output_dir=Path(execution_session.output_namespace),
+        material_context=material_context,
+        execution_session=execution_session,
+    )
+
+    try:
+        payload = runner.run(
+            lambda current, total, message: progress.append((current, total, message)),
+            lambda: False,
+        )
+    finally:
+        cleanup_execution_session_resources(execution_session)
+
+    assert payload["status"] == "success"
+    assert set(payload["output_paths"]) == {"student", "answer_key"}
+    assert Path(payload["output_paths"]["student"]).exists()
+    assert Path(payload["output_paths"]["answer_key"]).exists()
+    assert payload["exam_markdown_import"]["summary"]["question_count"] == 2
+    assert payload["exam_markdown_import"]["summary"]["answered_question_count"] == 2
+    report_json = next(
+        Path(path)
+        for path in payload["report_paths"]
+        if str(path).endswith(".json")
+    )
+    report_payload = json.loads(report_json.read_text(encoding="utf-8"))
+    assert report_payload["exam_markdown_import"] == payload["exam_markdown_import"]
+    report_markdown = "\n".join(
+        Path(path).read_text(encoding="utf-8")
+        for path in payload["report_paths"]
+        if str(path).endswith(".md")
+    )
+    assert "## Markdown 题稿导入证据" in report_markdown
+    assert "## 试卷题源结构校验" in report_markdown
+    assert "## 试卷多版本运行时渲染" in report_markdown
+    assert "Failed to open document" not in str(payload)
+    assert any(message == "解析 Markdown 题稿" for *_steps, message in progress)
+
+
+def test_workbench_runner_applies_block_material_policy_to_exam_markdown(tmp_path):
+    source = tmp_path / "incomplete_exam_source.md"
+    source.write_text(
+        """# 数学练习
+
+## 一、选择题
+
+1. 1 + 1 = （　　）
+   A. 1
+   B. 2
+""",
+        encoding="utf-8",
+    )
+    scene = SceneWorkspace(
+        scene_id="exam",
+        mode_id="exam",
+        category="exam_paper",
+        template_id="default",
+        compatible_template_ids=["default"],
+        master_id="default_exam",
+        input_source_profile=InputSourceProfile(
+            accepted_formats=["markdown"],
+            structured_formats=["json"],
+            material_schema_id="exam_items_v1",
+            failure_policy="block",
+        ),
+        exam_paper=ExamPaperConfig(
+            answer_policy="student_only",
+        ),
+    )
+    runner = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=TemplateConfig(),
+        scene=scene,
+        output_dir=tmp_path / "out",
+    )
+
+    payload = runner.run(lambda *_args: None, lambda: False)
+
+    assert payload["status"] == "failed"
+    assert payload["output_paths"] == {}
+    assert payload["exam_markdown_import"]["summary"]["question_count"] == 1
+    assert "Missing required material fields" in payload["error_text"]
+    assert {
+        diagnostic["change_type"]
+        for diagnostic in payload["material_diagnostics"]
+    } >= {"preflight_missing_material_fields"}
+    report_json = next(
+        Path(path)
+        for path in payload["report_paths"]
+        if str(path).endswith(".json")
+    )
+    report_payload = json.loads(report_json.read_text(encoding="utf-8"))
+    assert report_payload["exam_markdown_import"] == (
+        payload["exam_markdown_import"]
+    )
+    report_markdown = next(
+        Path(path).read_text(encoding="utf-8")
+        for path in payload["report_paths"]
+        if str(path).endswith(".md")
+    )
+    assert "## Markdown 题稿导入证据" in report_markdown
+
+
+def test_exam_material_preflight_report_failure_is_isolated_and_atomic(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "incomplete_exam_source.md"
+    source.write_text(
+        """# 数学练习
+
+## 一、选择题
+
+1. 1 + 1 = （　　）
+   A. 1
+   B. 2
+""",
+        encoding="utf-8",
+    )
+    scene = SceneWorkspace(
+        scene_id="exam",
+        mode_id="exam",
+        category="exam_paper",
+        template_id="default",
+        compatible_template_ids=["default"],
+        master_id="default_exam",
+        input_source_profile=InputSourceProfile(
+            accepted_formats=["markdown"],
+            structured_formats=["json"],
+            material_schema_id="exam_items_v1",
+            failure_policy="block",
+        ),
+        exam_paper=ExamPaperConfig(
+            answer_policy="student_only",
+        ),
+    )
+    original_atomic_write_text = material_preflight_reporting.atomic_write_text
+
+    def _fail_markdown_stage(path, text, *, encoding="utf-8"):
+        if Path(path).suffix.casefold() == ".md":
+            raise OSError("simulated markdown report failure")
+        return original_atomic_write_text(path, text, encoding=encoding)
+
+    monkeypatch.setattr(
+        material_preflight_reporting,
+        "atomic_write_text",
+        _fail_markdown_stage,
+    )
+    output_dir = tmp_path / "out"
+    payload = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=TemplateConfig(),
+        scene=scene,
+        output_dir=output_dir,
+    ).run(lambda *_args: None, lambda: False)
+
+    assert payload["status"] == "failed"
+    assert payload["exam_markdown_import"]["summary"]["question_count"] == 1
+    assert payload["report_paths"] == []
+    assert payload["artifact_failure_count"] >= 1
+    failure = next(
+        item
+        for item in payload["artifact_failures"]
+        if item["kind"] == "material_preflight_reports"
+    )
+    assert failure["error_type"] == "OSError"
+    assert "simulated markdown report failure" in failure["error"]
+    assert list(output_dir.glob("*_changes.json")) == []
+    assert list(output_dir.glob("*_changes.md")) == []
+
+
+def test_exam_markdown_block_policy_does_not_block_timeline_warning(tmp_path):
+    source = tmp_path / "timeline_warning_exam.md"
+    source.write_text(
+        """# 数学练习
+
+> 科目：数学　年级：七年级　考试时间：45 分钟　满分：5 分
+
+## 一、选择题
+
+1. 1 + 1 = （　　）（5 分）
+   A. 1
+   B. 2
+
+## 答案速查
+
+一、选择题
+1. B
+""",
+        encoding="utf-8",
+    )
+    scene = SceneWorkspace(
+        scene_id="exam",
+        mode_id="exam",
+        category="exam_paper",
+        template_id="default",
+        compatible_template_ids=["default"],
+        master_id="default_exam",
+        input_source_profile=InputSourceProfile(
+            accepted_formats=["markdown"],
+            structured_formats=["json"],
+            material_schema_id="exam_items_v1",
+            failure_policy="block",
+        ),
+        exam_paper=ExamPaperConfig(
+            answer_policy="student_only",
+        ),
+    )
+    plan = default_timeline_plan()
+    plan["start_field"] = "timeline_start"
+    plan["end_field"] = "timeline_end"
+    material_context = MaterialExecutionContext(
+        mode_id="exam",
+        entity_data={
+            "timeline_start": "2025-01-01",
+            "timeline_end": "2025-01-01",
+        },
+        timeline_plans={"primary": plan},
+    )
+    template = TemplateConfig()
+    execution_session = _build_exam_execution_session(
+        scene=scene,
+        template=template,
+        input_path=source,
+        output_root=tmp_path / "runs",
+        material_context=material_context,
+    )
+    runner = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=template,
+        scene=scene,
+        output_dir=Path(execution_session.output_namespace),
+        material_context=material_context,
+        execution_session=execution_session,
+    )
+
+    try:
+        payload = runner.run(lambda *_args: None, lambda: False)
+    finally:
+        cleanup_execution_session_resources(execution_session)
+    timeline_diagnostics = [
+        diagnostic
+        for diagnostic in payload["material_diagnostics"]
+        if str(diagnostic.get("change_type") or "").startswith("timeline_")
+    ]
+
+    assert payload["status"] == "success"
+    assert timeline_diagnostics
+    assert {diagnostic["level"] for diagnostic in timeline_diagnostics} == {"warning"}
 
 
 def test_execution_adapter_exposes_scene_sample_manifest_artifact(tmp_path):
@@ -2416,12 +2394,14 @@ def test_execution_adapter_exposes_scene_sample_manifest_artifact(tmp_path):
     manifest_path.write_text('{"artifact_count": 12}', encoding="utf-8")
 
     state = adapter.build_result_state(
-        status="success",
-        output_path="C:/tmp/out.docx",
-        report_paths=[],
-        failed_count=0,
-        error_text="",
-        scene_sample_manifest_paths={"fixture_manifest": str(manifest_path)},
+        terminal_payload={
+            "status": "success",
+            "output_path": "C:/tmp/out.docx",
+            "report_paths": [],
+            "failed_count": 0,
+            "error_text": "",
+            "scene_sample_manifest_paths": {"fixture_manifest": str(manifest_path)},
+        },
     )
     recent = adapter.build_recent_run_state(state)
 
@@ -2444,25 +2424,27 @@ def test_execution_adapter_marks_artifact_items_with_output_preflight_warnings()
     adapter = WorkbenchExecutionAdapter()
 
     state = adapter.build_result_state(
-        status="success",
-        output_path="C:/tmp/source.docx",
-        output_paths={"final": "C:/tmp/source.docx"},
-        report_paths=[],
-        failed_count=0,
-        error_text="",
-        output_target_preflight={
-            "items": [
-                {
-                    "preset_id": "final",
-                    "path": "C:/tmp/source.docx",
-                    "issues": [
-                        {
-                            "kind": "target_exists",
-                            "message": "final 输出文件已存在，将被覆盖: C:/tmp/source.docx",
-                        }
-                    ],
-                }
-            ]
+        terminal_payload={
+            "status": "success",
+            "output_path": "C:/tmp/source.docx",
+            "output_paths": {"final": "C:/tmp/source.docx"},
+            "report_paths": [],
+            "failed_count": 0,
+            "error_text": "",
+            "output_target_preflight": {
+                "items": [
+                    {
+                        "preset_id": "final",
+                        "path": "C:/tmp/source.docx",
+                        "issues": [
+                            {
+                                "kind": "target_exists",
+                                "message": "final 输出文件已存在，将被覆盖: C:/tmp/source.docx",
+                            }
+                        ],
+                    }
+                ]
+            },
         },
     )
     recent = adapter.build_recent_run_state(state)
@@ -2493,98 +2475,100 @@ def test_execution_adapter_exposes_question_figure_repair_queue_artifact():
     )
 
     state = adapter.build_result_state(
-        status="partial_success",
-        output_path="",
-        report_paths=[
-            "C:/tmp/source_batch_report.json",
-            "C:/tmp/source_batch_report.md",
-        ],
-        failed_count=0,
-        error_text="",
-        question_figure_repair_queue={
-            "kind": "question_figure_repair_queue",
-            "queue_count": 2,
-            "batch_confirmation_plan": {
-                "kind": "question_figure_repair_batch_confirmation_plan",
-                "status": "partial",
-                "eligible_count": 1,
-                "blocked_count": 1,
-                "conflict_count": 0,
-            },
-            "batch_confirmation_freeze": {
-                "kind": "question_figure_repair_batch_confirmation_freeze",
-                "status": "partial_frozen",
-                "frozen_candidate_count": 1,
-            },
-            "batch_apply_dry_run": {
-                "kind": "question_figure_repair_batch_apply_dry_run",
-                "status": "ready",
-                "checked_candidate_count": 1,
-            },
-            "batch_apply_execution_plan": {
-                "kind": "question_figure_repair_batch_apply_execution_plan",
-                "status": "planned",
-                "planned_candidate_count": 1,
-            },
-            "batch_apply_execution_result": {
-                "kind": "question_figure_repair_batch_apply_execution_result",
-                "status": "applied",
-                "applied_count": 1,
-                "audit_written": True,
-            },
-            "batch_apply_rollback_result": {
-                "kind": "question_figure_repair_batch_apply_rollback_result",
-                "status": "rolled_back",
-                "restored_count": 1,
-                "audit_written": True,
-            },
-            "batch_apply_transaction_manifest": {
-                "kind": "question_figure_repair_batch_apply_transaction_manifest",
-                "status": "tracked",
-                "transaction_count": 1,
-                "active_count": 0,
-                "rolled_back_count": 1,
-                "orphan_rollback_count": 0,
-                "artifact_written": True,
-                "artifact_path": (
-                    "C:/tmp/question_figure_batch_apply_transaction_manifest.json"
-                ),
-                "report_written": True,
-                "report_path": (
-                    "C:/tmp/question_figure_batch_apply_transaction_manifest.md"
-                ),
-                "task_summary": {
-                    "kind": (
-                        "question_figure_repair_batch_apply_transaction_task_summary"
-                    ),
-                    "status": "completed",
-                    "next_action": "review_transaction_history",
+        terminal_payload={
+            "status": "partial_success",
+            "output_path": "",
+            "report_paths": [
+                "C:/tmp/source_batch_report.json",
+                "C:/tmp/source_batch_report.md",
+            ],
+            "failed_count": 0,
+            "error_text": "",
+            "question_figure_repair_queue": {
+                "kind": "question_figure_repair_queue",
+                "queue_count": 2,
+                "batch_confirmation_plan": {
+                    "kind": "question_figure_repair_batch_confirmation_plan",
+                    "status": "partial",
+                    "eligible_count": 1,
+                    "blocked_count": 1,
+                    "conflict_count": 0,
+                },
+                "batch_confirmation_freeze": {
+                    "kind": "question_figure_repair_batch_confirmation_freeze",
+                    "status": "partial_frozen",
+                    "frozen_candidate_count": 1,
+                },
+                "batch_apply_dry_run": {
+                    "kind": "question_figure_repair_batch_apply_dry_run",
+                    "status": "ready",
+                    "checked_candidate_count": 1,
+                },
+                "batch_apply_execution_plan": {
+                    "kind": "question_figure_repair_batch_apply_execution_plan",
+                    "status": "planned",
+                    "planned_candidate_count": 1,
+                },
+                "batch_apply_execution_result": {
+                    "kind": "question_figure_repair_batch_apply_execution_result",
+                    "status": "applied",
+                    "applied_count": 1,
+                    "audit_written": True,
+                },
+                "batch_apply_rollback_result": {
+                    "kind": "question_figure_repair_batch_apply_rollback_result",
+                    "status": "rolled_back",
+                    "restored_count": 1,
+                    "audit_written": True,
+                },
+                "batch_apply_transaction_manifest": {
+                    "kind": "question_figure_repair_batch_apply_transaction_manifest",
+                    "status": "tracked",
                     "transaction_count": 1,
                     "active_count": 0,
                     "rolled_back_count": 1,
-                    "rollback_available_count": 0,
-                    "latest_apply_audit_id": "apply-1",
-                    "latest_rollback_audit_id": "rollback-1",
+                    "orphan_rollback_count": 0,
+                    "artifact_written": True,
+                    "artifact_path": (
+                        "C:/tmp/question_figure_batch_apply_transaction_manifest.json"
+                    ),
+                    "report_written": True,
                     "report_path": (
                         "C:/tmp/question_figure_batch_apply_transaction_manifest.md"
                     ),
+                    "task_summary": {
+                        "kind": (
+                            "question_figure_repair_batch_apply_transaction_task_summary"
+                        ),
+                        "status": "completed",
+                        "next_action": "review_transaction_history",
+                        "transaction_count": 1,
+                        "active_count": 0,
+                        "rolled_back_count": 1,
+                        "rollback_available_count": 0,
+                        "latest_apply_audit_id": "apply-1",
+                        "latest_rollback_audit_id": "rollback-1",
+                        "report_path": (
+                            "C:/tmp/question_figure_batch_apply_transaction_manifest.md"
+                        ),
+                    },
                 },
+                "entries": [
+                    {
+                        "queue_id": "repair:question_figure:exam_a:q2:abc",
+                        "status": "candidate",
+                        "profile_id": "exam_a",
+                        "profile_name": "Exam A",
+                        "question_index": "2",
+                        "repair_target_type": "question_figure_item",
+                        "repair_target_key": target_key,
+                    },
+                    {
+                        "queue_id": "repair:question_figure:exam_b:q5:def",
+                        "status": "candidate",
+                    },
+                ],
             },
-            "entries": [
-                {
-                    "queue_id": "repair:question_figure:exam_a:q2:abc",
-                    "status": "candidate",
-                    "profile_id": "exam_a",
-                    "profile_name": "Exam A",
-                    "question_index": "2",
-                    "repair_target_type": "question_figure_item",
-                    "repair_target_key": target_key,
-                },
-                {
-                    "queue_id": "repair:question_figure:exam_b:q5:def",
-                    "status": "candidate",
-                },
-            ],
         },
     )
     recent = adapter.build_recent_run_state(state)
@@ -2694,7 +2678,7 @@ def test_execution_adapter_exposes_question_figure_repair_queue_artifact():
     assert json.loads(action_payload)["profile_id"] == "exam_a"
 
 
-def test_output_target_preflight_issue_items_expose_output_risks_for_workbench_queue():
+def test_output_target_preflight_items_preserve_result_repair_targets():
     items = output_target_preflight_issue_items(
         {
             "items": [
@@ -2809,11 +2793,13 @@ def test_execution_adapter_builds_failed_result_summary():
     adapter = WorkbenchExecutionAdapter()
 
     state = adapter.build_result_state(
-        status="failed",
-        output_path="C:/tmp/out.docx",
-        report_paths=["C:/tmp/report.json"],
-        failed_count=5,
-        error_text="处理失败",
+        terminal_payload={
+            "status": "failed",
+            "output_path": "C:/tmp/out.docx",
+            "report_paths": ["C:/tmp/report.json"],
+            "failed_count": 5,
+            "error_text": "处理失败",
+        },
     )
 
     assert state.status == "failed"
@@ -2825,11 +2811,13 @@ def test_execution_adapter_builds_cancelled_result_summary():
     adapter = WorkbenchExecutionAdapter()
 
     state = adapter.build_result_state(
-        status="cancelled",
-        output_path="C:/tmp/out.docx",
-        report_paths=["C:/tmp/report.json"],
-        failed_count=0,
-        error_text="",
+        terminal_payload={
+            "status": "cancelled",
+            "output_path": "C:/tmp/out.docx",
+            "report_paths": ["C:/tmp/report.json"],
+            "failed_count": 0,
+            "error_text": "",
+        },
     )
 
     assert state.status == "cancelled"
@@ -2841,11 +2829,13 @@ def test_execution_adapter_rejects_unknown_result_status():
 
     with pytest.raises(ValueError):
         adapter.build_result_state(
-            status="paused",
-            output_path="C:/tmp/out.docx",
-            report_paths=["C:/tmp/report.json"],
-            failed_count=0,
-            error_text="",
+            terminal_payload={
+                "status": "paused",
+                "output_path": "C:/tmp/out.docx",
+                "report_paths": ["C:/tmp/report.json"],
+                "failed_count": 0,
+                "error_text": "",
+            },
         )
 
 

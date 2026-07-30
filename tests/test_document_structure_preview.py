@@ -7,7 +7,7 @@ from docx import Document
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.shared.engine.document_structure_preview import (
+from src.services.document_structure_preview import (
     analyze_document_structure,
     suppression_selectors_before,
 )

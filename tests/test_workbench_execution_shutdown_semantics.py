@@ -6,8 +6,48 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.ui.panels.workbench.execution_runtime import ThreadedExecutionHandle
+from src.ui.panels.workbench.execution_thread_handle import ThreadedExecutionHandle
 from src.ui.panels.workbench.execution_session_controller import WorkbenchExecutionSessionController
+from src.ui.panels.workbench.execution_worker import ExecutionWorker
+from src.qt_api import QApplication
+
+
+def _app():
+    return QApplication.instance() or QApplication([])
+
+
+def test_unstarted_thread_handle_shutdown_releases_execution_resources():
+    _app()
+
+    class _Runner:
+        def run(self, _progress_cb, _cancel_check):
+            return {"status": "success"}
+
+    worker = ExecutionWorker(_Runner())
+    cleanup_calls = []
+    worker.cleanup_execution_resources = lambda: cleanup_calls.append(True) or []
+    handle = ThreadedExecutionHandle(worker)
+
+    handle.shutdown()
+
+    assert cleanup_calls == [True]
+
+
+def test_discard_worker_clears_active_handle_and_shuts_it_down():
+    class _Worker:
+        def __init__(self) -> None:
+            self.shutdown_calls = []
+
+        def shutdown(self, timeout_ms=None) -> None:
+            self.shutdown_calls.append(timeout_ms)
+
+    controller = WorkbenchExecutionSessionController(resolve_document_path=lambda: None)
+    worker = _Worker()
+    controller.set_active_worker(worker)
+
+    assert controller.discard_worker(worker, timeout_ms=250) == []
+    assert controller.active_worker is None
+    assert worker.shutdown_calls == [250]
 
 
 def test_threaded_execution_handle_shutdown_logs_best_effort_failures(caplog):

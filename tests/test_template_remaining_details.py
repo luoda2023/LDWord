@@ -107,7 +107,7 @@ def test_reference_detail_style_sections_use_one_grid_baseline():
         app.processEvents()
 
 
-def test_reference_detail_promotes_legacy_typography_overrides():
+def test_reference_detail_displays_legacy_typography_without_mutating_template():
     app = _app()
     template = TemplateConfig()
     template.reference_style.font_cn = "黑体"
@@ -119,13 +119,11 @@ def test_reference_detail_promotes_legacy_typography_overrides():
         detail.set_template(template)
         app.processEvents()
 
-        assert is_variant_overridden(template, "references_body") is True
-        assert template.reference_style.font_cn is None
-        assert template.reference_style.font_en is None
-        assert template.reference_style.size_pt is None
-        assert template.styles["references_body"].font_cn == "黑体"
-        assert template.styles["references_body"].font_en == "Calibri"
-        assert template.styles["references_body"].size_pt == 11
+        assert is_variant_overridden(template, "references_body") is False
+        assert template.reference_style.font_cn == "黑体"
+        assert template.reference_style.font_en == "Calibri"
+        assert template.reference_style.size_pt == 11
+        assert "references_body" not in template.styles
         assert detail._mode_combo.currentData() == "independent"
         assert detail._font_cn.selected_font() == "黑体"
         assert detail._font_en.selected_font() == "Calibri"

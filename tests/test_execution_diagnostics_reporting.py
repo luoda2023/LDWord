@@ -1,6 +1,6 @@
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.execution_diagnostics import build_execution_diagnostics
 from src.config.scene import SceneWorkspace
+from src.config.master_library import default_master
 from src.config.resolver import resolve_config
 from src.config.style_source_report_summary import build_style_source_report_summary
 from src.config.template import StyleConfig, TemplateConfig
@@ -38,6 +39,8 @@ class RuntimeTraceTableModule(BaseModule):
         description="Table runtime trace",
         category="table",
         requires_config=("table",),
+        execution_phase="format",
+        scope_behavior="region_filtered",
     )
 
     def apply(self, doc, config, tracker, context):
@@ -50,6 +53,8 @@ class RuntimeTraceStylesModule(BaseModule):
         description="Styles runtime trace",
         category="style",
         requires_config=("styles",),
+        execution_phase="format",
+        scope_behavior="region_filtered",
     )
 
     def apply(self, doc, config, tracker, context):
@@ -195,10 +200,6 @@ def test_report_writer_emits_style_source_summary_into_json_and_markdown(tmp_pat
     template = TemplateConfig(name="默认格式")
     template.styles["body"] = StyleConfig(line_spacing_type="exact", line_spacing_pt=20)
     scene = SceneWorkspace(scene_id="custom", template_id="default")
-    scene.section_styles["references_body"] = StyleConfig(
-        line_spacing_type="exact",
-        line_spacing_pt=26,
-    )
     style_source_summary = build_style_source_report_summary(scene, template)
     report_json = tmp_path / "changes.json"
     report_md = tmp_path / "changes.md"
@@ -227,13 +228,13 @@ def test_report_writer_emits_style_source_summary_into_json_and_markdown(tmp_pat
     markdown = report_md.read_text(encoding="utf-8")
 
     assert report_data["style_source"]["template_label"] == "默认格式"
-    assert report_data["style_source"]["independent_section_count"] == 1
-    assert report_data["style_source"]["changed_section_count"] == 1
-    assert report_data["style_source"]["sections"][0]["compact_label"] == "参考文献（行距）"
-    assert report_data["style_source"]["sections"][0]["changed_labels"] == ["行距"]
+    assert report_data["style_source"] == {
+        "template_label": "默认格式",
+        "summary": "本次使用模板“默认格式”。",
+    }
     assert "## 样式来源" in markdown
-    assert "本次按模板“默认格式”处理；参考文献（行距）使用场景格式例外。" in markdown
-    assert "- 参考文献（行距）: 已调整 1 项：不同：行距" in markdown
+    assert "- 摘要: 本次使用模板“默认格式”。" in markdown
+    assert "- 模板: 默认格式" in markdown
 
 
 def test_official_numbering_preservation_detects_preserve_mode_rewrites():
@@ -366,6 +367,8 @@ def test_pipeline_records_official_numbering_preservation_context(tmp_path):
             description="Mark official heading map",
             category="structure",
             provides=("heading_map",),
+            execution_phase="semantics",
+            scope_behavior="structure_discovery",
         )
 
         def apply(self, doc, config, tracker, context):
@@ -377,6 +380,8 @@ def test_pipeline_records_official_numbering_preservation_context(tmp_path):
             description="Rewrite official heading number",
             category="structure",
             consumes=("heading_map",),
+            execution_phase="semantics",
+            scope_behavior="region_filtered",
         )
 
         def apply(self, doc, config, tracker, context):
@@ -400,7 +405,7 @@ def test_pipeline_records_official_numbering_preservation_context(tmp_path):
             object_preflight=SimpleNamespace(enabled=False),
         ),
         input_source_profile=SimpleNamespace(
-            material_schema_id="official_document_v1",
+            material_schema_id="",
             material_schema_ids=[],
         ),
         entity_data={},
@@ -421,6 +426,367 @@ def test_pipeline_records_official_numbering_preservation_context(tmp_path):
     diagnostics = build_execution_diagnostics(result)
     assert diagnostics["count"] == 1
     assert diagnostics["items"][0]["rule_name"] == "official_numbering_preservation"
+
+
+def test_report_writer_emits_official_document_assembly_evidence(tmp_path):
+    context = PipelineContext(
+        official_document_assembly={
+            "status": "ok",
+            "profile_id": "notice",
+            "master_id": "official_gbt_standard",
+            "material_schema_ids": ["official_document_v1"],
+            "docx_path": "dist/official_notice.docx",
+            "internal_review_docx_path": "dist/official_notice_internal_review.docx",
+            "archive_manifest_path": "dist/official_notice_archive_manifest.json",
+            "archive_manifest_markdown_path": "dist/official_notice_archive_manifest.md",
+            "review_pdf_path": "dist/official_notice_review.pdf",
+            "review_pdf_status": "generated",
+            "review_pdf_renderer": "word_com",
+            "review_pdf_issue": "",
+            "output_paths": {
+                "official_docx": "dist/official_notice.docx",
+                "internal_review_docx": "dist/official_notice_internal_review.docx",
+                "archive_manifest": "dist/official_notice_archive_manifest.json",
+                "archive_manifest_md": "dist/official_notice_archive_manifest.md",
+                "review_pdf": "dist/official_notice_review.pdf",
+            },
+            "replaced_placeholders": [
+                "official_title",
+                "official_body",
+                "official_issue_date",
+            ],
+            "missing_required_fields": [],
+            "unresolved_placeholders": [],
+        }
+    )
+    result = PipelineResult(success=True, context=context)
+    report_json = tmp_path / "official_assembly.json"
+    report_md = tmp_path / "official_assembly.md"
+
+    write_json_report(
+        result,
+        input_path=tmp_path / "official.docx",
+        output_path=None,
+        report_path=report_json,
+        elapsed=0.5,
+        modules_enabled=0,
+        modules_total=0,
+    )
+    write_markdown_report(
+        result,
+        input_path=tmp_path / "official.docx",
+        report_path=report_md,
+        elapsed=0.5,
+        modules_enabled=0,
+        modules_total=0,
+    )
+
+    report_data = json.loads(report_json.read_text(encoding="utf-8"))
+    markdown = report_md.read_text(encoding="utf-8")
+
+    evidence = report_data["official_document_assembly"]
+    assert evidence["status"] == "ok"
+    assert evidence["profile_id"] == "notice"
+    assert evidence["master_id"] == "official_gbt_standard"
+    assert "## 公文版式装配证据" in markdown
+    assert evidence["output_paths"]["internal_review_docx"].endswith(
+        "_internal_review.docx"
+    )
+    assert "Formal DOCX: `dist/official_notice.docx`" in markdown
+    assert (
+        "Internal review DOCX: `dist/official_notice_internal_review.docx`"
+        in markdown
+    )
+    assert "Archive manifest: `dist/official_notice_archive_manifest.json`" in markdown
+    assert evidence["review_pdf_status"] == "generated"
+    assert evidence["review_pdf_renderer"] == "word_com"
+    assert "Review PDF: `dist/official_notice_review.pdf`" in markdown
+    assert "Review PDF status: generated (word_com)" in markdown
+    assert "archive_manifest_md" in markdown
+    assert "official_title" in markdown
+
+
+def test_pipeline_records_official_document_assembly_context_and_output(tmp_path):
+    source = tmp_path / "official.docx"
+    Document().save(source)
+
+    output_dir = tmp_path / "out"
+    config = SimpleNamespace(
+        strict_mode=False,
+        compliance_profile=SimpleNamespace(
+            rule_family="official_document",
+            profile_id="official_document",
+            object_preflight=SimpleNamespace(enabled=False),
+        ),
+        input_source_profile=SimpleNamespace(
+            material_schema_id="official_document_v1",
+            material_schema_ids=[],
+        ),
+        entity_data={
+            "document_type": "notice",
+            "title": "关于开展资料归档检查的通知",
+            "body": "请各部门按要求完成自查并提交材料。",
+            "organization": "示例市档案局",
+            "document_no": "示档发〔2026〕1号",
+            "issue_date": "2026年7月9日",
+        },
+        delivery_presets=[],
+        output=SimpleNamespace(final_docx=False),
+    )
+
+    result = Pipeline(
+        modules=[],
+        config=config,
+        output_dir=str(output_dir),
+        official_document_type_id="notice",
+    ).execute(str(source))
+
+    evidence = result.context.official_document_assembly
+    docx_path = output_dir / "official_official.docx"
+    internal_review_path = output_dir / "official_official_internal_review.docx"
+    archive_manifest_path = output_dir / "official_official_archive_manifest.json"
+    archive_manifest_md_path = output_dir / "official_official_archive_manifest.md"
+    records = result.tracker.get_by_module("official_document_assembly")
+
+    assert result.success is True
+    assert evidence.status == "ok"
+    assert evidence.profile_id == "notice"
+    assert evidence.master_id == "official_gbt_standard"
+    assert evidence.docx_path == docx_path
+    assert evidence.internal_review_docx_path == internal_review_path
+    assert evidence.archive_manifest_path == archive_manifest_path
+    assert evidence.archive_manifest_markdown_path == archive_manifest_md_path
+    assert evidence.review_pdf_status == "not_requested"
+    assert evidence.review_pdf_path is None
+    assert result.output_paths == {
+        "official_docx": str(docx_path),
+        "internal_review_docx": str(internal_review_path),
+        "archive_manifest": str(archive_manifest_path),
+        "archive_manifest_md": str(archive_manifest_md_path),
+    }
+    assert docx_path.is_file()
+    assert internal_review_path.is_file()
+    assert archive_manifest_path.is_file()
+    assert archive_manifest_md_path.is_file()
+    assert len(records) == 1
+    assert records[0].success is True
+    assert "review_pdf=not_requested" in records[0].after
+
+
+def test_pipeline_uses_explicit_official_master_for_assembly(tmp_path, monkeypatch):
+    import src.shared.engine.official_document_assembly as assembly_module
+
+    source = tmp_path / "official.docx"
+    Document().save(source)
+    default = default_master("official")
+    assert default is not None
+    selected = replace(default, execution_frozen=True)
+    resolver_calls = []
+    real_resolver = assembly_module.resolve_official_master_for_contract
+
+    def _resolve_master(contract, *, requested=None):
+        resolver_calls.append(requested)
+        return real_resolver(contract, requested=requested)
+
+    monkeypatch.setattr(
+        assembly_module,
+        "resolve_official_master_for_contract",
+        _resolve_master,
+    )
+    config = SimpleNamespace(
+        strict_mode=False,
+        compliance_profile=SimpleNamespace(
+            rule_family="official_document",
+            profile_id="official_document",
+            object_preflight=SimpleNamespace(enabled=False),
+        ),
+        input_source_profile=SimpleNamespace(
+            material_schema_id="official_document_v1",
+            material_schema_ids=[],
+        ),
+        entity_data={
+            "document_type": "notice",
+            "title": "关于所选公文母版链路的通知",
+            "body": "验证运行时使用显式选择的公文母版。",
+            "organization": "示例单位",
+            "document_no": "示发〔2026〕2号",
+            "issue_date": "2026年7月11日",
+        },
+        delivery_presets=[],
+        output=SimpleNamespace(final_docx=False),
+    )
+
+    result = Pipeline(
+        modules=[],
+        config=config,
+        output_dir=str(tmp_path / "out"),
+        official_master=selected,
+        official_document_type_id="notice",
+    ).execute(str(source))
+
+    assert result.success is True
+    assert resolver_calls == [selected]
+    assert result.context.official_document_assembly.master_id == selected.master_id
+
+
+def test_pipeline_generates_opted_in_official_review_pdf(tmp_path, monkeypatch):
+    import src.shared.engine.official_document_assembly as assembly_module
+
+    source = tmp_path / "official.docx"
+    Document().save(source)
+
+    def fake_renderer(_docx_path, pdf_path):
+        Path(pdf_path).write_bytes(b"%PDF-1.4\n% test review pdf\n")
+
+    monkeypatch.setattr(
+        assembly_module,
+        "_default_review_pdf_renderer_resolver",
+        lambda: ("fake_pdf", fake_renderer),
+    )
+    output_dir = tmp_path / "out"
+    config = SimpleNamespace(
+        strict_mode=False,
+        compliance_profile=SimpleNamespace(
+            rule_family="official_document",
+            profile_id="official_document",
+            object_preflight=SimpleNamespace(enabled=False),
+        ),
+        input_source_profile=SimpleNamespace(
+            material_schema_id="official_document_v1",
+            material_schema_ids=[],
+        ),
+        entity_data={
+            "document_type": "notice",
+            "title": "关于开展资料归档检查的通知",
+            "body": "请各部门按要求完成自查并提交材料。",
+            "organization": "示例市档案局",
+            "document_no": "示档发〔2026〕1号",
+            "issue_date": "2026年7月9日",
+        },
+        delivery_presets=[],
+        output=SimpleNamespace(final_docx=False, review_pdf=True),
+    )
+
+    result = Pipeline(
+        modules=[],
+        config=config,
+        output_dir=str(output_dir),
+        official_document_type_id="notice",
+    ).execute(str(source))
+
+    evidence = result.context.official_document_assembly
+    records = result.tracker.get_by_module("official_document_assembly")
+    assert result.success is True
+    assert evidence.status == "ok"
+    assert evidence.review_pdf_status == "generated"
+    assert evidence.review_pdf_renderer == "fake_pdf"
+    assert evidence.review_pdf_path == output_dir / "official_official_review.pdf"
+    assert evidence.review_pdf_path.is_file()
+    assert result.output_paths["review_pdf"] == str(evidence.review_pdf_path)
+    assert records[0].success is True
+    assert "review_pdf=generated" in records[0].after
+
+
+def test_pipeline_degrades_when_official_review_pdf_renderer_is_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    import src.shared.engine.official_document_assembly as assembly_module
+
+    source = tmp_path / "official.docx"
+    Document().save(source)
+    monkeypatch.setattr(
+        assembly_module,
+        "_default_review_pdf_renderer_resolver",
+        lambda: None,
+    )
+    output_dir = tmp_path / "out"
+    config = SimpleNamespace(
+        strict_mode=False,
+        compliance_profile=SimpleNamespace(
+            rule_family="official_document",
+            profile_id="official_document",
+            object_preflight=SimpleNamespace(enabled=False),
+        ),
+        input_source_profile=SimpleNamespace(
+            material_schema_id="official_document_v1",
+            material_schema_ids=[],
+        ),
+        entity_data={
+            "document_type": "notice",
+            "title": "关于开展资料归档检查的通知",
+            "body": "请各部门按要求完成自查并提交材料。",
+            "organization": "示例市档案局",
+            "document_no": "示档发〔2026〕1号",
+            "issue_date": "2026年7月9日",
+        },
+        delivery_presets=[],
+        output=SimpleNamespace(final_docx=False, review_pdf=True),
+    )
+
+    result = Pipeline(
+        modules=[],
+        config=config,
+        output_dir=str(output_dir),
+        official_document_type_id="notice",
+    ).execute(str(source))
+
+    evidence = result.context.official_document_assembly
+    records = result.tracker.get_by_module("official_document_assembly")
+    assert result.success is True
+    assert evidence.status == "ok"
+    assert evidence.review_pdf_status == "renderer_unavailable"
+    assert evidence.review_pdf_path is None
+    assert evidence.review_pdf_issue == "docx_to_pdf_renderer_unavailable"
+    assert "review_pdf" not in result.output_paths
+    assert records[0].success is True
+    assert "review_pdf=renderer_unavailable" in records[0].after
+
+
+def test_pipeline_reports_official_document_assembly_missing_fields(tmp_path):
+    source = tmp_path / "official.docx"
+    Document().save(source)
+
+    config = SimpleNamespace(
+        strict_mode=False,
+        compliance_profile=SimpleNamespace(
+            rule_family="official_document",
+            profile_id="official_document",
+            object_preflight=SimpleNamespace(enabled=False),
+        ),
+        input_source_profile=SimpleNamespace(
+            material_schema_id="official_document_v1",
+            material_schema_ids=[],
+        ),
+        entity_data={
+            "document_type": "notice",
+            "title": "缺正文的通知",
+            "organization": "示例单位",
+            "document_no": "示发〔2026〕2号",
+            "issue_date": "2026年7月9日",
+        },
+        delivery_presets=[],
+        output=SimpleNamespace(final_docx=False),
+    )
+
+    result = Pipeline(
+        modules=[],
+        config=config,
+        official_document_type_id="notice",
+    ).execute(str(source))
+    evidence = result.context.official_document_assembly
+    diagnostics = build_execution_diagnostics(result)
+
+    assert result.success is False
+    assert "Terminal assembler 'official' blocked delivery" in str(result.error)
+    assert evidence.status == "missing_required_fields"
+    assert evidence.missing_required_fields == ("body",)
+    assert result.output_paths == {}
+    assert any(
+        item["rule_name"] == "official_document_assembly"
+        and item["success"] is False
+        for item in diagnostics["items"]
+    )
 
 
 def test_technical_chapter_inventory_counts_chapters_appendices_and_objects():
@@ -547,6 +913,8 @@ def test_pipeline_records_technical_chapter_inventory_context(tmp_path):
             description="Mark technical heading map",
             category="structure",
             provides=("heading_map",),
+            execution_phase="semantics",
+            scope_behavior="structure_discovery",
         )
 
         def apply(self, doc, config, tracker, context):
@@ -716,6 +1084,8 @@ def test_pipeline_records_application_section_word_limit_context(tmp_path):
             description="Mark application heading map",
             category="structure",
             provides=("heading_map",),
+            execution_phase="semantics",
+            scope_behavior="structure_discovery",
         )
 
         def apply(self, doc, config, tracker, context):
@@ -1020,7 +1390,7 @@ def test_report_writer_emits_coverage_boundary_evidence(tmp_path):
     assert report_data["coverage_boundaries"][0]["plugin_manual_gate"][
         "plugin_entry_id"
     ] == "exam_ai_quality_diagram_plugin"
-    assert "## 场景边界证据" in markdown
+    assert "## 方案边界证据" in markdown
     assert "exam_education (Exam and teaching materials)" in markdown
     assert "Plugin entry: exam_ai_quality_diagram_plugin" in markdown
     assert "Manual confirmation: required" in markdown
@@ -1105,6 +1475,22 @@ def test_report_writer_emits_exam_delivery_runtime_evidence(tmp_path):
             "markdown_preview_path": "preview/exam.md",
             "markdown_preview_excerpt": "一、选择题",
             "version_count": 1,
+            "master_evidence": {
+                "mode_id": "exam",
+                "master_id": "default_exam",
+                "master_label": "A4 标准卷面",
+                "master_source_type": "builtin",
+                "master_docx_path": "config_library/masters/exam/builtin/default_exam_v20.docx",
+                "master_version": "exam-master-v20-free-answer-area-2026-07-06",
+                "manifest_path": (
+                    "config_library/masters/exam/builtin/default_exam.master.json"
+                ),
+                "placeholder_contract_status": "ok",
+                "required_placeholders": ["af_title", "af_questions"],
+                "optional_placeholders": ["af_answer_area"],
+                "runtime_fields": ["title", "subject"],
+                "generated_fields": ["version"],
+            },
             "rendered_versions": [
                 {
                     "preset_id": "student",
@@ -1151,10 +1537,18 @@ def test_report_writer_emits_exam_delivery_runtime_evidence(tmp_path):
     report_data = json.loads(report_json.read_text(encoding="utf-8"))
     markdown = report_md.read_text(encoding="utf-8")
     rendered_version = report_data["exam_delivery_runtime"]["rendered_versions"][0]
+    master = report_data["exam_delivery_runtime"]["master_evidence"]
 
     assert rendered_version["preset_id"] == "student"
     assert rendered_version["fixed_layout_row_height_twips"] == 720
+    assert master["mode_id"] == "exam"
+    assert master["master_id"] == "default_exam"
+    assert master["placeholder_contract_status"] == "ok"
     assert "## 试卷多版本运行时渲染" in markdown
+    assert "Work mode: exam" in markdown
+    assert "Master: A4 标准卷面 / default_exam" in markdown
+    assert "contract=ok" in markdown
+    assert "Master DOCX: `config_library/masters/exam/builtin/default_exam_v20.docx`" in markdown
     assert "student: `dist/exam_student.docx`" in markdown
     assert "assets=1/1" in markdown
     assert "Preview excerpt: 一、选择题" in markdown
@@ -1233,6 +1627,7 @@ def test_report_writer_emits_scene_product_readiness_for_green_contract_delivery
         elapsed=0.5,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
     write_markdown_report(
         result,
@@ -1241,6 +1636,7 @@ def test_report_writer_emits_scene_product_readiness_for_green_contract_delivery
         elapsed=0.5,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
 
     report_data = json.loads(report_json.read_text(encoding="utf-8"))
@@ -1262,7 +1658,7 @@ def test_report_writer_emits_scene_product_readiness_for_green_contract_delivery
     assert "pre-execution legal-boundary banner" in (
         subjects[("pack", "contract_delivery")]["evidence_surfaces"]
     )
-    assert "## 场景产品成熟度证据" in markdown
+    assert "## 方案产品成熟度证据" in markdown
     assert "Static closed != Green/L5: 0" in markdown
     assert "field evidence UI" in markdown
 
@@ -1291,6 +1687,7 @@ def test_report_writer_emits_parameter_ownership_evidence(tmp_path):
         elapsed=0.5,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
     write_markdown_report(
         result,
@@ -1299,6 +1696,7 @@ def test_report_writer_emits_parameter_ownership_evidence(tmp_path):
         elapsed=0.5,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
 
     report_data = json.loads(report_json.read_text(encoding="utf-8"))
@@ -1312,8 +1710,7 @@ def test_report_writer_emits_parameter_ownership_evidence(tmp_path):
     assert evidence["execution_consumer_anchor_status"] == "clean"
     assert evidence["execution_consumer_anchor_audit"]["gap_count"] == 0
     assert any(
-        sample["consumer"] == "report writer"
-        and sample["source_path"] == "src/report_writer.py"
+        sample["source_path"] == "src/report_writer.py"
         for sample in evidence["execution_consumer_anchor_samples"]
     )
     assert evidence["audit"]["missing_top_level_paths"] == ["experimental_knob"]
@@ -1342,6 +1739,7 @@ def test_report_writer_emits_control_contract_evidence(tmp_path):
         elapsed=0.5,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
     write_markdown_report(
         result,
@@ -1350,6 +1748,7 @@ def test_report_writer_emits_control_contract_evidence(tmp_path):
         elapsed=0.5,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
 
     report_data = json.loads(report_json.read_text(encoding="utf-8"))
@@ -1429,6 +1828,7 @@ def test_report_writer_emits_parameter_effective_value_evidence(tmp_path):
         elapsed=0.5,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
     write_markdown_report(
         result,
@@ -1437,6 +1837,7 @@ def test_report_writer_emits_parameter_effective_value_evidence(tmp_path):
         elapsed=0.5,
         modules_enabled=0,
         modules_total=0,
+        include_internal_evidence=True,
     )
 
     report_data = json.loads(report_json.read_text(encoding="utf-8"))
@@ -1483,6 +1884,7 @@ def test_pipeline_report_emits_parameter_runtime_consumption_trace(tmp_path):
         elapsed=0.5,
         modules_enabled=1,
         modules_total=1,
+        include_internal_evidence=True,
     )
     write_markdown_report(
         result,
@@ -1491,6 +1893,7 @@ def test_pipeline_report_emits_parameter_runtime_consumption_trace(tmp_path):
         elapsed=0.5,
         modules_enabled=1,
         modules_total=1,
+        include_internal_evidence=True,
     )
 
     report_data = json.loads(report_json.read_text(encoding="utf-8"))
@@ -1549,6 +1952,7 @@ def test_pipeline_report_links_control_contracts_to_effective_values_and_runtime
         elapsed=0.5,
         modules_enabled=1,
         modules_total=1,
+        include_internal_evidence=True,
     )
     write_markdown_report(
         result,
@@ -1557,6 +1961,7 @@ def test_pipeline_report_links_control_contracts_to_effective_values_and_runtime
         elapsed=0.5,
         modules_enabled=1,
         modules_total=1,
+        include_internal_evidence=True,
     )
 
     report_data = json.loads(report_json.read_text(encoding="utf-8"))
@@ -1582,7 +1987,9 @@ def test_pipeline_report_links_control_contracts_to_effective_values_and_runtime
     assert mode_trace["overridden"] is True
     assert mode_trace["value"] == "first_line"
     assert "template.styles.body.special_indent_mode" in mode_trace["declared_paths"]
-    assert "scene.section_styles.*.special_indent_mode" in mode_trace["declared_paths"]
+    assert mode_trace["declared_paths"] == [
+        "template.styles.body.special_indent_mode"
+    ]
     event = special_trace["runtime_consumption_events"][0]
     assert event["module_name"] == "styles_runtime_trace"
     assert event["status"] == "executed"

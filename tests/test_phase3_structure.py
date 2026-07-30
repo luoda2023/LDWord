@@ -70,9 +70,29 @@ def test_heading_numbering_import():
     print("  ✅ M06 heading_numbering 导入正常")
 
 
+def test_heading_numbering_reports_no_effect_instead_of_silent_success():
+    from src.config.builtin_templates import create_builtin_template
+    from src.config.resolver import resolve_config
+    from src.config.scene import SceneWorkspace
+    from src.modules.structure.heading_numbering import HeadingNumberingModule
+    from src.pipeline.context import PipelineContext
+    from src.pipeline.tracker import ChangeTracker
+
+    config = resolve_config(create_builtin_template("default"), SceneWorkspace())
+    tracker = ChangeTracker()
+    context = PipelineContext()
+
+    HeadingNumberingModule().apply(Document(), config, tracker, context)
+
+    records = tracker.get_by_module("heading_numbering")
+    assert len(records) == 1
+    assert records[0].change_type == "no_effect"
+    assert records[0].after == "no recognized headings"
+
+
 def test_heading_numbering_logic():
     """M06: 模板化编号生成逻辑测试"""
-    from src.modules.structure.heading_numbering import _format_level_number
+    from src.shared.engine.heading_numbering_format import format_heading_level_number
     from src.config.template import HeadingLevelBindingConfig
 
     # --- 单级 chain ---
@@ -82,7 +102,7 @@ def test_heading_numbering_logic():
         chain="current_only", title_separator="\u3000",
     )
     counters = [0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
-    result = _format_level_number(1, counters, b)
+    result = format_heading_level_number(1, counters, b)
     assert result == "第一章\u3000", f"Expected '第一章\\u3000', got {result!r}"
 
     # 第1章 (display_template override)
@@ -91,7 +111,7 @@ def test_heading_numbering_logic():
         chain="current_only", title_separator="\u3000",
     )
     counters = [0, 3, 0, 0, 0, 0, 0, 0, 0, 0]
-    result = _format_level_number(1, counters, b)
+    result = format_heading_level_number(1, counters, b)
     assert result == "第3章\u3000", f"Expected '第3章\\u3000', got {result!r}"
 
     # 第 1 章 (spaces around number)
@@ -100,7 +120,7 @@ def test_heading_numbering_logic():
         chain="current_only", title_separator=" ",
     )
     counters = [0, 5, 0, 0, 0, 0, 0, 0, 0, 0]
-    result = _format_level_number(1, counters, b)
+    result = format_heading_level_number(1, counters, b)
     assert result == "第 5 章 ", f"Got {result!r}"
 
     # (一) (括号中文)
@@ -109,7 +129,7 @@ def test_heading_numbering_logic():
         chain="current_only", title_separator=" ",
     )
     counters = [0, 0, 3, 0, 0, 0, 0, 0, 0, 0]
-    result = _format_level_number(2, counters, b)
+    result = format_heading_level_number(2, counters, b)
     assert result == "(三) ", f"Got {result!r}"
 
     # ① 带圈 (auto-expand)
@@ -118,7 +138,7 @@ def test_heading_numbering_logic():
         chain="current_only", title_separator=" ",
     )
     counters = [0, 0, 2, 0, 0, 0, 0, 0, 0, 0]
-    result = _format_level_number(2, counters, b)
+    result = format_heading_level_number(2, counters, b)
     assert "②" in result, f"Got {result!r}"
 
     # --- 多级 chain ---
@@ -128,7 +148,7 @@ def test_heading_numbering_logic():
         chain_separator=".", title_separator="\u3000",
     )
     counters = [0, 3, 1, 0, 0, 0, 0, 0, 0, 0]
-    result = _format_level_number(2, counters, b)
+    result = format_heading_level_number(2, counters, b)
     assert result == "3.1\u3000", f"Got {result!r}"
 
     # 第1-1节 (chain with template wrap)
@@ -138,7 +158,7 @@ def test_heading_numbering_logic():
         title_separator=" ",
     )
     counters = [0, 1, 1, 0, 0, 0, 0, 0, 0, 0]
-    result = _format_level_number(2, counters, b)
+    result = format_heading_level_number(2, counters, b)
     assert result == "第1-1节 ", f"Got {result!r}"
 
     # 2.3.1 (parent.parent.current)
@@ -147,7 +167,7 @@ def test_heading_numbering_logic():
         chain_separator=".", title_separator=" ",
     )
     counters = [0, 2, 3, 1, 0, 0, 0, 0, 0, 0]
-    result = _format_level_number(3, counters, b)
+    result = format_heading_level_number(3, counters, b)
     assert result == "2.3.1 ", f"Got {result!r}"
 
     print("  ✅ M06 模板化编号 — 所有格式通过")
@@ -155,7 +175,7 @@ def test_heading_numbering_logic():
 
 def test_heading_numbering_logic_uses_reference_core_style_for_parent_segments():
     """M06: 多级 chain 中 parent 段应使用 source level 的 reference_core_style。"""
-    from src.modules.structure.heading_numbering import _format_level_number
+    from src.shared.engine.heading_numbering_format import format_heading_level_number
     from src.config.template import HeadingLevelBindingConfig
 
     parent = HeadingLevelBindingConfig(
@@ -180,7 +200,7 @@ def test_heading_numbering_logic_uses_reference_core_style_for_parent_segments()
         "heading2": child,
     }
 
-    result = _format_level_number(2, counters, child, level_bindings)
+    result = format_heading_level_number(2, counters, child, level_bindings)
 
     assert result == "i.1 ", f"Expected 'i.1 ', got {result!r}"
 
@@ -247,7 +267,8 @@ def test_toc_import():
     from src.modules.structure.toc import TocModule
     mod = TocModule()
     assert mod.meta.name == "toc"
-    assert "heading_numbering" in mod.meta.depends_on
+    assert mod.meta.depends_on == ("heading_recognition",)
+    assert "heading_numbering" in mod.meta.soft_after
     assert "heading_map" in mod.meta.consumes
     print("  ✅ M07 toc 导入正常")
 
@@ -315,10 +336,10 @@ def test_pipeline_requests_post_save_field_refresh_for_toc_output():
     tmp.close()
     doc.save(tmp.name)
 
-    refresh_calls: list[tuple[str, int]] = []
+    refresh_calls: list[tuple[str, int, bool]] = []
 
     def _fake_refresh(path: str, timeout_sec: int = 30):
-        refresh_calls.append((path, timeout_sec))
+        refresh_calls.append((path, timeout_sec, Path(path).exists()))
         return True, "ok(test)"
 
     try:
@@ -330,7 +351,9 @@ def test_pipeline_requests_post_save_field_refresh_for_toc_output():
         assert result.success, f"执行失败: {result.error}"
         assert refresh_calls, "保存后未触发字段刷新"
         assert refresh_calls[0][1] == 30
-        assert Path(refresh_calls[0][0]).exists()
+        assert refresh_calls[0][2] is True
+        assert not Path(refresh_calls[0][0]).exists()
+        assert Path(result.output_paths["final"]).exists()
         print("  ✅ M07 Pipeline 保存后字段刷新调用正确")
     finally:
         Path(tmp.name).unlink(missing_ok=True)
@@ -410,7 +433,8 @@ def test_all_structure_meta():
         assert m.category == "structure"
 
     assert "heading_recognition" in HeadingNumberingModule().meta.depends_on
-    assert "heading_numbering" in TocModule().meta.depends_on
+    assert TocModule().meta.depends_on == ("heading_recognition",)
+    assert "heading_numbering" in TocModule().meta.soft_after
 
     names = [m.meta.name for m in modules]
     assert len(names) == len(set(names))

@@ -15,17 +15,12 @@ from src.ui.adapters.field_display_names import (  # noqa: E402
 
 def test_field_display_name_translates_scene_and_template_paths():
     assert (
-        field_display_name("scene.section_styles.references_body.font_cn")
-        == "参考文献正文中文字体"
-    )
-    assert field_display_name("scene.section_styles.references_body") == "参考文献正文"
-    assert (
-        field_display_name("scene.section_styles.*.line_spacing_pt")
-        == "所有处理分区行距"
+        field_display_name("scene.document_scope.mode")
+        == "处理范围"
     )
     assert (
-        field_display_name("format_scope.sections.references")
-        == "处理范围：参考文献"
+        field_display_name("scene.document_scope.selected_roles")
+        == "指定区域"
     )
     assert (
         field_display_name("template.page_setup.margin.left_cm")
@@ -36,10 +31,6 @@ def test_field_display_name_translates_scene_and_template_paths():
         == "正文特殊缩进"
     )
     assert field_display_name("template.styles.body.bold") == "正文字形"
-    assert (
-        field_display_name("scene.section_styles.references_body.italic")
-        == "参考文献正文字形"
-    )
     assert field_display_name("input_source_profile.material_schema_id") == "主资料规则"
     assert field_display_name("filename_template") == "文件名规则"
 
@@ -107,10 +98,10 @@ def test_replace_field_keys_with_display_names_translates_embedded_keys():
         include_raw_key=False,
     ) == "控件契约缺失：正文特殊缩进"
     assert replace_field_keys_with_display_names(
-        "参数：scene.section_styles.references_body.font_cn"
+        "参数：scene.document_scope.selected_roles"
     ) == (
-        "参数：参考文献正文中文字体"
-        "（scene.section_styles.references_body.font_cn）"
+        "参数：指定区域"
+        "（scene.document_scope.selected_roles）"
     )
     assert replace_field_keys_with_display_names(
         "参数：template.styles.body.bold",

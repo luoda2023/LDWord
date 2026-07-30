@@ -9,9 +9,8 @@ sys.path.insert(0, str(ROOT))
 from src.qt_api import QApplication
 from src.shared.ui.theme import get_theme
 from src.ui.bridge import PanelBridge
-from src.ui.panels.workbench import WorkbenchPanel as PackageWorkbenchPanel
+from src.ui.panels.workbench import WorkbenchPanel
 from src.ui.panels.workbench.command_bar import TaskCommandBar
-from src.ui.panels.workbench_panel import WorkbenchPanel
 from src.ui.panels.workbench.state import CurrentTaskState
 from src.ui.panels.workbench.styles import build_workbench_stylesheet
 
@@ -20,13 +19,13 @@ def _app():
     return QApplication.instance() or QApplication([])
 
 
-def test_workbench_panel_import_path_stays_stable_after_package_split():
+def test_workbench_panel_uses_the_package_entry_point():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
         assert panel.__class__.__name__ == "WorkbenchPanel"
         assert panel.objectName() == "WorkbenchPanel"
-        assert PackageWorkbenchPanel is WorkbenchPanel
+        assert WorkbenchPanel is type(panel)
     finally:
         panel.close()
 
@@ -43,23 +42,29 @@ def test_workbench_panel_uses_v2_master_detail_shell():
         panel.close()
 
 
-def test_workbench_panel_starts_with_fixed_cards_only():
+def test_workbench_panel_starts_with_single_and_batch_fixed_cards():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        assert list(panel._navigation_cards) == ["quick_execute", "config_management"]
+        assert list(panel._navigation_cards) == [
+            "quick_execute",
+            "batch_generate",
+        ]
+        assert not hasattr(panel, "_config_management_detail")
     finally:
         panel.close()
 
 
-def test_navigation_selection_switches_detail_pane():
-    _app()
-    panel = WorkbenchPanel(PanelBridge())
-    try:
-        panel._nav_rail.select_card("config_management")
-        assert panel._current_detail is panel._config_management_detail
-    finally:
-        panel.close()
+def test_workbench_keeps_one_panel_implementation() -> None:
+    package_dir = ROOT / "src" / "ui" / "panels" / "workbench"
+    package_source = (package_dir / "__init__.py").read_text(encoding="utf-8")
+
+    assert not (package_dir / "panel.py").exists()
+    assert not (package_dir / "detail_controller.py").exists()
+    assert not (package_dir / "scene_presets.py").exists()
+    assert not (package_dir.parent / "workbench_panel.py").exists()
+    assert "LegacyWorkbenchPanel" not in package_source
+    assert "WorkbenchPanelV2" not in package_source
 
 
 def test_enabling_feature_adds_dynamic_navigation_card():
@@ -99,6 +104,42 @@ def test_summary_refresh_does_not_recreate_existing_dynamic_navigation_cards():
         panel._quick_execution_detail.set_document_path("C:/docs/thesis.docx")
 
         assert panel._navigation_cards["content_fill"] is original_card
+    finally:
+        panel.close()
+
+
+def test_dynamic_navigation_feature_diff_preserves_selection_identity_and_order():
+    _app()
+    panel = WorkbenchPanel(PanelBridge())
+    try:
+        panel._quick_execution_detail.set_feature_enabled("formula", True)
+        formula_card = panel._navigation_cards["formula"]
+        header = panel._navigation.dynamic_section_header
+        panel._nav_rail.select_card("formula")
+        selection_events: list[str] = []
+        panel._nav_rail.card_selected.connect(selection_events.append)
+
+        # table_chart is ordered before formula, but enabling it must move only
+        # layout items and leave the selected formula card alive.
+        panel._quick_execution_detail.set_feature_enabled("table_chart", True)
+
+        assert panel._navigation_cards["formula"] is formula_card
+        assert panel._navigation.dynamic_section_header is header
+        assert panel._nav_rail.selected_card_id() == "formula"
+        assert selection_events == []
+        header_index = panel._nav_rail._layout.indexOf(header)
+        assert panel._nav_rail._layout.itemAt(header_index + 1).widget() is panel._navigation_cards["table_chart"]
+        assert panel._nav_rail._layout.itemAt(header_index + 2).widget() is formula_card
+
+        table_card = panel._navigation_cards["table_chart"]
+        panel._quick_execution_detail.set_feature_enabled("table_chart", False)
+
+        assert "table_chart" not in panel._navigation_cards
+        assert panel._navigation_cards["formula"] is formula_card
+        assert panel._navigation.dynamic_section_header is header
+        assert panel._nav_rail.selected_card_id() == "formula"
+        assert selection_events == []
+        assert table_card is not formula_card
     finally:
         panel.close()
 
@@ -143,7 +184,7 @@ def test_workbench_stylesheet_includes_v3_shell_selectors():
     assert "#wb_navigation_rail" in stylesheet
     assert "#wb_detail_stack" in stylesheet
     assert "#wb_quick_execute_pane" in stylesheet
-    assert "#wb_config_management_pane" in stylesheet
-    assert "#wb_config_management_title" in stylesheet
-    assert "#wb_config_management_description" in stylesheet
+    assert "#wb_config_management_pane" not in stylesheet
+    assert "#wb_config_management_title" not in stylesheet
+    assert "#wb_config_management_description" not in stylesheet
     assert "#wb_command_center_subtitle" in stylesheet

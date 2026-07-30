@@ -16,7 +16,8 @@ from src.qt_api import QApplication
 from src.shared.engine.ooxml_ops import qn
 from src.shared.ui.font_combo import FontCombo
 from src.shared.ui.size_combo import SizeCombo
-from src.ui.panels.template_format import build_template_preview_groups
+from src.config.resolver import resolve_template_baseline
+from src.ui.panels.template_summary_projection import build_template_detail_summary
 
 
 def _app():
@@ -228,11 +229,13 @@ def test_style_preview_summary_reflects_hanging_indent():
     body.line_spacing_pt = 1.5
     apply_style_special_indent(body, "hanging", 1.5, "chars")
 
-    groups = build_template_preview_groups(cfg)
-    style_group = next(group for group in groups if group.group_id == "style")
+    style_summary = build_template_detail_summary(
+        resolve_template_baseline(cfg),
+        "tpl_style",
+    ).nav_summary
 
-    assert "悬挂" in style_group.summary
-    assert "1.5倍" in style_group.summary
+    assert "悬挂" in style_summary
+    assert "1.5倍" in style_summary
 
 
 def test_style_preview_summary_preserves_named_line_spacing_presets():
@@ -242,7 +245,9 @@ def test_style_preview_summary_preserves_named_line_spacing_presets():
     body.line_spacing_type = "double"
     body.line_spacing_pt = 2.0
 
-    groups = build_template_preview_groups(cfg)
-    style_group = next(group for group in groups if group.group_id == "style")
+    style_summary = build_template_detail_summary(
+        resolve_template_baseline(cfg),
+        "tpl_style",
+    ).nav_summary
 
-    assert "双倍" in style_group.summary
+    assert "双倍" in style_summary

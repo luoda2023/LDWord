@@ -1,5 +1,7 @@
 import base64
 import json
+from dataclasses import replace
+from shutil import copy2
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -8,6 +10,10 @@ from docx import Document
 
 from src.config.resolved import ResolvedConfig
 from src.config.resolver import resolve_config
+from src.config.library import load_scene_from_library, load_template_from_library
+from src.config.master_library import get_master
+from src.config.material_context import MaterialExecutionContext
+from src.config.object_preflight_evidence import build_object_preflight_evidence
 from src.config.scene import (
     ContentVisibilityRule,
     DeliveryPreset,
@@ -17,10 +23,20 @@ from src.config.scene import (
 )
 from src.config.template import TemplateConfig
 from src.pipeline.runner import Pipeline
+from src.services.execution_session import (
+    build_execution_session_snapshot,
+    cleanup_execution_session_resources,
+    execution_session_frozen_master,
+)
+from src.services.execution_session import resolution as execution_session_resolution
+from src.services.production_runtime.execution_runtime import WorkbenchProductionRunner
 from src.report_writer import write_json_report, write_markdown_report
 from src.shared.engine.exam_question_schema import (
+    _preset_hidden_selectors,
     build_exam_delivery_runtime,
+    exam_markdown_import_entity_data,
     inspect_exam_question_schema,
+    parse_exam_markdown_source,
     render_exam_markdown_preview,
 )
 from src.shared.engine.fixed_layout_tables import row_height_state
@@ -39,6 +55,7 @@ def _write_sample_png(tmp_path) -> str:
 
 
 def _exam_config(payload, *, delivery_presets=None) -> ResolvedConfig:
+    presets = list(delivery_presets or [])
     return ResolvedConfig(
         input_source_profile=InputSourceProfile(
             accepted_formats=["docx", "json"],
@@ -46,8 +63,15 @@ def _exam_config(payload, *, delivery_presets=None) -> ResolvedConfig:
             material_schema_id="exam_items_v1",
         ),
         entity_data={"exam_items": json.dumps(payload, ensure_ascii=False)},
-        delivery_presets=list(delivery_presets or []),
+        delivery_presets=presets,
+        default_delivery_preset_id=(presets[0].preset_id if presets else ""),
     )
+
+
+def _resolved_exam_master():
+    master = get_master("default_exam", mode_id="exam")
+    assert master is not None
+    return master
 
 
 def _exam_delivery_presets() -> list[DeliveryPreset]:
@@ -94,6 +118,119 @@ def _exam_delivery_presets() -> list[DeliveryPreset]:
             ],
         ),
     ]
+
+
+def test_exam_visibility_projection_uses_the_canonical_remove_only_contract():
+    assert _preset_hidden_selectors(
+        {
+            "content_visibility_rules": [
+                {
+                    "selector_type": "marker_block",
+                    "selector": "answer",
+                    "action": "remove",
+                }
+            ]
+        }
+    ) == ("answer",)
+    for retired_action in ("hide", "exclude"):
+        assert _preset_hidden_selectors(
+            {
+                "content_visibility_rules": [
+                    {
+                        "selector_type": "marker_block",
+                        "selector": "answer",
+                        "action": retired_action,
+                    }
+                ]
+            }
+        ) == ()
+
+
+def test_parse_exam_markdown_source_imports_prompt_contract():
+    markdown = """# 七年级数学期中模拟试卷
+
+> 科目：数学　年级：七年级　考试时间：90 分钟　满分：15 分
+
+## 一、选择题（本大题共 2 小题，每小题 5 分，共 10 分）
+
+1. 下列各数中，最小的是（　　）（5 分）
+   A. -3
+   B. 0
+   C. 2
+   D. -1
+
+2. 计算 `-4 + 7` 的结果是（　　）（5 分）
+   A. -11
+   B. -3
+   C. 3
+   D. 11
+
+## 二、解答题（本大题共 1 小题，共 5 分）
+
+1. 计算：`(-6) + 9 - (-4) - 7`。（5 分）
+
+   answer_area_kind: free
+   answer_lines: 4
+
+## 答案速查
+
+一、选择题
+1. A
+2. C
+
+二、解答题
+1. 0。解析：`(-6) + 9 + 4 - 7 = 0`。
+"""
+
+    result = parse_exam_markdown_source(markdown)
+    entity_data = exam_markdown_import_entity_data(result)
+    payload = result.payload
+
+    assert result.status == "ok"
+    assert result.summary.section_count == 2
+    assert result.summary.question_count == 3
+    assert result.summary.answered_question_count == 3
+    assert result.summary.analysis_count == 1
+    assert result.summary.declared_total_score == 15
+    assert result.summary.computed_total_score == 15
+    assert payload["paper_title"] == "七年级数学期中模拟试卷"
+    assert payload["subject"] == "数学"
+    assert payload["grade"] == "七年级"
+    assert payload["duration"] == "90 分钟"
+    assert payload["total_score"] == "15 分"
+    assert payload["sections"][0]["questions"][0]["options"] == [
+        "A. -3",
+        "B. 0",
+        "C. 2",
+        "D. -1",
+    ]
+    assert payload["sections"][1]["questions"][0]["answer_area_kind"] == "free"
+    assert payload["sections"][1]["questions"][0]["answer_lines"] == 4
+    assert payload["sections"][1]["questions"][0]["answer"] == "0"
+    assert "解析" not in payload["sections"][1]["questions"][0]["answer"]
+    assert "exam_items" in entity_data
+    assert json.loads(entity_data["exam_items"])["sections"][0]["questions"][1]["answer"] == "C"
+
+
+def test_parse_exam_markdown_source_reports_missing_answer_block():
+    result = parse_exam_markdown_source(
+        """# 单元测试
+
+> 科目：数学　满分：5 分
+
+## 一、选择题
+
+1. 1 + 1 = （　　）（5 分）
+   A. 1
+   B. 2
+"""
+    )
+
+    issue_kinds = {issue.kind for issue in result.issues}
+
+    assert result.status == "error"
+    assert "missing_answer_block" in issue_kinds
+    assert "missing_answer" in issue_kinds
 
 
 def test_exam_question_schema_accepts_single_structured_source():
@@ -276,14 +413,15 @@ def test_exam_delivery_runtime_renders_markdown_preview_and_word_versions(tmp_pa
 def test_scene_exam_paper_config_renders_structured_source_into_master_docx(tmp_path):
     scene = SceneWorkspace(
         scene_id="exam",
+        mode_id="exam",
         category="exam_paper",
+        master_id="default_exam",
         input_source_profile=InputSourceProfile(
             accepted_formats=["markdown", "docx"],
             structured_formats=["json"],
             material_schema_id="exam_items_v1",
         ),
         exam_paper=ExamPaperConfig(
-            blank_style_id="default_exam",
             question_structure_mode="markdown_headings",
             answer_policy="student_only",
             runtime_fields=["title", "subject", "grade", "duration", "total_score"],
@@ -323,6 +461,7 @@ def test_scene_exam_paper_config_renders_structured_source_into_master_docx(tmp_
         output_dir=tmp_path,
         source_stem="scene_exam",
         validation=validation,
+        master=_resolved_exam_master(),
     )
 
     assert config.exam_paper is not None
@@ -343,14 +482,15 @@ def test_scene_exam_paper_config_renders_structured_source_into_master_docx(tmp_
 def test_scene_exam_paper_config_renders_student_and_answer_key_files(tmp_path):
     scene = SceneWorkspace(
         scene_id="exam",
+        mode_id="exam",
         category="exam_paper",
+        master_id="default_exam",
         input_source_profile=InputSourceProfile(
             accepted_formats=["markdown", "docx"],
             structured_formats=["json"],
             material_schema_id="exam_items_v1",
         ),
         exam_paper=ExamPaperConfig(
-            blank_style_id="default_exam",
             question_structure_mode="markdown_headings",
             answer_policy="student_plus_answer",
             runtime_fields=["title", "subject", "grade", "duration", "total_score"],
@@ -390,11 +530,27 @@ def test_scene_exam_paper_config_renders_student_and_answer_key_files(tmp_path):
         output_dir=tmp_path,
         source_stem="scene_exam",
         validation=validation,
+        master=_resolved_exam_master(),
     )
     versions = {version.preset_id: version for version in runtime.rendered_versions}
 
     assert runtime.status == "ok"
     assert runtime.version_count == 2
+    assert runtime.master_evidence is not None
+    assert runtime.master_evidence.mode_id == "exam"
+    assert runtime.master_evidence.master_id == "default_exam"
+    assert runtime.master_evidence.master_source_type == "builtin"
+    assert runtime.master_evidence.placeholder_contract_status == "ok"
+    assert runtime.master_evidence.master_docx_path.endswith(
+        "config_library\\masters\\exam\\builtin\\default_exam_v20.docx"
+    ) or runtime.master_evidence.master_docx_path.endswith(
+        "config_library/masters/exam/builtin/default_exam_v20.docx"
+    )
+    assert runtime.master_evidence.manifest_path.endswith(
+        "config_library\\masters\\exam\\builtin\\default_exam.master.json"
+    ) or runtime.master_evidence.manifest_path.endswith(
+        "config_library/masters/exam/builtin/default_exam.master.json"
+    )
     assert set(versions) == {"student", "answer_key"}
     assert versions["student"].label == "学生卷"
     assert versions["answer_key"].label == "答案速查"
@@ -419,14 +575,15 @@ def test_scene_exam_paper_config_renders_student_and_answer_key_files(tmp_path):
 def test_scene_exam_paper_config_can_render_answer_key_only(tmp_path):
     scene = SceneWorkspace(
         scene_id="exam",
+        mode_id="exam",
         category="exam_paper",
+        master_id="default_exam",
         input_source_profile=InputSourceProfile(
             accepted_formats=["markdown", "docx"],
             structured_formats=["json"],
             material_schema_id="exam_items_v1",
         ),
         exam_paper=ExamPaperConfig(
-            blank_style_id="default_exam",
             answer_policy="answer_only",
         ),
     )
@@ -460,6 +617,7 @@ def test_scene_exam_paper_config_can_render_answer_key_only(tmp_path):
         output_dir=tmp_path,
         source_stem="scene_exam",
         validation=validation,
+        master=_resolved_exam_master(),
     )
     versions = {version.preset_id: version for version in runtime.rendered_versions}
 
@@ -470,7 +628,7 @@ def test_scene_exam_paper_config_can_render_answer_key_only(tmp_path):
     assert not (tmp_path / "scene_exam_学生卷.docx").exists()
 
 
-def test_pipeline_exposes_exam_runtime_files_as_output_paths(tmp_path):
+def test_pipeline_without_execution_master_blocks_exam_runtime(tmp_path):
     source = tmp_path / "scene_exam.docx"
     doc = Document()
     doc.add_paragraph("Exam source")
@@ -478,14 +636,15 @@ def test_pipeline_exposes_exam_runtime_files_as_output_paths(tmp_path):
 
     scene = SceneWorkspace(
         scene_id="exam",
+        mode_id="exam",
         category="exam_paper",
+        master_id="default_exam",
         input_source_profile=InputSourceProfile(
             accepted_formats=["markdown", "docx"],
             structured_formats=["json"],
             material_schema_id="exam_items_v1",
         ),
         exam_paper=ExamPaperConfig(
-            blank_style_id="default_exam",
             answer_policy="student_plus_answer",
         ),
     )
@@ -508,12 +667,126 @@ def test_pipeline_exposes_exam_runtime_files_as_output_paths(tmp_path):
 
     result = Pipeline([], config, output_dir=str(tmp_path)).execute(str(source))
 
-    assert result.success is True
-    assert set(result.output_paths) == {"student", "answer_key"}
-    assert result.output_paths["student"].endswith("scene_exam_学生卷.docx")
-    assert result.output_paths["answer_key"].endswith("scene_exam_答案速查.docx")
-    assert Path(result.output_paths["student"]).exists()
-    assert Path(result.output_paths["answer_key"]).exists()
+    assert result.success is False
+    assert result.output_paths == {}
+    assert "execution_master_required" in str(result.error)
+    assert result.context.exam_delivery_runtime.status == "blocked"
+    assert result.context.exam_delivery_runtime.master_evidence is None
+
+
+def test_exam_runtime_consumes_frozen_master_after_live_source_is_deleted(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "exam_source.docx"
+    Document().save(source)
+    scene = load_scene_from_library("exam", mode_id="exam")
+    template = load_template_from_library("default", mode_id="exam")
+
+    builtin_master = _resolved_exam_master()
+    live_master_path = tmp_path / "live_exam_master.docx"
+    copy2(builtin_master.docx_path, live_master_path)
+    live_master = replace(
+        builtin_master,
+        source_type="user",
+        readonly=False,
+        docx_path=live_master_path,
+    )
+    monkeypatch.setattr(
+        execution_session_resolution,
+        "get_master",
+        lambda *_args, **_kwargs: live_master,
+    )
+
+    exam_payload = {
+        "paper_title": "Frozen master exam",
+        "total_score": 2,
+        "sections": [
+            {
+                "title": "Questions",
+                "questions": [
+                    {
+                        "stem": "1 + 1 = ?",
+                        "answer": "2",
+                        "score": 2,
+                    }
+                ],
+            }
+        ],
+    }
+    material_context = MaterialExecutionContext(
+        mode_id="exam",
+        entity_data={
+            "exam_items": json.dumps(exam_payload, ensure_ascii=False),
+        },
+    )
+    preflight = build_object_preflight_evidence(scene, source)
+    snapshot = build_execution_session_snapshot(
+        mode_id="exam",
+        scene=scene,
+        template=template,
+        material_context=material_context,
+        input_path=source,
+        output_root=tmp_path / "runs",
+        plan_id="exam",
+        template_id="default",
+        object_preflight_confirmation_revision=preflight.source_revision,
+        object_preflight_confirmation_digest=preflight.evidence_digest,
+    )
+    try:
+        frozen_master = execution_session_frozen_master(snapshot)
+        assert frozen_master is not None
+        assert frozen_master.execution_frozen is True
+        assert frozen_master.docx_path != live_master_path
+        assert frozen_master.docx_path.is_file()
+
+        live_master_path.unlink()
+
+        def _reject_live_master_lookup(*_args, **_kwargs):
+            raise AssertionError("live exam master lookup must not run after snapshot")
+
+        monkeypatch.setattr(
+            "src.shared.engine.exam_paper_style.ensure_current_exam_blank_master_docx",
+            _reject_live_master_lookup,
+        )
+        config = resolve_config(
+            template,
+            scene,
+            **material_context.to_resolve_kwargs(),
+        )
+        runtime = build_exam_delivery_runtime(
+            config,
+            output_dir=tmp_path / "output",
+            source_stem="frozen_exam",
+            master=frozen_master,
+        )
+
+        assert runtime.status == "ok"
+        assert runtime.rendered_versions
+        assert all(
+            Path(version.docx_path).is_file()
+            for version in runtime.rendered_versions
+        )
+        assert runtime.master_evidence is not None
+        assert Path(runtime.master_evidence.master_docx_path) == frozen_master.docx_path
+        assert not live_master_path.exists()
+
+        runner_payload = WorkbenchProductionRunner(
+            doc_path=str(source),
+            template=template,
+            scene=scene,
+            material_context=material_context,
+            output_dir=Path(snapshot.output_namespace),
+            execution_session=snapshot,
+        ).run(lambda *_args: None, lambda: False)
+        runner_master = runner_payload["exam_delivery_runtime"]["master_evidence"]
+
+        assert runner_payload["status"] == "success"
+        assert runner_master["master_id"] == frozen_master.master_id
+        assert Path(runner_master["master_docx_path"]) == frozen_master.docx_path
+        assert runner_payload["output_paths"]
+    finally:
+        cleanup_execution_session_resources(snapshot)
 
 
 def _first_doc_pr_attrs(docx_path: str) -> dict[str, str]:
@@ -583,7 +856,9 @@ def test_pipeline_records_exam_question_schema_result_and_reports(tmp_path):
     config = _exam_config(payload)
     result = Pipeline([], config, output_dir=str(tmp_path)).execute(str(source))
 
-    assert result.success is True
+    assert result.success is False
+    assert result.output_paths == {}
+    assert "Terminal assembler 'exam' blocked delivery" in str(result.error)
     assert result.context is not None
     assert result.context.exam_question_schema.status == "error"
     records = result.tracker.get_by_module("exam_question_schema")
@@ -691,6 +966,7 @@ def test_pipeline_records_exam_delivery_runtime_and_reports(tmp_path):
         "exam_preview.md"
     )
     assert len(data["exam_delivery_runtime"]["rendered_versions"]) == 5
+    assert data["exam_delivery_runtime"]["master_evidence"] == {}
     versions = {
         version["preset_id"]: version
         for version in data["exam_delivery_runtime"]["rendered_versions"]

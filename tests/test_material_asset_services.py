@@ -1,9 +1,11 @@
 import ast
 import zipfile
-from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from src.config import asset_resolution
 from src.config.materials import AssetItem
 from src.services import material_assets
 from src.services.material_assets import (
@@ -13,8 +15,6 @@ from src.services.material_assets import (
     repair_audit,
     word_docx_recovery,
 )
-from src.ui.panels.assets import question_audit as ui_question_audit
-from src.ui.panels.assets import question_figures as ui_question_figures
 
 
 def test_material_asset_service_exposes_public_question_figure_api(tmp_path):
@@ -72,6 +72,56 @@ def test_material_asset_service_does_not_expose_remote_url_preview_helpers():
     assert not hasattr(question_figures, "remote_asset_url_name")
 
 
+def test_question_figure_repair_audit_append_fails_closed_on_corrupt_history(
+    tmp_path,
+):
+    history_path = tmp_path / "question_figure_repair_audit.json"
+    corrupt_bytes = b'{"schema_version":1,"records":['
+    history_path.write_bytes(corrupt_bytes)
+
+    with pytest.raises(
+        repair_audit.QuestionFigureRepairAuditIntegrityError,
+        match="question_figure_repair_audit_unreadable",
+    ):
+        material_assets.append_question_figure_repair_audit_record(
+            tmp_path,
+            {
+                "audit_id": "repair-apply-new",
+                "action": "frontstage_question_figure_repair_apply",
+                "applied_at": "2026-07-14T00:00:00Z",
+            },
+        )
+
+    assert history_path.read_bytes() == corrupt_bytes
+
+
+def test_question_figure_repair_audit_write_failure_is_explicit_to_caller(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        repair_audit,
+        "atomic_write_text",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("injected audit write failure")
+        ),
+    )
+
+    result = material_assets.append_question_figure_repair_audit_record(
+        tmp_path,
+        {
+            "audit_id": "repair-apply-new",
+            "action": "frontstage_question_figure_repair_apply",
+            "applied_at": "2026-07-14T00:00:00Z",
+        },
+    )
+
+    assert result["artifact_path"] == ""
+    assert result["audit_persistence_status"] == "failed"
+    assert result["audit_persistence_error"] == "write_failed"
+    assert not (tmp_path / "question_figure_repair_audit.json").exists()
+
+
 def test_material_asset_service_updates_question_library_metadata_and_history():
     item = AssetItem(
         item_id="q1",
@@ -97,6 +147,12 @@ def test_material_asset_service_updates_question_library_metadata_and_history():
                 "assetId": "old-q1",
                 "alt": "old alt",
             },
+            "group_id": "question-bank-a",
+            "sequence": 4,
+            "source_path": "C:/materials",
+            "original_relative_path": "questions/q1.png",
+            "normalized_name": "question_figure_004.png",
+            "content_hash": "b" * 64,
         }
     ]
 
@@ -116,6 +172,15 @@ def test_material_asset_service_updates_question_library_metadata_and_history():
     assert metadata["alt_text"] == "new alt"
     assert "assetId" not in metadata
     assert "alt" not in metadata
+    for key in (
+        "group_id",
+        "sequence",
+        "source_path",
+        "original_relative_path",
+        "normalized_name",
+        "content_hash",
+    ):
+        assert updated_payload[key] == payloads[0][key]
     history_record = result["history_record"]
     assert history_record["action"] == "question_figure_library_metadata_update"
     assert history_record["changed_fields"] == "source,asset_id,alt_text"
@@ -135,6 +200,10 @@ def test_material_asset_service_updates_question_library_metadata_and_history():
         material_assets.apply_question_figure_library_metadata
         is question_library.apply_question_figure_library_metadata
     )
+    assert (
+        material_assets.normalize_asset_item_payloads
+        is asset_resolution.normalize_asset_item_payloads
+    )
 
 
 def test_material_asset_service_rolls_back_question_library_metadata():
@@ -149,6 +218,12 @@ def test_material_asset_service_rolls_back_question_library_metadata():
             "asset_id": "new-q1",
             "alt_text": "new alt",
         },
+        group_id="question-bank-a",
+        sequence=4,
+        source_path="C:/materials",
+        original_relative_path="questions/q1.png",
+        normalized_name="question_figure_004.png",
+        content_hash="b" * 64,
     )
     history_record = material_assets.question_figure_library_metadata_history_record(
         current_item,
@@ -177,6 +252,13 @@ def test_material_asset_service_rolls_back_question_library_metadata():
     assert metadata["source"] == "local"
     assert metadata["asset_id"] == "old-q1"
     assert metadata["alt_text"] == "old alt"
+    rolled_back = result["payloads"][0]
+    assert rolled_back["group_id"] == current_item.group_id
+    assert rolled_back["sequence"] == current_item.sequence
+    assert rolled_back["source_path"] == current_item.source_path
+    assert rolled_back["original_relative_path"] == current_item.original_relative_path
+    assert rolled_back["normalized_name"] == current_item.normalized_name
+    assert rolled_back["content_hash"] == current_item.content_hash
     records = result["records"]
     assert len(records) == 2
     rollback_record = records[-1]
@@ -543,20 +625,9 @@ def test_material_asset_service_exposes_public_docx_recovery_api(tmp_path):
     )
 
 
-def test_ui_question_helpers_are_compatibility_exports_for_services():
-    assert (
-        ui_question_figures._question_figure_asset_items
-        is question_figures._question_figure_asset_items
-    )
-    assert ui_question_figures.question_figure_items is question_figures.question_figure_items
-    assert (
-        ui_question_audit._question_figure_repair_audit_record
-        is repair_audit._question_figure_repair_audit_record
-    )
-    assert (
-        ui_question_audit.build_question_figure_repair_audit_record
-        is repair_audit.build_question_figure_repair_audit_record
-    )
+def test_ui_question_compatibility_modules_do_not_return():
+    assert not (Path("src/ui/panels/assets/question_figures.py")).exists()
+    assert not (Path("src/ui/panels/assets/question_audit.py")).exists()
     assert not (Path("src/ui/panels/assets/question_cache.py")).exists()
 
 
@@ -576,7 +647,7 @@ def test_material_asset_services_do_not_import_ui_panel_layer():
     assert "assets_panel" not in common_source
 
 
-def test_assets_panel_uses_material_asset_services_for_local_question_helpers():
+def test_assets_panel_does_not_republish_material_asset_service_helpers():
     panel_path = Path("src/ui/panels/assets_panel.py")
     module = ast.parse(panel_path.read_text(encoding="utf-8"))
     imports = [
@@ -628,6 +699,6 @@ def test_assets_panel_uses_material_asset_services_for_local_question_helpers():
         and node.func.id in legacy_call_names
     ]
 
-    assert any(node.module == "src.services.material_assets" for node in imports)
+    assert not any(node.module == "src.services.material_assets" for node in imports)
     assert not any(node.module in legacy_modules for node in imports)
     assert legacy_calls == []

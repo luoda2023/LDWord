@@ -1,44 +1,35 @@
+import ast
+import json
 import sys
 from pathlib import Path
+
+from docx import Document
+from PySide6.QtTest import QTest
 
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.qt_api import QApplication, QPoint, Qt
-from src.ui.icons.catalog import get_icon_names
+from src.qt_api import QApplication, QPoint, Qt, QWidget
+from src.shared.ui.icons.catalog import get_icon_names
 from src.shared.ui.form_row import FormRow
-from src.shared.ui.style_owner_state import scene_section_style_owner_state
+from src.shared.ui.styled_combo_box import SOURCE_BADGE_TEXT_ROLE
 from src.shared.ui.theme import get_theme
-from src.shared.ui.themed_radio_button import ThemedRadioButton
 from src.config import library as config_library
+from src.config import material_package_library
+from src.config.material_context import MaterialExecutionContext
 from src.config.scene import SceneWorkspace
 from src.config.builtin_templates import create_builtin_template
 from src.config.scene_family_application import apply_planned_scene_family_defaults
-from src.config.template import StyleConfig
-from src.config.style_variant_semantics import (
-    STYLE_VARIANTS,
-    build_section_style_override_projection,
-    enable_section_style_override,
-)
 from src.ui.bridge import PanelBridge
+import src.ui.panels.scene_panel as scene_panel_module
+import src.shared.engine.official_document_material_package as material_package_module
 from src.ui.panels.scene_panel import ScenePanel, _set_combo_by_data
 from src.ui.panels.scene_overview_projection import FIRST_SCREEN_BANNED_TERMS
-from src.ui.panels.scene_scope_sections import SceneScopeZoneSection
-from src.ui.panels.scene_style_override_sections import SceneStyleOverrideSection
-from src.ui.panels.scene_style_rules_block import SceneStyleRulesBlock
-from src.ui.panels.scene_style_override_service import (
-    restore_all_scene_section_styles_to_template,
-    restore_scene_section_style_to_template,
-    scene_section_effective_style,
-    scene_section_style_override_projection,
-    scene_section_style_preview_projection,
-    scene_style_variants_for_scene,
-    set_scene_section_style_override,
-    sync_disabled_section_style_overrides,
+from src.ui.panels.scene_scope_sections import DocumentScopeSection
+from src.ui.panels.template_navigation_context import (
+    build_template_navigation_context,
 )
-from src.ui.panels.scene_scope_service import apply_scene_scope_zone_states
-from src.ui.panels.template_format import build_template_preview_context
 from src.ui.panels.scene_summary_projection import (
     build_academic_rule_source_evidence_summary_items,
     build_application_report_evidence_summary_items,
@@ -57,12 +48,14 @@ from src.ui.panels.scene_summary_projection import (
     build_scene_scope_summary_items,
     build_scene_sample_fixture_detail_text,
     build_scene_sample_fixture_summary_items,
-    build_scene_style_override_summary_items,
     recommended_object_preflight_targets_for_scene,
     scene_request_cell_filter_options,
     scene_request_cell_fixture_specs_for_scene,
+    scene_request_cell_list_item_projection,
+    scene_request_cell_matches_filter,
 )
-from src.ui.panels.workbench.scene_presets import (
+from src.config.scene_presets import (
+    build_scene_profile_summary,
     create_bidding_scene,
     create_exam_scene,
     create_official_scene,
@@ -71,8 +64,198 @@ from src.ui.panels.workbench.scene_presets import (
 )
 
 
+def test_scene_surfaces_do_not_hide_invalid_default_delivery_with_first_preset():
+    scene = create_official_scene()
+    first_id = scene.delivery_presets[0].preset_id
+    scene.default_delivery_preset_id = "missing_delivery"
+
+    items = {item.key: item for item in build_delivery_summary_items(scene)}
+
+    assert first_id != "missing_delivery"
+    assert items["default_delivery"].value == "无效引用：missing_delivery"
+    assert items["default_delivery"].variant == "warning"
+    assert items["default_artifacts"].value == "未设置"
+    assert items["default_artifacts"].variant == "warning"
+    assert "交付 missing_delivery" in build_scene_profile_summary(scene)
+
+
 def _app():
     return QApplication.instance() or QApplication([])
+
+
+def test_scene_detail_implementations_keep_one_way_module_ownership():
+    panel_path = ROOT / "src/ui/panels/scene_panel.py"
+    panel_source = panel_path.read_text(encoding="utf-8")
+    panel_tree = ast.parse(panel_source)
+    panel_classes = {
+        node.name for node in panel_tree.body if isinstance(node, ast.ClassDef)
+    }
+
+    owned_details = {
+        "scene_detail_base.py": {"_SimpleFormDetail"},
+        "scene_content_detail.py": {"_ContentDetail"},
+        "scene_output_detail.py": {"_OutputDetail"},
+        "scene_exam_detail.py": {"ExamPaperDetail"},
+    }
+    assert panel_classes.isdisjoint(
+        class_name
+        for class_names in owned_details.values()
+        for class_name in class_names
+    )
+
+    for module_name, class_names in owned_details.items():
+        module_source = (ROOT / "src/ui/panels" / module_name).read_text(
+            encoding="utf-8"
+        )
+        module_tree = ast.parse(module_source)
+        assert class_names.issubset({
+            node.name for node in module_tree.body if isinstance(node, ast.ClassDef)
+        })
+        assert all(
+            not (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "src.ui.panels.scene_panel"
+            )
+            for node in ast.walk(module_tree)
+        )
+
+    assert "from src.ui.panels.scene_content_detail import _ContentDetail" in panel_source
+    assert "from src.ui.panels.scene_output_detail import _OutputDetail" in panel_source
+    assert "from src.ui.panels.scene_exam_detail import (" in panel_source
+    assert "self._exam_paper = ExamPaperDetail(self.bridge)" in panel_source
+    exam_detail_source = (ROOT / "src/ui/panels/scene_exam_detail.py").read_text(
+        encoding="utf-8"
+    )
+    assert "ExamPaperPreviewDialog" not in exam_detail_source
+
+
+def test_scene_activation_and_edit_transactions_have_one_real_owner():
+    panel_source = (ROOT / "src/ui/panels/scene_panel.py").read_text(
+        encoding="utf-8"
+    )
+    owner_source = (
+        ROOT / "src/ui/panels/scene_session_coordinator.py"
+    ).read_text(encoding="utf-8")
+    owner_tree = ast.parse(owner_source)
+
+    assert "SceneSessionCoordinator" in {
+        node.name for node in owner_tree.body if isinstance(node, ast.ClassDef)
+    }
+    assert "class PreparedSceneChanges" in owner_source
+    assert "class SceneActivationSnapshot" in owner_source
+    assert "capture_state_snapshot()" in owner_source
+    assert "restore_state_snapshot(" in owner_source
+    assert "def resolve_template_binding(" in owner_source
+    assert "def activate(" in owner_source
+    assert "def commit_prepared_changes(" in owner_source
+    assert "def rollback_prepared_changes(" in owner_source
+    assert "scene_user_target_path(" in owner_source
+    assert "def _assert_prepared_revision(" in owner_source
+    assert "def _load_canonical_committed_scene(" in owner_source
+    assert "target = prepared.committed_path or prepared.target_path" in owner_source
+    assert "from src.ui.panels.scene_panel" not in owner_source
+
+    assert "self._scene_session.activate(" in panel_source
+    assert "self._scene_session.prepare_pending_changes(" in panel_source
+    assert "self._scene_session.commit_prepared_changes()" in panel_source
+    assert "def _capture_scene_activation_snapshot(" not in panel_source
+    assert "def _restore_scene_activation_snapshot(" not in panel_source
+    assert "def _adopt_committed_scene(" not in panel_source
+    assert "self._prepared_scene_changes" not in panel_source
+
+
+def test_exam_detail_separates_surface_builders_and_official_projection():
+    detail_source = (ROOT / "src/ui/panels/scene_exam_detail.py").read_text(
+        encoding="utf-8"
+    )
+    detail_tree = ast.parse(detail_source)
+    detail_class = next(
+        node
+        for node in detail_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "ExamPaperDetail"
+    )
+    methods = {
+        node.name: node
+        for node in detail_class.body
+        if isinstance(node, ast.FunctionDef)
+    }
+
+    assert methods["__init__"].end_lineno - methods["__init__"].lineno + 1 <= 25
+    assert (
+        methods["_refresh_official_preview"].end_lineno
+        - methods["_refresh_official_preview"].lineno
+        + 1
+        <= 25
+    )
+    assert "def _build_exam_master_controls(" in detail_source
+    assert "def _build_official_preview_controls(" in detail_source
+    assert "build_official_plan_preview_projection(" in detail_source
+    assert "check_master_preflight(" not in detail_source
+
+
+def test_scene_plan_preview_uses_authoritative_official_mode_for_custom_scene():
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = SceneWorkspace(
+        scene_id="custom_plan",
+        category="custom",
+        template_id="official_gbt",
+    )
+    bridge.set_current_scene(scene, config_id="custom_plan", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("official_gbt"),
+        config_id="official_gbt",
+        emit_signal=False,
+    )
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+
+        assert panel._exam_paper._active_preview_provider_id == "official"
+        assert panel._exam_paper._plan_preview_card.isHidden() is False
+        assert panel._exam_paper._preview_mode_control.isHidden() is True
+        assert panel._nav_cards["scn_exam_paper"].isHidden() is False
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_ui_hot_imports_do_not_depend_on_release_or_static_dashboards():
+    ui_paths = (
+        ROOT / "src/ui/panels/scene_panel.py",
+        ROOT / "src/ui/panels/scene_summary_projection.py",
+    )
+
+    for path in ui_paths:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        top_level_modules = {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        top_level_modules.update(
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        )
+        forbidden = {
+            module
+            for module in top_level_modules
+            if module.startswith("src.config.scene_matrix_dashboard")
+            or module == "src.config.scene_matrix_drilldown"
+            or (
+                module.startswith("src.config.scene_")
+                and "release" in module
+            )
+        }
+        assert forbidden == set(), f"{path.name}: {sorted(forbidden)}"
+
+    summary_source = ui_paths[1].read_text(encoding="utf-8")
+    assert "build_scene_matrix_dashboard_summary_items" not in summary_source
+    assert "_scene_matrix_dashboard_tooltip" not in summary_source
 
 
 def test_scene_panel_removes_page_elements_detail_from_scene_surface():
@@ -85,963 +268,75 @@ def test_scene_panel_removes_page_elements_detail_from_scene_surface():
     assert "scn_page_elem" not in source
 
 
-def test_scene_panel_uses_shared_card_header_and_flow_scope_layout():
-    source = (ROOT / "src/ui/panels/scene_panel.py").read_text(encoding="utf-8")
-    projection_source = (
-        ROOT / "src/ui/panels/scene_overview_projection.py"
-    ).read_text(encoding="utf-8")
-    scope_section_source = (
-        ROOT / "src/ui/panels/scene_scope_sections.py"
-    ).read_text(encoding="utf-8")
-    style_override_section_source = (
-        ROOT / "src/ui/panels/scene_style_override_sections.py"
-    ).read_text(encoding="utf-8")
-    style_rules_block_source = (
-        ROOT / "src/ui/panels/scene_style_rules_block.py"
-    ).read_text(encoding="utf-8")
-    style_object_builder_source = (
-        ROOT / "src/ui/panels/style_object_projection_builders.py"
-    ).read_text(encoding="utf-8")
-    style_editing_source = (
-        ROOT / "src/shared/ui/style_editing_section.py"
-    ).read_text(encoding="utf-8")
-    style_management_source = (
-        ROOT / "src/shared/ui/style_management_block.py"
-    ).read_text(encoding="utf-8")
-    style_rule_deck_source = (
-        ROOT / "src/shared/ui/style_rule_control_deck.py"
-    ).read_text(encoding="utf-8")
-    scene_card_definitions_source = (
-        ROOT / "src/ui/panels/scene_card_definitions.py"
-    ).read_text(encoding="utf-8")
-    scene_navigation_projection_source = (
-        ROOT / "src/ui/panels/scene_navigation_projection.py"
-    ).read_text(encoding="utf-8")
-    scene_state_projection_source = (
-        ROOT / "src/ui/panels/scene_state_projection.py"
-    ).read_text(encoding="utf-8")
-    style_policy_deck_source = (
-        ROOT / "src/shared/ui/style_policy_control_deck.py"
-    ).read_text(encoding="utf-8")
-    style_difference_slot_source = (
-        ROOT / "src/shared/ui/style_difference_summary_slot.py"
-    ).read_text(encoding="utf-8")
-    scope_checklist_source = (
-        ROOT / "src/shared/ui/scope_zone_checklist.py"
-    ).read_text(encoding="utf-8")
-
-    assert "_make_card_header" not in source
-    assert "_apply_cached_header_theme" not in source
-    assert "QGridLayout" not in source
-    assert "FlowLayout" in source
-    assert "SceneScopeZoneSection" in source
-    assert "SceneStyleRulesBlock" in source
-    assert "SceneStyleOverrideSection" not in source
-    assert "ScopeZoneChecklist" not in source
-    assert "ScopeZoneOption" not in source
-    assert "StyleOverrideToggleList" not in source
-    assert "StyleOverrideToggleOption" not in source
-    assert "_zones_flow = FlowLayout" not in source
-    assert "ScopeZoneChecklist" in scope_section_source
-    assert "ScopeZoneOption" in scope_section_source
-    assert "zone_changed = Signal(str, bool)" in scope_section_source
-    assert "ScopeZoneChecklist" in scope_checklist_source
-    assert "checked_changed = Signal(str, bool)" in scope_checklist_source
-    assert "QCheckBox(option.label" in scope_checklist_source
-    assert 'self._make_scene_overview_header("mountain-snow", "当前场景")' in source
-    assert 'self._make_scene_overview_header("sliders-horizontal", "场景策略")' in source
-    registered_icons = set(get_icon_names())
-    assert {"mountain-snow", "sliders-horizontal"} <= registered_icons
-    assert '"scn_evidence"' not in source
-    assert '"核对依据"' not in source
-    assert "from src.ui.panels.scene_card_definitions import" in source
-    assert '"scn_rules": ("场景规则", "sliders-horizontal")' in scene_card_definitions_source
-    assert "from src.ui.panels.scene_navigation_projection import" in source
-    assert "SCENE_RULES_ALIAS_CARDS = frozenset" in scene_navigation_projection_source
-    assert "NAV_OUTPUT_FIELDS = (" in scene_navigation_projection_source
-    assert "def build_scene_navigation_card_snapshots" in scene_navigation_projection_source
-    assert "def rules_navigation_snapshot" in scene_navigation_projection_source
-    assert "def content_navigation_snapshot" in scene_navigation_projection_source
-    assert "def _overview_navigation_snapshot" not in source
-    assert "def _rules_navigation_snapshot" not in source
-    assert "def _content_navigation_snapshot" not in source
-    assert "def _normalise_scene_detail_card_id" not in source
-    assert "from src.ui.panels.scene_state_projection import" in source
-    for helper_name in (
-        "safe_scene_file_stem",
-        "is_scene_selector_group",
-        "builtin_scene_id_set",
-        "scene_is_exam",
-        "generic_style_variants_for_scene",
-        "scene_should_show_content_card",
-    ):
-        assert f"def {helper_name}(" in scene_state_projection_source
-    for old_helper_name in (
-        "_safe_scene_file_stem",
-        "_is_scene_selector_group",
-        "_builtin_scene_id_set",
-        "_scene_is_exam",
-        "_generic_style_variants_for_scene",
-        "_scene_should_show_content_card",
-    ):
-        assert f"def {old_helper_name}(" not in source
-    assert "self._style_rules = _StyleRulesDetail()" in source
-    assert "self._rules = _SceneRulesDetail(" in source
-    assert "self._style_rules_block = SceneStyleRulesBlock" in source
-    assert '"scn_rules": self._create_rules_detail' in source
-    assert "self._detail_map[card_id] = detail" in source
-    assert 'SCENE_SCOPE_ZONE_SECTION_TITLE = "处理范围"' in scope_section_source
-    assert 'SCENE_SCOPE_ZONE_SECTION_DESCRIPTION = ""' in scope_section_source
-    assert '.set_header(title, icon_name="crosshair")' in scope_section_source
-    assert "crosshair" in registered_icons
-    assert 'SCENE_STYLE_OVERRIDE_SECTION_TITLE = "分区样式"' in style_override_section_source
-    assert "SceneStyleOverrideSection(" in style_rules_block_source
-    assert "StyleManagementBlock(" in style_override_section_source
-    assert "build_scene_section_style_projection" in source
-    assert "StyleObjectProjection" not in source
-    assert "StyleObjectProjection" in style_object_builder_source
-    assert "apply_style_object_projection(" in source
-    assert "def apply_style_object_projection" in style_rules_block_source
-    assert "def apply_style_object_projection" in style_override_section_source
-    assert "StyleRuleControlDeck(" in style_override_section_source
-    assert "StylePolicyControlDeck" in style_rule_deck_source
-    assert "def apply_projection" in style_policy_deck_source
-    assert "policy=build_scene_section_style_policy_projection" in (
-        style_object_builder_source
-    )
-    assert "summary_items=build_scene_style_override_summary_items" in (
-        style_object_builder_source
-    )
-    assert "style_object.policy" in style_management_source
-    assert "self._style_rules_block.set_summary_items" not in source
-    assert "self._style_rules_block.set_restore_all_enabled" not in source
-    assert "self._style_rules_block.set_undo_restore_all_enabled" not in source
-    assert "def _section_style_override_labels" not in source
-    assert "rule_control=self._rule_control_deck" in style_override_section_source
-    assert "difference_slot=self._rule_control_deck.difference_slot" in (
-        style_override_section_source
-    )
-    assert "management_widgets=" not in style_override_section_source
-    assert "StyleComparisonStrip(" not in style_override_section_source
-    assert "StyleDifferenceSummarySlot(" in style_policy_deck_source
-    assert "StyleComparisonStrip(" not in style_policy_deck_source
-    assert "StyleComparisonStrip(" in style_difference_slot_source
-    assert "StylePolicyToggleList(" in style_policy_deck_source
-    assert "StyleOverrideToggleList(" not in style_policy_deck_source
-    assert "scene_section_style_comparison_projection" not in source
-    assert "scene_section_style_comparison_projection" in style_object_builder_source
-    assert "StyleSourceSlot(" not in source
-    assert "StyleSourceCompactRow(" not in source
-    assert "DetailSummaryCard(" in style_management_source
-    assert "TemplateSummaryCard(" not in style_management_source
-    assert "StyleEditingSection(" in style_management_source
-    assert "_set_editor_surface_visible(" in style_management_source
-    assert "style_management_editor_visible" in style_management_source
-    assert "style_management_editor_collapsed_by_readonly" in style_management_source
-    assert "style_surface.setVisible(editable)" not in style_management_source
-    assert "分区样式编辑" not in source
-    assert '"style_source"' in source
-    assert '"template_style"' not in source
-    assert "编辑样式" in style_editing_source or "编辑样式" in style_management_source
-    assert '"scn_features"' not in source
-    assert '.set_header("执行能力", icon_name="toggle-right")' not in source
-    assert '"scn_table_chart"' not in source
-    assert '"scn_formula"' not in source
-    assert '"scn_citation"' not in source
-    assert '"format_template"' in source
-    assert '"场景策略"' in source
-    assert '"格式与模板"' not in source
-    assert 'add_section_header("风险与边界")' not in source
-    assert 'add_section_header("资料包")' in source
-    assert 'add_section_header("输出")' not in source
-    assert "RISK_BOUNDARY_CARDS" not in source
-    assert 'add_section_header("功能参数")' not in source
-    assert '"功能开关"' not in source
-    assert 'INPUT_MATERIAL_CARDS = ("scn_content",)' in scene_card_definitions_source
-    assert '"content_fill":  "scn_content"' not in source
-    assert "TemplateStylePreview" not in source
-    assert "_template_preview_context_for_scene" in source
-    assert "template_preview_action" in projection_source
-    assert "统一页面、正文、标题、表格和页眉页脚" not in projection_source
-
-
-def test_scene_scope_zone_section_wraps_summary_and_checklist():
-    app = _app()
-    section = SceneScopeZoneSection(
-        summary_items=build_scene_scope_summary_items(None),
-        zone_labels={"body": "正文", "references": "参考文献"},
-        object_name_prefix="test_scene_scope_zone_section",
-    )
-    changed: list[tuple[str, bool]] = []
-    mode_changed: list[str] = []
-    section.zone_changed.connect(lambda key, checked: changed.append((key, checked)))
-    section.boundary_mode_changed.connect(mode_changed.append)
-
+def test_document_scope_section_contains_only_plan_intent_controls():
+    _app()
+    section = DocumentScopeSection()
     try:
-        app.processEvents()
+        section.set_mode_id("thesis")
+        assert section.mode_control.count() == 3
+        assert [
+            section.mode_control.segment_text(index)
+            for index in range(section.mode_control.count())
+        ] == ["全部内容", "仅正文", "指定区域"]
+        assert set(section._role_checks) == {
+            "abstract_cn",
+            "abstract_en",
+            "toc",
+            "body",
+            "references",
+            "appendix",
+            "acknowledgment",
+            "resume",
+        }
 
-        assert section.summary.value_for("main_controls") == "选择处理范围"
-        assert section.summary.isVisibleTo(section) is False
-        assert section.boundary_mode() == "follow_template"
-        assert section.boundary_mode_control.objectName() == (
-            "test_scene_scope_zone_section_boundary_mode"
-        )
-        assert section.boundary_mode_control.isVisibleTo(section) is True
-        assert set(section.checks) == {"body", "references"}
-        assert section.checklist.objectName() == "test_scene_scope_zone_section"
-        assert section.checklist.isVisibleTo(section) is False
-        assert section.checks["references"].text() == "参考文献"
+        section.set_scope("selected", ("references", "appendix"))
+        assert section.mode() == "selected"
+        assert section.selected_roles() == ["references", "appendix"]
+        assert section._roles_widget.isHidden() is False
 
-        section.set_boundary_mode("body_only")
-        app.processEvents()
-
-        assert section.boundary_mode() == "body_only"
-        assert mode_changed == ["body_only"]
-
-        section.set_zone_checked("references", True)
-        app.processEvents()
-
-        assert section.checked_states()["references"] is True
-        assert changed == [("references", True)]
+        section.set_scope("all", ())
+        assert section._roles_widget.isHidden() is True
+        assert section.findChild(QWidget, "document_path") is None
     finally:
         section.close()
-        app.processEvents()
-
-
-def test_scene_style_override_section_wraps_owner_preview_and_surface():
-    app = _app()
-    section = SceneStyleOverrideSection(
-        summary_items=build_scene_style_override_summary_items(None, None),
-        style_variants=STYLE_VARIANTS[:2],
-        object_name_prefix="test_scene_style_override",
-    )
-    toggled: list[tuple[str, bool]] = []
-    changed: list[str] = []
-    restored: list[bool] = []
-    restored_all: list[bool] = []
-    undone_restore_all: list[bool] = []
-    section.policy_toggled.connect(
-        lambda key, checked: toggled.append((key, checked))
-    )
-    section.current_variant_changed.connect(changed.append)
-    section.restore_requested.connect(lambda: restored.append(True))
-    section.restore_all_requested.connect(lambda: restored_all.append(True))
-    section.undo_restore_all_requested.connect(lambda: undone_restore_all.append(True))
-
-    try:
-        app.processEvents()
-
-        assert section.summary.value_for("override_status") == "无格式例外"
-        assert section.management_block.property("style_management_mode") == (
-            "scene_section_rules"
-        )
-        assert section.management_block.property("style_management_content_plan") == (
-            "source|scope|rules|difference|editor|preview"
-        )
-        assert section.management_block.property("style_management_has_rules") is True
-        assert (
-            section.management_block.property("style_management_has_difference")
-            is True
-        )
-        assert (
-            section.management_block.property("style_management_has_difference_slot")
-            is True
-        )
-        assert section.management_block.property("style_management_has_preview") is True
-        assert section.management_block.preview_slot is None
-        assert section.management_block.effective_preview_slot is (
-            section.editing_section.preview_surface
-        )
-        assert section.management_block.property(
-            "style_management_effective_preview_protocol"
-        ) == "preview_projection"
-        assert section.management_block.property(
-            "style_management_effective_preview_ready"
-        ) is True
-        assert section.editing_section.preview_surface.property(
-            "style_preview_surface_renderer_protocol"
-        ) == "envelope_projection"
-        assert section.editing_section.preview_surface.property(
-            "style_preview_surface_renderer_ready"
-        ) is True
-        assert (
-            section.management_block.property("style_management_has_legacy_widgets")
-            is False
-        )
-        assert section.rule_control_deck.objectName() == (
-            "test_scene_style_override_rule_control_deck"
-        )
-        assert section.management_block.rule_control is section.rule_control_deck
-        assert section.management_block.property(
-            "style_management_rule_control_protocol"
-        ) == "policy_projection"
-        assert section.management_block.property(
-            "style_management_rule_control_ready"
-        ) is True
-        assert section.management_block.difference_slot is section.difference_slot
-        assert section.toggle_list is section.rule_control_deck.toggle_list
-        assert section.difference_slot is section.rule_control_deck.difference_slot
-        assert section.difference_slot.parentWidget() is section.rule_control_deck
-        assert section.difference_slot.property("style_difference_content_plan") == (
-            "difference"
-        )
-        assert section.comparison_strip is section.rule_control_deck.comparison_strip
-        assert set(section.toggles) == {"references_body", "acknowledgment_body"}
-        assert section.selector.objectName() == "test_scene_style_override_owner_selector"
-        assert section.restore_button.objectName() == "scn_section_style_restore_template"
-        assert section.restore_all_button.objectName() == (
-            "test_scene_style_override_restore_all_template"
-        )
-        assert section.undo_restore_all_button.objectName() == (
-            "test_scene_style_override_undo_restore_all_template"
-        )
-        assert section.restore_all_button.isEnabled() is False
-        assert section.undo_restore_all_button.isEnabled() is False
-        assert section.style_surface.editor is section.editor
-        assert section.comparison_strip.objectName() == (
-            "test_scene_style_override_comparison"
-        )
-
-        section.apply_preview_projection(None)
-        assert section.preview.text() == "选择分区后预览样式"
-        assert section.preview.isEnabled() is False
-        section.apply_comparison_projection(None)
-        assert section.comparison_strip.property("style_compare_current_status") == (
-            "选择分区"
-        )
-
-        section.set_policy_row_visible("acknowledgment_body", False)
-        assert section.rows["acknowledgment_body"].isHidden() is True
-        section.set_override_row_visible("acknowledgment_body", True)
-        assert section.rows["acknowledgment_body"].isHidden() is False
-        assert section.has_policy_key("references_body") is True
-        assert section.policy_toggle_for_key("references_body") is (
-            section.toggles["references_body"]
-        )
-
-        index = section.selector.findData("acknowledgment_body")
-        assert index >= 0
-        section.selector.setCurrentIndex(index)
-        app.processEvents()
-        assert changed[-1] == "acknowledgment_body"
-
-        section.toggles["references_body"].click()
-        app.processEvents()
-        assert toggled[-1] == ("references_body", True)
-
-        section.restore_button.click()
-        app.processEvents()
-        assert restored == [True]
-
-        section.set_restore_all_enabled(True)
-        section.restore_all_button.click()
-        app.processEvents()
-        assert restored_all == [True]
-
-        section.set_undo_restore_all_enabled(True, ("参考文献",))
-        section.undo_restore_all_button.click()
-        app.processEvents()
-        assert undone_restore_all == [True]
-    finally:
-        section.close()
-        app.processEvents()
-
-
-def test_scene_style_rules_block_wraps_override_section_as_stable_object():
-    app = _app()
-    block = SceneStyleRulesBlock(
-        summary_items=build_scene_style_override_summary_items(None, None),
-        style_variants=STYLE_VARIANTS[:2],
-        object_name_prefix="test_scene_style_rules",
-    )
-    toggled: list[tuple[str, bool]] = []
-    changed: list[str] = []
-    restored: list[bool] = []
-    block.policy_toggled.connect(
-        lambda key, checked: toggled.append((key, checked))
-    )
-    block.current_variant_changed.connect(changed.append)
-    block.restore_requested.connect(lambda: restored.append(True))
-
-    try:
-        app.processEvents()
-
-        assert isinstance(block.section, SceneStyleOverrideSection)
-        assert block.management_block.property("style_management_mode") == (
-            "scene_section_rules"
-        )
-        assert block.summary.value_for("override_status") == "无格式例外"
-        assert block.rule_control_deck is block.section.rule_control_deck
-        assert block.toggle_list is block.section.toggle_list
-        assert set(block.toggles) == {"references_body", "acknowledgment_body"}
-        assert block.rows is block.section.rows
-        assert block.current_variant_key() == "references_body"
-        assert block.current_policy_key() == "references_body"
-        assert block.rows["references_body"].property(
-            "style_policy_row_current"
-        ) is True
-        assert block.rows["acknowledgment_body"].property(
-            "style_policy_row_current"
-        ) is False
-        assert block.owner_toolbar is block.section.owner_toolbar
-        assert block.owner_status is block.section.owner_status
-        assert block.selector is block.section.selector
-        assert block.restore_button is block.section.restore_button
-        assert block.restore_all_button is block.section.restore_all_button
-        assert block.undo_restore_all_button is block.section.undo_restore_all_button
-        assert block.comparison_strip is block.section.comparison_strip
-        assert block.preview is block.section.preview
-        assert block.style_surface is block.section.style_surface
-        assert block.editor is block.section.editor
-        assert block.unit_labels == block.section.unit_labels
-
-        block.apply_preview_projection(None)
-        assert block.preview.text() == "选择分区后预览样式"
-        block.apply_comparison_projection(None)
-        assert block.comparison_strip.property("style_compare_current_status") == (
-            "选择分区"
-        )
-
-        block.set_policy_row_visible("acknowledgment_body", False)
-        assert block.rows["acknowledgment_body"].isHidden() is True
-        block.set_override_row_visible("acknowledgment_body", True)
-        assert block.rows["acknowledgment_body"].isHidden() is False
-
-        assert block.set_policy_checked("references_body", True) is True
-        assert block.toggles["references_body"].isChecked() is True
-        assert block.toggles["references_body"].thumb_position == (
-            block.toggles["references_body"].TRACK_W
-            - block.toggles["references_body"].THUMB_D
-            - block.toggles["references_body"].THUMB_MARGIN
-        )
-        assert block.set_policy_checked("references_body", False) is True
-        assert block.toggles["references_body"].isChecked() is False
-        assert block.toggles["references_body"].thumb_position == (
-            block.toggles["references_body"].THUMB_MARGIN
-        )
-        assert block.set_policy_checked("unknown", True) is False
-        assert block.set_override_checked("references_body", True) is True
-        assert block.has_policy_key("references_body") is True
-        assert block.has_policy_key("unknown") is False
-        assert block.has_variant("references_body") is True
-        assert (
-            block.policy_toggle_for_key("references_body")
-            is block.toggles["references_body"]
-        )
-        assert block.override_toggle_for_variant("references_body") is (
-            block.toggles["references_body"]
-        )
-        assert block.override_toggle_for_variant("unknown") is None
-        assert block.set_policy_checked("references_body", False) is True
-        assert block.editor_widget_for_field("font_cn") is block.editor.font_cn
-        assert block.editor_widget_for_field("") is None
-        assert (
-            block.navigation_widget_for_field(
-                "font_cn",
-                variant_key="references_body",
-                prefer_toggle=True,
-            )
-            is block.toggles["references_body"]
-        )
-        assert (
-            block.navigation_widget_for_field("font_cn", variant_key="references_body")
-            is block.editor.font_cn
-        )
-        assert (
-            block.navigation_widget_for_field(
-                "font_cn",
-                variant_key="references_body",
-                prefer_toggle_when_unchecked=True,
-            )
-            is block.toggles["references_body"]
-        )
-        block.set_editor_editable(False)
-        assert block.editor.font_cn.isEnabled() is False
-        block.set_editor_editable(True)
-        assert block.editor.font_cn.isEnabled() is True
-        target_style = StyleConfig()
-        block.set_editor_values(font_cn="黑体", bold=True, line_spacing_type="single")
-        block.apply_editor_to_style(target_style)
-        assert target_style.font_cn == "黑体"
-        assert target_style.bold is True
-        assert target_style.line_spacing_type == "single"
-
-        index = block.selector.findData("acknowledgment_body")
-        assert index >= 0
-        block.selector.setCurrentIndex(index)
-        app.processEvents()
-        assert block.current_variant_key() == "acknowledgment_body"
-        assert block.current_policy_key() == "acknowledgment_body"
-        assert block.rows["acknowledgment_body"].property(
-            "style_policy_row_current"
-        ) is True
-        assert block.rows["references_body"].property(
-            "style_policy_row_current"
-        ) is False
-        assert changed[-1] == "acknowledgment_body"
-
-        assert block.set_current_policy_key("references_body") is True
-        assert block.current_variant_key() == "references_body"
-        assert block.current_policy_key() == "references_body"
-        assert block.rows["references_body"].property(
-            "style_policy_row_current"
-        ) is True
-
-        block.toggles["references_body"].click()
-        app.processEvents()
-        assert toggled[-1] == ("references_body", True)
-
-        block.restore_button.click()
-        app.processEvents()
-        assert restored == [True]
-    finally:
-        block.close()
-        app.processEvents()
-
-
-def test_scene_panel_controls_follow_template_management_contract():
-    source = (ROOT / "src/ui/panels/scene_panel.py").read_text(encoding="utf-8")
-    surface_source = (
-        ROOT / "src/shared/ui/paragraph_style_surface.py"
-    ).read_text(encoding="utf-8")
-    toolbar_source = (
-        ROOT / "src/shared/ui/style_owner_toolbar.py"
-    ).read_text(encoding="utf-8")
-    scope_checklist_source = (
-        ROOT / "src/shared/ui/scope_zone_checklist.py"
-    ).read_text(encoding="utf-8")
-    scope_section_source = (
-        ROOT / "src/ui/panels/scene_scope_sections.py"
-    ).read_text(encoding="utf-8")
-    style_override_section_source = (
-        ROOT / "src/ui/panels/scene_style_override_sections.py"
-    ).read_text(encoding="utf-8")
-    style_rules_block_source = (
-        ROOT / "src/ui/panels/scene_style_rules_block.py"
-    ).read_text(encoding="utf-8")
-    style_object_builder_source = (
-        ROOT / "src/ui/panels/style_object_projection_builders.py"
-    ).read_text(encoding="utf-8")
-    style_editing_source = (
-        ROOT / "src/shared/ui/style_editing_section.py"
-    ).read_text(encoding="utf-8")
-    style_management_source = (
-        ROOT / "src/shared/ui/style_management_block.py"
-    ).read_text(encoding="utf-8")
-    override_list_source = (
-        ROOT / "src/shared/ui/style_override_toggle_list.py"
-    ).read_text(encoding="utf-8")
-    policy_list_source = (
-        ROOT / "src/shared/ui/style_policy_toggle_list.py"
-    ).read_text(encoding="utf-8")
-    owner_state_source = (
-        ROOT / "src/shared/ui/style_owner_state.py"
-    ).read_text(encoding="utf-8")
-    service_source = (
-        ROOT / "src/ui/panels/scene_style_override_service.py"
-    ).read_text(encoding="utf-8")
-    scope_service_source = (
-        ROOT / "src/ui/panels/scene_scope_service.py"
-    ).read_text(encoding="utf-8")
-    editor_source = (
-        ROOT / "src/shared/ui/paragraph_style_editor.py"
-    ).read_text(encoding="utf-8")
-
-    assert "QRadioButton" not in source
-    assert "ThemedRadioButton" in source
-    assert "SceneScopeZoneSection" in source
-    assert "SceneStyleRulesBlock" in source
-    assert "SceneStyleOverrideSection" not in source
-    assert "_StyleRulesDetail" in source
-    assert "StyleControlSurface" not in source
-    assert "ScopeZoneChecklist" not in source
-    assert "ScopeZoneOption" not in source
-    assert "scene_section_style_override_projection" in source
-    assert "set_scene_section_style_override" in source
-    assert "restore_scene_section_style_to_template" in source
-    assert "apply_scene_scope_zone_states" in source
-    assert "sync_disabled_section_style_overrides" not in source
-    assert "enable_section_style_override" not in source
-    assert "disable_section_style_override" not in source
-    assert "build_section_style_override_projection" not in source
-    assert "build_section_style_preview_projection" not in source
-    assert "StyleControlOwnerToolbar" not in source
-    assert "StyleOwnerOption" not in source
-    assert "StyleOverrideToggleList" not in source
-    assert "StyleOverrideToggleOption" not in source
-    assert "management_block = self._style_override_section.management_block" not in source
-    assert "rule_deck = self._style_override_section.rule_control_deck" not in source
-    assert "editing_section = self._style_override_section.editing_section" not in source
-    assert "self._style_rules_block.toggle_list" in source
-    assert "self._style_rules_block.style_surface" in source
-    assert "self._section_style_editor =" not in source
-    assert "self._section_font_cn =" not in source
-    assert "self._section_font_en =" not in source
-    assert "self._section_size_combo =" not in source
-    assert "self._section_bold_switch =" not in source
-    assert "self._section_italic_switch =" not in source
-    assert "self._section_emphasis =" not in source
-    assert "self._section_alignment_combo =" not in source
-    assert "self._section_special_indent =" not in source
-    assert "self._section_left_indent =" not in source
-    assert "self._section_right_indent =" not in source
-    assert "self._section_line_type_combo =" not in source
-    assert "self._section_line_value =" not in source
-    assert "self._section_line_value_suffix =" not in source
-    assert "self._section_space_before =" not in source
-    assert "self._section_space_after =" not in source
-    assert "TRACK_W" not in source
-    assert "THUMB_D" not in source
-    assert "thumb_position" not in source
-    assert "set_policy_checked(" in source
-    assert "set_override_checked(" not in source
-    assert "set_policy_checked(" in style_rules_block_source
-    assert "set_override_checked(" in style_rules_block_source
-    assert "_variant_toggles.get" not in source
-    assert "_section_style_editor.widget_for_field(" not in source
-    assert "navigation_widget_for_field(" in source
-    assert "editor_widget_for_field(" in source
-    assert "has_policy_key(" in source
-    assert "scene_style_navigation_target_from_field_id" in source
-    assert "has_variant(" not in source
-    assert "_section_style_editor.set_editable(" not in source
-    assert "_section_style_editor.apply_to_style(" not in source
-    assert "set_editor_editable(" in source
-    assert "apply_editor_to_style(" in source
-    assert "set_editor_editable(" in style_rules_block_source
-    assert "apply_editor_to_style(" in style_rules_block_source
-    assert "set_editor_values(" in style_rules_block_source
-    assert "self.editor.set_values(" in style_rules_block_source
-    assert "build_scene_section_style_projection" in source
-    assert "scene_section_style_owner_state" not in source
-    assert "scene_section_style_owner_state" in style_object_builder_source
-    assert "ParagraphStyleEditor" not in source
-    assert "StyleControlSurfaceState(" not in source
-    assert "NavigationHighlighter" in source
-    assert "当前执行问题定位" not in source
-    assert "_navigation_highlight_base_style" not in source
-    assert "FontCombo(" not in source
-    assert "SizeCombo(" not in source
-    assert "SpecialIndentInput(" not in source
-    assert "IndentInput(" not in source
-    assert "SpacingInput(" not in source
-    assert "build_emphasis_widget" not in source
-    assert "LINE_SPACING_OPTIONS" not in source
-    assert "FontCombo(" in editor_source
-    assert "SizeCombo(" in editor_source
-    assert "SpecialIndentInput(" in editor_source
-    assert "IndentInput(" in editor_source
-    assert "SpacingInput(" in editor_source
-    assert "build_emphasis_widget" in editor_source
-    assert "LINE_SPACING_OPTIONS" in editor_source
-    assert "ParagraphStyleEditor(" in surface_source
-    assert "style_field_layout_rows" in surface_source
-    assert "InspectorForm(" in surface_source
-    assert "template_form_row(selector_label" in toolbar_source
-    assert "StyledComboBox(" in toolbar_source
-    assert "QPushButton(action_label" in toolbar_source
-    assert "ScopeZoneChecklist" in scope_checklist_source
-    assert "build_checkbox_stylesheet" in scope_checklist_source
-    assert "ScopeZoneChecklist" in scope_section_source
-    assert "ScopeZoneOption" in scope_section_source
-    assert "SummaryGrid(" in scope_section_source
-    assert "SceneStyleOverrideSection(" in style_rules_block_source
-    assert "policy_toggled.connect(self.policy_toggled.emit)" in style_rules_block_source
-    assert "override_toggled.connect(self.override_toggled.emit)" in style_rules_block_source
-    assert "def management_block" in style_rules_block_source
-    assert "def rule_control_deck" in style_rules_block_source
-    assert "def editing_section" in style_rules_block_source
-    assert "StyleManagementBlock" in style_override_section_source
-    assert "StyleEditingSection(" not in style_override_section_source
-    assert "StyleControlSurface" not in style_override_section_source
-    assert "StyleControlOwnerToolbar" not in style_override_section_source
-    assert "StyleOwnerOption" in style_override_section_source
-    assert "StylePolicyToggleList" in style_override_section_source
-    assert "StylePolicyToggleOption" in style_override_section_source
-    assert "StyleOverrideToggleList" not in style_override_section_source
-    assert "StyleOverrideToggleOption" not in style_override_section_source
-    assert "StyleControlSurface" in style_editing_source
-    assert "StyleControlOwnerToolbar" in style_editing_source
-    assert "StylePreviewSurface(" in style_editing_source
-    assert "show_metadata=False" in style_editing_source
-    assert "StylePreview(" in style_editing_source
-    assert "DetailSummaryCard(" in style_management_source
-    assert "TemplateSummaryCard(" not in style_management_source
-    assert "StyleEditingSection(" in style_management_source
-    assert "StylePolicyToggleList" in policy_list_source
-    assert "ToggleSwitch(row" in policy_list_source
-    assert "toggled = Signal(str, bool)" in policy_list_source
-    assert "StyleOverrideToggleList(StylePolicyToggleList)" in override_list_source
-    assert "ToggleSwitch(row" not in override_list_source
-    assert "scene_section_style_owner_state" in owner_state_source
-    assert "StyleOwnerViewState" in owner_state_source
-    assert "enable_section_style_override" in service_source
-    assert "disable_section_style_override" in service_source
-    assert "build_section_style_override_projection" in service_source
-    assert "apply_scene_scope_zone_states" in scope_service_source
-    assert "sync_disabled_section_style_overrides" not in scope_service_source
-    assert "style_field_layout_rows" in editor_source
-    assert "template_form_pair_row(rows[0], rows[1]" in editor_source
-    assert '"font_cn": self._font_cn' in editor_source
-    assert '"emphasis": self._emphasis' in editor_source
-    assert '"line_spacing_pt": self._line_value' in editor_source
-    assert "build_text_input_stylesheet" in source
-    assert "apply_button_variant" in source
-    assert "_tpl_combo" not in source
-    assert '"关联模板"' not in source
-
-    app = _app()
-    bridge = PanelBridge()
-    scene = create_thesis_scene()
-    template = create_builtin_template("thesis_gbt")
-    bridge.set_current_scene(scene, config_id="thesis", emit_signal=False)
-    bridge.set_current_template(template, config_id="thesis_gbt", emit_signal=False)
-
-    panel = ScenePanel(bridge)
-    try:
-        app.processEvents()
-
-        assert isinstance(panel._overview._rebuild_radio, ThemedRadioButton)
-        assert isinstance(panel._overview._preserve_radio, ThemedRadioButton)
-        assert panel._overview._strategy_group.exclusive() is True
-        assert panel._nav_cards["scn_content"].isHidden() is False
-        assert panel._nav_section_headers["input_material"].isHidden() is False
-        for detail in (
-            panel._scope,
-            panel._cleanup,
-            panel._content,
-            panel._output,
-        ):
-            assert detail._detail_summary.value_for("advanced_evidence") == ""
-        assert panel._scope._detail_summary.isVisibleTo(panel._scope) is False
-        assert panel._scope._detail_summary.value_for("main_controls") == "按模板默认"
-        assert panel._scope._detail_summary.detail_for("main_controls") == (
-            "模板负责识别正文、附录等区域。"
-        )
-        assert panel._cleanup._detail_summary.value_for("main_controls") == "执行前检查"
-        assert panel._cleanup._detail_summary.value_for("risk_note") == "高风险先提醒"
-        assert panel._output._detail_summary.value_for("main_controls") == "交付版本"
-        assert panel._output._detail_summary.value_for("risk_note") == "输出路径需确认"
-        output_labels = {
-            row.label_text for row in panel._output.findChildren(FormRow)
-        }
-        assert "最终 Word" in output_labels
-        assert "对比 Word" in output_labels
-        assert "交付名称" in output_labels
-        assert "交付编号" in output_labels
-        assert "版本管理" in output_labels
-        assert "版本模板" in output_labels
-        assert "命名信息" in output_labels
-        assert "添加内容块" in output_labels
-        assert "内容块规则" in output_labels
-        assert "最终 DOCX" not in output_labels
-        assert "对比 DOCX" not in output_labels
-        assert "交付 ID" not in output_labels
-        assert "交付操作" not in output_labels
-        assert "业务模板" not in output_labels
-        assert "变量插入" not in output_labels
-        assert "规则插入" not in output_labels
-        assert "显隐规则" not in output_labels
-        assert panel._output._add_preset_btn.text() == "新增版本"
-        assert panel._output._copy_preset_btn.text() == "复制版本"
-        assert panel._output._remove_preset_btn.text() == "移除版本"
-        assert panel._output._add_preset_template_btn.text() == "套用模板"
-        assert panel._output._apply_family_delivery_btn.text() == "应用推荐"
-        assert "新增交付版本" in panel._output._add_preset_template_btn.toolTip()
-        assert "推荐交付版本" in panel._output._apply_family_delivery_btn.toolTip()
-        student_template_index = panel._output._delivery_preset_template_combo.findData(
-            "student_version"
-        )
-        assert student_template_index >= 0
-        assert (
-            panel._output._delivery_preset_template_combo.itemText(student_template_index)
-            == "学生版"
-        )
-        student_template_tooltip = panel._output._delivery_preset_template_combo.itemData(
-            student_template_index,
-            Qt.ToolTipRole,
-        )
-        assert "新增交付版本：学生版" in student_template_tooltip
-        assert "输出内容：最终 Word、报告 JSON、报告 Markdown" in student_template_tooltip
-        assert "答案：删除块" in student_template_tooltip
-        assert "解析：删除块" in student_template_tooltip
-        assert "模板编号：student_version" in student_template_tooltip
-        assert "student_version" not in panel._output._delivery_preset_template_combo.itemText(
-            student_template_index
-        )
-        assert panel._output._delivery_preset_id.placeholderText() == "自动生成，可按需修改"
-        assert "review_copy" not in panel._output._delivery_preset_id.placeholderText()
-        assert "review_copy" in panel._output._delivery_preset_id.toolTip()
-        content_labels = {
-            row.label_text for row in panel._content.findChildren(FormRow)
-        }
-        assert "必填资料字段" in content_labels
-        assert "必需图片/签章" in content_labels
-        assert "必填字段" not in content_labels
-        assert "资产角色" not in content_labels
-        assert panel._content._replace_unknown_schema_btn.text() == "替换未识别"
-        assert panel._content._remove_unknown_schema_btn.text() == "移除未识别"
-        selector = panel._content._material_rule_selector
-        assert selector is panel._content._material_requirement_block
-        assert selector.schema_registry_tools is panel._content._schema_registry_tools
-        assert selector.primary_schema_editor is panel._content._material_schema_id
-        assert selector.schema_list_editor is panel._content._material_schema_ids
-        assert (
-            selector.required_material_fields_editor
-            is panel._content._required_material_fields
-        )
-        assert selector.required_image_roles_editor is panel._content._required_image_roles
-        assert selector.preview_summary is panel._content._schema_validation_summary
-        assert (
-            selector.navigation_widget_for_field(
-                "input_source_profile.material_schema_id"
-            )
-            is panel._content._material_schema_id
-        )
-        assert (
-            selector.navigation_widget_for_field(
-                "input_source_profile.required_material_fields"
-            )
-            is panel._content._required_material_fields
-        )
-        assert (
-            selector.navigation_widget_for_field(
-                "input_source_profile.required_image_roles"
-            )
-            is panel._content._required_image_roles
-        )
-        contract_schema_index = panel._content._schema_registry_combo.findData(
-            "contract_parties_v1"
-        )
-        assert contract_schema_index >= 0
-        assert (
-            panel._content._schema_registry_combo.itemText(contract_schema_index)
-            == "合同方字段资料"
-        )
-        assert (
-            "contract_parties_v1"
-            not in panel._content._schema_registry_combo.itemText(contract_schema_index)
-        )
-        schema_tooltip = panel._content._schema_registry_combo.itemData(
-            contract_schema_index,
-            Qt.ToolTipRole,
-        )
-        assert "contract_parties_v1" in schema_tooltip
-        assert "Contract party fields" in schema_tooltip
-        schema_id_placeholder = panel._content._material_schema_id.placeholderText()
-        schema_list_placeholder = (
-            panel._content._material_schema_ids._text_edit.placeholderText()
-        )
-        field_placeholder = (
-            panel._content._required_material_fields._text_edit.placeholderText()
-        )
-        image_placeholder = (
-            panel._content._required_image_roles._text_edit.placeholderText()
-        )
-        assert "资料规则" in schema_id_placeholder
-        assert "资料规则" in schema_list_placeholder
-        assert "资料规则" in field_placeholder
-        assert "资料规则" in image_placeholder
-        assert "资料字段" in field_placeholder
-        assert "图片或签章" in image_placeholder
-        assert "contract_parties_v1" not in schema_id_placeholder
-        assert "signature_assets_v1" not in schema_list_placeholder
-        assert "party_a" not in field_placeholder
-        assert "seal" not in image_placeholder
-        assert "schema" not in schema_id_placeholder.lower()
-        assert "schema" not in schema_list_placeholder.lower()
-        variable_index = panel._output._delivery_variable_combo.findData("preset_label")
-        assert variable_index >= 0
-        variable_text = panel._output._delivery_variable_combo.itemText(variable_index)
-        assert "preset_label" not in variable_text
-        assert "{preset_label}" not in variable_text
-        variable_tooltip = panel._output._delivery_variable_combo.itemData(
-            variable_index,
-            Qt.ToolTipRole,
-        )
-        assert "{preset_label}" in variable_tooltip
-        assert "交付名称" in variable_tooltip
-        assert "preset_label" not in panel._output._delivery_variable_combo.toolTip()
-
-        selector_index = panel._output._visibility_selector_combo.findData("answer")
-        assert selector_index >= 0
-        selector_text = panel._output._visibility_selector_combo.itemText(selector_index)
-        assert selector_text == "答案"
-        assert "answer" not in selector_text
-        selector_tooltip = panel._output._visibility_selector_combo.itemData(
-            selector_index,
-            Qt.ToolTipRole,
-        )
-        assert "answer" in selector_tooltip
-        assert "{{#visibility:answer}}" in selector_tooltip
-        assert "answer" not in panel._output._visibility_selector_input.placeholderText()
-        assert "{{#visibility:answer}}" not in panel._output._visibility_selector_input.placeholderText()
-
-        for line_edit in (
-            panel._content._material_schema_id,
-            panel._content._watermark_text,
-            panel._output._delivery_preset_id,
-            panel._output._delivery_label,
-            panel._output._delivery_target_template,
-            panel._output._delivery_output_dir,
-            panel._output._delivery_filename,
-            panel._output._visibility_selector_input,
-        ):
-            assert line_edit.property("sizeClass") == "md"
-            assert "QLineEdit" in line_edit.styleSheet()
-            assert "border-radius" in line_edit.styleSheet()
-
-        expected_variants = {
-            panel._overview._new_scene_btn: "secondary",
-            panel._overview._duplicate_scene_btn: "secondary",
-            panel._overview._rename_scene_btn: "secondary",
-            panel._overview._open_scene_folder_btn: "secondary",
-            panel._overview._delete_scene_btn: "ghost-danger",
-            panel._content._set_primary_schema_btn: "secondary",
-            panel._content._append_schema_btn: "secondary",
-            panel._content._replace_unknown_schema_btn: "secondary",
-            panel._content._remove_unknown_schema_btn: "ghost-danger",
-            panel._cleanup._apply_family_preflight_btn: "secondary",
-            panel._output._add_preset_btn: "secondary",
-            panel._output._copy_preset_btn: "secondary",
-            panel._output._remove_preset_btn: "ghost-danger",
-            panel._output._move_up_preset_btn: "secondary",
-            panel._output._move_down_preset_btn: "secondary",
-            panel._output._add_preset_template_btn: "secondary",
-            panel._output._apply_family_delivery_btn: "secondary",
-            panel._output._insert_output_variable_btn: "secondary",
-            panel._output._insert_filename_variable_btn: "secondary",
-            panel._output._insert_visibility_rule_btn: "secondary",
-        }
-        for button, variant in expected_variants.items():
-            assert button.property("variant") == variant
-            assert button.property("sizeClass") == "md"
-            assert "QPushButton[variant" in button.styleSheet()
-    finally:
-        panel.close()
-        app.processEvents()
 
 
 def test_scene_panel_projects_scene_profiles_with_shared_summary_grid():
     source = (ROOT / "src/ui/panels/scene_panel.py").read_text(encoding="utf-8")
-    projection_source = (
+    surface_source = "\n".join(
+        (
+            source,
+            (ROOT / "src/ui/panels/scene_content_detail.py").read_text(
+                encoding="utf-8"
+            ),
+            (ROOT / "src/ui/panels/scene_output_detail.py").read_text(
+                encoding="utf-8"
+            ),
+        )
+    )
+    product_projection_source = (
+        ROOT / "src/ui/panels/scene_product_summary_projection.py"
+    ).read_text(encoding="utf-8")
+    engineering_projection_source = (
         ROOT / "src/ui/panels/scene_summary_projection.py"
     ).read_text(encoding="utf-8")
 
-    assert "scene_summary_projection" in source
-    assert "SummaryGrid" in source
-    assert "build_scene_overview_summary_items" in source
-    assert "build_scene_scope_summary_items" in source
-    assert "build_input_profile_summary_items" in source
-    assert "build_compliance_summary_items" in source
-    assert "build_scene_style_override_summary_items" in source
-    assert "build_parameter_ownership_summary_items" in projection_source
-    assert "build_coverage_summary_items" in projection_source
-    assert "build_scene_style_override_summary_items" in projection_source
-    assert "build_delivery_summary_items" in source
-    assert "input_source_profile" in source
-    assert "compliance_profile" in source
-    assert "default_delivery_preset_id" in source
+    assert "scene_product_summary_projection" in surface_source
+    assert "SummaryGrid" in surface_source
+    assert "build_scene_overview_spec" in surface_source
+    assert "DocumentScopeSection" in surface_source
+    assert "build_input_profile_summary_items" in surface_source
+    assert "build_compliance_summary_items" in surface_source
+    assert (
+        "build_parameter_ownership_summary_items"
+        in engineering_projection_source
+    )
+    assert "build_coverage_summary_items" in engineering_projection_source
+    assert "build_scene_scope_summary_items" in product_projection_source
+    assert "build_delivery_summary_items" in surface_source
+    assert "input_source_profile" in surface_source
+    assert "compliance_profile" in surface_source
+    assert "default_delivery_preset_id" in surface_source
 
 
 def test_scene_navigation_cards_use_readable_status_subtitles():
@@ -1082,210 +377,12 @@ def test_scene_navigation_cards_use_readable_status_subtitles():
         assert "/" not in content_subtitle
         assert "_" not in content_subtitle
         assert "/" not in rules_subtitle
-        assert "按模板默认" in rules_subtitle
-        assert "无格式例外" in rules_subtitle
+        assert "全部内容" in rules_subtitle
         assert "产物" in rules_subtitle
-        assert snapshots["scn_rules"]["badge_text"] == "按模板默认"
+        assert snapshots["scn_rules"]["badge_text"] == "全部内容"
         assert snapshots["scn_content"]["badge_text"] == "已配置"
     finally:
         panel.close()
-
-
-def test_scene_scope_summary_projection_tracks_application_boundary():
-    scene = SceneWorkspace(scene_id="scope_summary", template_id="default")
-
-    default_items = {
-        item.key: item for item in build_scene_scope_summary_items(scene)
-    }
-    assert set(default_items) == {"main_controls"}
-    assert default_items["main_controls"].label == "处理范围"
-    assert default_items["main_controls"].value == "按模板默认"
-    assert default_items["main_controls"].detail == "模板负责识别正文、附录等区域。"
-
-    scene.application_boundary.mode = "body_only"
-
-    items = {
-        item.key: item for item in build_scene_scope_summary_items(scene)
-    }
-    assert items["main_controls"].value == "只处理正文"
-    assert items["main_controls"].detail == "只处理模板识别出的正文内容。"
-
-    scene.application_boundary.mode = "confirm_before_apply"
-    confirm_items = {
-        item.key: item for item in build_scene_scope_summary_items(scene)
-    }
-    assert confirm_items["main_controls"].value == "每次执行前选择"
-    assert confirm_items["main_controls"].variant == "warning"
-
-
-def test_scene_style_override_summary_projection_tracks_follow_and_override():
-    template = create_builtin_template("thesis_gbt")
-    scene = SceneWorkspace(scene_id="thesis", template_id="thesis_gbt")
-    scene.format_scope.sections["acknowledgment"] = True
-
-    projection = build_section_style_override_projection(
-        scene,
-        template,
-        "references_body",
-    )
-    items = {
-        item.key: item
-        for item in build_scene_style_override_summary_items(scene, projection)
-    }
-
-    assert items["override_status"].value == "无格式例外"
-    assert items["override_status"].detail == "默认跟随模板；需要局部不同时再添加例外。"
-    assert items["current_variant_status"].value == "参考文献 · 跟随模板"
-    assert items["current_variant_status"].detail == "使用模板样式。"
-    assert items["owner_boundary"].value == "仅当前场景"
-
-    enable_section_style_override(scene, template, "references_body")
-    projection = build_section_style_override_projection(
-        scene,
-        template,
-        "references_body",
-    )
-    items = {
-        item.key: item
-        for item in build_scene_style_override_summary_items(scene, projection)
-    }
-
-    assert items["override_status"].value == "1 个格式例外"
-    assert items["override_status"].detail == "参考文献"
-    assert items["current_variant_status"].value == "参考文献 · 已开启独立样式"
-    assert items["current_variant_status"].detail == "与模板一致。"
-
-
-def test_scene_section_style_override_service_tracks_actions_and_projections():
-    template = create_builtin_template("thesis_gbt")
-    template.styles["references_body"] = StyleConfig(font_cn="黑体")
-    scene = SceneWorkspace(scene_id="thesis", template_id="thesis_gbt")
-    scene.format_scope.sections["references"] = True
-
-    projection = scene_section_style_override_projection(
-        scene,
-        template,
-        "references_body",
-    )
-    assert projection.status_value == "跟随模板"
-    assert projection.editor_hint == "跟随模板 · 开启独立样式后可编辑"
-    assert scene_section_effective_style(scene, template, "references_body").font_cn == "黑体"
-
-    style = set_scene_section_style_override(
-        scene,
-        template,
-        "references_body",
-        True,
-    )
-    assert style is scene.section_styles["references_body"]
-    assert style.font_cn == "黑体"
-
-    projection = scene_section_style_override_projection(
-        scene,
-        template,
-        "references_body",
-    )
-    preview = scene_section_style_preview_projection(
-        scene,
-        template,
-        "references_body",
-    )
-    assert projection.status_value == "已开启独立样式"
-    assert projection.editor_hint == "已开启独立样式 · 与模板一致"
-    assert preview.source_label == "已开启独立样式"
-
-    assert restore_scene_section_style_to_template(scene, "references_body") is True
-    assert "references_body" not in scene.section_styles
-    assert restore_scene_section_style_to_template(scene, "references_body") is False
-
-
-def test_scene_section_style_owner_state_keeps_main_hint_short_when_following_template():
-    owner_state = scene_section_style_owner_state(
-        style=StyleConfig(font_cn="黑体"),
-        variant_label="参考文献",
-        section_enabled=True,
-        overridden=False,
-    )
-
-    assert owner_state.hint == "跟随模板 · 开启独立样式后可编辑"
-    assert "参考文献：" not in owner_state.hint
-    assert owner_state.surface_state.readonly_reason == (
-        "参考文献：跟随模板。开启独立样式后可编辑。"
-    )
-
-
-def test_scene_section_style_restore_all_service_clears_known_overrides():
-    template = create_builtin_template("thesis_gbt")
-    scene = SceneWorkspace(scene_id="thesis", template_id="thesis_gbt")
-    scene.format_scope.sections["references"] = True
-    scene.format_scope.sections["appendix"] = True
-
-    set_scene_section_style_override(scene, template, "references_body", True)
-    set_scene_section_style_override(scene, template, "appendix_body", True)
-
-    restored = restore_all_scene_section_styles_to_template(scene)
-
-    assert restored == ("references_body", "appendix_body")
-    assert "references_body" not in scene.section_styles
-    assert "appendix_body" not in scene.section_styles
-    assert restore_all_scene_section_styles_to_template(scene) == ()
-
-
-def test_scene_section_style_override_service_preserves_format_exceptions_when_scope_changes():
-    template = create_builtin_template("thesis_gbt")
-    scene = SceneWorkspace(scene_id="thesis", template_id="thesis_gbt")
-    scene.format_scope.sections["references"] = True
-    scene.format_scope.sections["appendix"] = False
-
-    set_scene_section_style_override(scene, template, "references_body", True)
-    set_scene_section_style_override(scene, template, "appendix_body", True)
-
-    dropped = sync_disabled_section_style_overrides(scene)
-
-    assert dropped == ()
-    assert "references_body" in scene.section_styles
-    assert "appendix_body" in scene.section_styles
-
-
-def test_scene_style_variants_respect_exam_paper_boundary_and_legacy_overrides():
-    template = create_builtin_template("default")
-    scene = create_exam_scene()
-
-    assert scene_style_variants_for_scene(scene, template) == ()
-
-    scene.section_styles["appendix_body"] = StyleConfig(font_cn="仿宋")
-
-    assert [
-        variant.key for variant in scene_style_variants_for_scene(scene, template)
-    ] == ["appendix_body"]
-
-    example_scene = SceneWorkspace(scene_id="example_custom", template_id="default")
-
-    assert scene_style_variants_for_scene(example_scene, template) == STYLE_VARIANTS
-
-
-def test_scene_scope_service_applies_zone_states_without_cleaning_format_exceptions():
-    template = create_builtin_template("thesis_gbt")
-    scene = SceneWorkspace(scene_id="thesis", template_id="thesis_gbt")
-    scene.format_scope.sections["references"] = True
-    scene.format_scope.sections["appendix"] = True
-
-    set_scene_section_style_override(scene, template, "references_body", True)
-    set_scene_section_style_override(scene, template, "appendix_body", True)
-
-    dropped = apply_scene_scope_zone_states(
-        scene,
-        {
-            "references": False,
-            "appendix": True,
-        },
-    )
-
-    assert dropped == ()
-    assert scene.format_scope.sections["references"] is False
-    assert scene.format_scope.sections["appendix"] is True
-    assert "references_body" in scene.section_styles
-    assert "appendix_body" in scene.section_styles
 
 
 def test_scene_panel_does_not_mount_template_page_number_summary_in_scene():
@@ -1294,10 +391,8 @@ def test_scene_panel_does_not_mount_template_page_number_summary_in_scene():
     scene = SceneWorkspace(
         scene_id="thesis",
         template_id="thesis_gbt",
-        default_template_id="thesis_gbt",
         compatible_template_ids=["thesis_gbt"],
     )
-    scene.header_footer.page_number_enabled = False
     template = create_builtin_template("thesis_gbt")
     bridge.set_current_scene(scene, config_id="thesis", emit_signal=False)
     bridge.set_current_template(template, config_id="thesis_gbt", emit_signal=False)
@@ -1314,360 +409,12 @@ def test_scene_panel_does_not_mount_template_page_number_summary_in_scene():
         app.processEvents()
 
 
-def test_scene_panel_scope_style_override_editor_writes_section_styles():
-    app = _app()
-    bridge = PanelBridge()
-    scene = SceneWorkspace(scene_id="thesis", template_id="thesis_gbt")
-    scene.format_scope.sections["acknowledgment"] = True
-    template = create_builtin_template("thesis_gbt")
-    bridge.set_current_scene(scene, config_id="thesis", emit_signal=False)
-    bridge.set_current_template(template, config_id="thesis_gbt", emit_signal=False)
-
-    panel = ScenePanel(bridge)
-    try:
-        app.processEvents()
-        scope_detail = panel._scope
-        scope = panel._style_rules
-        font_cn_widget = scope._style_rules_block.editor_widget_for_field("font_cn")
-        special_indent_widget = scope._style_rules_block.editor_widget_for_field(
-            "special_indent"
-        )
-        line_value_widget = scope._style_rules_block.editor_widget_for_field(
-            "line_spacing_pt"
-        )
-        assert font_cn_widget is not None
-        assert special_indent_widget is not None
-        assert line_value_widget is not None
-
-        assert "acknowledgment_body" not in scene.section_styles
-        assert font_cn_widget.isEnabled() is False
-        assert special_indent_widget.isEnabled() is False
-        assert scope._style_editor_hint.text() == "跟随模板 · 开启独立样式后可编辑"
-        assert "致谢：" not in scope._style_editor_hint.text()
-        assert not scope._restore_section_style_btn.isEnabled()
-        assert scope._section_style_preview.isEnabled()
-        assert "致谢样式预览" in scope._section_style_preview.text()
-        assert "跟随模板" in scope._section_style_preview.toolTip()
-        assert scope._section_style_preview.property("style_preview_source_label") == (
-            "跟随模板"
-        )
-        assert scope._section_style_preview.property("style_presentation_kind") == (
-            "section_paragraph"
-        )
-        assert scope._section_style_preview.property("style_presentation_title") == (
-            "致谢"
-        )
-        assert scope._section_style_preview.property("style_presentation_summary") == (
-            "跟随模板"
-        )
-        assert scope._section_style_preview.property("style_presentation_detail") == (
-            "使用模板样式。"
-        )
-        assert scope._section_style_preview.property(
-            "style_presentation_action_label"
-        ) == "调例外"
-        assert scope._style_comparison_strip.property("style_compare_template_status") == (
-            "模板基线"
-        )
-        assert scope._style_comparison_strip.property("style_compare_current_status") == (
-            "跟随模板"
-        )
-        assert scope._style_comparison_strip.property("style_compare_difference_status") == (
-            "无差异"
-        )
-        assert scope._style_override_summary.value_for("override_status") == "无格式例外"
-        assert (
-            scope._style_override_summary.value_for("current_variant_status")
-            == "致谢 · 跟随模板"
-        )
-        assert scope._style_override_summary.value_for("owner_boundary") == "仅当前场景"
-        assert scope._style_owner_status.property("style_owner_source_status") == (
-            "跟随模板"
-        )
-        assert scope._style_owner_status.property("style_owner_scope_status") == (
-            "来自模板"
-        )
-        assert scope._style_owner_status.property("style_owner_edit_status") == (
-            "开启独立样式后可编辑"
-        )
-        assert scope._style_surface.property("style_surface_owner_kind") == (
-            "scene_section_style"
-        )
-        assert scope._style_surface.property("style_surface_active_label") == (
-            "致谢"
-        )
-        assert scope._style_surface.property("style_surface_source_label") == (
-            "跟随模板"
-        )
-        assert scope._style_surface.property("style_surface_editable") is False
-        assert "开启独立样式后可编辑" in scope._style_surface.property(
-            "style_surface_readonly_reason"
-        )
-        assert scope.focus_navigation_field("section_styles.acknowledgment_body.font_cn") is True
-        acknowledgment_toggle = scope._style_rules_block.policy_toggle_for_key(
-            "acknowledgment_body"
-        )
-        assert acknowledgment_toggle is not None
-        assert scope._style_rules_block.current_policy_key() == "acknowledgment_body"
-        assert scope._style_rules_block.rows["acknowledgment_body"].property(
-            "style_policy_row_current"
-        ) is True
-        assert bool(acknowledgment_toggle.property("navigation_field_highlight"))
-        assert scope.focus_navigation_field("scene.section_styles.acknowledgment_body") is True
-        assert scope._style_variant_combo.currentData() == "acknowledgment_body"
-        assert scope._style_rules_block.current_policy_key() == "acknowledgment_body"
-        assert bool(acknowledgment_toggle.property("navigation_field_highlight"))
-        assert scope.focus_navigation_field("scene.section_styles.*.font_cn") is True
-        assert scope._style_variant_combo.currentData() == "acknowledgment_body"
-        assert scope._style_rules_block.current_policy_key() == "acknowledgment_body"
-        assert bool(acknowledgment_toggle.property("navigation_field_highlight"))
-        assert scope_detail.focus_navigation_field("format_scope.sections.acknowledgment") is True
-        assert bool(scope_detail._zone_checks["acknowledgment"].property("navigation_field_highlight"))
-
-        assert scope._style_rules_block.set_policy_checked("acknowledgment_body", True)
-        scope._on_variant_toggled("acknowledgment_body", True)
-        app.processEvents()
-
-        assert "acknowledgment_body" in scene.section_styles
-        assert font_cn_widget.isEnabled() is True
-        assert special_indent_widget.isEnabled() is True
-        assert scope._restore_section_style_btn.isEnabled()
-        assert "与模板一致" in scope._style_editor_hint.text()
-        assert "已开启独立样式" in scope._section_style_preview.toolTip()
-        assert scope._section_style_preview.property("style_preview_source_label") == (
-            "已开启独立样式"
-        )
-        assert scope._section_style_preview.property("style_presentation_summary") == (
-            "已开启独立样式"
-        )
-        assert "与模板一致" in scope._section_style_preview.property(
-            "style_preview_detail"
-        )
-        assert scope._style_comparison_strip.property("style_compare_current_status") == (
-            "独立样式"
-        )
-        assert scope._style_comparison_strip.property("style_compare_difference_status") == (
-            "未改字段"
-        )
-        assert scope._style_comparison_strip.property("style_compare_detail") == (
-            "已独立，但字段仍与模板一致。"
-        )
-        assert scope._style_override_summary.value_for("override_status") == "1 个格式例外"
-        assert "致谢" in scope._style_override_summary.detail_for("override_status")
-        assert (
-            scope._style_override_summary.value_for("current_variant_status")
-            == "致谢 · 已开启独立样式"
-        )
-        assert scope._style_surface.property("style_surface_source_label") == (
-            "已开启独立样式"
-        )
-        assert scope._style_owner_status.property("style_owner_source_status") == (
-            "已开启独立样式"
-        )
-        assert scope._style_owner_status.property("style_owner_scope_status") == (
-            "仅当前场景"
-        )
-        assert scope._style_owner_status.property("style_owner_edit_status") == "可编辑"
-        assert scope._style_surface.property("style_surface_editable") is True
-        assert scope._style_surface.property("style_surface_readonly_reason") == ""
-        assert scope.focus_navigation_field("scene.section_styles.acknowledgment_body.font_cn") is True
-        assert scope._style_variant_combo.currentData() == "acknowledgment_body"
-        assert scope._style_rules_block.current_policy_key() == "acknowledgment_body"
-        assert scope._style_rules_block.rows["acknowledgment_body"].property(
-            "style_policy_row_current"
-        ) is True
-        assert bool(font_cn_widget.property("navigation_field_highlight"))
-        assert "致谢" in font_cn_widget.toolTip()
-        assert "中文字体" in font_cn_widget.toolTip()
-        assert "scene.section_styles.acknowledgment_body.font_cn" not in font_cn_widget.toolTip()
-        assert font_cn_widget.property("navigation_field_raw_label") == (
-            "scene.section_styles.acknowledgment_body.font_cn"
-        )
-
-        scope._style_rules_block.set_editor_values(
-            font_cn="黑体",
-            font_en="Arial",
-            size_pt=14.0,
-            bold=True,
-            italic=True,
-            alignment="center",
-            special_indent=("first_line", 2.0, "chars"),
-            left_indent=(1.0, "cm"),
-            right_indent=(12.0, "pt"),
-            space_before=(6.0, "pt"),
-            space_after=(1.0, "lines"),
-            line_spacing_type="single",
-        )
-        scope._on_style_editor_edited()
-
-        style = scene.section_styles["acknowledgment_body"]
-        assert style.font_cn == "黑体"
-        assert style.font_en == "Arial"
-        assert style.size_pt == 14.0
-        assert style.bold is True
-        assert style.italic is True
-        assert style.alignment == "center"
-        assert style.special_indent_mode == "first_line"
-        assert style.special_indent_value == 2.0
-        assert style.special_indent_unit == "chars"
-        assert style.left_indent_chars == 1.0
-        assert style.left_indent_unit == "cm"
-        assert style.right_indent_chars == 12.0
-        assert style.right_indent_unit == "pt"
-        assert style.space_before_pt == 6.0
-        assert style.space_before_unit == "pt"
-        assert style.space_after_pt == 1.0
-        assert style.space_after_unit == "lines"
-        assert style.line_spacing_type == "single"
-        assert line_value_widget.isEnabled() is False
-        assert "正在编辑" in scope._style_editor_hint.text()
-        assert scope._restore_section_style_btn.isEnabled()
-        assert "已调整" in scope._section_style_preview.toolTip()
-        assert "不同" in scope._section_style_preview.toolTip()
-        assert scope._section_style_preview.property("style_presentation_kind") == (
-            "section_paragraph"
-        )
-        assert scope._section_style_preview.property("style_presentation_title") == (
-            "致谢"
-        )
-        assert str(
-            scope._section_style_preview.property("style_presentation_summary")
-        ).startswith("已调整 ")
-        assert "中文字体" in scope._style_override_summary.detail_for("current_variant_status")
-        assert "行距" in scope._style_override_summary.detail_for("current_variant_status")
-        assert scope._style_comparison_strip.property(
-            "style_compare_difference_status"
-        ).startswith("已调整 ")
-        assert "中文字体" in scope._style_comparison_strip.property("style_compare_detail")
-        assert "行距" in scope._style_comparison_strip.property("style_compare_detail")
-
-        scope._style_rules_block.set_editor_values(line_spacing_type="exact")
-        app.processEvents()
-        assert line_value_widget.isEnabled() is True
-        scope._set_style_editor_variant("appendix_body")
-        assert scope._style_variant_combo.currentData() == "appendix_body"
-        assert scope.focus_navigation_field("scene.section_styles.*.line_spacing_pt") is True
-        assert scope._style_variant_combo.currentData() == "acknowledgment_body"
-        assert bool(line_value_widget.property("navigation_field_highlight"))
-        assert "行距与段距：所有处理分区行距" in line_value_widget.toolTip()
-        assert "所有处理分区行距" in line_value_widget.toolTip()
-        assert "scene.section_styles.*.line_spacing_pt" not in line_value_widget.toolTip()
-        assert line_value_widget.property("navigation_field_raw_label") == (
-            "scene.section_styles.*.line_spacing_pt"
-        )
-
-        scope._restore_section_style_btn.click()
-        app.processEvents()
-        assert "acknowledgment_body" not in scene.section_styles
-        assert acknowledgment_toggle.isChecked() is False
-        assert font_cn_widget.isEnabled() is False
-        assert special_indent_widget.isEnabled() is False
-        assert not scope._restore_section_style_btn.isEnabled()
-        assert "致谢样式预览" in scope._section_style_preview.text()
-        assert "跟随模板" in scope._section_style_preview.toolTip()
-        assert scope._style_override_summary.value_for("override_status") == "无格式例外"
-        assert (
-            scope._style_override_summary.value_for("current_variant_status")
-            == "致谢 · 跟随模板"
-        )
-    finally:
-        panel.close()
-        app.processEvents()
-
-
-def test_scene_panel_restore_all_section_styles_returns_every_partition_to_template():
-    app = _app()
-    bridge = PanelBridge()
-    scene = SceneWorkspace(scene_id="thesis", template_id="thesis_gbt")
-    scene.format_scope.sections["references"] = True
-    scene.format_scope.sections["appendix"] = True
-    template = create_builtin_template("thesis_gbt")
-    references_style = set_scene_section_style_override(
-        scene,
-        template,
-        "references_body",
-        True,
-    )
-    appendix_style = set_scene_section_style_override(
-        scene,
-        template,
-        "appendix_body",
-        True,
-    )
-    references_style.font_cn = "黑体"
-    appendix_style.font_cn = "仿宋"
-    bridge.set_current_scene(scene, config_id="thesis", emit_signal=False)
-    bridge.set_current_template(template, config_id="thesis_gbt", emit_signal=False)
-
-    panel = ScenePanel(bridge)
-    changed: list[bool] = []
-    panel._style_rules.style_rules_changed.connect(lambda: changed.append(True))
-    try:
-        app.processEvents()
-        scope = panel._style_rules
-        references_toggle = scope._style_rules_block.policy_toggle_for_key(
-            "references_body"
-        )
-        appendix_toggle = scope._style_rules_block.policy_toggle_for_key(
-            "appendix_body"
-        )
-        assert references_toggle is not None
-        assert appendix_toggle is not None
-
-        assert scope._style_override_summary.value_for("override_status") == (
-            "1 个格式例外"
-        )
-        assert scope._restore_all_section_styles_btn.isEnabled() is True
-        assert scope._undo_restore_all_section_styles_btn.isEnabled() is False
-        assert "参考文献" not in scope._restore_all_section_styles_btn.toolTip()
-        assert "附录" in scope._restore_all_section_styles_btn.toolTip()
-        assert references_toggle.isChecked() is True
-        assert appendix_toggle.isChecked() is True
-
-        scope._restore_all_section_styles_btn.click()
-        app.processEvents()
-
-        assert changed == [True]
-        assert "references_body" in scene.section_styles
-        assert "appendix_body" not in scene.section_styles
-        assert references_toggle.isChecked() is True
-        assert appendix_toggle.isChecked() is False
-        assert scope._restore_all_section_styles_btn.isEnabled() is False
-        assert scope._undo_restore_all_section_styles_btn.isEnabled() is True
-        assert "参考文献" not in scope._undo_restore_all_section_styles_btn.toolTip()
-        assert "附录" in scope._undo_restore_all_section_styles_btn.toolTip()
-        assert scope._style_override_summary.value_for("override_status") == (
-            "无格式例外"
-        )
-        assert scope._style_owner_status.property("style_owner_scope_status") == (
-            "来自模板"
-        )
-
-        scope._undo_restore_all_section_styles_btn.click()
-        app.processEvents()
-
-        assert changed == [True, True]
-        assert scene.section_styles["references_body"].font_cn == "黑体"
-        assert scene.section_styles["appendix_body"].font_cn == "仿宋"
-        assert references_toggle.isChecked() is True
-        assert appendix_toggle.isChecked() is True
-        assert scope._restore_all_section_styles_btn.isEnabled() is True
-        assert scope._undo_restore_all_section_styles_btn.isEnabled() is False
-        assert scope._style_override_summary.value_for("override_status") == (
-            "1 个格式例外"
-        )
-    finally:
-        panel.close()
-        app.processEvents()
-
-
 def test_scene_panel_template_change_skips_removed_page_number_detail():
     app = _app()
     bridge = PanelBridge()
     scene = SceneWorkspace(
         scene_id="thesis",
         template_id="thesis_gbt",
-        default_template_id="thesis_gbt",
         compatible_template_ids=["thesis_gbt"],
     )
     template = create_builtin_template("thesis_gbt")
@@ -1696,55 +443,16 @@ def test_scene_panel_profile_summaries_reflect_current_scene():
     scene = create_bidding_scene()
     template = create_builtin_template("bid_engineering")
     bridge.set_current_scene(scene, config_id="bidding", emit_signal=False)
-    bridge.set_current_template(template, config_id="bid_engineering", emit_signal=False)
+    bridge.set_current_template(
+        template, config_id="bid_engineering", emit_signal=False
+    )
 
     panel = ScenePanel(bridge)
     try:
         app.processEvents()
 
-        assert panel._overview._profile_summary.value_for("input_profile") == "Word 文档 / Excel 表格"
-        assert panel._overview._profile_summary.value_for("parameter_ownership") == "归属清楚"
-        ownership_detail = panel._overview._profile_summary.detail_for(
-            "parameter_ownership"
-        )
-        assert "模板管样式" in ownership_detail
-        assert "场景管流程" in ownership_detail
-        assert "资料管输入" in ownership_detail
-        assert "输出管版本" in ownership_detail
-        assert panel._overview._profile_summary.value_for("parameter_boundary") == (
-            "按字段应用"
-        )
-        parameter_boundary_detail = panel._overview._profile_summary.detail_for(
-            "parameter_boundary"
-        )
-        assert "固定行高" in parameter_boundary_detail
-        assert "固定版式" in parameter_boundary_detail
-        assert "待裁决" not in parameter_boundary_detail
-        assert panel._overview._profile_summary.value_for("control_contract") == "已统一"
-        control_contract_detail = panel._overview._profile_summary.detail_for(
-            "control_contract"
-        )
-        assert "缩进" in control_contract_detail
-        assert "固定版式行高" in control_contract_detail
-        assert "特殊缩进" not in control_contract_detail
-        assert panel._overview._profile_summary.value_for("control_contract_scope") == (
-            "16 类控件"
-        )
-        assert panel._overview._profile_summary.value_for("bidding_archive_evidence") == (
-            "已打通"
-        )
-        bidding_detail = panel._overview._profile_summary.detail_for(
-            "bidding_archive_evidence"
-        )
-        assert "标书资料" in bidding_detail
-        assert "资质归档资料" in bidding_detail
-        bidding_tooltip = panel._overview._profile_summary.tooltip_for(
-            "bidding_archive_evidence"
-        )
-        assert "bid_materials_v1" in bidding_tooltip
-        assert "qualification_archive_assets_v1" in bidding_tooltip
-        assert "seal_position_residue_report" in bidding_tooltip
-        assert "bidding_materials_consortium_seal_residue_degraded" in bidding_tooltip
+        assert not hasattr(panel._overview, "_profile_summary")
+        assert not hasattr(panel._overview, "_advanced_evidence_card")
         assert panel._content._input_summary.value_for("materials") == "必需"
         material_detail = panel._content._input_summary.detail_for("materials")
         assert "标书资料" in material_detail
@@ -1759,10 +467,18 @@ def test_scene_panel_profile_summaries_reflect_current_scene():
         assert "印章" in panel._content._input_summary.detail_for("image_roles")
         assert panel._cleanup._compliance_summary.value_for("object_policy") == "启用"
         assert "严格" in panel._cleanup._compliance_summary.detail_for("object_policy")
-        assert panel._cleanup._compliance_summary.value_for("scan_targets") == "11 个目标"
-        assert "content_controls" in panel._cleanup._compliance_summary.detail_for("scan_targets")
-        assert "hidden_text" in panel._cleanup._compliance_summary.detail_for("scan_targets")
-        assert panel._output._delivery_summary.value_for("preset_count") == "3 个输出版本"
+        assert (
+            panel._cleanup._compliance_summary.value_for("scan_targets") == "11 个目标"
+        )
+        assert "content_controls" in panel._cleanup._compliance_summary.detail_for(
+            "scan_targets"
+        )
+        assert "hidden_text" in panel._cleanup._compliance_summary.detail_for(
+            "scan_targets"
+        )
+        assert (
+            panel._output._delivery_summary.value_for("preset_count") == "3 个输出版本"
+        )
     finally:
         panel.close()
         app.processEvents()
@@ -1793,7 +509,7 @@ def test_scene_overview_summary_projects_parameter_ownership_registry():
     assert ownership_items["parameter_ownership"].value == "归属清楚"
     assert items["parameter_ownership"].value == "归属清楚"
     assert "模板管样式" in items["parameter_ownership"].detail
-    assert "场景管流程" in items["parameter_ownership"].detail
+    assert "方案管流程" in items["parameter_ownership"].detail
     assert "资料管输入" in items["parameter_ownership"].detail
     assert "输出管版本" in items["parameter_ownership"].detail
     assert "13" not in items["parameter_ownership"].detail
@@ -1809,9 +525,7 @@ def test_scene_overview_summary_projects_parameter_ownership_registry():
 def test_scene_overview_summary_projects_control_contract_registry():
     scene = SceneWorkspace(scene_id="contract_delivery")
     items = {item.key: item for item in build_scene_overview_summary_items(scene)}
-    control_items = {
-        item.key: item for item in build_control_contract_summary_items()
-    }
+    control_items = {item.key: item for item in build_control_contract_summary_items()}
 
     assert control_items["control_contract"].value == "已统一"
     assert items["control_contract"].value == "已统一"
@@ -1833,7 +547,7 @@ def test_scene_overview_summary_projects_control_contract_registry():
     assert items["control_contract_scope"].value == "16 类控件"
     assert items["control_contract_scope"].detail == "5 类控件归属已分开"
     assert "模板管样式 9" in items["control_contract_scope"].tooltip
-    assert "场景管流程 3" in items["control_contract_scope"].tooltip
+    assert "方案管流程 3" in items["control_contract_scope"].tooltip
     assert "资料管输入 1" in items["control_contract_scope"].tooltip
     assert "输出管版本 2" in items["control_contract_scope"].tooltip
     assert "插件管人工确认 1" in items["control_contract_scope"].tooltip
@@ -1899,7 +613,10 @@ def test_scene_overview_summary_projects_sample_fixture_coverage():
     assert sample_items["sample_fixture_coverage"].value == "已有样本文档"
     assert "2 个样本" in sample_items["sample_fixture_coverage"].detail
     assert "修订" in sample_items["sample_fixture_coverage"].tooltip
-    assert "scene_sample_fixture_registry" not in sample_items["sample_fixture_coverage"].tooltip
+    assert (
+        "scene_sample_fixture_registry"
+        not in sample_items["sample_fixture_coverage"].tooltip
+    )
     assert "覆盖 pack" not in sample_items["sample_fixture_coverage"].tooltip
     assert overview["sample_fixture_coverage"].value == "已有样本文档"
     assert overview["sample_fixture_boundary"].value == "有边界说明"
@@ -1907,8 +624,13 @@ def test_scene_overview_summary_projects_sample_fixture_coverage():
     assert request_items["request_cell_coverage"].value == "常见说法已覆盖"
     assert "4 个请求" in request_items["request_cell_coverage"].detail
     assert "0 个借用样本" in request_items["request_cell_coverage"].detail
-    assert "常见说法登记：高频用户说法" in request_items["request_cell_coverage"].tooltip
-    assert "scene_request_cell_fixture_registry" not in request_items["request_cell_coverage"].tooltip
+    assert (
+        "常见说法登记：高频用户说法" in request_items["request_cell_coverage"].tooltip
+    )
+    assert (
+        "scene_request_cell_fixture_registry"
+        not in request_items["request_cell_coverage"].tooltip
+    )
     assert "fixture-backed" not in request_items["request_cell_coverage"].tooltip
     assert overview["request_cell_coverage"].value == "常见说法已覆盖"
     assert "4 个请求" in overview["request_cell_coverage"].detail
@@ -1936,9 +658,7 @@ def test_scene_overview_summary_projects_sample_fixture_coverage():
         "direct_family_fixture",
         "ambiguous_fixture_set",
     }
-    assert (
-        "Word 对象：正文片段 / 域 / 批注 / 修订 / 隐藏文字 / 嵌入附件"
-    ) in (
+    assert ("Word 对象：正文片段 / 域 / 批注 / 修订 / 隐藏文字 / 嵌入附件") in (
         detail_text
     )
     assert "边界：合同样本只验证格式和字段，不代表法律审查" in detail_text
@@ -2009,12 +729,12 @@ def test_scene_family_application_uses_shared_content_visibility_rule_labels():
     ]
 
     answer_sheet = next(
-        preset for preset in scene.delivery_presets if preset.preset_id == "answer_sheet"
+        preset
+        for preset in scene.delivery_presets
+        if preset.preset_id == "answer_sheet"
     )
     assert answer_sheet.label == "答题卡"
-    assert [
-        rule.label for rule in answer_sheet.content_visibility_rules
-    ] == [
+    assert [rule.label for rule in answer_sheet.content_visibility_rules] == [
         "答案",
         "解析",
         "解题过程",
@@ -2033,7 +753,6 @@ def test_scene_panel_family_delivery_combo_uses_shared_display_labels():
         name="试卷/教学资料",
         category="exam_teaching",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     template = create_builtin_template("default")
@@ -2094,7 +813,9 @@ def test_scene_overview_summary_projects_official_archive_profile_defaults():
     assert "official_policy_metadata_archive_report" in (
         overview["official_policy_evidence"].tooltip
     )
-    assert "Official metadata evidence" not in overview["official_policy_evidence"].label
+    assert (
+        "Official metadata evidence" not in overview["official_policy_evidence"].label
+    )
     assert "ready" not in overview["official_policy_evidence"].value
     assert overview["product_readiness"].value == "可直接使用"
     assert "product_readiness_gaps" not in overview
@@ -2109,6 +830,1071 @@ def test_scene_overview_summary_projects_official_archive_profile_defaults():
     assert compliance["count_profile"].value == "administrative_sections"
     assert "Administrative section" in compliance["count_profile"].detail
     assert compliance["planning_scan_targets"].value in {"已应用", "已覆盖"}
+
+
+def test_scene_panel_official_plan_preview_uses_official_master_contract(monkeypatch):
+    monkeypatch.setattr(
+        config_library, "SCENE_LIBRARY_DIR", ROOT / "config_library" / "plans"
+    )
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("official_gbt"),
+        config_id="official_gbt",
+        emit_signal=False,
+    )
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+        assert panel._nav_cards["scn_exam_paper"].isHidden() is False
+        assert panel._nav_cards["scn_exam_paper"]._title.text() == "方案概览"
+
+        panel._nav_rail.select_card("scn_exam_paper")
+        app.processEvents()
+
+        detail = panel._exam_paper
+        assert detail._plan_preview_card.isHidden() is False
+        assert detail._master_card.isHidden() is True
+        assert detail._preview_mode_control.isHidden() is True
+        assert detail._prompt_card.isHidden() is True
+        assert not hasattr(detail, "_official_card")
+        assert not hasattr(detail, "_preview_card")
+        assert not hasattr(detail, "_official_word_preview_controller")
+        assert not hasattr(detail, "_exam_word_preview_controller")
+        assert detail._active_preview_provider_id == "official"
+        assert detail._official_profile.findData("notice") >= 0
+        assert detail._official_profile.findData("minutes") >= 0
+        assert (
+            detail._official_material_sample.findData("builtin/notice_archive_check")
+            >= 0
+        )
+        assert (
+            detail._official_material_sample.findData("builtin/letter_material_request")
+            < 0
+        )
+        assert (
+            detail._official_material_sample.findData("builtin/minutes_coordination")
+            < 0
+        )
+        assert (
+            detail._official_material_sample.currentData()
+            == "builtin/notice_archive_check"
+        )
+        assert detail._official_master.findData("official_gbt_standard") >= 0
+        assert "official_gbt" in detail._official_template.text()
+        assert detail._official_profile.isHidden()
+        assert detail._official_material_sample.isHidden()
+        assert detail._official_master.isHidden()
+        assert detail._official_action_row.isHidden()
+        assert not hasattr(detail, "_official_navigation_row")
+        assert not hasattr(detail, "_official_material_nav_btn")
+        assert not hasattr(detail, "_official_master_nav_btn")
+        assert "资料状态：尚未填写" in detail._official_material_status.text()
+        assert not hasattr(detail, "_official_preview_page")
+        assert not hasattr(detail, "_official_preview_mode_control")
+        assert (
+            detail._document_word_preview.toolbar_widget().parent()
+            is detail._plan_preview_card._header_widget
+        )
+        assert "official_document_v1" in detail._official_contract.text()
+        assert "official_title" in detail._official_contract.text()
+        assert "装配检查" in detail._official_contract.text()
+        assert "母版" not in detail._official_contract.text()
+
+        _set_combo_by_data(detail._official_profile, "minutes")
+        app.processEvents()
+        assert detail._official_profile.currentData() == "minutes"
+        assert (
+            detail._official_material_sample.findData("builtin/minutes_coordination")
+            >= 0
+        )
+        assert (
+            detail._official_material_sample.findData("builtin/notice_archive_check")
+            < 0
+        )
+        assert (
+            detail._official_material_sample.currentData()
+            == "builtin/minutes_coordination"
+        )
+        assert detail._official_master.currentData() == "official_gbt_minutes"
+        assert "administrative_meeting_fields_v1" in detail._official_contract.text()
+
+        snapshot = panel._navigation_card_snapshots(scene)["scn_exam_paper"]
+        assert snapshot["badge_text"] == "公文版式"
+        assert "GB/T 9704 通用红头公文版式" in snapshot["subtitle"]
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_navigation_uses_bridge_mode_when_scene_identity_is_stale():
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    panel = ScenePanel(bridge)
+    try:
+        stale_scene = SceneWorkspace(
+            scene_id="custom",
+            category="custom",
+            mode_id="custom",
+            template_id="default",
+        )
+        panel._current_scene = stale_scene
+        panel._update_dynamic_card_visibility()
+        app.processEvents()
+
+        assert bridge.current_work_mode_id() == "official"
+        assert panel._nav_cards["scn_exam_paper"].isHidden() is False
+        assert panel._nav_cards["scn_overview"].isHidden() is True
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_official_open_scene_folder_button_keeps_label_but_targets_user_docx_pool(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        scene_panel_module,
+        "OFFICIAL_USER_MASTER_DIR",
+        tmp_path / "config_library" / "masters" / "official" / "user",
+    )
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+
+        assert panel._overview._open_scene_folder_btn.text() == "打开方案文件夹"
+        assert panel._current_scene_folder() == (
+            tmp_path / "config_library" / "masters" / "official" / "user"
+        )
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_official_plan_minutes_type_flows_to_preview_and_material_fill(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        config_library, "SCENE_LIBRARY_DIR", ROOT / "config_library" / "plans"
+    )
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = config_library.load_scene_from_library("official", mode_id="official")
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_official_document_type_id("minutes", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("official_gbt"),
+        config_id="official_gbt",
+        emit_signal=False,
+    )
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+
+        panel._nav_rail.select_card("scn_exam_paper")
+        app.processEvents()
+        preview_detail = panel._exam_paper
+        assert preview_detail._official_profile.currentData() == "minutes"
+        assert (
+            preview_detail._official_material_sample.currentData()
+            == "builtin/minutes_coordination"
+        )
+        assert (
+            "administrative_meeting_fields_v1"
+            in preview_detail._official_contract.text()
+        )
+
+        panel._nav_rail.select_card("scn_content")
+        app.processEvents()
+        content_detail = panel._content
+        assert content_detail._official_material_profile.currentData() == "minutes"
+        assert (
+            content_detail._official_material_rows["meeting_date"].isHidden() is False
+        )
+        assert (
+            content_detail._official_material_rows["participants"].isHidden() is False
+        )
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_official_plan_letter_type_uses_builtin_material_sample(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        config_library, "SCENE_LIBRARY_DIR", ROOT / "config_library" / "plans"
+    )
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = config_library.load_scene_from_library("official", mode_id="official")
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_official_document_type_id("letter", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("official_gbt"),
+        config_id="official_gbt",
+        emit_signal=False,
+    )
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+
+        panel._nav_rail.select_card("scn_exam_paper")
+        app.processEvents()
+        detail = panel._exam_paper
+
+        assert detail._official_profile.currentData() == "letter"
+        assert (
+            detail._official_material_sample.findData("builtin/letter_material_request")
+            >= 0
+        )
+        assert (
+            detail._official_material_sample.findData("builtin/notice_archive_check")
+            < 0
+        )
+        assert (
+            detail._official_material_sample.findData("builtin/minutes_coordination")
+            < 0
+        )
+        assert (
+            detail._official_material_sample.currentData()
+            == "builtin/letter_material_request"
+        )
+        assert "函件资料包样例" in detail._official_material_sample.currentText()
+        assert detail._official_apply_sample_btn.isEnabled() is True
+        assert "official_document_v1" in detail._official_contract.text()
+        assert (
+            "administrative_meeting_fields_v1" not in detail._official_contract.text()
+        )
+
+        detail._apply_official_sample_material()
+        app.processEvents()
+        context = bridge.current_material_context()
+        assert context.profile_id == "official:letter"
+        assert context.profile_name == "函"
+        assert context.entity_data["document_type"] == "letter"
+        assert context.entity_data["title"] == "关于商请协助提供归档材料的函"
+        assert "必填字段已齐" in detail._official_material_status.text()
+
+        _set_combo_by_data(detail._official_profile, "notice")
+        app.processEvents()
+        assert detail._official_profile.currentData() == "notice"
+        assert (
+            detail._official_material_sample.findData("builtin/notice_archive_check")
+            >= 0
+        )
+        assert (
+            detail._official_material_sample.findData("builtin/letter_material_request")
+            < 0
+        )
+        assert (
+            detail._official_material_sample.currentData()
+            == "builtin/notice_archive_check"
+        )
+        assert detail._official_apply_sample_btn.isEnabled() is True
+
+        _set_combo_by_data(detail._official_profile, "letter")
+        app.processEvents()
+        assert detail._official_profile.currentData() == "letter"
+        assert (
+            detail._official_material_sample.currentData()
+            == "builtin/letter_material_request"
+        )
+        assert "函件资料包样例" in detail._official_material_sample.currentText()
+        assert detail._official_apply_sample_btn.isEnabled() is True
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_official_plan_preview_applies_sample_and_generates_docx(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr("src.ui.panels.scene_exam_detail.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.Toast.show_success",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.Toast.show_warning",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.Toast.show_error",
+        lambda *args, **kwargs: None,
+    )
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("official_gbt"),
+        config_id="official_gbt",
+        emit_signal=False,
+    )
+    panel = ScenePanel(bridge)
+    opened_paths: list[Path] = []
+    try:
+        app.processEvents()
+        panel._nav_rail.select_card("scn_exam_paper")
+        app.processEvents()
+
+        detail = panel._exam_paper
+        detail._open_sample_path_handler = lambda path: (
+            opened_paths.append(Path(path)) or True
+        )
+        _set_combo_by_data(detail._official_profile, "minutes")
+        app.processEvents()
+        assert (
+            detail._official_material_sample.currentData()
+            == "builtin/minutes_coordination"
+        )
+
+        detail._apply_official_sample_material()
+        app.processEvents()
+
+        context = bridge.current_material_context()
+        assert context.profile_id == "official:minutes"
+        assert context.profile_name == "纪要"
+        assert context.entity_data["document_type"] == "minutes"
+        assert context.entity_data["title"] == "专题协调会议纪要"
+        assert context.entity_data["meeting_date"]
+        assert context.entity_data["participants"]
+        assert "必填字段已齐" in detail._official_material_status.text()
+        assert "administrative_meeting_fields_v1" in detail._official_contract.text()
+        assert bridge.current_scene() is scene
+        assert bridge.current_scene_id() == "official"
+        assert scene.default_material_profile_id == "official:notice"
+
+        detail._generate_official_sample()
+        app.processEvents()
+
+        output_dir = tmp_path / "output" / "official_master_samples"
+        assert (output_dir / "minutes_official_sample.docx").is_file()
+        assert opened_paths == [output_dir]
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_official_plan_preview_rejects_ambiguous_material_sample(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        config_library, "SCENE_LIBRARY_DIR", ROOT / "config_library" / "plans"
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.Toast.show_warning",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.load_official_document_material_package_sample",
+        lambda _sample_id: (
+            material_package_module.OfficialDocumentMaterialPackageResult(
+                status="sample_ambiguous",
+                profile_id="notice_archive_check",
+                material_schema_ids=(),
+                context=MaterialExecutionContext(),
+                issues=("ambiguous",),
+            )
+        ),
+    )
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("official_gbt"),
+        config_id="official_gbt",
+        emit_signal=False,
+    )
+    bridge.set_current_material_context(
+        MaterialExecutionContext(
+            profile_id="official:notice",
+            entity_data={"document_type": "notice", "title": "Keep current task"},
+        ),
+        emit_signal=False,
+    )
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+        panel._nav_rail.select_card("scn_exam_paper")
+        app.processEvents()
+
+        panel._exam_paper._apply_official_sample_material()
+        app.processEvents()
+
+        context = bridge.current_material_context()
+        assert context.profile_id == "official:notice"
+        assert context.entity_data["title"] == "Keep current task"
+        assert bridge.current_scene() is scene
+        assert scene.default_material_profile_id == "official:notice"
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_official_plan_preview_imports_and_exports_material_package(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        config_library, "SCENE_LIBRARY_DIR", ROOT / "config_library" / "plans"
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_success", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_warning", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_error", lambda *args, **kwargs: None
+    )
+    import_path = tmp_path / "letter_material.json"
+    export_path = tmp_path / "exported_letter_material.json"
+    material_package_module.export_official_document_material_package(
+        MaterialExecutionContext(
+            profile_id="official:letter",
+            entity_data={
+                "title": "关于材料补充的函",
+                "body": "请补充相关材料。",
+                "organization": "示例办公室",
+                "document_no": "示函〔2026〕1号",
+                "issue_date": "2026年7月10日",
+                "recipient": "项目单位",
+            },
+        ),
+        import_path,
+        profile_id="letter",
+    )
+
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("official_gbt"),
+        config_id="official_gbt",
+        emit_signal=False,
+    )
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+        panel._nav_rail.select_card("scn_exam_paper")
+        app.processEvents()
+
+        detail = panel._exam_paper
+        assert not hasattr(detail, "_official_import_material_btn")
+        assert not hasattr(detail, "_official_export_material_btn")
+
+        detail._load_official_material_package(import_path)
+        app.processEvents()
+
+        context = bridge.current_material_context()
+        assert detail._official_profile.currentData() == "letter"
+        assert context.profile_id == "official:letter"
+        assert context.entity_data["document_type"] == "letter"
+        assert context.entity_data["title"] == "关于材料补充的函"
+        assert "必填字段已齐" in detail._official_material_status.text()
+
+        detail._export_official_material_package_to_path(export_path)
+        app.processEvents()
+
+        payload = json.loads(export_path.read_text(encoding="utf-8"))
+        assert payload["kind"] == "alavette.material_package"
+        assert payload["version"] == 5
+        assert payload["profiles"][0]["profile_id"] == "official:letter"
+        assert payload["profiles"][0]["fields"]["title"] == "关于材料补充的函"
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_official_material_fill_imports_and_exports_material_package(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        config_library, "SCENE_LIBRARY_DIR", ROOT / "config_library" / "plans"
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_success", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_warning", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_error", lambda *args, **kwargs: None
+    )
+    import_path = tmp_path / "letter_material.json"
+    export_path = tmp_path / "exported_letter_material.json"
+    material_package_module.export_official_document_material_package(
+        MaterialExecutionContext(
+            profile_id="official:letter",
+            entity_data={
+                "title": "关于资料补交的函",
+                "body": "请于本周内补交资料。",
+                "organization": "示例办公室",
+                "document_no": "示函〔2026〕2号",
+                "issue_date": "2026年7月10日",
+                "recipient": "项目单位",
+            },
+        ),
+        import_path,
+        profile_id="letter",
+    )
+
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    template = create_builtin_template("official_gbt")
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_template(template, config_id="official_gbt", emit_signal=False)
+    panel = ScenePanel(bridge)
+    scene_signals = []
+    template_signals = []
+    bridge.scene_changed.connect(lambda value: scene_signals.append(value))
+    bridge.template_changed.connect(lambda value: template_signals.append(value))
+    try:
+        app.processEvents()
+        panel._nav_rail.select_card("scn_exam_paper")
+        app.processEvents()
+        preview_detail = panel._exam_paper
+        assert preview_detail._official_profile.currentData() == "notice"
+        assert (
+            preview_detail._official_material_sample.currentData()
+            == "builtin/notice_archive_check"
+        )
+
+        panel._nav_rail.select_card("scn_content")
+        app.processEvents()
+
+        detail = panel._content
+        assert not hasattr(detail, "_official_import_material_btn")
+        assert not hasattr(detail, "_official_export_material_btn")
+        assert detail._official_material_profile.currentData() == "notice"
+
+        detail._load_official_material_package(import_path)
+        app.processEvents()
+
+        context = bridge.current_material_context()
+        assert detail._official_material_profile.currentData() == "letter"
+        assert detail._official_material_fields["title"].text() == "关于资料补交的函"
+        assert detail._official_material_fields["recipient"].text() == "项目单位"
+        assert (
+            detail._official_material_fields["body"].get_text()
+            == "请于本周内补交资料。"
+        )
+        assert context.profile_id == "official:letter"
+        assert context.entity_data["document_type"] == "letter"
+        assert context.entity_data["title"] == "关于资料补交的函"
+        assert preview_detail._official_profile.currentData() == "letter"
+        assert (
+            preview_detail._official_material_sample.currentData()
+            == "builtin/letter_material_request"
+        )
+        assert bridge.current_scene() is scene
+        assert bridge.current_template() == template
+        assert scene.default_material_profile_id == "official:notice"
+        assert scene_signals == []
+        assert template_signals == []
+
+        detail._official_material_fields["body"].set_text("请于三个工作日内补交资料。")
+        app.processEvents()
+        detail._export_official_material_package_to_path(export_path)
+        app.processEvents()
+
+        payload = json.loads(export_path.read_text(encoding="utf-8"))
+        assert payload["kind"] == "alavette.material_package"
+        assert payload["version"] == 5
+        profile = payload["profiles"][0]
+        assert profile["profile_id"] == "official:letter"
+        assert profile["fields"]["title"] == "关于资料补交的函"
+        assert profile["fields"]["body"] == "请于三个工作日内补交资料。"
+        assert bridge.current_scene() is scene
+        assert bridge.current_template() == template
+        assert scene.default_material_profile_id == "official:notice"
+        assert scene_signals == []
+        assert template_signals == []
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_official_material_fill_imports_csv_and_syncs_task_profile(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        config_library, "SCENE_LIBRARY_DIR", ROOT / "config_library" / "plans"
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_success", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_warning", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_error", lambda *args, **kwargs: None
+    )
+    import_path = tmp_path / "minutes_material.csv"
+    import_path.write_text(
+        "文种,标题,正文,发文机关,发文字号,成文日期,会议时间,参会人员\n"
+        "minutes,档案工作协调会纪要,会议研究了归档安排。,综合办公室,办纪〔2026〕2号,"
+        "2026-07-10,2026-07-10 09:00,张三、李四\n",
+        encoding="utf-8-sig",
+    )
+    multiple_path = tmp_path / "multiple_materials.csv"
+    multiple_path.write_text(
+        "document_type,title,body,organization,document_no,issue_date\n"
+        "notice,Notice A,Body A,Office,A-1,2026-07-10\n"
+        "notice,Notice B,Body B,Office,B-1,2026-07-11\n",
+        encoding="utf-8",
+    )
+
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    template = create_builtin_template("official_gbt")
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_template(template, config_id="official_gbt", emit_signal=False)
+    panel = ScenePanel(bridge)
+    scene_signals = []
+    template_signals = []
+    bridge.scene_changed.connect(scene_signals.append)
+    bridge.template_changed.connect(template_signals.append)
+    try:
+        panel._nav_rail.select_card("scn_exam_paper")
+        app.processEvents()
+        preview_detail = panel._exam_paper
+
+        panel._nav_rail.select_card("scn_content")
+        app.processEvents()
+        detail = panel._content
+        assert not hasattr(detail, "_official_import_material_btn")
+        bridge.set_current_official_document_type_id("minutes")
+        app.processEvents()
+        detail._load_official_material_package(import_path)
+        app.processEvents()
+
+        context = bridge.current_material_context()
+        assert detail._official_material_profile.currentData() == "minutes"
+        assert detail._official_material_fields["title"].text() == "档案工作协调会纪要"
+        assert (
+            detail._official_material_fields["meeting_date"].text()
+            == "2026-07-10 09:00"
+        )
+        assert detail._official_material_fields["participants"].text() == "张三、李四"
+        assert detail._official_material_rows["meeting_date"].isHidden() is False
+        assert context.profile_id == "official:minutes"
+        assert context.entity_data["document_type"] == "minutes"
+        assert preview_detail._official_profile.currentData() == "minutes"
+        assert (
+            preview_detail._official_material_sample.currentData()
+            == "builtin/minutes_coordination"
+        )
+        assert bridge.current_scene() is scene
+        assert bridge.current_template() == template
+        assert scene.default_material_profile_id == "official:notice"
+        assert scene_signals == []
+        assert template_signals == []
+
+        before = bridge.current_material_context()
+        rejected = detail._load_official_material_package(multiple_path)
+        after = bridge.current_material_context()
+        assert rejected.status == "multiple_records"
+        assert after.profile_id == before.profile_id
+        assert after.entity_data == before.entity_data
+        assert detail._official_material_profile.currentData() == "minutes"
+        assert preview_detail._official_profile.currentData() == "minutes"
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_official_material_batch_import_is_transient_and_does_not_replace_single_task(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        config_library, "SCENE_LIBRARY_DIR", ROOT / "config_library" / "plans"
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_success", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_warning", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_error", lambda *args, **kwargs: None
+    )
+    batch_path = tmp_path / "official_batch.csv"
+    batch_path.write_text(
+        "task_id,document_type,title,body,organization,document_no,issue_date\n"
+        "notice_1,notice,Notice A,Body A,Office,A-1,2026-07-10\n"
+        "letter_1,letter,Letter B,Body B,Office,,2026-07-11\n",
+        encoding="utf-8",
+    )
+
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    template = create_builtin_template("official_gbt")
+    single_context = MaterialExecutionContext(
+        profile_id="official:notice",
+        profile_name="Current notice",
+        entity_data={
+            "document_type": "notice",
+            "title": "Current single task",
+        },
+    )
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_template(template, config_id="official_gbt", emit_signal=False)
+    bridge.set_current_material_context(single_context, emit_signal=False)
+    panel = ScenePanel(bridge)
+    scene_signals = []
+    template_signals = []
+    batch_signals = []
+    bridge.scene_changed.connect(scene_signals.append)
+    bridge.template_changed.connect(template_signals.append)
+    bridge.material_batch_selection_changed.connect(batch_signals.append)
+    try:
+        panel._nav_rail.select_card("scn_content")
+        app.processEvents()
+        detail = panel._content
+
+        assert not hasattr(detail, "_official_import_batch_btn")
+        loaded = detail._load_official_material_batch(batch_path)
+        app.processEvents()
+
+        assert loaded.status == "ready_with_issues"
+        assert loaded.invalid_count == 1
+        assert len(batch_signals) == 1
+        selection = bridge.current_material_batch_selection()
+        assert selection.source_kind == "official_document_table"
+        assert selection.source_path == str(batch_path)
+        assert selection.profile_ids == ["notice_1", "letter_1"]
+        assert selection.archive.profiles[0].fields["document_type"] == "notice"
+        assert selection.archive.profiles[1].fields["document_type"] == "letter"
+        assert "已载入 2 份公文资料" in detail._official_material_batch_status.text()
+        assert detail._official_material_batch_status.isHidden() is False
+        assert detail._official_batch_profile_row.isHidden() is False
+        assert detail._official_batch_profile.currentData() == "notice_1"
+
+        letter_index = detail._official_batch_profile.findData("letter_1")
+        assert letter_index >= 0
+        detail._official_batch_profile.setCurrentIndex(letter_index)
+        app.processEvents()
+        assert detail._official_material_profile.currentData() == "letter"
+        assert detail._official_material_fields["title"].text() == "Letter B"
+        assert detail._official_material_fields["document_no"].text() == ""
+
+        detail._official_material_fields["document_no"].setText("B-2")
+        QTest.qWait(320)
+        app.processEvents()
+        edited_selection = bridge.current_material_batch_selection()
+        edited_letter = edited_selection.archive.get_profile("letter_1")
+        assert edited_letter.fields["document_no"] == "B-2"
+        assert not hasattr(edited_letter, "required_fields")
+        assert edited_selection.item_metadata["letter_1"]["import_status"] == "ok"
+        assert edited_selection.item_metadata["letter_1"]["edited_in_batch"] is True
+        assert len(batch_signals) > 1
+
+        after = bridge.current_material_context()
+        assert after.profile_id == single_context.profile_id
+        assert after.profile_name == single_context.profile_name
+        assert after.entity_data == single_context.entity_data
+        assert bridge.current_scene() is scene
+        assert bridge.current_template() == template
+        assert scene.default_material_profile_id == "official:notice"
+        assert scene_signals == []
+        assert template_signals == []
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_official_material_rejects_legacy_without_context_mutation(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        config_library, "SCENE_LIBRARY_DIR", ROOT / "config_library" / "plans"
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_success", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_warning", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_error", lambda *args, **kwargs: None
+    )
+    source_path = tmp_path / "legacy_notice.json"
+    source_payload = {
+        "profile_id": "official:notice",
+        "entity_data": {
+            "title": "Legacy title",
+            "body": "Legacy body",
+            "organization": "Archive Office",
+            "document_no": "N-1",
+            "issue_date": "2026-07-10",
+        },
+    }
+    original_text = json.dumps(source_payload, ensure_ascii=False, indent=2)
+    source_path.write_text(original_text, encoding="utf-8")
+
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    template = create_builtin_template("official_gbt")
+    context = MaterialExecutionContext(
+        profile_id="official:letter",
+        profile_name="Current letter",
+        entity_data={"document_type": "letter", "title": "Current task"},
+    )
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_template(template, config_id="official_gbt", emit_signal=False)
+    bridge.set_current_material_context(context, emit_signal=False)
+    panel = ScenePanel(bridge)
+    scene_signals = []
+    template_signals = []
+    bridge.scene_changed.connect(scene_signals.append)
+    bridge.template_changed.connect(template_signals.append)
+    try:
+        panel._nav_rail.select_card("scn_content")
+        app.processEvents()
+        detail = panel._content
+
+        assert not hasattr(detail, "_official_convert_material_btn")
+        assert not hasattr(detail, "_convert_official_material_package_to_path")
+        result = detail._load_official_material_package(source_path)
+        app.processEvents()
+
+        assert result.status == "invalid_package"
+        assert result.context.is_empty()
+        assert source_path.read_text(encoding="utf-8") == original_text
+
+        after = bridge.current_material_context()
+        assert after.profile_id == context.profile_id
+        assert after.profile_name == context.profile_name
+        assert after.entity_data == context.entity_data
+        assert bridge.current_scene() is scene
+        assert bridge.current_template() == template
+        assert scene_signals == []
+        assert template_signals == []
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_official_material_fill_saves_user_library_material_package(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        config_library, "SCENE_LIBRARY_DIR", ROOT / "config_library" / "plans"
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_success", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_warning", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_panel.Toast.show_error", lambda *args, **kwargs: None
+    )
+    library_root = tmp_path / "config_library" / "material_packages"
+    monkeypatch.setattr(
+        material_package_library,
+        "MATERIAL_PACKAGE_LIBRARY_DIR",
+        library_root,
+    )
+    user_dir = material_package_library.material_package_user_dir("official")
+
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    template = create_builtin_template("official_gbt")
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_template(template, config_id="official_gbt", emit_signal=False)
+    panel = ScenePanel(bridge)
+    scene_signals = []
+    template_signals = []
+    bridge.scene_changed.connect(lambda value: scene_signals.append(value))
+    bridge.template_changed.connect(lambda value: template_signals.append(value))
+    try:
+        app.processEvents()
+        panel._nav_rail.select_card("scn_content")
+        app.processEvents()
+
+        detail = panel._content
+        assert not hasattr(detail, "_official_save_material_btn")
+        detail._official_material_fields["title"].setText("Notice title")
+        detail._official_material_fields["body"].set_text("Notice body")
+        detail._official_material_fields["organization"].setText("Archive Office")
+        detail._official_material_fields["document_no"].setText("A-2026-1")
+        detail._official_material_fields["issue_date"].setText("2026-07-10")
+        app.processEvents()
+
+        detail._save_official_material_package_to_library_with_label(
+            "saved_notice_package"
+        )
+        app.processEvents()
+
+        package_path = user_dir / "saved_notice_package" / "package.json"
+        payload = json.loads(package_path.read_text(encoding="utf-8"))
+        assert payload["kind"] == "alavette.material_package"
+        assert payload["version"] == 5
+        assert payload["package_id"] == "saved_notice_package"
+        assert payload["archive_name"] == "saved_notice_package"
+        profile = payload["profiles"][0]
+        assert profile["profile_id"] == "official:notice"
+        assert profile["fields"]["title"] == "Notice title"
+        assert profile["fields"]["body"] == "Notice body"
+        assert bridge.current_scene() is scene
+        assert bridge.current_template() == template
+        assert scene.default_material_profile_id == "official:notice"
+        assert scene_signals == []
+        assert template_signals == []
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_official_material_fill_writes_material_context(monkeypatch):
+    monkeypatch.setattr(
+        config_library, "SCENE_LIBRARY_DIR", ROOT / "config_library" / "plans"
+    )
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("official_gbt"),
+        config_id="official_gbt",
+        emit_signal=False,
+    )
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+        panel._nav_rail.select_card("scn_exam_paper")
+        app.processEvents()
+        preview_detail = panel._exam_paper
+        assert "资料状态：尚未填写" in preview_detail._official_material_status.text()
+
+        panel._nav_rail.select_card("scn_content")
+        app.processEvents()
+
+        detail = panel._content
+        assert detail._official_material_section.isHidden() is False
+        assert detail._official_material_profile.currentData() == "notice"
+        assert detail._official_material_rows["meeting_date"].isHidden() is True
+        assert detail._official_material_rows["recipient"].isHidden() is True
+        assert detail._official_material_rows["copy_scope"].isHidden() is True
+        assert detail._official_material_rows["title"].label_text == "标题 *"
+        assert detail._official_material_contract_row.isHidden() is True
+
+        detail._official_optional_fields_toggle.click()
+        app.processEvents()
+        assert detail._official_material_rows["recipient"].isHidden() is False
+        assert detail._official_material_rows["attachment_note"].isHidden() is False
+        assert detail._official_material_rows["copy_scope"].isHidden() is True
+
+        detail._official_advanced_fields_toggle.click()
+        app.processEvents()
+        assert detail._official_material_rows["copy_scope"].isHidden() is False
+        assert detail._official_material_contract_row.isHidden() is False
+
+        material_emissions = []
+        bridge.material_context_changed.connect(material_emissions.append)
+        detail._official_material_fields["title"].setText("关于开展资料归档检查的通知")
+        detail._official_material_fields["organization"].setText("示例市档案局")
+        detail._official_material_fields["document_no"].setText("示档发〔2026〕1号")
+        detail._official_material_fields["issue_date"].setText("2026年7月10日")
+        detail._official_material_fields["recipient"].setText("各部门")
+        detail._official_material_fields["body"].set_text("请各部门完成归档自查。")
+        QTest.qWait(320)
+        app.processEvents()
+
+        context = bridge.current_material_context()
+        assert len(material_emissions) == 1
+        assert context.profile_id == "official:notice"
+        assert context.profile_name == "公文资料"
+        assert context.entity_data["document_type"] == "notice"
+        assert context.entity_data["title"] == "关于开展资料归档检查的通知"
+        assert context.entity_data["recipient"] == "各部门"
+        assert context.entity_data["body"] == "请各部门完成归档自查。"
+        assert "必填字段已齐" in detail._official_material_status.text()
+        assert "必填字段已齐" in preview_detail._official_material_status.text()
+        assert "official_document_v1" in detail._official_material_contract.text()
+        assert "标题 -> official_title" in detail._official_material_contract.text()
+
+        _set_combo_by_data(detail._official_material_profile, "minutes")
+        app.processEvents()
+        assert detail._official_material_rows["recipient"].isHidden() is True
+        assert detail._official_material_rows["attachment_note"].isHidden() is True
+        assert detail._official_material_rows["meeting_date"].isHidden() is False
+        assert detail._official_material_rows["participants"].isHidden() is False
+        assert detail._official_material_rows["meeting_date"].label_text == "会议时间"
+
+        detail._official_material_fields["meeting_date"].setText("2026年7月10日上午")
+        detail._official_material_fields["participants"].setText("张三、李四")
+        QTest.qWait(320)
+        app.processEvents()
+
+        context = bridge.current_material_context()
+        assert context.profile_id == "official:minutes"
+        assert context.entity_data["document_type"] == "minutes"
+        assert context.entity_data["meeting_date"] == "2026年7月10日上午"
+        assert context.entity_data["participants"] == "张三、李四"
+        assert context.entity_data["recipient"] == "各部门"
+        assert (
+            "administrative_meeting_fields_v1"
+            in detail._official_material_contract.text()
+        )
+        assert preview_detail._official_profile.currentData() == "minutes"
+        assert (
+            preview_detail._official_material_sample.currentData()
+            == "builtin/minutes_coordination"
+        )
+
+        bridge.set_current_material_context(MaterialExecutionContext())
+        app.processEvents()
+        assert bridge.current_official_document_type_id() == "minutes"
+        assert detail._official_material_profile.currentData() == "minutes"
+        assert preview_detail._official_profile.currentData() == "minutes"
+        assert (
+            preview_detail._official_material_sample.currentData()
+            == "builtin/minutes_coordination"
+        )
+        assert bridge.current_scene() is scene
+        assert scene.default_material_profile_id == "official:notice"
+    finally:
+        panel.close()
+        app.processEvents()
 
 
 def test_scene_overview_summary_projects_academic_rule_source_evidence():
@@ -2126,7 +1912,10 @@ def test_scene_overview_summary_projects_academic_rule_source_evidence():
     assert evidence["academic_rule_source_evidence"].label == "学术规则证据"
     assert evidence["academic_rule_source_evidence"].value == "已打通"
     assert "学校论文规则资料" in evidence["academic_rule_source_evidence"].detail
-    assert "thesis_school_rule_context_v1" in evidence["academic_rule_source_evidence"].tooltip
+    assert (
+        "thesis_school_rule_context_v1"
+        in evidence["academic_rule_source_evidence"].tooltip
+    )
     assert "school_rule_source_selection" in (
         evidence["academic_rule_source_evidence"].tooltip
     )
@@ -2137,7 +1926,9 @@ def test_scene_overview_summary_projects_academic_rule_source_evidence():
         evidence["academic_rule_source_evidence"].tooltip
     )
     assert overview["academic_rule_source_evidence"].value == "已打通"
-    assert "Academic rule evidence" not in evidence["academic_rule_source_evidence"].label
+    assert (
+        "Academic rule evidence" not in evidence["academic_rule_source_evidence"].label
+    )
     assert overview["product_readiness"].value == "可直接使用"
     assert "product_readiness_gaps" not in overview
 
@@ -2159,7 +1950,10 @@ def test_scene_overview_summary_projects_journal_submission_evidence():
     assert evidence["journal_submission_evidence"].value == "已打通"
     assert "期刊投稿资料" in evidence["journal_submission_evidence"].detail
     assert "期刊资料" in evidence["journal_submission_evidence"].detail
-    assert "journal_submission_materials_v1" in evidence["journal_submission_evidence"].tooltip
+    assert (
+        "journal_submission_materials_v1"
+        in evidence["journal_submission_evidence"].tooltip
+    )
     assert "journal_materials_v1" in evidence["journal_submission_evidence"].tooltip
     assert "journal_submission_reviewed_generic_rules" in (
         evidence["journal_submission_evidence"].tooltip
@@ -2174,7 +1968,10 @@ def test_scene_overview_summary_projects_journal_submission_evidence():
         evidence["journal_submission_evidence"].tooltip
     )
     assert overview["journal_submission_evidence"].value == "已打通"
-    assert "Journal submission evidence" not in evidence["journal_submission_evidence"].label
+    assert (
+        "Journal submission evidence"
+        not in evidence["journal_submission_evidence"].label
+    )
     assert overview["product_readiness"].value == "可直接使用"
     assert "product_readiness_gaps" not in overview
     assert input_items["materials"].detail == "期刊投稿资料"
@@ -2194,7 +1991,9 @@ def test_scene_overview_summary_projects_technical_long_doc_evidence():
     assert "技术文档资料" in overview["technical_long_doc_evidence"].detail
     assert "长文档元数据" in overview["technical_long_doc_evidence"].detail
     assert "technical_document_v1" in overview["technical_long_doc_evidence"].tooltip
-    assert "long_document_metadata_v1" in overview["technical_long_doc_evidence"].tooltip
+    assert (
+        "long_document_metadata_v1" in overview["technical_long_doc_evidence"].tooltip
+    )
     assert "index_appendix_inventory" in overview["technical_long_doc_evidence"].tooltip
     assert "multi_file_merge_boundary_report" in (
         overview["technical_long_doc_evidence"].tooltip
@@ -2202,7 +2001,10 @@ def test_scene_overview_summary_projects_technical_long_doc_evidence():
     assert "technical_long_docs_index_appendix_merge_boundary" in (
         overview["technical_long_doc_evidence"].tooltip
     )
-    assert "Technical long-doc evidence" not in overview["technical_long_doc_evidence"].label
+    assert (
+        "Technical long-doc evidence"
+        not in overview["technical_long_doc_evidence"].label
+    )
     assert overview["product_readiness"].value == "可直接使用"
     assert "product_readiness_gaps" not in overview
 
@@ -2237,7 +2039,10 @@ def test_scene_overview_summary_projects_fixed_layout_batch_evidence():
     assert "通道：12/12" in evidence["fixed_layout_batch_evidence"].detail
     assert "channels=" not in evidence["fixed_layout_batch_evidence"].detail
     assert overview["fixed_layout_batch_evidence"].value == "已打通"
-    assert "Fixed-layout batch evidence" not in evidence["fixed_layout_batch_evidence"].label
+    assert (
+        "Fixed-layout batch evidence"
+        not in evidence["fixed_layout_batch_evidence"].label
+    )
     assert overview["product_readiness"].value == "可直接使用"
     assert "product_readiness_gaps" not in overview
     assert input_items["materials"].detail == "表单字段资料"
@@ -2317,7 +2122,10 @@ def test_scene_overview_summary_projects_application_report_evidence():
         evidence["application_report_evidence"].tooltip
     )
     assert overview["application_report_evidence"].value == "已打通"
-    assert "Application/report evidence" not in evidence["application_report_evidence"].label
+    assert (
+        "Application/report evidence"
+        not in evidence["application_report_evidence"].label
+    )
     assert overview["product_readiness"].value == "可直接使用"
     assert "product_readiness_gaps" not in overview
     assert "产品资料" in input_items["materials"].detail
@@ -2408,8 +2216,12 @@ def test_scene_overview_summary_projects_n2128_family_application_parity_default
         scene = SceneWorkspace(scene_id=family_id, category=family_id)
         apply_planned_scene_family_defaults(scene)
 
-        overview = {item.key: item for item in build_scene_overview_summary_items(scene)}
-        input_items = {item.key: item for item in build_input_profile_summary_items(scene)}
+        overview = {
+            item.key: item for item in build_scene_overview_summary_items(scene)
+        }
+        input_items = {
+            item.key: item for item in build_input_profile_summary_items(scene)
+        }
         compliance = {item.key: item for item in build_compliance_summary_items(scene)}
         delivery = {item.key: item for item in build_delivery_summary_items(scene)}
 
@@ -2501,7 +2313,6 @@ def test_scene_panel_overview_shows_planning_family_governance(tmp_path):
         description="字段一致性、审阅稿和签署稿规划族。",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     scene.input_source_profile.material_schema_id = "contract_parties_v1"
@@ -2514,18 +2325,27 @@ def test_scene_panel_overview_shows_planning_family_governance(tmp_path):
         app.processEvents()
 
         overview_layout = panel._overview.layout()
-        assert overview_layout.indexOf(panel._overview._scene_card) < overview_layout.indexOf(
+        assert overview_layout.indexOf(
+            panel._overview._scene_card
+        ) < overview_layout.indexOf(panel._overview._settings_card)
+        assert overview_layout.indexOf(
             panel._overview._settings_card
-        )
-        assert overview_layout.indexOf(panel._overview._settings_card) < overview_layout.indexOf(
-            panel._overview._run_preview_card
-        )
+        ) < overview_layout.indexOf(panel._overview._run_preview_card)
         assert panel._overview._combo.property("fullWidthMode") is True
-        assert panel._overview._new_scene_btn.text() == "新建场景"
+        assert panel._overview._new_scene_btn.text() == "新建方案"
         assert panel._overview._duplicate_scene_btn.text() == "创建副本"
-        assert panel._overview._open_scene_folder_btn.text() == "打开场景文件夹"
+        assert panel._overview._rename_scene_btn.text() == "重命名方案"
+        assert panel._overview._delete_scene_btn.text() == "删除方案"
         assert panel._overview._rename_scene_btn.isEnabled() is False
         assert panel._overview._delete_scene_btn.isEnabled() is False
+        assert not hasattr(panel._overview, "_save_scene_btn")
+        assert "save" not in panel._overview._scene_action_row._buttons
+        assert "保存为我的方案" not in {
+            button.text()
+            for button in panel._overview._scene_action_row._buttons.values()
+        }
+        assert not hasattr(panel._overview, "_fork_scene_btn")
+        assert panel._overview._open_scene_folder_btn.text() == "打开方案文件夹"
         assert panel._overview._execute_btn.parent() is not panel._overview._scene_card
         assert panel._overview._task_title.isHidden()
         assert panel._overview._task_meta.isHidden()
@@ -2538,7 +2358,7 @@ def test_scene_panel_overview_shows_planning_family_governance(tmp_path):
             panel._overview._run_steps_label.text()
         )
         assert panel._overview._summary.isHidden()
-        assert "按模板默认" in panel._overview._summary.text()
+        assert "全部内容" in panel._overview._summary.text()
         assert "/" not in panel._overview._summary.text()
         assert panel._overview._run_steps_label.isHidden()
         run_step_texts = [
@@ -2551,19 +2371,19 @@ def test_scene_panel_overview_shows_planning_family_governance(tmp_path):
         assert any("检查风险" in text for text in run_step_texts)
         assert any("统一主要样式" in text for text in run_step_texts)
         assert all("\n" not in text for text in run_step_texts)
+        assert all(
+            not row._icon.pixmap().isNull()
+            for row in panel._overview._run_step_rows
+            if not row.isHidden()
+        )
         assert "materials" in panel._overview._setting_rows
-        assert "已开启" in panel._overview._setting_rows[
-            "materials"
-        ].summary_text()
-        template_preview = build_template_preview_context(template)
-        style_source_row = panel._overview._setting_rows["style_source"]
-        assert style_source_row._label.text() == "套用模板"
-        assert style_source_row.summary_text() == "使用默认格式，无格式例外"
-        assert template_preview.action == "核对页面、正文、标题、表格、页眉页脚、目录和题注"
-        assert style_source_row._status.text() == "同源预览"
-        assert style_source_row._jump_btn.text() == "设置"
-        assert style_source_row._secondary_jump_btn.isHidden()
-        assert "编号：" not in style_source_row.summary_text()
+        assert all(
+            not panel._overview._setting_rows[key]._icon.pixmap().isNull()
+            for key in ("materials", "scope")
+        )
+        assert "已开启" in panel._overview._setting_rows["materials"].summary_text()
+        assert panel._overview._setting_rows["scope"].summary_text() == "全部内容"
+        assert "style_source" not in panel._overview._setting_rows
         assert "risk_confirmation" not in panel._overview._setting_rows
         assert "manual_confirmation" not in panel._overview._setting_rows
         first_screen_text = "\n".join(
@@ -2581,196 +2401,26 @@ def test_scene_panel_overview_shows_planning_family_governance(tmp_path):
             ]
         ).lower()
         assert not [
-            term for term in FIRST_SCREEN_BANNED_TERMS
+            term
+            for term in FIRST_SCREEN_BANNED_TERMS
             if term.lower() in first_screen_text
         ]
         assert "scn_evidence" not in panel._nav_cards
         assert "scn_evidence" not in panel._navigation_card_snapshots(scene)
-        assert panel._overview._advanced_evidence_card.isHidden() is True
-        assert panel._overview._advanced_evidence_content.isHidden() is True
-        assert panel._overview._advanced_evidence_hint.isHidden() is True
-        assert panel._overview._advanced_evidence_toggle_btn.text() == "展开"
+        assert not hasattr(panel._overview, "_advanced_evidence_card")
+        assert not hasattr(panel._overview, "_profile_summary")
+        assert not hasattr(panel._overview, "_sample_fixture_list")
+        assert not hasattr(panel._overview, "_request_cell_list")
+        assert "scn_overview" in panel._nav_cards
+        assert panel._nav_cards["scn_overview"].isHidden() is False
         assert panel._details.current_detail is panel._overview
-        panel._overview.show_advanced_evidence()
-        app.processEvents()
-        assert panel._overview._advanced_evidence_card.isHidden() is True
-        assert panel._overview._advanced_evidence_content.isHidden() is False
-        assert panel._overview._advanced_evidence_hint.isHidden() is False
-        assert "常见说法" in panel._overview._advanced_evidence_hint.text()
-        assert "请求样本" not in panel._overview._advanced_evidence_hint.text()
-        assert panel._overview._advanced_evidence_toggle_btn.text() == "收起"
-        assert (
-            panel._overview._profile_summary.value_for("planning_family")
-            == "合同交付"
-        )
-        assert "核对字段一致性" in panel._overview._profile_summary.detail_for(
-            "planning_workflows"
-        )
-        assert "修订保护" in panel._overview._profile_summary.detail_for(
-            "planning_first_slice"
-        )
-        assert "批注" in panel._overview._profile_summary.detail_for("planning_ooxml")
-        assert "修订" in panel._overview._profile_summary.detail_for("planning_ooxml")
-        assert panel._overview._profile_summary.value_for("coverage_pack") == (
-            "合同交付"
-        )
-        assert panel._overview._profile_summary.value_for("contract_field_evidence") == (
-            "已打通"
-        )
-        assert "contract_field_consistency_report" in (
-            panel._overview._profile_summary.tooltip_for("contract_field_evidence")
-        )
-        assert panel._overview._profile_summary.value_for("sample_fixture_coverage") == (
-            "已有样本文档"
-        )
-        assert "Word 对象" in panel._overview._profile_summary.detail_for(
-            "sample_fixture_coverage"
-        )
-        assert panel._overview._profile_summary.value_for("sample_fixture_boundary") == (
-            "有边界说明"
-        )
-        assert panel._overview._profile_summary.value_for("request_cell_coverage") == (
-            "常见说法已覆盖"
-        )
-        assert "4 个请求" in panel._overview._profile_summary.detail_for(
-            "request_cell_coverage"
-        )
-        assert panel._overview._sample_fixture_detail_row.isHidden() is False
-        sample_detail = panel._overview._sample_fixture_detail.get_text()
-        assert "合同交付样本 1" in sample_detail
-        assert "常见说法：" in sample_detail
-        assert "用户说法：合同审阅稿甲方乙方金额修订批注" in sample_detail
-        assert "修订" in sample_detail
-        assert "边界：合同样本只验证格式和字段，不代表法律审查" in sample_detail
-        assert "contract_delivery_revisions" not in sample_detail
-        assert "contract_review_revisions" not in sample_detail
-        assert "fixture=" not in sample_detail
-        assert "request-cells:" not in sample_detail
-        assert "boundary=" not in sample_detail
-        assert panel._overview._sample_fixture_detail._text_edit.isReadOnly() is True
-        assert panel._overview._sample_fixture_list_row.isHidden() is False
-        assert panel._overview._sample_fixture_list.count() == 2
-        assert (
-            panel._overview._sample_fixture_list.currentItem().data(Qt.UserRole)
-            == "contract_delivery_revisions"
-        )
-        assert "合同交付样本 1" in panel._overview._sample_fixture_list.currentItem().text()
-        assert (
-            "contract_delivery_revisions"
-            not in panel._overview._sample_fixture_list.currentItem().text()
-        )
-        sample_tooltip = panel._overview._sample_fixture_list.currentItem().toolTip()
-        assert "样本编号：contract_delivery_revisions" in sample_tooltip
-        assert "Word 对象：" in sample_tooltip
-        assert panel._overview._request_cell_filter_row.isHidden() is False
-        assert tuple(
-            (
-                str(panel._overview._request_cell_filter.itemData(index)),
-                panel._overview._request_cell_filter.itemText(index),
-            )
-            for index in range(panel._overview._request_cell_filter.count())
-        ) == scene_request_cell_filter_options()
-        assert panel._overview._request_cell_list_row.isHidden() is False
-        assert panel._overview._request_cell_list.count() == 4
-        assert panel._overview._request_cell_filter_status.text() == "4 条说法"
-        assert "当前筛选：全部说法" in (
-            panel._overview._request_cell_filter_status.toolTip()
-        )
-        assert (
-            panel._overview._request_cell_list.currentItem().data(Qt.UserRole)
-            == "contract_signing_consistency"
-        )
-        assert "直接证据" in panel._overview._request_cell_list.currentItem().text()
-        assert (
-            "contract_signing_consistency"
-            not in panel._overview._request_cell_list.currentItem().text()
-        )
-        tooltip = panel._overview._request_cell_list.currentItem().toolTip()
-        assert "证据编号：contract_delivery_revisions" in tooltip
-        assert "fixture：" not in tooltip
-        _set_combo_by_data(
-            panel._overview._request_cell_filter,
-            "manual_boundary_fixture",
-        )
-        app.processEvents()
-        assert panel._overview._request_cell_list.count() == 0
-        assert panel._overview._request_cell_filter_status.text() == "无匹配说法"
-        assert "当前筛选：人工确认" in (
-            panel._overview._request_cell_filter_status.toolTip()
-        )
-        _set_combo_by_data(
-            panel._overview._request_cell_filter,
-            "ambiguous_fixture_set",
-        )
-        app.processEvents()
-        assert panel._overview._request_cell_list.count() == 1
-        assert panel._overview._request_cell_filter_status.text() == "1 条 / 共 4 条"
-        _set_combo_by_data(panel._overview._request_cell_filter, "all")
-        app.processEvents()
-        assert panel._overview._request_cell_list.count() == 4
-        assert panel._overview._request_cell_filter_status.text() == "4 条说法"
-        panel._overview._sample_fixture_output_dir = tmp_path / "scene_samples"
-        panel._overview._refresh_sample_fixture_library_state()
-        assert panel._overview._open_sample_fixture_dir_btn.isEnabled() is False
-        assert panel._overview._open_sample_fixture_file_btn.isEnabled() is False
-        assert panel._overview._open_request_cell_fixture_btn.isEnabled() is False
-        assert "证据文件未生成" in (
-            panel._overview._open_request_cell_fixture_btn.toolTip()
-        )
-        assert "尚未生成样本库" in panel._overview._sample_fixture_manifest.text()
-        assert "manifest" not in panel._overview._sample_fixture_manifest.text()
-        assert "生成样本库后" in panel._overview._sample_fixture_manifest.toolTip()
-        assert "样本文件未生成" in (
-            panel._overview._open_sample_fixture_file_btn.toolTip()
-        )
-
-        panel._overview._generate_sample_fixture_btn.click()
-        app.processEvents()
-
-        manifest_path = tmp_path / "scene_samples" / "manifest.json"
-        fixture_path = tmp_path / "scene_samples" / "contract_delivery_revisions.docx"
-        assert manifest_path.exists()
-        assert fixture_path.exists()
-        assert "样本库已生成" in panel._overview._sample_fixture_manifest.text()
-        assert "manifest" not in panel._overview._sample_fixture_manifest.text()
-        assert "42 个样本" in panel._overview._sample_fixture_manifest.text()
-        assert "位置：" in panel._overview._sample_fixture_manifest.toolTip()
-        assert panel._overview._open_sample_fixture_dir_btn.isEnabled() is True
-        assert panel._overview._open_sample_fixture_file_btn.isEnabled() is True
-        assert "样本库已生成" in panel._overview._open_sample_fixture_file_btn.toolTip()
-        assert panel._overview._open_request_cell_fixture_btn.isEnabled() is True
-        assert "可以打开说法依据" in (
-            panel._overview._open_request_cell_fixture_btn.toolTip()
-        )
-
-        opened_paths = []
-        panel._overview._open_local_path_handler = (
-            lambda path: opened_paths.append(Path(path)) or True
-        )
-        panel._overview._open_request_cell_fixture_btn.click()
-        app.processEvents()
-
-        assert opened_paths == [fixture_path]
-        assert "已打开说法依据" in panel._overview._request_cell_evidence_status.text()
-        assert str(fixture_path) not in panel._overview._request_cell_evidence_status.text()
-        assert "位置：" in panel._overview._request_cell_evidence_status.toolTip()
-
-        panel._overview._open_sample_fixture_file_btn.click()
-        app.processEvents()
-
-        assert opened_paths == [fixture_path, fixture_path]
-        assert "已打开样本" in panel._overview._sample_fixture_manifest.text()
-        assert str(fixture_path) not in panel._overview._sample_fixture_manifest.text()
-        assert "位置：" in panel._overview._sample_fixture_manifest.toolTip()
-
-        panel._overview._open_sample_fixture_dir_btn.click()
-        app.processEvents()
-
-        assert opened_paths == [fixture_path, fixture_path, tmp_path / "scene_samples"]
-        assert "已打开样本目录" in panel._overview._sample_fixture_manifest.text()
-        assert str(tmp_path / "scene_samples") not in panel._overview._sample_fixture_manifest.text()
-        assert "位置：" in panel._overview._sample_fixture_manifest.toolTip()
-        assert panel._overview._profile_summary.value_for("coverage_next_closure") == ""
+        engineering_overview = {
+            item.key: item for item in build_scene_overview_summary_items(scene)
+        }
+        assert engineering_overview["planning_family"].value == "合同交付"
+        assert engineering_overview["sample_fixture_coverage"].value == "已有样本文档"
+        assert "Word 对象" in engineering_overview["sample_fixture_coverage"].detail
+        assert build_scene_sample_fixture_detail_text(scene)
     finally:
         panel.close()
 
@@ -2797,7 +2447,9 @@ def test_scene_panel_overview_actions_emit_contextual_navigation_intents():
         assert intents[-1]["panel_id"] == "template"
         assert intents[-1]["card_id"] == "tpl_overview"
         assert intents[-1]["return_panel_id"] == "scene"
-        assert intents[-1]["payload"]["entry_context_title"] == "来自场景：核对模板与样式"
+        assert (
+            intents[-1]["payload"]["entry_context_title"] == "来自方案：核对模板与样式"
+        )
         assert "模板：" in intents[-1]["payload"]["entry_context_detail"]
         assert intents[-1]["payload"]["entry_context_action"] == (
             "核对页面、正文、标题、表格、页眉页脚、目录和题注"
@@ -2820,18 +2472,18 @@ def test_scene_panel_overview_actions_emit_contextual_navigation_intents():
             "tpl_toc",
             "tpl_caption",
         )
-        style_source_row = panel._overview._setting_rows["style_source"]
-        style_source_row._jump_btn.click()
-        assert panel._nav_rail.selected_card_id() == "scn_rules"
-        assert style_source_row._secondary_jump_btn.isHidden()
     finally:
         panel.close()
 
 
-def test_scene_overview_duplicate_creates_saved_scene_and_selects_it(tmp_path, monkeypatch):
-    monkeypatch.setattr(config_library, "SCENE_LIBRARY_DIR", tmp_path / "scenes")
+def test_scene_overview_duplicate_creates_mode_scoped_user_plan_and_selects_it(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(config_library, "SCENE_LIBRARY_DIR", tmp_path / "plans")
     app = _app()
     bridge = PanelBridge()
+    bridge.set_current_work_mode("exam", emit_signal=False)
     panel = ScenePanel(bridge)
     try:
         app.processEvents()
@@ -2841,12 +2493,56 @@ def test_scene_overview_duplicate_creates_saved_scene_and_selects_it(tmp_path, m
         app.processEvents()
 
         duplicated_scene_id = bridge.current_scene_id()
+        duplicated_path = (
+            config_library.scene_user_dir("exam") / f"{duplicated_scene_id}.json"
+        )
         assert duplicated_scene_id
         assert duplicated_scene_id != original_scene_id
-        assert (tmp_path / "scenes" / f"{duplicated_scene_id}.json").exists()
+        assert duplicated_path.is_file()
         assert panel._overview._combo.currentData() == duplicated_scene_id
+        assert bridge.current_scene_source_type() == "user"
         assert panel._overview._rename_scene_btn.isEnabled() is True
         assert panel._overview._delete_scene_btn.isEnabled() is True
+
+        monkeypatch.setattr(
+            scene_panel_module,
+            "input_text",
+            lambda *args, **kwargs: "校级期中方案",
+        )
+        panel._overview._rename_scene_btn.click()
+        app.processEvents()
+
+        assert bridge.current_scene().name == "校级期中方案"
+        assert duplicated_path.is_file()
+
+        monkeypatch.setattr(
+            scene_panel_module,
+            "confirm",
+            lambda *args, **kwargs: True,
+        )
+        panel._overview._delete_scene_btn.click()
+        app.processEvents()
+
+        assert duplicated_path.exists() is False
+        assert bridge.current_scene_id() != duplicated_scene_id
+        assert panel._overview._rename_scene_btn.isEnabled() is False
+        assert panel._overview._delete_scene_btn.isEnabled() is False
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_exposes_complete_plan_management_handlers():
+    app = _app()
+    bridge = PanelBridge()
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+        assert hasattr(panel, "_create_scene_copy")
+        assert hasattr(panel, "_on_new_scene_requested")
+        assert hasattr(panel, "_on_duplicate_scene_requested")
+        assert hasattr(panel, "_on_rename_scene_requested")
+        assert hasattr(panel, "_on_delete_scene_requested")
     finally:
         panel.close()
         app.processEvents()
@@ -2857,8 +2553,12 @@ def test_scene_overview_strategy_edit_stays_local(tmp_path, monkeypatch):
     app = _app()
     bridge = PanelBridge()
     scene = SceneWorkspace(scene_id="custom", template_id="default")
-    bridge.set_current_scene(scene, config_id="custom", source="library", emit_signal=False)
-    bridge.set_current_template(create_builtin_template("default"), config_id="default", emit_signal=False)
+    bridge.set_current_scene(
+        scene, config_id="custom", source="library", emit_signal=False
+    )
+    bridge.set_current_template(
+        create_builtin_template("default"), config_id="default", emit_signal=False
+    )
     panel = ScenePanel(bridge)
     scene_changed: list[SceneWorkspace] = []
     apply_calls: list[SceneWorkspace] = []
@@ -2882,13 +2582,18 @@ def test_scene_overview_strategy_edit_stays_local(tmp_path, monkeypatch):
         app.processEvents()
 
 
-def test_scene_overview_shows_exam_assembly_strategy_without_workbench_fields(tmp_path, monkeypatch):
+def test_scene_overview_shows_exam_assembly_strategy_with_canonical_schema(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(config_library, "SCENE_LIBRARY_DIR", tmp_path / "scenes")
     app = _app()
     bridge = PanelBridge()
+    bridge.set_current_work_mode("exam", emit_signal=False)
     scene = create_exam_scene()
     bridge.set_current_scene(scene, config_id="exam", emit_signal=False)
-    bridge.set_current_template(create_builtin_template("default"), config_id="default", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("default"), config_id="default", emit_signal=False
+    )
     panel = ScenePanel(bridge)
     try:
         app.processEvents()
@@ -2899,26 +2604,39 @@ def test_scene_overview_shows_exam_assembly_strategy_without_workbench_fields(tm
         assert "exam_answer_handling" not in panel._overview._setting_rows
         assert panel._overview._setting_rows["materials"].isHidden() is True
         assert panel._overview._setting_rows["scope"].isHidden() is True
-        assert panel._overview._setting_rows["style_source"].isHidden() is True
-        assert panel._nav_cards["scn_content"].isHidden() is True
-        assert panel._nav_section_headers["input_material"].isHidden() is True
-        assert panel._style_rules.isHidden() is True
-        assert panel._style_rules._style_variant_combo.count() == 0
-        assert panel._style_rules._style_rules_block.current_variant_key() == ""
-        assert panel._style_rules._style_rules_block.current_policy_key() == ""
-        assert all(
-            panel._style_rules._style_rules_block.rows[variant.key].isHidden()
-            for variant in STYLE_VARIANTS
-        )
-        assert "无格式例外" not in panel._navigation_card_snapshots(scene)["scn_rules"][
-            "subtitle"
-        ]
+        assert "style_source" not in panel._overview._setting_rows
+        assert scene.input_source_profile.material_schema_id == "exam_items_v1"
+        assert panel._nav_cards["scn_content"].isHidden() is False
+        assert "input_material" not in panel._nav_section_headers
+        rules_snapshot = panel._navigation_card_snapshots(scene)["scn_rules"]
+        assert "仅正文" not in rules_snapshot["subtitle"]
+        assert rules_snapshot["badge_text"] == "生成结果"
 
-        assert panel._overview._setting_rows["exam_blank_style"]._label.text() == "试卷母版"
-        assert panel._overview._setting_rows["exam_runtime_fields"]._label.text() == "本次信息"
+        panel._nav_rail.select_card("scn_rules")
+        app.processEvents()
+        assert panel._rules._scope.isHidden() is True
+        assert panel._rules._output_rules.isHidden() is False
+
+        assert (
+            panel._overview._setting_rows["exam_blank_style"]._label.text()
+            == "当前方案"
+        )
+        assert (
+            panel._overview._setting_rows["exam_runtime_fields"]._label.text()
+            == "本次信息"
+        )
         assert panel._nav_cards["scn_exam_paper"].isHidden() is False
-        assert panel._overview._setting_rows["exam_runtime_fields"]._jump_btn.isHidden() is False
-        assert "工作台" in panel._overview._setting_rows["exam_runtime_fields"].summary_text()
+        assert panel._nav_cards["scn_exam_paper"]._title.text() == "方案概览"
+        exam_snapshot = panel._navigation_card_snapshots(scene)["scn_exam_paper"]
+        assert exam_snapshot["subtitle"].endswith("· 当前方案")
+        assert (
+            panel._overview._setting_rows["exam_runtime_fields"]._jump_btn.isHidden()
+            is False
+        )
+        assert (
+            "工作台"
+            in panel._overview._setting_rows["exam_runtime_fields"].summary_text()
+        )
         panel._overview._setting_rows["exam_blank_style"]._jump_btn.click()
         assert panel._nav_rail.selected_card_id() == "scn_exam_paper"
 
@@ -2935,36 +2653,99 @@ def test_scene_overview_shows_exam_assembly_strategy_without_workbench_fields(tm
         app.processEvents()
 
 
-def test_scene_panel_keeps_material_card_for_exam_with_material_contract(tmp_path, monkeypatch):
+def test_scene_panel_hides_scope_for_official_master_assembly(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(config_library, "SCENE_LIBRARY_DIR", tmp_path / "scenes")
     app = _app()
     bridge = PanelBridge()
-    scene = create_exam_scene()
-    scene.input_source_profile.required_material_fields = ["exam_title"]
-    bridge.set_current_scene(scene, config_id="exam", emit_signal=False)
-    bridge.set_current_template(create_builtin_template("default"), config_id="default", emit_signal=False)
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = create_official_scene()
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("official_gbt"),
+        config_id="official_gbt",
+        emit_signal=False,
+    )
     panel = ScenePanel(bridge)
     try:
         app.processEvents()
 
-        assert panel._nav_cards["scn_content"].isHidden() is False
-        assert panel._nav_section_headers["input_material"].isHidden() is False
-        assert panel._navigation_card_snapshots(scene)["scn_content"]["badge_text"] == "已配置"
+        assert panel._overview._setting_rows["scope"].isHidden() is True
+        assert "style_source" not in panel._overview._setting_rows
+
+        rules_snapshot = panel._navigation_card_snapshots(scene)["scn_rules"]
+        assert rules_snapshot["badge_text"] == "生成结果"
+
+        panel._nav_rail.select_card("scn_rules")
+        app.processEvents()
+        assert panel._rules._scope.isHidden() is True
+        assert panel._rules._output_rules.isHidden() is False
     finally:
         panel.close()
         app.processEvents()
 
 
-def test_scene_exam_paper_detail_updates_config_and_answer_delivery(tmp_path, monkeypatch):
+def test_scene_panel_keeps_material_card_for_exam_with_material_contract(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(config_library, "SCENE_LIBRARY_DIR", tmp_path / "scenes")
-    monkeypatch.setattr("src.ui.panels.scene_panel.Toast.show_success", lambda *args, **kwargs: None)
-    monkeypatch.setattr("src.ui.panels.scene_panel.Toast.show_warning", lambda *args, **kwargs: None)
-    monkeypatch.setattr("src.ui.panels.scene_panel.Toast.show_error", lambda *args, **kwargs: None)
     app = _app()
     bridge = PanelBridge()
+    bridge.set_current_work_mode("exam", emit_signal=False)
+    scene = create_exam_scene()
+    scene.input_source_profile.required_material_fields = ["exam_title"]
+    bridge.set_current_scene(scene, config_id="exam", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("default"), config_id="default", emit_signal=False
+    )
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+
+        assert panel._nav_cards["scn_content"].isHidden() is False
+        assert "input_material" not in panel._nav_section_headers
+        assert (
+            panel._navigation_card_snapshots(scene)["scn_content"]["badge_text"]
+            == "已配置"
+        )
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_exam_paper_detail_updates_config_and_answer_delivery(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(config_library, "SCENE_LIBRARY_DIR", tmp_path / "scenes")
+    monkeypatch.setattr(
+        "src.shared.engine.exam_paper_style.USER_EXAM_MASTER_DIR",
+        tmp_path / "user_masters",
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.USER_EXAM_MASTER_DIR",
+        tmp_path / "user_masters",
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.Toast.show_success",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.Toast.show_warning",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.Toast.show_error",
+        lambda *args, **kwargs: None,
+    )
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("exam", emit_signal=False)
     scene = create_exam_scene()
     bridge.set_current_scene(scene, config_id="exam", emit_signal=False)
-    bridge.set_current_template(create_builtin_template("default"), config_id="default", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("default"), config_id="default", emit_signal=False
+    )
     panel = ScenePanel(bridge)
     try:
         panel.resize(1330, 1120)
@@ -2977,39 +2758,69 @@ def test_scene_exam_paper_detail_updates_config_and_answer_delivery(tmp_path, mo
         detail = panel._exam_paper
         expected_gap = get_theme().template_detail_section_gap
         assert detail.layout().spacing() == expected_gap
-        assert detail._preview_card.y() - (
-            detail._master_card.y() + detail._master_card.height()
-        ) == expected_gap
-        assert detail._prompt_card.y() - (
-            detail._preview_card.y() + detail._preview_card.height()
-        ) == expected_gap
+        assert (
+            detail._plan_preview_card.y()
+            - (detail._attached_plan_card.y() + detail._attached_plan_card.height())
+            == expected_gap
+        )
+        assert (
+            detail._prompt_card.y()
+            - (detail._plan_preview_card.y() + detail._plan_preview_card.height())
+            == expected_gap
+        )
 
         assert detail._card.isHidden()
         assert detail._detail_summary.isHidden()
-        assert detail._master_card.isHidden() is False
-        assert detail._master_card._title_label.text() == "试卷装配"
-        assert detail._master_card._sep.isHidden()
+        assert detail._master_card.isHidden() is True
+        assert detail._attached_plan_card is panel._overview._scene_card
+        assert detail._attached_plan_card.isHidden() is False
+        assert panel._overview._combo.currentData() == "exam"
         assert not hasattr(detail, "_master_intro")
         assert not hasattr(detail, "_style_status")
         assert detail._live_summary.isHidden()
         assert not hasattr(detail, "_question_structure")
         assert not hasattr(detail, "_answer_policy")
         assert detail._blank_style.findData("compact_exam") == -1
+        assert detail._blank_style.findData("class_quiz_exam") == -1
+        assert detail._blank_style.findData("term_exam") == -1
+        assert (
+            detail._blank_style.itemText(detail._blank_style.findData("default_exam"))
+            == "A4 标准卷面"
+        )
         assert detail._blank_style.property("fullWidthMode") is True
-        assert detail._default_master_btn.text() == "默认母版"
-        assert detail._open_master_btn.text() == "打开母版"
-        assert detail._sample_docx_btn.text() == "生成样张"
-        assert detail._copy_style_btn.text() == "创建副本"
-        assert detail._open_master_folder_btn.text() == "打开母版文件夹"
-        assert detail._import_style_btn.text() == "导入母版"
-        assert detail._preview_card.isHidden() is False
-        assert detail._preview_card._title_label.text() == "母版预览"
+        assert detail._style_action_row.isHidden()
+        assert not hasattr(detail, "_copy_style_btn")
+        assert not hasattr(detail, "_rename_master_btn")
+        assert not hasattr(detail, "_delete_master_btn")
+        assert not hasattr(detail, "_open_master_btn")
+        assert not hasattr(detail, "_sample_docx_btn")
+        assert not hasattr(detail, "_import_style_btn")
+        assert detail._plan_preview_card.isHidden() is False
+        assert detail._plan_preview_card._title_label.text() == "方案概览"
         assert detail._preview_mode_control.current_data() == "student"
-        assert "学生卷：答案与解析不显示" not in detail._preview_page.text()
-        assert "下列词语中加点字读音" in detail._preview_page.text()
-        assert "答案速查" not in detail._preview_page.text()
+        assert detail._active_preview_provider_id == "exam"
+        assert detail._document_word_preview.objectName() == (
+            "scn_plan_document_preview"
+        )
+        assert (
+            detail._document_word_preview.toolbar_widget().parent()
+            is detail._plan_preview_card._header_widget
+        )
+        assert detail._document_word_preview.page_count() == 0
+        assert "当前环境未启用真实 Word 渲染" in (
+            detail._document_word_preview._status.text()
+        )
+        assert not hasattr(detail, "_preview_page")
+        assert not hasattr(detail, "_preview_canvas")
         assert detail._prompt_card.isHidden() is False
         assert detail._prompt_card._title_label.text() == "AI 提示词"
+        assert (
+            detail._prompt_card._content_layout.indexOf(detail._prompt_mode_control)
+            == -1
+        )
+        assert (
+            detail._prompt_card._header_layout.indexOf(detail._prompt_mode_control) >= 0
+        )
         assert detail._prompt_mode_control.current_data() == "markdown"
         assert "只输出 Markdown 正文" in detail._prompt_area.get_text()
         assert "不要编写页眉、页脚、页码、密封线" in detail._prompt_area.get_text()
@@ -3020,74 +2831,20 @@ def test_scene_exam_paper_detail_updates_config_and_answer_delivery(tmp_path, mo
         assert detail._prompt_mode_control.current_data() == "master"
         assert "{{af_title}}" in detail._prompt_area.get_text()
         assert "{{af_questions}}" in detail._prompt_area.get_text()
-        assert "页眉页脚只作为母版版式存在" in detail._prompt_area.get_text()
+        assert "页眉页脚只作为卷面版式存在" in detail._prompt_area.get_text()
         detail._copy_prompt_btn.click()
         assert app.clipboard().text() == detail._prompt_area.get_text()
 
         detail._preview_mode_control.set_current_index(1)
         app.processEvents()
         assert detail._preview_mode_control.current_data() == "answer"
-        assert "答案速查" in detail._preview_page.text()
-        assert "注意事项" not in detail._preview_page.text()
-        assert "下列词语中加点字读音" not in detail._preview_page.text()
         assert bridge.current_scene().exam_paper.answer_policy == "student_plus_answer"
 
-        opened_paths = []
-        detail._open_sample_path_handler = lambda path: opened_paths.append(path) or True
-        detail._open_master_btn.click()
-        assert opened_paths
-        assert opened_paths[-1].exists()
-        assert opened_paths[-1].name == "default_exam_v20.docx"
-        assert opened_paths[-1].parent.name == "builtin"
-
-        detail._open_master_folder_btn.click()
-        assert opened_paths[-1].exists()
-        assert opened_paths[-1].name == "builtin"
-
-        detail._sample_docx_btn.click()
-        assert opened_paths[-1].exists()
-        assert "样张" in opened_paths[-1].name
-
-        detail._copy_style_btn.click()
-        app.processEvents()
         current_scene = bridge.current_scene()
-        assert current_scene.exam_paper.custom_blank_styles
-        copied_style = current_scene.exam_paper.custom_blank_styles[-1]
-        assert current_scene.exam_paper.blank_style_id == copied_style.style_id
-        assert detail._blank_style.currentData() == copied_style.style_id
-        assert copied_style.label in detail._preview_page.text()
-        copied_path = Path(copied_style.master_docx_path)
-        if not copied_path.is_absolute():
-            copied_path = ROOT / copied_path
-        assert copied_path.exists()
-        assert not hasattr(detail, "_master_intro")
-
-        monkeypatch.setattr(
-            "src.ui.panels.scene_panel.QFileDialog.getOpenFileName",
-            lambda *args, **kwargs: (str(opened_paths[0]), "Word 文档 (*.docx)"),
-        )
-        detail._import_style_btn.click()
-        app.processEvents()
-        current_scene = bridge.current_scene()
-        imported_style = current_scene.exam_paper.custom_blank_styles[-1]
-        assert imported_style.style_id == "user_imported_exam"
-        assert current_scene.exam_paper.blank_style_id == imported_style.style_id
-        assert detail._blank_style.currentData() == imported_style.style_id
-        assert imported_style.label in detail._preview_page.text()
-        imported_path = Path(imported_style.master_docx_path)
-        if not imported_path.is_absolute():
-            imported_path = ROOT / imported_path
-        assert imported_path.exists()
-        assert not hasattr(detail, "_master_intro")
-
-        detail._default_master_btn.click()
-        app.processEvents()
-
-        current_scene = bridge.current_scene()
-        assert current_scene.exam_paper.blank_style_id == "default_exam"
+        assert current_scene.master_id == "default_exam"
         assert current_scene.exam_paper.question_structure_mode == "markdown_headings"
         assert current_scene.exam_paper.answer_policy == "student_plus_answer"
-        assert "默认试卷" in detail._preview_page.text()
+        assert detail._document_word_preview.page_count() == 0
         assert not hasattr(detail, "_master_intro")
         assert not hasattr(detail, "_style_status")
         preset_ids = {
@@ -3096,23 +2853,106 @@ def test_scene_exam_paper_detail_updates_config_and_answer_delivery(tmp_path, mo
         }
         assert "student" in preset_ids
 
-        detail._default_master_btn.click()
-        app.processEvents()
-        current_scene = bridge.current_scene()
-        assert current_scene.exam_paper.blank_style_id == "default_exam"
-        assert current_scene.exam_paper.question_structure_mode == "markdown_headings"
-        assert current_scene.exam_paper.answer_policy == "student_plus_answer"
-        preset_ids = {
-            str(getattr(preset, "preset_id", "") or "")
-            for preset in current_scene.delivery_presets
-        }
-        assert "student" in preset_ids
     finally:
         panel.close()
         app.processEvents()
 
 
-def test_scene_overview_selector_groups_user_scenes_above_builtin_scenes(tmp_path, monkeypatch):
+def test_scene_exam_paper_detail_discovers_manual_user_master_docx(
+    tmp_path, monkeypatch
+):
+    user_master_dir = tmp_path / "user_masters"
+    user_master_dir.mkdir(parents=True)
+    manual_master = user_master_dir / "AI生成母版.docx"
+    document = Document()
+    document.add_paragraph("{{af_title}}")
+    document.add_paragraph("科目：{{af_subject}}")
+    document.add_paragraph("{{af_questions}}")
+    document.save(manual_master)
+
+    monkeypatch.setattr(config_library, "SCENE_LIBRARY_DIR", tmp_path / "scenes")
+    monkeypatch.setattr(
+        "src.shared.engine.exam_paper_style.USER_EXAM_MASTER_DIR",
+        user_master_dir,
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.USER_EXAM_MASTER_DIR",
+        user_master_dir,
+    )
+
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("exam", emit_signal=False)
+    scene = create_exam_scene()
+    bridge.set_current_scene(scene, config_id="exam", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("default"), config_id="default", emit_signal=False
+    )
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+        detail = panel._exam_paper
+
+        assert detail._blank_style.findText("AI生成母版") >= 0
+        assert [
+            style.label
+            for style in bridge.current_scene().exam_paper.custom_blank_styles
+        ] == ["AI生成母版"]
+        discovered = bridge.current_scene().exam_paper.custom_blank_styles[0]
+        assert discovered.master_docx_path.endswith("AI生成母版.docx")
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_exam_paper_open_folder_uses_mode_scoped_user_dir(
+    tmp_path, monkeypatch
+):
+    active_user_dir = tmp_path / "config_library" / "masters" / "exam" / "user"
+
+    monkeypatch.setattr(config_library, "SCENE_LIBRARY_DIR", tmp_path / "scenes")
+    monkeypatch.setattr(
+        "src.shared.engine.exam_paper_style.USER_EXAM_MASTER_DIR",
+        active_user_dir,
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.USER_EXAM_MASTER_DIR",
+        active_user_dir,
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.scene_exam_detail.Toast.show_success",
+        lambda *args, **kwargs: None,
+    )
+
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("exam", emit_signal=False)
+    scene = create_exam_scene()
+    bridge.set_current_scene(scene, config_id="exam", emit_signal=False)
+    bridge.set_current_template(
+        create_builtin_template("default"), config_id="default", emit_signal=False
+    )
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+        detail = panel._exam_paper
+        opened_paths = []
+        detail._open_sample_path_handler = lambda path: (
+            opened_paths.append(path) or True
+        )
+
+        detail._open_master_folder_btn.click()
+
+        assert opened_paths == [active_user_dir]
+        assert active_user_dir.is_dir()
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_overview_selector_places_source_badges_on_real_scene_options(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(config_library, "SCENE_LIBRARY_DIR", tmp_path / "scenes")
     config_library.ensure_config_library()
     config_library.save_scene_to_library(
@@ -3120,7 +2960,6 @@ def test_scene_overview_selector_groups_user_scenes_above_builtin_scenes(tmp_pat
             scene_id="exam_default_copy",
             name="试卷-期中",
             template_id="default",
-            default_template_id="default",
             compatible_template_ids=["default"],
         ),
         scene_id="exam_default_copy",
@@ -3133,23 +2972,72 @@ def test_scene_overview_selector_groups_user_scenes_above_builtin_scenes(tmp_pat
 
         combo = panel._overview._combo
         texts = [combo.itemText(index) for index in range(combo.count())]
-        assert texts.index("我的场景") < texts.index("试卷-期中")
-        assert texts.index("试卷-期中") < texts.index("内置场景")
-        assert texts.index("内置场景") < texts.index("通用-默认")
+        assert "我的方案" not in texts
+        assert "内置方案" not in texts
+        assert texts.index("试卷-期中方案") < texts.index("自定义方案")
 
-        group_index = texts.index("我的场景")
-        combo.setCurrentIndex(group_index)
-        panel._on_scene_changed(group_index)
-        app.processEvents()
-
-        assert bridge.current_scene_id() == "custom"
-        assert combo.currentData() == "custom"
+        user_index = texts.index("试卷-期中方案")
+        builtin_index = texts.index("自定义方案")
+        assert combo.itemData(user_index, SOURCE_BADGE_TEXT_ROLE) == "自定"
+        assert combo.itemData(builtin_index, SOURCE_BADGE_TEXT_ROLE) == "内置"
+        assert combo.model().item(user_index).isEnabled() is True
+        assert combo.model().item(builtin_index).isEnabled() is True
     finally:
         panel.close()
         app.processEvents()
 
 
-def test_scene_panel_template_preview_summary_renders_without_overlap_at_narrow_width():
+def test_scene_overview_distinct_user_plan_gets_user_management_permissions(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(config_library, "SCENE_LIBRARY_DIR", tmp_path / "scenes")
+    config_library.ensure_config_library()
+    user_scene_id = "exam_school_midterm"
+    user_scene = config_library.load_scene_from_library("exam", mode_id="exam")
+    user_scene.scene_id = user_scene_id
+    user_scene.name = "校级期中试卷"
+    config_library.save_scene_to_library(
+        user_scene,
+        scene_id=user_scene_id,
+        mode_id="exam",
+    )
+
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("exam")
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+
+        descriptor = panel._descriptor_for_scene_id(user_scene_id)
+        assert descriptor is not None
+        assert descriptor.source_type == "user"
+        assert descriptor.name == "校级期中试卷"
+        assert panel._current_scene_id() == "exam"
+        user_index = panel._overview._combo.findData(user_scene_id)
+        assert user_index >= 0
+        panel._overview._combo.setCurrentIndex(user_index)
+        app.processEvents()
+
+        assert panel._current_scene_id() == user_scene_id
+        combo_texts = [
+            panel._overview._combo.itemText(index)
+            for index in range(panel._overview._combo.count())
+        ]
+        assert "校级期中试卷方案" in combo_texts
+        assert "默认试卷方案" in combo_texts
+        assert panel._current_scene_is_builtin() is False
+        assert bridge.current_scene_source() == "library"
+        assert bridge.current_scene_source_type() == "user"
+        assert panel._overview._rename_scene_btn.isEnabled() is True
+        assert panel._overview._delete_scene_btn.isEnabled() is True
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_scene_panel_scope_summary_renders_without_overlap_at_narrow_width():
     app = _app()
     bridge = PanelBridge()
     scene = SceneWorkspace(
@@ -3157,7 +3045,6 @@ def test_scene_panel_template_preview_summary_renders_without_overlap_at_narrow_
         name="合同交付",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     template = create_builtin_template("default")
@@ -3168,9 +3055,11 @@ def test_scene_panel_template_preview_summary_renders_without_overlap_at_narrow_
         panel.resize(620, 900)
         panel.show()
         app.processEvents()
+        panel._show_detail("scn_overview")
+        app.processEvents()
         app.processEvents()
 
-        row = panel._overview._setting_rows["style_source"]
+        row = panel._overview._setting_rows["scope"]
         summary = row._summary
         button = row._jump_btn
         summary_right = summary.mapTo(row, QPoint(summary.width(), 0)).x()
@@ -3180,10 +3069,7 @@ def test_scene_panel_template_preview_summary_renders_without_overlap_at_narrow_
         if required_summary_height < 0:
             required_summary_height = summary.sizeHint().height()
 
-        assert row.summary_text() == "使用默认格式，无格式例外"
-        assert build_template_preview_context(template).action == (
-            "核对页面、正文、标题、表格、页眉页脚、目录和题注"
-        )
+        assert row.summary_text() == "全部内容"
         assert summary.wordWrap() is True
         assert summary.width() > 0
         assert summary.height() >= required_summary_height
@@ -3199,7 +3085,7 @@ def test_scene_panel_template_preview_summary_renders_without_overlap_at_narrow_
                 color = image.pixelColor(x, y)
                 if color.alpha() and color.red() + color.green() + color.blue() < 600:
                     dark_samples += 1
-        assert dark_samples >= 8
+        assert dark_samples >= 4
     finally:
         panel.close()
 
@@ -3218,6 +3104,7 @@ def test_scene_panel_output_advanced_naming_and_reports_are_collapsed_by_default
         assert output._advanced_output_container.isHidden() is True
         assert output._advanced_output_toggle_btn.text() == "展开"
         assert output._final_docx.isHidden() is False
+        assert output._review_pdf_row.isHidden() is True
         assert output._material_package.isHidden() is False
 
         output._advanced_output_toggle_btn.click()
@@ -3225,6 +3112,42 @@ def test_scene_panel_output_advanced_naming_and_reports_are_collapsed_by_default
 
         assert output._advanced_output_container.isHidden() is False
         assert output._advanced_output_toggle_btn.text() == "收起"
+    finally:
+        panel.close()
+
+
+def test_scene_panel_official_review_pdf_toggle_survives_delivery_switch():
+    app = _app()
+    bridge = PanelBridge()
+    bridge.set_current_work_mode("official", emit_signal=False)
+    scene = config_library.load_scene_from_library("official", mode_id="official")
+    bridge.set_current_scene(scene, config_id="official", emit_signal=False)
+    panel = ScenePanel(bridge)
+    try:
+        app.processEvents()
+
+        output = panel._output
+        compact_review = panel._rules._output_rules._general_checks["review_pdf"]
+        assert output._review_pdf_row.isHidden() is False
+        assert output._review_pdf.isChecked() is True
+        assert compact_review.isHidden() is False
+        assert compact_review.isChecked() is True
+        assert scene.default_delivery_preset().artifacts.review_pdf is True
+
+        internal_review_index = output._default_delivery.findData("internal_review")
+        assert internal_review_index >= 0
+        output._default_delivery.setCurrentIndex(internal_review_index)
+        app.processEvents()
+
+        assert scene.default_delivery_preset_id == "internal_review"
+        assert scene.default_delivery_preset().artifacts.review_pdf is True
+        assert output._review_pdf.isChecked() is True
+
+        compact_review.click()
+        app.processEvents()
+
+        assert scene.default_delivery_preset().artifacts.review_pdf is False
+        assert output._review_pdf.isChecked() is False
     finally:
         panel.close()
 
@@ -3241,21 +3164,22 @@ def test_scene_panel_output_rules_card_edits_delivery_artifacts_directly():
         output_rules = panel._rules._output_rules
         assert panel._output.isHidden() is True
         assert output_rules._general_checks["final_docx"].isHidden() is False
+        assert output_rules._general_checks["review_pdf"].isHidden() is True
         assert output_rules._exam_student_check.isHidden() is True
         assert output_rules._general_checks["report"].isChecked() is True
 
         output_rules._general_checks["report"].click()
         app.processEvents()
 
-        assert scene.output.report_json is False
-        assert scene.output.report_markdown is False
+        assert scene.default_delivery_preset().artifacts.report_json is False
+        assert scene.default_delivery_preset().artifacts.report_markdown is False
         assert scene.delivery_presets[0].artifacts.report_json is False
         assert scene.delivery_presets[0].artifacts.report_markdown is False
 
         output_rules._general_checks["material_package"].click()
         app.processEvents()
 
-        assert scene.output.material_package is True
+        assert scene.default_delivery_preset().artifacts.material_package is True
         assert scene.delivery_presets[0].artifacts.material_package is True
     finally:
         panel.close()
@@ -3264,7 +3188,13 @@ def test_scene_panel_output_rules_card_edits_delivery_artifacts_directly():
 def test_scene_panel_output_rules_card_controls_exam_answer_delivery():
     app = _app()
     bridge = PanelBridge()
-    scene = SceneWorkspace(scene_id="exam_default", category="exam", template_id="default")
+    bridge.set_current_work_mode("exam", emit_signal=False)
+    scene = SceneWorkspace(
+        scene_id="exam_default",
+        mode_id="exam",
+        category="exam",
+        template_id="default",
+    )
     bridge.set_current_scene(scene, config_id="exam_default", emit_signal=False)
     panel = ScenePanel(bridge)
     try:
@@ -3277,19 +3207,14 @@ def test_scene_panel_output_rules_card_controls_exam_answer_delivery():
         assert output_rules._exam_student_check.isEnabled() is True
         assert output_rules._exam_answer_check.isChecked() is True
         assert scene.exam_paper.answer_policy == "student_plus_answer"
-        assert {
-            preset.preset_id
-            for preset in scene.delivery_presets
-        } == {"student", "answer_key"}
+        assert {preset.preset_id for preset in scene.delivery_presets} == {"final"}
+        assert scene.default_delivery_preset_id == "final"
 
         output_rules._exam_answer_check.click()
         app.processEvents()
 
         assert scene.exam_paper.answer_policy == "student_only"
-        assert {
-            preset.preset_id
-            for preset in scene.delivery_presets
-        } == {"student"}
+        assert {preset.preset_id for preset in scene.delivery_presets} == {"student"}
 
         output_rules._exam_answer_check.click()
         app.processEvents()
@@ -3297,10 +3222,7 @@ def test_scene_panel_output_rules_card_controls_exam_answer_delivery():
         app.processEvents()
 
         assert scene.exam_paper.answer_policy == "answer_only"
-        assert {
-            preset.preset_id
-            for preset in scene.delivery_presets
-        } == {"answer_key"}
+        assert {preset.preset_id for preset in scene.delivery_presets} == {"answer_key"}
         assert scene.default_delivery_preset_id == "answer_key"
     finally:
         panel.close()
@@ -3377,12 +3299,15 @@ def test_scene_panel_navigation_intent_shows_return_to_execution_action():
 
         assert panel._nav_rail.selected_card_id() == "scn_rules"
         assert panel._output._advanced_output_container.isHidden() is False
-        assert panel._output._delivery_filename.property("navigation_field_highlight") is True
+        assert (
+            panel._output._delivery_filename.property("navigation_field_highlight")
+            is True
+        )
         assert "文件名规则" in panel._output._delivery_filename.toolTip()
         assert "filename_template" not in panel._output._delivery_filename.toolTip()
-        assert panel._output._delivery_filename.property("navigation_field_raw_label") == (
-            "filename_template"
-        )
+        assert panel._output._delivery_filename.property(
+            "navigation_field_raw_label"
+        ) == ("filename_template")
         assert panel._output._delivery_filename.objectName() == (
             "scn_output_filename_template"
         )
@@ -3404,72 +3329,55 @@ def test_scene_panel_navigation_intent_shows_return_to_execution_action():
 
         assert panel._nav_rail.selected_card_id() == "scn_rules"
         assert panel._output._advanced_output_container.isHidden() is False
-        assert panel._output._delivery_preset_id.property("navigation_field_highlight") is True
-        assert "交付编号" in panel._output._delivery_preset_id.toolTip()
-        assert panel._output._delivery_preset_id.property("navigation_field_raw_label") == (
-            "preset_id"
+        assert (
+            panel._output._delivery_preset_id.property("navigation_field_highlight")
+            is True
         )
+        assert "交付编号" in panel._output._delivery_preset_id.toolTip()
+        assert panel._output._delivery_preset_id.property(
+            "navigation_field_raw_label"
+        ) == ("preset_id")
     finally:
         panel.close()
         app.processEvents()
 
 
-def test_scene_panel_request_cell_list_filters_boundary_levels():
-    app = _app()
-    bridge = PanelBridge()
+def test_scene_request_cell_projection_filters_boundary_levels_without_product_ui():
     scene = SceneWorkspace(
         scene_id="professional_disclosure",
         name="专业披露",
         category="professional_disclosure",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
-    template = create_builtin_template("default")
-    bridge.set_current_scene(scene, config_id="professional_disclosure", emit_signal=False)
-    bridge.set_current_template(template, config_id="default", emit_signal=False)
-
-    panel = ScenePanel(bridge)
-    try:
-        app.processEvents()
-
-        assert panel._overview._request_cell_list_row.isHidden() is False
-        assert panel._overview._request_cell_list.count() == 9
-
-        _set_combo_by_data(
-            panel._overview._request_cell_filter,
-            "manual_boundary_fixture",
-        )
-        app.processEvents()
-        assert panel._overview._request_cell_list.count() == 6
-        assert panel._overview._request_cell_filter_status.text() == "6 条 / 共 9 条"
-        assert "人工确认" in panel._overview._request_cell_list.currentItem().text()
-        assert "professional_disclosure_review_gate" in (
-            panel._overview._request_cell_list.currentItem().toolTip()
-        )
-
-        _set_combo_by_data(panel._overview._request_cell_filter, "ambiguous_fixture_set")
-        app.processEvents()
-        assert panel._overview._request_cell_list.count() == 3
-        assert panel._overview._request_cell_filter_status.text() == "3 条 / 共 9 条"
-        assert "容易误解" in panel._overview._request_cell_list.currentItem().text()
-        assert "需要先澄清" in panel._overview._request_cell_list.currentItem().toolTip()
-        assert "候选资料包" in panel._overview._request_cell_list.currentItem().toolTip()
-        assert "候选路由" not in panel._overview._request_cell_list.currentItem().toolTip()
-
-        _set_combo_by_data(panel._overview._request_cell_filter, "direct_family_fixture")
-        app.processEvents()
-        assert panel._overview._request_cell_list.count() == 0
-        assert panel._overview._request_cell_filter_status.text() == "无匹配说法"
-        assert "当前筛选：直接证据" in (
-            panel._overview._request_cell_filter_status.toolTip()
-        )
-        assert "先选择一条请求说法" in (
-            panel._overview._open_request_cell_fixture_btn.toolTip()
-        )
-    finally:
-        panel.close()
-        app.processEvents()
+    cells = scene_request_cell_fixture_specs_for_scene(scene)
+    assert len(cells) == 9
+    manual = tuple(
+        cell
+        for cell in cells
+        if scene_request_cell_matches_filter(cell, "manual_boundary_fixture")
+    )
+    ambiguous = tuple(
+        cell
+        for cell in cells
+        if scene_request_cell_matches_filter(cell, "ambiguous_fixture_set")
+    )
+    direct = tuple(
+        cell
+        for cell in cells
+        if scene_request_cell_matches_filter(cell, "direct_family_fixture")
+    )
+    assert len(manual) == 6
+    assert len(ambiguous) == 3
+    assert not direct
+    manual_projection = scene_request_cell_list_item_projection(manual[0])
+    assert "人工确认" in manual_projection.text
+    assert "professional_disclosure_review_gate" in manual_projection.tooltip
+    ambiguous_projection = scene_request_cell_list_item_projection(ambiguous[0])
+    assert "容易误解" in ambiguous_projection.text
+    assert "需要先澄清" in ambiguous_projection.tooltip
+    assert "候选资料包" in ambiguous_projection.tooltip
+    assert "候选路由" not in ambiguous_projection.tooltip
 
 
 def test_scene_panel_can_apply_planning_family_preflight_targets():
@@ -3480,7 +3388,6 @@ def test_scene_panel_can_apply_planning_family_preflight_targets():
         name="合同交付",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     scene.input_source_profile.material_schema_id = "contract_parties_v1"
@@ -3495,16 +3402,26 @@ def test_scene_panel_can_apply_planning_family_preflight_targets():
 
         recommended = recommended_object_preflight_targets_for_scene(scene)
         assert panel._cleanup._apply_family_preflight_btn.isEnabled() is True
-        assert panel._cleanup._compliance_summary.value_for("planning_scan_targets") == "需同步"
+        assert (
+            panel._cleanup._compliance_summary.value_for("planning_scan_targets")
+            == "需同步"
+        )
 
         panel._cleanup._apply_family_preflight_btn.click()
         app.processEvents()
 
-        assert scene.compliance_profile.object_preflight.scan_targets == list(recommended)
-        assert "tracked_changes" in scene.compliance_profile.object_preflight.scan_targets
+        assert scene.compliance_profile.object_preflight.scan_targets == list(
+            recommended
+        )
+        assert (
+            "tracked_changes" in scene.compliance_profile.object_preflight.scan_targets
+        )
         assert panel._cleanup._scan_target_checks["tracked_changes"].isChecked() is True
         assert panel._cleanup._scan_target_checks["fields"].isChecked() is True
-        assert panel._cleanup._compliance_summary.value_for("planning_scan_targets") == "已应用"
+        assert (
+            panel._cleanup._compliance_summary.value_for("planning_scan_targets")
+            == "已应用"
+        )
     finally:
         panel.close()
         app.processEvents()
@@ -3518,7 +3435,6 @@ def test_scene_panel_scan_target_checkboxes_write_back_to_scene():
         name="合同交付",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     scene.compliance_profile.object_preflight.scan_targets = ["comments", "fields"]
@@ -3532,7 +3448,9 @@ def test_scene_panel_scan_target_checkboxes_write_back_to_scene():
 
         assert panel._cleanup._scan_target_checks["fields"].isChecked() is True
         assert panel._cleanup._scan_target_checks["macros"].isChecked() is False
-        assert panel._cleanup._compliance_summary.value_for("scan_targets") == "2 个目标"
+        assert (
+            panel._cleanup._compliance_summary.value_for("scan_targets") == "2 个目标"
+        )
 
         panel._cleanup._scan_target_checks["fields"].click()
         panel._cleanup._scan_target_checks["tracked_changes"].click()
@@ -3542,7 +3460,9 @@ def test_scene_panel_scan_target_checkboxes_write_back_to_scene():
             "tracked_changes",
             "comments",
         ]
-        assert panel._cleanup._compliance_summary.value_for("scan_targets") == "2 个目标"
+        assert (
+            panel._cleanup._compliance_summary.value_for("scan_targets") == "2 个目标"
+        )
         target_detail = panel._cleanup._compliance_summary.detail_for("scan_targets")
         assert "tracked_changes" in target_detail
         assert "fields" not in target_detail
@@ -3578,7 +3498,7 @@ def test_scene_panel_profile_controls_write_back_to_scene():
         panel._output._default_delivery.setCurrentIndex(review_index)
         app.processEvents()
         assert scene.default_delivery_preset_id == "review"
-        assert scene.output.compare_docx is True
+        assert scene.default_delivery_preset().artifacts.compare_docx is True
         assert panel._output._delivery_summary.value_for("default_delivery") == "审阅稿"
 
         panel._output._delivery_label.setText("Review package")
@@ -3586,18 +3506,32 @@ def test_scene_panel_profile_controls_write_back_to_scene():
         panel._output._delivery_filename.setText("{stem}_reviewed")
         app.processEvents()
 
-        review_preset = next(preset for preset in scene.delivery_presets if preset.preset_id == "review")
+        review_preset = next(
+            preset for preset in scene.delivery_presets if preset.preset_id == "review"
+        )
         assert review_preset.label == "Review package"
         assert review_preset.output_dir_template == "review/{preset_id}"
         assert review_preset.filename_template == "{stem}_reviewed"
-        assert panel._output._default_delivery.itemText(
-            panel._output._default_delivery.currentIndex()
-        ) == "Review package"
-        assert panel._output._delivery_summary.value_for("default_delivery") == "Review package"
-        assert panel._output._delivery_summary.detail_for("default_delivery") == "执行时默认生成"
-        assert panel._output._delivery_validation_summary.value_for(
-            "delivery_template_status"
-        ) == "通过"
+        assert (
+            panel._output._default_delivery.itemText(
+                panel._output._default_delivery.currentIndex()
+            )
+            == "Review package"
+        )
+        assert (
+            panel._output._delivery_summary.value_for("default_delivery")
+            == "Review package"
+        )
+        assert (
+            panel._output._delivery_summary.detail_for("default_delivery")
+            == "执行时默认生成"
+        )
+        assert (
+            panel._output._delivery_validation_summary.value_for(
+                "delivery_template_status"
+            )
+            == "通过"
+        )
         variable_detail = panel._output._delivery_validation_summary.detail_for(
             "delivery_variables"
         )
@@ -3614,14 +3548,18 @@ def test_scene_panel_profile_controls_write_back_to_scene():
         panel._output._material_package.click()
         app.processEvents()
 
-        assert scene.output.material_manifest is True
-        assert scene.output.material_package is True
+        assert scene.default_delivery_preset().artifacts.material_manifest is True
+        assert scene.default_delivery_preset().artifacts.material_package is True
         assert review_preset.artifacts.material_manifest is True
         assert review_preset.artifacts.material_package is True
-        assert "资料清单" in panel._output._delivery_summary.value_for("default_artifacts")
-        assert "资料包" in panel._output._delivery_summary.value_for("default_artifacts")
+        assert "资料清单" in panel._output._delivery_summary.value_for(
+            "default_artifacts"
+        )
+        assert "资料包" in panel._output._delivery_summary.value_for(
+            "default_artifacts"
+        )
 
-        panel._output._visibility_rules.set_text("answer=remove\nanalysis=hide")
+        panel._output._visibility_rules.set_text("answer=remove\nanalysis=remove")
         app.processEvents()
 
         assert [rule.selector for rule in review_preset.content_visibility_rules] == [
@@ -3634,19 +3572,21 @@ def test_scene_panel_profile_controls_write_back_to_scene():
         ]
         assert [rule.action for rule in review_preset.content_visibility_rules] == [
             "remove",
-            "hide",
+            "remove",
         ]
         rule_status_detail = panel._output._delivery_validation_summary.detail_for(
             "delivery_rule_status"
         )
         assert "答案：删除块" in rule_status_detail
-        assert "解析：隐藏块" in rule_status_detail
+        assert "解析：删除块" in rule_status_detail
         rule_status_tooltip = panel._output._delivery_validation_summary.tooltip_for(
             "delivery_rule_status"
         )
         assert "answer=remove" in rule_status_tooltip
-        assert "analysis=hide" in rule_status_tooltip
-        assert "显隐规则 2 条" in panel._output._delivery_summary.detail_for("default_artifacts")
+        assert "analysis=remove" in rule_status_tooltip
+        assert "显隐规则 2 条" in panel._output._delivery_summary.detail_for(
+            "default_artifacts"
+        )
 
         original_count = len(scene.delivery_presets)
         panel._output._copy_preset_btn.click()
@@ -3668,7 +3608,10 @@ def test_scene_panel_profile_controls_write_back_to_scene():
             "解析",
         ]
         assert scene.default_delivery_preset_id == "review_copy"
-        assert panel._output._delivery_summary.value_for("default_delivery") == "Review package Copy"
+        assert (
+            panel._output._delivery_summary.value_for("default_delivery")
+            == "Review package Copy"
+        )
         assert (
             panel._output._delivery_summary.detail_for("default_delivery")
             == "执行时默认生成"
@@ -3684,7 +3627,10 @@ def test_scene_panel_profile_controls_write_back_to_scene():
         assert scene.default_delivery_preset_id == "review_public"
         assert panel._output._default_delivery.currentData() == "review_public"
         assert panel._output._delivery_preset_id.text() == "review_public"
-        assert panel._output._delivery_summary.value_for("default_delivery") == "Review package Copy"
+        assert (
+            panel._output._delivery_summary.value_for("default_delivery")
+            == "Review package Copy"
+        )
         assert (
             panel._output._delivery_summary.detail_for("default_delivery")
             == "执行时默认生成"
@@ -3692,13 +3638,17 @@ def test_scene_panel_profile_controls_write_back_to_scene():
 
         panel._output._move_up_preset_btn.click()
         app.processEvents()
-        assert [preset.preset_id for preset in scene.delivery_presets][-2] == "review_public"
+        assert [preset.preset_id for preset in scene.delivery_presets][
+            -2
+        ] == "review_public"
         assert scene.default_delivery_preset_id == "review_public"
         assert panel._output._move_down_preset_btn.isEnabled()
 
         panel._output._move_down_preset_btn.click()
         app.processEvents()
-        assert [preset.preset_id for preset in scene.delivery_presets][-1] == "review_public"
+        assert [preset.preset_id for preset in scene.delivery_presets][
+            -1
+        ] == "review_public"
         assert scene.default_delivery_preset_id == "review_public"
 
         panel._output._add_preset_btn.click()
@@ -3715,7 +3665,10 @@ def test_scene_panel_profile_controls_write_back_to_scene():
 
         assert all(preset.preset_id != "delivery" for preset in scene.delivery_presets)
         assert scene.default_delivery_preset_id == "review_public"
-        assert panel._output._delivery_summary.value_for("default_delivery") == "Review package Copy"
+        assert (
+            panel._output._delivery_summary.value_for("default_delivery")
+            == "Review package Copy"
+        )
     finally:
         panel.close()
         app.processEvents()
@@ -3729,7 +3682,6 @@ def test_scene_panel_content_detail_edits_material_schema_contract():
         name="合同交付",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     template = create_builtin_template("default")
@@ -3740,7 +3692,9 @@ def test_scene_panel_content_detail_edits_material_schema_contract():
     try:
         app.processEvents()
 
-        contract_index = panel._content._schema_registry_combo.findData("contract_parties_v1")
+        contract_index = panel._content._schema_registry_combo.findData(
+            "contract_parties_v1"
+        )
         assert contract_index >= 0
         panel._content._schema_registry_combo.setCurrentIndex(contract_index)
         panel._content._set_primary_schema_btn.click()
@@ -3749,17 +3703,23 @@ def test_scene_panel_content_detail_edits_material_schema_contract():
         assert scene.input_source_profile.material_schema_id == "contract_parties_v1"
         assert scene.input_source_profile.material_schema_ids == []
         assert "合同方字段资料" in panel._content._input_summary.detail_for("materials")
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_registry_status"
-        ) == "通过"
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_registry_status"
+            )
+            == "通过"
+        )
         assert "合同方字段资料" in panel._content._schema_validation_summary.detail_for(
             "schema_labels"
         )
-        assert "Contract party fields" in panel._content._schema_validation_summary.tooltip_for(
-            "schema_labels"
+        assert (
+            "Contract party fields"
+            in panel._content._schema_validation_summary.tooltip_for("schema_labels")
         )
 
-        signature_index = panel._content._schema_registry_combo.findData("signature_assets_v1")
+        signature_index = panel._content._schema_registry_combo.findData(
+            "signature_assets_v1"
+        )
         assert signature_index >= 0
         panel._content._schema_registry_combo.setCurrentIndex(signature_index)
         panel._content._append_schema_btn.click()
@@ -3776,12 +3736,16 @@ def test_scene_panel_content_detail_edits_material_schema_contract():
         material_detail = panel._content._input_summary.detail_for("materials")
         assert "合同方字段资料" in material_detail
         assert "签章资料" in material_detail
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_registry_status"
-        ) == "通过"
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_rule_overview"
-        ) == "已识别 2 个资料规则"
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_registry_status"
+            )
+            == "通过"
+        )
+        assert (
+            panel._content._schema_validation_summary.value_for("schema_rule_overview")
+            == "已识别 2 个资料规则"
+        )
         overview_detail = panel._content._schema_validation_summary.detail_for(
             "schema_rule_overview"
         )
@@ -3798,30 +3762,38 @@ def test_scene_panel_content_detail_edits_material_schema_contract():
         assert "签章资料" in panel._content._schema_validation_summary.detail_for(
             "schema_labels"
         )
-        assert "Signature and seal assets" in panel._content._schema_validation_summary.tooltip_for(
-            "schema_labels"
+        assert (
+            "Signature and seal assets"
+            in panel._content._schema_validation_summary.tooltip_for("schema_labels")
         )
         assert "合同交付" in panel._content._schema_validation_summary.detail_for(
             "schema_families"
         )
-        assert "contract_delivery" in panel._content._schema_validation_summary.tooltip_for(
-            "schema_families"
+        assert (
+            "contract_delivery"
+            in panel._content._schema_validation_summary.tooltip_for("schema_families")
         )
-        assert panel._content._schema_validation_summary.value_for(
+        assert (
+            panel._content._schema_validation_summary.value_for("schema_fields")
+            == "5 个必填项"
+        )
+        field_detail = panel._content._schema_validation_summary.detail_for(
             "schema_fields"
-        ) == "5 个必填项"
-        field_detail = panel._content._schema_validation_summary.detail_for("schema_fields")
+        )
         assert "合同编号（必填）" in field_detail
         assert "contract_no" not in field_detail
         assert "profile override" not in field_detail
-        assert "本场景补充要求" not in field_detail
-        field_tooltip = panel._content._schema_validation_summary.tooltip_for("schema_fields")
+        assert "本方案补充要求" not in field_detail
+        field_tooltip = panel._content._schema_validation_summary.tooltip_for(
+            "schema_fields"
+        )
         assert "contract_no · Contract number · 必填" in field_tooltip
-        assert "本场景补充要求" in field_tooltip
+        assert "本方案补充要求" in field_tooltip
         assert "profile override" not in field_tooltip
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_image_roles"
-        ) == "2 必填 / 3 全部"
+        assert (
+            panel._content._schema_validation_summary.value_for("schema_image_roles")
+            == "2 必填 / 3 全部"
+        )
         image_detail = panel._content._schema_validation_summary.detail_for(
             "schema_image_roles"
         )
@@ -3831,12 +3803,18 @@ def test_scene_panel_content_detail_edits_material_schema_contract():
             "schema_image_roles"
         )
         assert "seal · Seal · 必填 · image" in image_tooltip
-        assert "legal_signature · Legal representative signature · 必填 · image" in image_tooltip
-        assert "本场景补充要求" in image_tooltip
+        assert (
+            "legal_signature · Legal representative signature · 必填 · image"
+            in image_tooltip
+        )
+        assert "本方案补充要求" in image_tooltip
         assert "profile override" not in image_tooltip
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_attachment_roles"
-        ) == "无"
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_attachment_roles"
+            )
+            == "无"
+        )
         assert panel._content._input_summary.value_for("material_fields") == "5 个字段"
         assert "合同编号" in panel._content._input_summary.detail_for("material_fields")
         assert panel._content._input_summary.value_for("image_roles") == "2 个角色"
@@ -3849,24 +3827,40 @@ def test_scene_panel_content_detail_edits_material_schema_contract():
         )
         app.processEvents()
 
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_registry_status"
-        ) == "未识别 1 个"
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_rule_overview"
-        ) == "已识别 1 个，未识别 1 个"
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_registry_status"
+            )
+            == "未识别 1 个"
+        )
+        assert (
+            panel._content._schema_validation_summary.value_for("schema_rule_overview")
+            == "已识别 1 个，未识别 1 个"
+        )
         assert panel._content._remove_unknown_schema_btn.isEnabled() is True
-        assert "missing_schema_v1" not in panel._content._schema_validation_summary.detail_for(
-            "schema_rule_overview"
+        assert (
+            "missing_schema_v1"
+            not in panel._content._schema_validation_summary.detail_for(
+                "schema_rule_overview"
+            )
         )
-        assert "missing_schema_v1" in panel._content._schema_validation_summary.tooltip_for(
-            "schema_rule_overview"
+        assert (
+            "missing_schema_v1"
+            in panel._content._schema_validation_summary.tooltip_for(
+                "schema_rule_overview"
+            )
         )
-        assert "missing_schema_v1" not in panel._content._schema_validation_summary.detail_for(
-            "schema_registry_status"
+        assert (
+            "missing_schema_v1"
+            not in panel._content._schema_validation_summary.detail_for(
+                "schema_registry_status"
+            )
         )
-        assert "missing_schema_v1" in panel._content._schema_validation_summary.tooltip_for(
-            "schema_registry_status"
+        assert (
+            "missing_schema_v1"
+            in panel._content._schema_validation_summary.tooltip_for(
+                "schema_registry_status"
+            )
         )
 
         panel._content._remove_unknown_schema_btn.click()
@@ -3875,9 +3869,12 @@ def test_scene_panel_content_detail_edits_material_schema_contract():
         assert scene.input_source_profile.material_schema_id == "contract_parties_v1"
         assert scene.input_source_profile.material_schema_ids == ["contract_parties_v1"]
         assert "missing_schema_v1" not in panel._content._material_schema_ids.get_text()
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_registry_status"
-        ) == "通过"
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_registry_status"
+            )
+            == "通过"
+        )
         assert panel._content._remove_unknown_schema_btn.isEnabled() is False
     finally:
         panel.close()
@@ -3892,7 +3889,6 @@ def test_scene_panel_content_detail_focuses_material_schema_contract_controls():
         name="鍚堝悓浜や粯",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     scene.input_source_profile.material_schema_id = "contract_parties_v1"
@@ -3947,7 +3943,10 @@ def test_scene_panel_content_detail_focuses_material_schema_contract_controls():
             is True
         )
 
-        assert panel._content.focus_navigation_field("input_source_profile.unknown") is False
+        assert (
+            panel._content.focus_navigation_field("input_source_profile.unknown")
+            is False
+        )
     finally:
         panel.close()
         app.processEvents()
@@ -3961,7 +3960,6 @@ def test_scene_panel_content_detail_repairs_unknown_primary_material_schema():
         name="合同交付",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     scene.input_source_profile.material_schema_id = "missing_primary_schema_v1"
@@ -3978,9 +3976,12 @@ def test_scene_panel_content_detail_repairs_unknown_primary_material_schema():
     try:
         app.processEvents()
 
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_registry_status"
-        ) == "未识别 2 个"
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_registry_status"
+            )
+            == "未识别 2 个"
+        )
         assert panel._content._remove_unknown_schema_btn.isEnabled() is True
 
         panel._content._remove_unknown_schema_btn.click()
@@ -3990,14 +3991,18 @@ def test_scene_panel_content_detail_repairs_unknown_primary_material_schema():
         assert scene.input_source_profile.material_schema_ids == ["contract_parties_v1"]
         assert panel._content._material_schema_id.text() == "contract_parties_v1"
         assert panel._content._material_schema_ids.get_text() == "contract_parties_v1"
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_registry_status"
-        ) == "通过"
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_registry_status"
+            )
+            == "通过"
+        )
         assert "合同方字段资料" in panel._content._schema_validation_summary.detail_for(
             "schema_labels"
         )
-        assert "Contract party fields" in panel._content._schema_validation_summary.tooltip_for(
-            "schema_labels"
+        assert (
+            "Contract party fields"
+            in panel._content._schema_validation_summary.tooltip_for("schema_labels")
         )
         assert panel._content._remove_unknown_schema_btn.isEnabled() is False
     finally:
@@ -4013,7 +4018,6 @@ def test_scene_panel_content_detail_replaces_unknown_material_schema_with_select
         name="合同交付",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     scene.input_source_profile.material_schema_id = "missing_primary_schema_v1"
@@ -4030,19 +4034,27 @@ def test_scene_panel_content_detail_replaces_unknown_material_schema_with_select
     try:
         app.processEvents()
 
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_registry_status"
-        ) == "未识别 2 个"
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_registry_status"
+            )
+            == "未识别 2 个"
+        )
         assert panel._content._replace_unknown_schema_btn.isEnabled() is True
         assert "（推荐）" in panel._content._replace_unknown_schema_btn.toolTip()
 
-        signature_index = panel._content._schema_registry_combo.findData("signature_assets_v1")
+        signature_index = panel._content._schema_registry_combo.findData(
+            "signature_assets_v1"
+        )
         assert signature_index >= 0
         panel._content._schema_registry_combo.setCurrentIndex(signature_index)
         app.processEvents()
 
         assert panel._content._replace_unknown_schema_btn.isEnabled() is True
-        assert "signature_assets_v1" in panel._content._replace_unknown_schema_btn.toolTip()
+        assert (
+            "signature_assets_v1"
+            in panel._content._replace_unknown_schema_btn.toolTip()
+        )
 
         panel._content._replace_unknown_schema_btn.click()
         app.processEvents()
@@ -4056,9 +4068,12 @@ def test_scene_panel_content_detail_replaces_unknown_material_schema_with_select
         assert panel._content._material_schema_ids.get_text() == (
             "signature_assets_v1\ncontract_parties_v1"
         )
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_registry_status"
-        ) == "通过"
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_registry_status"
+            )
+            == "通过"
+        )
         assert "签章资料" in panel._content._schema_validation_summary.detail_for(
             "schema_labels"
         )
@@ -4085,7 +4100,6 @@ def test_scene_panel_content_detail_recommends_replacement_for_unknown_material_
         name="合同交付",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     scene.input_source_profile.material_schema_id = "contract_parties_v1"
@@ -4102,11 +4116,17 @@ def test_scene_panel_content_detail_recommends_replacement_for_unknown_material_
         app.processEvents()
 
         assert panel._content._schema_registry_combo.currentData() == ""
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_registry_status"
-        ) == "未识别 1 个"
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_registry_status"
+            )
+            == "未识别 1 个"
+        )
         assert panel._content._replace_unknown_schema_btn.isEnabled() is True
-        assert "signature_assets_v1" in panel._content._replace_unknown_schema_btn.toolTip()
+        assert (
+            "signature_assets_v1"
+            in panel._content._replace_unknown_schema_btn.toolTip()
+        )
         assert "（推荐）" in panel._content._replace_unknown_schema_btn.toolTip()
 
         panel._content._replace_unknown_schema_btn.click()
@@ -4120,14 +4140,18 @@ def test_scene_panel_content_detail_recommends_replacement_for_unknown_material_
         assert panel._content._material_schema_ids.get_text() == (
             "contract_parties_v1\nsignature_assets_v1"
         )
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_registry_status"
-        ) == "通过"
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_registry_status"
+            )
+            == "通过"
+        )
         assert "签章资料" in panel._content._schema_validation_summary.detail_for(
             "schema_labels"
         )
-        assert "Signature and seal assets" in panel._content._schema_validation_summary.tooltip_for(
-            "schema_labels"
+        assert (
+            "Signature and seal assets"
+            in panel._content._schema_validation_summary.tooltip_for("schema_labels")
         )
         assert panel._content._replace_unknown_schema_btn.isEnabled() is False
     finally:
@@ -4143,11 +4167,12 @@ def test_scene_panel_content_detail_previews_attachment_schema_roles():
         name="资质附件包",
         category="qualification_archive_packages",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     template = create_builtin_template("default")
-    bridge.set_current_scene(scene, config_id="qualification_archive_packages", emit_signal=False)
+    bridge.set_current_scene(
+        scene, config_id="qualification_archive_packages", emit_signal=False
+    )
     bridge.set_current_template(template, config_id="default", emit_signal=False)
 
     panel = ScenePanel(bridge)
@@ -4162,33 +4187,49 @@ def test_scene_panel_content_detail_previews_attachment_schema_roles():
         panel._content._set_primary_schema_btn.click()
         app.processEvents()
 
-        assert scene.input_source_profile.material_schema_id == "qualification_archive_assets_v1"
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_registry_status"
-        ) == "通过"
+        assert (
+            scene.input_source_profile.material_schema_id
+            == "qualification_archive_assets_v1"
+        )
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_registry_status"
+            )
+            == "通过"
+        )
         assert "标书/资质归档" in panel._content._schema_validation_summary.detail_for(
             "schema_families"
         )
-        assert "qualification_archive_packages" in panel._content._schema_validation_summary.tooltip_for(
-            "schema_families"
+        assert (
+            "qualification_archive_packages"
+            in panel._content._schema_validation_summary.tooltip_for("schema_families")
         )
-        assert panel._content._schema_validation_summary.value_for(
+        assert (
+            panel._content._schema_validation_summary.value_for("schema_fields")
+            == "2 必填 / 9 全部"
+        )
+        field_detail = panel._content._schema_validation_summary.detail_for(
             "schema_fields"
-        ) == "2 必填 / 9 全部"
-        field_detail = panel._content._schema_validation_summary.detail_for("schema_fields")
+        )
         assert "机构名称（必填）" in field_detail
         assert "资料包名称（必填）" in field_detail
         assert "还有 4 项" in field_detail
-        field_tooltip = panel._content._schema_validation_summary.tooltip_for("schema_fields")
+        field_tooltip = panel._content._schema_validation_summary.tooltip_for(
+            "schema_fields"
+        )
         assert "organization · Organization · 必填" in field_tooltip
         assert "valid_until · Valid until · 可选" in field_tooltip
         assert "consortium_member_name · Consortium member name · 可选" in field_tooltip
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_image_roles"
-        ) == "无"
-        assert panel._content._schema_validation_summary.value_for(
-            "schema_attachment_roles"
-        ) == "2 必填 / 3 全部"
+        assert (
+            panel._content._schema_validation_summary.value_for("schema_image_roles")
+            == "无"
+        )
+        assert (
+            panel._content._schema_validation_summary.value_for(
+                "schema_attachment_roles"
+            )
+            == "2 必填 / 3 全部"
+        )
         attachment_detail = panel._content._schema_validation_summary.detail_for(
             "schema_attachment_roles"
         )
@@ -4200,9 +4241,18 @@ def test_scene_panel_content_detail_previews_attachment_schema_roles():
         )
         assert "assets/01_certificates" in attachment_tooltip
         assert "assets/02_business_license" in attachment_tooltip
-        assert "certificate · Qualification certificate · 必填 · image/pdf" in attachment_tooltip
-        assert "business_license · Business license · 必填 · image/pdf" in attachment_tooltip
-        assert "attachment · Supporting attachment · 可选 · image/pdf" in attachment_tooltip
+        assert (
+            "certificate · Qualification certificate · 必填 · image/pdf"
+            in attachment_tooltip
+        )
+        assert (
+            "business_license · Business license · 必填 · image/pdf"
+            in attachment_tooltip
+        )
+        assert (
+            "attachment · Supporting attachment · 可选 · image/pdf"
+            in attachment_tooltip
+        )
     finally:
         panel.close()
         app.processEvents()
@@ -4228,22 +4278,27 @@ def test_scene_panel_delivery_validation_summary_flags_template_and_rule_issues(
         panel._output._visibility_rules.set_text("answer=drop\n=remove\nanswer=hide")
         app.processEvents()
 
-        assert panel._output._delivery_validation_summary.value_for(
-            "delivery_template_status"
-        ) == "需处理"
+        assert (
+            panel._output._delivery_validation_summary.value_for(
+                "delivery_template_status"
+            )
+            == "需处理"
+        )
         template_detail = panel._output._delivery_validation_summary.detail_for(
             "delivery_template_status"
         )
         assert "未知变量: unknown" in template_detail
         assert "包含非法字符: :" in template_detail
 
-        assert panel._output._delivery_validation_summary.value_for(
-            "delivery_rule_status"
-        ) == "需处理"
+        assert (
+            panel._output._delivery_validation_summary.value_for("delivery_rule_status")
+            == "需处理"
+        )
         rule_detail = panel._output._delivery_validation_summary.detail_for(
             "delivery_rule_status"
         )
         assert "未知处理动作: drop" in rule_detail
+        assert "未知处理动作: hide" in rule_detail
         assert "缺少内容块名" in rule_detail
         assert "重复内容块: 答案 (answer)" in rule_detail
         assert "selector" not in rule_detail
@@ -4279,7 +4334,9 @@ def test_scene_panel_delivery_business_preset_templates_create_common_versions()
             "student_version"
         )
         assert student_template_index >= 0
-        panel._output._delivery_preset_template_combo.setCurrentIndex(student_template_index)
+        panel._output._delivery_preset_template_combo.setCurrentIndex(
+            student_template_index
+        )
         panel._output._add_preset_template_btn.click()
         app.processEvents()
 
@@ -4289,7 +4346,7 @@ def test_scene_panel_delivery_business_preset_templates_create_common_versions()
         assert student_preset.output_dir_template == "{preset_id}"
         assert student_preset.filename_template == "{stem}_{preset_id}"
         assert scene.default_delivery_preset_id == "student_version"
-        assert scene.output.compare_docx is False
+        assert scene.default_delivery_preset().artifacts.compare_docx is False
         assert panel._output._visibility_rules.get_text() == (
             "answer=remove\nanalysis=remove\nsolution=remove"
         )
@@ -4301,10 +4358,7 @@ def test_scene_panel_delivery_business_preset_templates_create_common_versions()
             ("analysis", "remove"),
             ("solution", "remove"),
         ]
-        assert [
-            rule.label
-            for rule in student_preset.content_visibility_rules
-        ] == [
+        assert [rule.label for rule in student_preset.content_visibility_rules] == [
             "答案",
             "解析",
             "解题过程",
@@ -4325,16 +4379,20 @@ def test_scene_panel_delivery_business_preset_templates_create_common_versions()
             "material_archive"
         )
         assert archive_template_index >= 0
-        archive_template_tooltip = panel._output._delivery_preset_template_combo.itemData(
-            archive_template_index,
-            Qt.ToolTipRole,
+        archive_template_tooltip = (
+            panel._output._delivery_preset_template_combo.itemData(
+                archive_template_index,
+                Qt.ToolTipRole,
+            )
         )
         assert "新增交付版本：资料归档包" in archive_template_tooltip
         assert "资料清单" in archive_template_tooltip
         assert "资料包" in archive_template_tooltip
         assert "详细报告" in archive_template_tooltip
         assert "模板编号：material_archive" in archive_template_tooltip
-        panel._output._delivery_preset_template_combo.setCurrentIndex(archive_template_index)
+        panel._output._delivery_preset_template_combo.setCurrentIndex(
+            archive_template_index
+        )
         panel._output._add_preset_template_btn.click()
         app.processEvents()
 
@@ -4343,10 +4401,14 @@ def test_scene_panel_delivery_business_preset_templates_create_common_versions()
         assert archive_preset.artifacts.material_manifest is True
         assert archive_preset.artifacts.material_package is True
         assert archive_preset.report_level == "detailed"
-        assert scene.output.material_manifest is True
-        assert scene.output.material_package is True
-        assert "资料清单" in panel._output._delivery_summary.value_for("default_artifacts")
-        assert "资料包" in panel._output._delivery_summary.value_for("default_artifacts")
+        assert scene.default_delivery_preset().artifacts.material_manifest is True
+        assert scene.default_delivery_preset().artifacts.material_package is True
+        assert "资料清单" in panel._output._delivery_summary.value_for(
+            "default_artifacts"
+        )
+        assert "资料包" in panel._output._delivery_summary.value_for(
+            "default_artifacts"
+        )
     finally:
         panel.close()
         app.processEvents()
@@ -4360,7 +4422,6 @@ def test_scene_panel_applies_contract_family_recommended_delivery_defaults():
         name="合同交付",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
         compatible_template_ids=["default"],
     )
     template = create_builtin_template("default")
@@ -4373,10 +4434,15 @@ def test_scene_panel_applies_contract_family_recommended_delivery_defaults():
 
         assert panel._output._apply_family_delivery_btn.isEnabled() is True
         family_delivery_tooltip = panel._output._apply_family_delivery_btn.toolTip()
-        assert "场景类型：合同交付" in family_delivery_tooltip
-        assert "将新增：合同审阅稿、合同签署稿、字段一致性报告" in family_delivery_tooltip
+        assert "方案类型：合同交付" in family_delivery_tooltip
+        assert (
+            "将新增：合同审阅稿、合同签署稿、字段一致性报告" in family_delivery_tooltip
+        )
         assert "默认版本：合同审阅稿" in family_delivery_tooltip
-        assert "版本 ID：review_copy, signing_copy, field_consistency_report" in family_delivery_tooltip
+        assert (
+            "版本 ID：review_copy, signing_copy, field_consistency_report"
+            in family_delivery_tooltip
+        )
 
         panel._output._apply_family_delivery_btn.click()
         app.processEvents()
@@ -4386,7 +4452,7 @@ def test_scene_panel_applies_contract_family_recommended_delivery_defaults():
         assert "signing_copy" in preset_ids
         assert "field_consistency_report" in preset_ids
         assert scene.default_delivery_preset_id == "review_copy"
-        assert scene.output.compare_docx is True
+        assert scene.default_delivery_preset().artifacts.compare_docx is True
 
         assert scene.input_source_profile.material_schema_id == "contract_parties_v1"
         assert scene.input_source_profile.material_schema_ids == [
@@ -4400,10 +4466,21 @@ def test_scene_panel_applies_contract_family_recommended_delivery_defaults():
         assert "签章资料" in material_detail
         assert panel._content._input_summary.value_for("image_roles") == "1 个角色"
         assert "印章" in panel._content._input_summary.detail_for("image_roles")
-        assert panel._cleanup._compliance_summary.value_for("count_profile") == "contract_fields"
-        assert panel._cleanup._compliance_summary.value_for("planning_scan_targets") == "已应用"
-        assert panel._output._delivery_summary.value_for("default_delivery") == "合同审阅稿"
-        assert "对比稿" in panel._output._delivery_summary.value_for("default_artifacts")
+        assert (
+            panel._cleanup._compliance_summary.value_for("count_profile")
+            == "contract_fields"
+        )
+        assert (
+            panel._cleanup._compliance_summary.value_for("planning_scan_targets")
+            == "已应用"
+        )
+        assert (
+            panel._output._delivery_summary.value_for("default_delivery")
+            == "合同审阅稿"
+        )
+        assert "对比稿" in panel._output._delivery_summary.value_for(
+            "default_artifacts"
+        )
 
         signing_index = panel._output._default_delivery.findData("signing_copy")
         assert signing_index >= 0
@@ -4411,10 +4488,14 @@ def test_scene_panel_applies_contract_family_recommended_delivery_defaults():
         app.processEvents()
 
         assert scene.default_delivery_preset_id == "signing_copy"
-        assert scene.output.material_manifest is True
-        assert scene.output.material_package is True
-        assert "资料清单" in panel._output._delivery_summary.value_for("default_artifacts")
-        assert "资料包" in panel._output._delivery_summary.value_for("default_artifacts")
+        assert scene.default_delivery_preset().artifacts.material_manifest is True
+        assert scene.default_delivery_preset().artifacts.material_package is True
+        assert "资料清单" in panel._output._delivery_summary.value_for(
+            "default_artifacts"
+        )
+        assert "资料包" in panel._output._delivery_summary.value_for(
+            "default_artifacts"
+        )
     finally:
         panel.close()
         app.processEvents()
@@ -4436,7 +4517,9 @@ def test_scene_panel_delivery_variable_picker_inserts_into_templates():
         panel._output._default_delivery.setCurrentIndex(review_index)
         app.processEvents()
 
-        review_preset = next(preset for preset in scene.delivery_presets if preset.preset_id == "review")
+        review_preset = next(
+            preset for preset in scene.delivery_presets if preset.preset_id == "review"
+        )
         panel._output._delivery_output_dir.setText("review/")
         panel._output._delivery_output_dir.setCursorPosition(len("review/"))
         variable_index = panel._output._delivery_variable_combo.findData("preset_label")
@@ -4464,8 +4547,11 @@ def test_scene_panel_delivery_variable_picker_inserts_into_templates():
         app.processEvents()
 
         assert review_preset.filename_template == "{stem}_{preset_id}"
-        assert "document_review" in panel._output._delivery_validation_summary.detail_for(
-            "delivery_template_status"
+        assert (
+            "document_review"
+            in panel._output._delivery_validation_summary.detail_for(
+                "delivery_template_status"
+            )
         )
     finally:
         panel.close()
@@ -4493,7 +4579,9 @@ def test_scene_panel_delivery_visibility_rule_inserter_updates_current_preset():
         )
         selector_index = panel._output._visibility_selector_combo.findData("answer")
         assert selector_index >= 0
-        assert panel._output._visibility_selector_combo.itemText(selector_index) == "答案"
+        assert (
+            panel._output._visibility_selector_combo.itemText(selector_index) == "答案"
+        )
         assert "answer" in panel._output._visibility_selector_combo.itemData(
             selector_index,
             Qt.ToolTipRole,
@@ -4502,22 +4590,25 @@ def test_scene_panel_delivery_visibility_rule_inserter_updates_current_preset():
         app.processEvents()
         assert panel._output._visibility_selector_input.text() == "answer"
 
-        action_index = panel._output._visibility_action_combo.findData("hide")
+        action_index = panel._output._visibility_action_combo.findData("remove")
         assert action_index >= 0
         panel._output._visibility_action_combo.setCurrentIndex(action_index)
         panel._output._insert_visibility_rule_btn.click()
         app.processEvents()
 
-        assert panel._output._visibility_rules.get_text() == "answer=hide"
+        assert panel._output._visibility_rules.get_text() == "answer=remove"
         assert panel._output._visibility_selector_combo.currentData() in ("", None)
         assert [
             (rule.selector, rule.action)
             for rule in review_preset.content_visibility_rules
-        ] == [("answer", "hide")]
-        assert [rule.label for rule in review_preset.content_visibility_rules] == ["答案"]
-        assert panel._output._delivery_validation_summary.value_for(
-            "delivery_rule_status"
-        ) == "1 条"
+        ] == [("answer", "remove")]
+        assert [rule.label for rule in review_preset.content_visibility_rules] == [
+            "答案"
+        ]
+        assert (
+            panel._output._delivery_validation_summary.value_for("delivery_rule_status")
+            == "1 条"
+        )
         assert "显隐规则 1 条" in panel._output._delivery_summary.detail_for(
             "default_artifacts"
         )
@@ -4526,7 +4617,7 @@ def test_scene_panel_delivery_visibility_rule_inserter_updates_current_preset():
         panel._output._insert_visibility_rule_btn.click()
         app.processEvents()
 
-        assert panel._output._visibility_rules.get_text() == "answer=hide"
+        assert panel._output._visibility_rules.get_text() == "answer=remove"
         assert len(review_preset.content_visibility_rules) == 1
     finally:
         panel.close()
@@ -4549,7 +4640,9 @@ def test_scene_panel_delivery_target_template_combo_and_status():
         panel._output._default_delivery.setCurrentIndex(review_index)
         app.processEvents()
 
-        review_preset = next(preset for preset in scene.delivery_presets if preset.preset_id == "review")
+        review_preset = next(
+            preset for preset in scene.delivery_presets if preset.preset_id == "review"
+        )
         thesis_template_index = panel._output._delivery_target_template_combo.findData(
             "thesis_gbt"
         )
@@ -4560,20 +4653,27 @@ def test_scene_panel_delivery_target_template_combo_and_status():
                 thesis_template_index
             )
         )
-        thesis_template_tooltip = panel._output._delivery_target_template_combo.itemData(
-            thesis_template_index,
-            Qt.ToolTipRole,
+        thesis_template_tooltip = (
+            panel._output._delivery_target_template_combo.itemData(
+                thesis_template_index,
+                Qt.ToolTipRole,
+            )
         )
         assert "thesis_gbt" in thesis_template_tooltip
 
-        panel._output._delivery_target_template_combo.setCurrentIndex(thesis_template_index)
+        panel._output._delivery_target_template_combo.setCurrentIndex(
+            thesis_template_index
+        )
         app.processEvents()
 
         assert review_preset.target_template_id == "thesis_gbt"
         assert panel._output._delivery_target_template.text() == "thesis_gbt"
-        assert panel._output._delivery_validation_summary.value_for(
-            "delivery_target_template"
-        ) == "兼容模板"
+        assert (
+            panel._output._delivery_validation_summary.value_for(
+                "delivery_target_template"
+            )
+            == "兼容模板"
+        )
         assert "thesis_gbt" in panel._output._delivery_validation_summary.detail_for(
             "delivery_target_template"
         )
@@ -4581,9 +4681,12 @@ def test_scene_panel_delivery_target_template_combo_and_status():
         panel._output._delivery_target_template.setText("default")
         app.processEvents()
 
-        assert panel._output._delivery_validation_summary.value_for(
-            "delivery_target_template"
-        ) == "非兼容"
+        assert (
+            panel._output._delivery_validation_summary.value_for(
+                "delivery_target_template"
+            )
+            == "需处理"
+        )
         assert "default" in panel._output._delivery_validation_summary.detail_for(
             "delivery_target_template"
         )
@@ -4591,26 +4694,28 @@ def test_scene_panel_delivery_target_template_combo_and_status():
             "default"
         )
         assert default_template_index >= 0
-        assert (
-            "default"
-            not in panel._output._delivery_target_template_combo.itemText(
-                default_template_index
+        default_template_tooltip = (
+            panel._output._delivery_target_template_combo.itemData(
+                default_template_index,
+                Qt.ToolTipRole,
             )
-        )
-        default_template_tooltip = panel._output._delivery_target_template_combo.itemData(
-            default_template_index,
-            Qt.ToolTipRole,
         )
         assert "default" in default_template_tooltip
 
         panel._output._delivery_target_template.setText("missing_template_id")
         app.processEvents()
 
-        assert panel._output._delivery_validation_summary.value_for(
-            "delivery_target_template"
-        ) == "需处理"
-        assert "模板不存在: missing_template_id" in panel._output._delivery_validation_summary.detail_for(
-            "delivery_target_template"
+        assert (
+            panel._output._delivery_validation_summary.value_for(
+                "delivery_target_template"
+            )
+            == "需处理"
+        )
+        assert (
+            "模板不存在: missing_template_id"
+            in panel._output._delivery_validation_summary.detail_for(
+                "delivery_target_template"
+            )
         )
     finally:
         panel.close()

@@ -1,5 +1,6 @@
 import sys
 import json
+import pytest
 import threading
 import zipfile
 from functools import partial
@@ -26,27 +27,124 @@ from src.config.materials import (
     scan_asset_collection,
 )
 from src.config.feature_configs import OutputConfig
-from src.config.resolved import ImageInsertionItem, ReplacementRule
+from src.config.library import load_template_from_library
+from src.config.object_preflight_evidence import build_object_preflight_evidence
+from src.config.resolved import ImageInsertionItem
 from src.config.resolver import resolve_config
 from src.config.scene import DeliveryPreset, SceneWorkspace
 from src.config.scene_family_application import apply_planned_scene_family_defaults
 from src.config.template import TemplateConfig
 from src.shared.engine.media_ops import paragraph_has_image
+from src.shared.engine.material_timeline import (
+    default_timeline_plan,
+    default_timeline_segment,
+)
 from src.qt_api import QApplication
 from src.ui.bridge import PanelBridge
 from src.ui.adapters.workbench_execution_adapter import batch_execution_issue_items
 from src.ui.panels.assets_panel import AssetsPanel
 from src.ui.panels.workbench.feature_detail_panes import ContentDataDetailPane
-from src.ui.panels.workbench.execution_runtime import (
+from src.services.production_runtime.execution_runtime import (
     WorkbenchBatchProductionRunner,
     WorkbenchProductionRunner,
-    _render_batch_markdown_report,
+)
+from src.services.execution_session import (
+    build_execution_session_snapshot,
+    cleanup_execution_session_resources,
 )
 
 
 class _QuietSimpleHTTPRequestHandler(SimpleHTTPRequestHandler):
     def log_message(self, format, *args):  # noqa: A002
         return
+
+
+def _run_exam_material_context(
+    *,
+    tmp_path: Path,
+    source: Path,
+    scene: SceneWorkspace,
+    material_context: MaterialExecutionContext,
+) -> dict[str, object]:
+    """Run an exam fixture through the same frozen-master boundary as the product."""
+
+    scene.scene_id = "exam"
+    scene.mode_id = "exam"
+    scene.template_id = "default"
+    scene.compatible_template_ids = ["default"]
+    scene.master_id = "default_exam"
+    material_context.mode_id = "exam"
+    template = load_template_from_library("default", mode_id="exam")
+    preflight = build_object_preflight_evidence(scene, source)
+    snapshot = build_execution_session_snapshot(
+        mode_id="exam",
+        scene=scene,
+        template=template,
+        material_context=material_context,
+        input_path=source,
+        output_root=tmp_path / "out",
+        plan_id="exam",
+        template_id="default",
+        object_preflight_confirmation_revision=preflight.source_revision,
+        object_preflight_confirmation_digest=preflight.evidence_digest,
+    )
+    try:
+        return WorkbenchProductionRunner(
+            doc_path=str(source),
+            template=template,
+            scene=scene,
+            output_dir=Path(snapshot.output_namespace),
+            material_context=material_context,
+            execution_session=snapshot,
+        ).run(lambda *_args: None, lambda: False)
+    finally:
+        cleanup_execution_session_resources(snapshot)
+
+
+def _run_official_material_context(
+    *,
+    tmp_path: Path,
+    source: Path,
+    scene: SceneWorkspace,
+    material_context: MaterialExecutionContext,
+    document_type_id: str,
+) -> tuple[dict[str, object], Path]:
+    """Run an official fixture through the frozen type/master session boundary."""
+
+    scene.scene_id = "official"
+    scene.mode_id = "official"
+    scene.template_id = "official_gbt"
+    scene.compatible_template_ids = ["official_gbt"]
+    scene.master_id = "official_gbt_standard"
+    template = load_template_from_library("official_gbt", mode_id="official")
+    material_context.mode_id = "official"
+    preflight = build_object_preflight_evidence(scene, source)
+    snapshot = build_execution_session_snapshot(
+        mode_id="official",
+        scene=scene,
+        template=template,
+        material_context=material_context,
+        input_path=source,
+        output_root=tmp_path / "out",
+        plan_id="official",
+        template_id="official_gbt",
+        document_type_id=document_type_id,
+        object_preflight_confirmation_revision=preflight.source_revision,
+        object_preflight_confirmation_digest=preflight.evidence_digest,
+    )
+    output_dir = Path(snapshot.output_namespace)
+    try:
+        result = WorkbenchProductionRunner(
+            doc_path=str(source),
+            template=template,
+            scene=scene,
+            output_dir=output_dir,
+            material_context=material_context,
+            execution_session=snapshot,
+        ).run(lambda *_args: None, lambda: False)
+        return result, output_dir
+    finally:
+        cleanup_execution_session_resources(snapshot)
 
 
 class _HeaderAuthSimpleHTTPRequestHandler(_QuietSimpleHTTPRequestHandler):
@@ -124,7 +222,6 @@ def test_material_execution_context_normalizes_payload_and_clones():
             "entity_data": {"company_name": "测试公司"},
             "entity_assets_dir": "/tmp/assets",
             "images": [{"path": "logo.png", "position": 2, "width_cm": "6.5"}],
-            "replacements": [{"old": "{{project}}", "new": "测试项目"}],
             "asset_items": [
                 {
                     "role": "Question Figure",
@@ -145,7 +242,6 @@ def test_material_execution_context_normalizes_payload_and_clones():
     cloned = context.clone()
     cloned.entity_data["company_name"] = "被修改"
     cloned.images[0].path = "changed.png"
-    cloned.replacements[0].new = "被修改项目"
     cloned.asset_items[0].metadata["alt_text"] = "被修改说明"
 
     assert context.archive_id == "archive"
@@ -156,8 +252,7 @@ def test_material_execution_context_normalizes_payload_and_clones():
     assert isinstance(context.images[0], ImageInsertionItem)
     assert context.images[0].width_cm == 6.5
     assert context.images[0].path == "logo.png"
-    assert isinstance(context.replacements[0], ReplacementRule)
-    assert context.replacements[0].new == "测试项目"
+    assert not hasattr(context, "replacements")
     assert context.asset_items[0].role == "question_figure"
     assert context.asset_items[0].tags == ["exam", "1"]
     assert context.asset_items[0].width_cm == 7.25
@@ -185,14 +280,14 @@ def test_asset_collection_scan_and_rules_build_image_insertions(tmp_path):
     Image.new("RGB", (24, 24), color="red").save(logo_path)
 
     collection = scan_asset_collection(tmp_path)
-    rules = parse_asset_insertion_rules("logo={{logo}}")
+    rules = parse_asset_insertion_rules("logo={{@img:logo}}")
     insertions = build_image_insertions(collection.items, rules)
 
     assert collection.items[0].role == "logo"
     assert collection.items[0].path == str(logo_path)
     assert isinstance(rules[0], AssetInsertionRule)
     assert insertions == [
-        ImageInsertionItem(path=str(logo_path), position="{{logo}}", width_cm=6.0)
+        ImageInsertionItem(path=str(logo_path), position="{{@img:logo}}", width_cm=6.0)
     ]
 
 
@@ -203,13 +298,13 @@ def test_material_context_expands_asset_rules_into_resolve_images(tmp_path):
 
     context = MaterialExecutionContext(
         asset_items=collection.items,
-        image_rules=[AssetInsertionRule(asset_role="logo", target="{{logo}}", width_cm=2.5)],
+        image_rules=[AssetInsertionRule(asset_role="logo", target="{{@img:logo}}", width_cm=2.5)],
     )
 
     kwargs = context.to_resolve_kwargs()
 
     assert kwargs["images"] == [
-        ImageInsertionItem(path=str(logo_path), position="{{logo}}", width_cm=2.5)
+        ImageInsertionItem(path=str(logo_path), position="{{@img:logo}}", width_cm=2.5)
     ]
     assert context.missing_required_asset_roles() == []
 
@@ -217,6 +312,7 @@ def test_material_context_expands_asset_rules_into_resolve_images(tmp_path):
 def test_material_context_carries_profile_field_aliases_to_resolver_kwargs():
     context = MaterialExecutionContext(
         entity_data={"company_name": "测试公司"},
+        field_scopes={"company_name": "fixed", "project_name": "floating"},
         field_aliases={"company": "company_name"},
     )
 
@@ -227,6 +323,11 @@ def test_material_context_carries_profile_field_aliases_to_resolver_kwargs():
 
     assert context.field_aliases == {"company": "company_name"}
     assert kwargs["field_aliases"] == {"company": "company_name"}
+    assert kwargs["field_scopes"] == {
+        "company_name": "fixed",
+        "project_name": "floating",
+    }
+    assert resolved.field_scopes == kwargs["field_scopes"]
     assert resolved.field_aliases == {"company": "company_name"}
     assert MaterialExecutionContext.from_payload(
         {"field_aliases": {"company": "company_name"}}
@@ -243,33 +344,43 @@ def test_material_mapping_loads_flat_json_as_entity_data(tmp_path):
     payload = load_material_mapping(mapping_path)
 
     assert payload.entity_data == {"company_name": "测试公司", "legal_person": "张三"}
-    assert payload.replacements == []
+    assert not hasattr(payload, "replacements")
 
 
-def test_material_mapping_loads_csv_replacements(tmp_path):
+def test_material_mapping_rejects_json_replacements(tmp_path):
+    mapping_path = tmp_path / "replacements.json"
+    mapping_path.write_text(
+        json.dumps(
+            {"replacements": [{"old": "{{@text:project}}", "new": "Project"}]},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="不再支持替换规则"):
+        load_material_mapping(mapping_path)
+
+
+def test_material_mapping_rejects_csv_replacements(tmp_path):
     mapping_path = tmp_path / "replacements.csv"
-    mapping_path.write_text("old,new\n{{project_name}},测试项目\n", encoding="utf-8")
+    mapping_path.write_text("old,new\n{{@text:project_name}},测试项目\n", encoding="utf-8")
 
-    payload = load_material_mapping(mapping_path)
-
-    assert payload.entity_data == {}
-    assert payload.replacements == [ReplacementRule(old="{{project_name}}", new="测试项目")]
+    with pytest.raises(ValueError, match="不再支持 old/new 替换规则"):
+        load_material_mapping(mapping_path)
 
 
-def test_material_mapping_loads_excel_replacements(tmp_path):
+def test_material_mapping_rejects_excel_replacements(tmp_path):
     from openpyxl import Workbook
 
     mapping_path = tmp_path / "replacements.xlsx"
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(["old", "new"])
-    sheet.append(["{{project_name}}", "Project A"])
+    sheet.append(["{{@text:project_name}}", "Project A"])
     workbook.save(mapping_path)
 
-    payload = load_material_mapping(mapping_path)
-
-    assert payload.entity_data == {}
-    assert payload.replacements == [ReplacementRule(old="{{project_name}}", new="Project A")]
+    with pytest.raises(ValueError, match="不再支持 old/new 替换规则"):
+        load_material_mapping(mapping_path)
 
 
 def test_material_batch_items_build_profile_contexts_and_output_dirs(tmp_path):
@@ -304,7 +415,7 @@ def test_material_batch_items_build_profile_contexts_and_output_dirs(tmp_path):
     assert Path(items[0].output_dir).name == "测试公司B"
 
 
-def test_material_batch_items_inherit_shared_rules_and_scan_profile_assets(tmp_path):
+def test_material_batch_items_inherit_image_bindings_and_scan_profile_assets(tmp_path):
     assets_dir = tmp_path / "entity_assets"
     assets_dir.mkdir()
     logo_path = assets_dir / "logo.png"
@@ -327,13 +438,12 @@ def test_material_batch_items_inherit_shared_rules_and_scan_profile_assets(tmp_p
         archive,
         base_output_dir=tmp_path,
         base_context=MaterialExecutionContext(
-            replacements=[ReplacementRule(old="{{project}}", new="Project")],
-            image_rules=[AssetInsertionRule(asset_role="logo", target="{{logo}}")],
+            image_rules=[AssetInsertionRule(asset_role="logo", target="{{@img:logo}}")],
         ),
     )
 
     assert len(items) == 1
-    assert items[0].context.replacements == [ReplacementRule(old="{{project}}", new="Project")]
+    assert not hasattr(items[0].context, "replacements")
     assert items[0].context.field_aliases == {"company": "company_name"}
     assert items[0].context.asset_items[0].path == str(logo_path)
     assert items[0].context.missing_required_asset_roles() == []
@@ -360,34 +470,65 @@ def test_content_data_detail_exports_simple_entity_material_context():
         detail.close()
 
 
-def test_assets_panel_material_context_scans_images_from_rules(tmp_path):
+def test_content_data_detail_preserves_full_material_runtime_metadata():
+    _app()
+    detail = ContentDataDetailPane()
+    source = MaterialExecutionContext(
+        archive_id="archive-a",
+        profile_id="profile-a",
+        profile_name="资料 A",
+        entity_data={"公司": "测试公司"},
+        field_aliases={"company": "公司"},
+        image_rules=[AssetInsertionRule(asset_role="logo", target="{{@img:logo}}")],
+        exact_material_placeholders=True,
+    )
+    try:
+        detail.set_material_context(source, emit_signal=False)
+
+        exported = detail.material_context()
+
+        assert exported.archive_id == "archive-a"
+        assert exported.profile_id == "profile-a"
+        assert exported.field_aliases == {"company": "公司"}
+        assert not hasattr(exported, "replacements")
+        assert exported.image_rules == source.image_rules
+        assert exported.exact_material_placeholders is True
+        assert detail._confidence_row.isHidden()
+        assert "精确 {{@text:字段}} 匹配" in detail._summary.text()
+    finally:
+        detail.close()
+
+
+def test_assets_panel_material_context_builds_images_from_role_binding(tmp_path):
     _app()
     logo_path = tmp_path / "logo.png"
     Image.new("RGB", (24, 24), color="red").save(logo_path)
     panel = AssetsPanel(PanelBridge())
     try:
-        panel._assets_picker.set_path(str(tmp_path))
-        panel._image_rules_edit.set_text("logo={{logo}}")
+        panel._archive_name_edit.setText("测试资料包")
+        panel._asset_paths["logo"] = str(logo_path)
 
         context = panel.material_context()
         images = context.to_resolve_kwargs()["images"]
 
+        assert context.archive_name == "测试资料包"
         assert context.asset_items[0].role == "logo"
-        assert images == [
-            ImageInsertionItem(path=str(logo_path), position="{{logo}}", width_cm=6.0)
-        ]
+        assert context.image_material_rules["image:logo"].source_role == "logo"
+        assert context.image_material_rules["image:logo"].anchor_token == "{{@img:LOGO1}}"
+        # The new rule owns this role.  Sending the same source into the legacy
+        # ImageInsertionModule would create an unreceipted duplicate insertion.
+        assert images == []
     finally:
         panel.close()
 
 
-def test_assets_panel_loads_json_mapping_into_fields_and_replacements(tmp_path):
+def test_assets_panel_loads_json_mapping_into_token_fields(tmp_path):
     _app()
     mapping_path = tmp_path / "mapping.json"
     mapping_path.write_text(
         json.dumps(
             {
                 "entity_data": {"company_name": "测试公司"},
-                "replacements": [{"old": "{{project_name}}", "new": "测试项目"}],
             },
             ensure_ascii=False,
         ),
@@ -399,9 +540,10 @@ def test_assets_panel_loads_json_mapping_into_fields_and_replacements(tmp_path):
         context = panel.material_context()
 
         assert context.entity_data == {"company_name": "测试公司"}
-        assert context.replacements == [ReplacementRule(old="{{project_name}}", new="测试项目")]
-        assert "资料已填 1 项" in panel._summary.text()
-        assert "自定义替换 1 条" in panel._generation_detail_label.text()
+        assert not hasattr(context, "replacements")
+        assert "字段资料 1 项 · 已填写 1/1" in panel._summary.text()
+        assert not hasattr(panel, "_replacement_rules_edit")
+        assert not hasattr(panel, "_image_rules_edit")
     finally:
         panel.close()
 
@@ -409,7 +551,7 @@ def test_assets_panel_loads_json_mapping_into_fields_and_replacements(tmp_path):
 def test_workbench_runner_applies_material_context_entity_fields(tmp_path):
     source = tmp_path / "source.docx"
     doc = Document()
-    doc.add_paragraph("公司：{{company_name}}")
+    doc.add_paragraph("公司：{{@text:company_name}}")
     doc.save(source)
 
     scene = SceneWorkspace()
@@ -432,9 +574,81 @@ def test_workbench_runner_applies_material_context_entity_fields(tmp_path):
 
     assert payload["status"] == "success"
     assert "测试公司" in output_text
-    assert "{{company_name}}" not in output_text
+    assert "{{@text:company_name}}" not in output_text
     assert report_json.exists()
     assert '"rule_name": "entity_fill"' in report_json.read_text(encoding="utf-8")
+
+
+def test_workbench_runner_surfaces_official_assembly_from_material_context(tmp_path):
+    source = tmp_path / "official_source.docx"
+    Document().save(source)
+
+    scene = SceneWorkspace(
+        scene_id="official",
+        mode_id="official",
+        template_id="official_gbt",
+        master_id="official_gbt_standard",
+    )
+    scene.input_source_profile.material_schema_id = "official_document_v1"
+    scene.input_source_profile.material_schema_ids = []
+    scene.input_source_profile.failure_policy = "warn"
+    scene.compliance_profile.rule_family = "official_document"
+    scene.compliance_profile.profile_id = "official_document"
+    scene.default_material_profile_id = "official:minutes"
+    scene.compliance_profile.object_preflight.enabled = False
+    scene.default_delivery_preset().artifacts.final_docx = False
+
+    payload, output_dir = _run_official_material_context(
+        tmp_path=tmp_path,
+        source=source,
+        scene=scene,
+        document_type_id="notice",
+        material_context=MaterialExecutionContext(
+            profile_id="official:notice",
+            profile_name="公文资料",
+            entity_data={
+                "document_type": "notice",
+                "title": "关于开展资料归档检查的通知",
+                "body": "请各部门按要求完成自查并提交材料。",
+                "organization": "示例市档案局",
+                "document_no": "示档发〔2026〕1号",
+                "issue_date": "2026年7月9日",
+            },
+        ),
+    )
+
+    official_path = output_dir / "official_source_official.docx"
+    internal_review_path = (
+        output_dir / "official_source_official_internal_review.docx"
+    )
+    archive_manifest_path = (
+        output_dir / "official_source_official_archive_manifest.json"
+    )
+    archive_manifest_md_path = (
+        output_dir / "official_source_official_archive_manifest.md"
+    )
+    report_json = output_dir / "official_source_changes.json"
+
+    assert payload["status"] == "success"
+    report_data = json.loads(report_json.read_text(encoding="utf-8"))
+    assert payload["output_path"] == str(official_path)
+    assert payload["output_paths"] == {
+        "official_docx": str(official_path),
+        "internal_review_docx": str(internal_review_path),
+        "archive_manifest": str(archive_manifest_path),
+        "archive_manifest_md": str(archive_manifest_md_path),
+    }
+    assert payload["official_document_assembly"]["status"] == "ok"
+    assert payload["official_document_assembly"]["profile_id"] == "notice"
+    assert official_path.is_file()
+    assert internal_review_path.is_file()
+    assert archive_manifest_path.is_file()
+    assert archive_manifest_md_path.is_file()
+    assert report_data["official_document_assembly"]["status"] == "ok"
+    assert report_data["official_document_assembly"]["docx_path"] == str(official_path)
+    assert report_data["official_document_assembly"]["output_paths"][
+        "internal_review_docx"
+    ] == str(internal_review_path)
 
 
 def test_workbench_runner_inserts_scanned_asset_at_placeholder_anchor(tmp_path):
@@ -443,7 +657,7 @@ def test_workbench_runner_inserts_scanned_asset_at_placeholder_anchor(tmp_path):
     Image.new("RGB", (24, 24), color="red").save(logo_path)
 
     doc = Document()
-    doc.add_paragraph("Logo: {{logo}}")
+    doc.add_paragraph("Logo: {{@img:logo}}")
     doc.save(source)
 
     scene = SceneWorkspace()
@@ -457,7 +671,7 @@ def test_workbench_runner_inserts_scanned_asset_at_placeholder_anchor(tmp_path):
         scene=scene,
         material_context=MaterialExecutionContext(
             asset_items=collection.items,
-            image_rules=[AssetInsertionRule(asset_role="logo", target="{{logo}}", width_cm=2.0)],
+            image_rules=[AssetInsertionRule(asset_role="logo", target="{{@img:logo}}", width_cm=2.0)],
         ),
     ).run(lambda *_args: None, lambda: False)
 
@@ -465,14 +679,47 @@ def test_workbench_runner_inserts_scanned_asset_at_placeholder_anchor(tmp_path):
     output_para = output_doc.paragraphs[0]
 
     assert payload["status"] == "success"
-    assert "{{logo}}" not in output_para.text
+    assert "{{@img:logo}}" not in output_para.text
+    assert paragraph_has_image(output_para)
+
+
+def test_workbench_runner_inserts_scanned_asset_at_table_anchor(tmp_path):
+    source = tmp_path / "source.docx"
+    seal_path = tmp_path / "公章.png"
+    Image.new("RGB", (24, 24), color="red").save(seal_path)
+
+    doc = Document()
+    table = doc.add_table(rows=1, cols=1)
+    table.cell(0, 0).text = "盖章：{{@img:seal}}"
+    doc.save(source)
+
+    scene = SceneWorkspace()
+    scene.module_switches = {name: False for name in scene.module_switches}
+    scene.module_switches["image_insertion"] = True
+
+    collection = scan_asset_collection(tmp_path)
+    payload = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=TemplateConfig(),
+        scene=scene,
+        material_context=MaterialExecutionContext(
+            asset_items=collection.items,
+            image_rules=[AssetInsertionRule(asset_role="seal", target="{{@img:seal}}", width_cm=2.0)],
+        ),
+    ).run(lambda *_args: None, lambda: False)
+
+    output_doc = Document(payload["output_path"])
+    output_para = output_doc.tables[0].cell(0, 0).paragraphs[0]
+
+    assert payload["status"] == "success"
+    assert "{{@img:seal}}" not in output_para.text
     assert paragraph_has_image(output_para)
 
 
 def test_workbench_runner_blocks_missing_required_asset(tmp_path):
     source = tmp_path / "source.docx"
     doc = Document()
-    doc.add_paragraph("Logo: {{logo}}")
+    doc.add_paragraph("Logo: {{@img:logo}}")
     doc.save(source)
 
     payload = WorkbenchProductionRunner(
@@ -480,7 +727,7 @@ def test_workbench_runner_blocks_missing_required_asset(tmp_path):
         template=TemplateConfig(),
         scene=SceneWorkspace(),
         material_context=MaterialExecutionContext(
-            image_rules=[AssetInsertionRule(asset_role="logo", target="{{logo}}")]
+            image_rules=[AssetInsertionRule(asset_role="logo", target="{{@img:logo}}")]
         ),
     ).run(lambda *_args: None, lambda: False)
 
@@ -515,7 +762,6 @@ def test_workbench_runner_warns_material_schema_missing_fields_in_reports(tmp_pa
     report_json = source.parent / "output" / "source_changes.json"
     report_md = source.parent / "output" / "source_changes.md"
     report_json_text = report_json.read_text(encoding="utf-8")
-    report_md_text = report_md.read_text(encoding="utf-8")
     report_data = json.loads(report_json_text)
 
     assert payload["status"] == "success"
@@ -532,14 +778,92 @@ def test_workbench_runner_warns_material_schema_missing_fields_in_reports(tmp_pa
     assert "signing_date" in report_md.read_text(encoding="utf-8")
 
 
+def test_workbench_runner_does_not_block_timeline_warning_under_block_policy(tmp_path):
+    source = tmp_path / "timeline_warning.docx"
+    doc = Document()
+    doc.add_paragraph("Date: {{@time:timeline_1}}")
+    doc.save(source)
+
+    scene = SceneWorkspace()
+    scene.module_switches = {name: False for name in scene.module_switches}
+    scene.module_switches["entity_fill"] = True
+    scene.input_source_profile.failure_policy = "block"
+    plan = default_timeline_plan()
+    plan["start_field"] = "timeline_start"
+    plan["end_field"] = "timeline_end"
+    for index, node in enumerate(plan["nodes"], start=1):
+        node["outputs"] = [{"field": f"timeline_{index}", "format": "yyyy-MM-dd"}]
+
+    payload = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=TemplateConfig(),
+        scene=scene,
+        material_context=MaterialExecutionContext(
+            entity_data={
+                "timeline_start": "2025-01-01",
+                "timeline_end": "2025-01-01",
+            },
+            timeline_plans={"primary": plan},
+        ),
+    ).run(lambda *_args: None, lambda: False)
+
+    timeline_diagnostics = [
+        diagnostic
+        for diagnostic in payload["material_diagnostics"]
+        if str(diagnostic.get("change_type") or "").startswith("timeline_")
+    ]
+    output_text = "\n".join(
+        paragraph.text for paragraph in Document(payload["output_path"]).paragraphs
+    )
+
+    assert payload["status"] == "success"
+    assert "2025-01-01" in output_text
+    assert timeline_diagnostics
+    assert {diagnostic["level"] for diagnostic in timeline_diagnostics} == {"warning"}
+
+
+def test_workbench_runner_replaces_generated_chinese_timeline_tokens(tmp_path):
+    source = tmp_path / "timeline_segment_tokens.docx"
+    doc = Document()
+    doc.add_paragraph(
+        "{{@time:时间节点1-1}}｜{{@time:时间节点1-2}}｜{{@time:时间节点1-3}}"
+    )
+    doc.save(source)
+
+    scene = SceneWorkspace()
+    scene.module_switches = {name: False for name in scene.module_switches}
+    scene.module_switches["entity_fill"] = True
+    plan = default_timeline_segment(
+        1,
+        node_count=3,
+        start_value="2025-10-01",
+        end_value="2025-10-11",
+    )
+
+    payload = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=TemplateConfig(),
+        scene=scene,
+        material_context=MaterialExecutionContext(
+            timeline_plans={"segment_1": plan},
+        ),
+    ).run(lambda *_args: None, lambda: False)
+    output_text = "\n".join(
+        paragraph.text for paragraph in Document(payload["output_path"]).paragraphs
+    )
+
+    assert payload["status"] == "success"
+    assert output_text == "2025-10-01｜2025-10-06｜2025-10-11"
+
+
 def test_workbench_runner_payload_includes_material_field_consistency(tmp_path):
     source = tmp_path / "contract.docx"
     doc = Document()
     doc.add_paragraph("甲方：旧公司")
-    doc.add_paragraph("甲方签约主体：{{party_a}}")
-    doc.add_paragraph("乙方：{{party_b}}")
-    doc.add_paragraph("合同金额：{{contract_amount}}")
-    doc.add_paragraph("签署日期：{{signing_date}}")
+    doc.add_paragraph("甲方签约主体：{{@text:party_a}}")
+    doc.add_paragraph("乙方：{{@text:party_b}}")
+    doc.add_paragraph("合同金额：{{@text:contract_amount}}")
+    doc.add_paragraph("签署日期：{{@text:signing_date}}")
     doc.save(source)
 
     scene = SceneWorkspace()
@@ -584,8 +908,8 @@ def test_workbench_runner_writes_material_manifest_for_attachment_inventory(tmp_
     scene.module_switches = {name: False for name in scene.module_switches}
     scene.input_source_profile.material_schema_id = "qualification_archive_assets_v1"
     scene.input_source_profile.failure_policy = "warn"
-    scene.output.material_manifest = True
-    scene.output.material_package = True
+    scene.default_delivery_preset().artifacts.material_manifest = True
+    scene.default_delivery_preset().artifacts.material_package = True
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -647,6 +971,7 @@ def test_workbench_runner_writes_material_manifest_for_attachment_inventory(tmp_
     assert package_zip.exists()
     assert package_manifest["kind"] == "material_delivery_package"
     assert package_manifest["status"] == "incomplete"
+    assert payload["material_package_receipt"]["status"] == "incomplete"
     assert any(
         item["path"] == "assets/01_certificates/certificate.pdf"
         for item in package_manifest["files"]
@@ -663,7 +988,7 @@ def test_workbench_runner_writes_material_manifest_for_attachment_inventory(tmp_
 def test_workbench_runner_writes_project_application_attachment_inventory(tmp_path):
     source = tmp_path / "application.docx"
     doc = Document()
-    doc.add_paragraph("Project: {{project_name}}")
+    doc.add_paragraph("Project: {{@text:project_name}}")
     doc.save(source)
     application_form_path = tmp_path / "application_form.pdf"
     application_form_path.write_bytes(b"%PDF-1.4\n%application\n")
@@ -828,7 +1153,6 @@ def test_contract_family_signing_copy_writes_material_package_with_missing_seal(
         scene_id="contract_delivery",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
     )
     result = apply_planned_scene_family_defaults(scene)
     scene.module_switches = {name: False for name in scene.module_switches}
@@ -892,11 +1216,11 @@ def test_contract_family_signing_copy_writes_material_package_with_missing_seal(
 def test_contract_family_signing_copy_places_seal_and_packages_manifest(tmp_path):
     source = tmp_path / "contract.docx"
     doc = Document()
-    doc.add_paragraph("甲方：{{party_a}}")
-    doc.add_paragraph("乙方：{{party_b}}")
-    doc.add_paragraph("合同金额：{{contract_amount}}")
-    doc.add_paragraph("签署日期：{{signing_date}}")
-    doc.add_paragraph("盖章：{{seal}}")
+    doc.add_paragraph("甲方：{{@text:party_a}}")
+    doc.add_paragraph("乙方：{{@text:party_b}}")
+    doc.add_paragraph("合同金额：{{@text:contract_amount}}")
+    doc.add_paragraph("签署日期：{{@text:signing_date}}")
+    doc.add_paragraph("盖章：{{@img:seal}}")
     doc.save(source)
 
     seal_path = tmp_path / "seal.png"
@@ -906,7 +1230,6 @@ def test_contract_family_signing_copy_places_seal_and_packages_manifest(tmp_path
         scene_id="contract_delivery",
         category="contract_delivery",
         template_id="default",
-        default_template_id="default",
     )
     apply_planned_scene_family_defaults(scene)
 
@@ -932,7 +1255,7 @@ def test_contract_family_signing_copy_places_seal_and_packages_manifest(tmp_path
             image_rules=[
                 AssetInsertionRule(
                     asset_role="seal",
-                    target="{{seal}}",
+                    target="{{@img:seal}}",
                     width_cm=2.0,
                     required=True,
                 )
@@ -952,7 +1275,7 @@ def test_contract_family_signing_copy_places_seal_and_packages_manifest(tmp_path
 
     assert scene.module_switches["image_insertion"] is True
     assert payload["status"] == "success"
-    assert "{{seal}}" not in output_text
+    assert "{{@img:seal}}" not in output_text
     assert output_doc.inline_shapes
     assert paragraph_has_image(output_doc.paragraphs[-1])
     assert seal_role["present"] is True
@@ -977,10 +1300,10 @@ def test_workbench_runner_injects_question_figure_asset_into_exam_runtime(tmp_pa
     scene = SceneWorkspace()
     scene.input_source_profile.material_schema_id = "exam_items_v1"
     scene.input_source_profile.structured_formats = ["json"]
-    scene.output.report_json = True
-    scene.output.report_markdown = True
-    scene.output.material_manifest = True
-    scene.output.material_package = True
+    scene.default_delivery_preset().artifacts.report_json = True
+    scene.default_delivery_preset().artifacts.report_markdown = True
+    scene.default_delivery_preset().artifacts.material_manifest = True
+    scene.default_delivery_preset().artifacts.material_package = True
 
     payload = {
         "paper_title": "期末测试",
@@ -1000,11 +1323,10 @@ def test_workbench_runner_injects_question_figure_asset_into_exam_runtime(tmp_pa
             }
         ],
     }
-    result = WorkbenchProductionRunner(
-        doc_path=str(source),
-        template=TemplateConfig(),
+    result = _run_exam_material_context(
+        tmp_path=tmp_path,
+        source=source,
         scene=scene,
-        output_dir=tmp_path / "out",
         material_context=MaterialExecutionContext(
             entity_data={"exam_items": json.dumps(payload, ensure_ascii=False)},
             asset_items=[
@@ -1016,12 +1338,11 @@ def test_workbench_runner_injects_question_figure_asset_into_exam_runtime(tmp_pa
                 )
             ],
         ),
-    ).run(lambda *_args: None, lambda: False)
+    )
 
     report_json = next(Path(path) for path in result["report_paths"] if str(path).endswith(".json"))
     report_md = next(Path(path) for path in result["report_paths"] if str(path).endswith(".md"))
     report_json_text = report_json.read_text(encoding="utf-8")
-    report_md_text = report_md.read_text(encoding="utf-8")
     report_data = json.loads(report_json_text)
     version = report_data["exam_delivery_runtime"]["rendered_versions"][0]
     version_doc = Document(version["docx_path"])
@@ -1051,9 +1372,9 @@ def test_workbench_runner_treats_remote_question_figure_url_as_missing_local_fil
     scene = SceneWorkspace()
     scene.input_source_profile.material_schema_id = "exam_items_v1"
     scene.input_source_profile.structured_formats = ["json"]
-    scene.output.report_json = True
-    scene.output.report_markdown = True
-    scene.output.material_manifest = True
+    scene.default_delivery_preset().artifacts.report_json = True
+    scene.default_delivery_preset().artifacts.report_markdown = True
+    scene.default_delivery_preset().artifacts.material_manifest = True
 
     payload = {
         "paper_title": "期末测试",
@@ -1073,11 +1394,10 @@ def test_workbench_runner_treats_remote_question_figure_url_as_missing_local_fil
             }
         ],
     }
-    result = WorkbenchProductionRunner(
-        doc_path=str(source),
-        template=TemplateConfig(),
+    result = _run_exam_material_context(
+        tmp_path=tmp_path,
+        source=source,
         scene=scene,
-        output_dir=tmp_path / "out",
         material_context=MaterialExecutionContext(
             entity_data={"exam_items": json.dumps(payload, ensure_ascii=False)},
             asset_items=[
@@ -1090,7 +1410,7 @@ def test_workbench_runner_treats_remote_question_figure_url_as_missing_local_fil
                 )
             ],
         ),
-    ).run(lambda *_args: None, lambda: False)
+    )
 
     manifest_path = next(Path(path) for path in result["material_manifest_paths"].values())
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1122,9 +1442,9 @@ def test_workbench_runner_maps_multiple_question_figure_assets_by_question_metad
     scene = SceneWorkspace()
     scene.input_source_profile.material_schema_id = "exam_items_v1"
     scene.input_source_profile.structured_formats = ["json"]
-    scene.output.report_json = True
-    scene.output.report_markdown = True
-    scene.output.material_manifest = True
+    scene.default_delivery_preset().artifacts.report_json = True
+    scene.default_delivery_preset().artifacts.report_markdown = True
+    scene.default_delivery_preset().artifacts.material_manifest = True
 
     payload = {
         "paper_title": "期末测试",
@@ -1152,11 +1472,10 @@ def test_workbench_runner_maps_multiple_question_figure_assets_by_question_metad
             }
         ],
     }
-    result = WorkbenchProductionRunner(
-        doc_path=str(source),
-        template=TemplateConfig(),
+    result = _run_exam_material_context(
+        tmp_path=tmp_path,
+        source=source,
         scene=scene,
-        output_dir=tmp_path / "out",
         material_context=MaterialExecutionContext(
             entity_data={"exam_items": json.dumps(payload, ensure_ascii=False)},
             asset_items=[
@@ -1176,7 +1495,7 @@ def test_workbench_runner_maps_multiple_question_figure_assets_by_question_metad
                 ),
             ],
         ),
-    ).run(lambda *_args: None, lambda: False)
+    )
 
     report_json = next(Path(path) for path in result["report_paths"] if str(path).endswith(".json"))
     report_md = next(Path(path) for path in result["report_paths"] if str(path).endswith(".md"))
@@ -1220,9 +1539,9 @@ def test_workbench_runner_appends_same_question_figure_group_by_order(tmp_path):
     scene = SceneWorkspace()
     scene.input_source_profile.material_schema_id = "exam_items_v1"
     scene.input_source_profile.structured_formats = ["json"]
-    scene.output.report_json = True
-    scene.output.report_markdown = True
-    scene.output.material_manifest = True
+    scene.default_delivery_preset().artifacts.report_json = True
+    scene.default_delivery_preset().artifacts.report_markdown = True
+    scene.default_delivery_preset().artifacts.material_manifest = True
 
     payload = {
         "paper_title": "期末测试",
@@ -1242,11 +1561,10 @@ def test_workbench_runner_appends_same_question_figure_group_by_order(tmp_path):
             }
         ],
     }
-    result = WorkbenchProductionRunner(
-        doc_path=str(source),
-        template=TemplateConfig(),
+    result = _run_exam_material_context(
+        tmp_path=tmp_path,
+        source=source,
         scene=scene,
-        output_dir=tmp_path / "out",
         material_context=MaterialExecutionContext(
             entity_data={"exam_items": json.dumps(payload, ensure_ascii=False)},
             asset_items=[
@@ -1274,7 +1592,7 @@ def test_workbench_runner_appends_same_question_figure_group_by_order(tmp_path):
                 ),
             ],
         ),
-    ).run(lambda *_args: None, lambda: False)
+    )
 
     report_json = next(Path(path) for path in result["report_paths"] if str(path).endswith(".json"))
     report_md = next(Path(path) for path in result["report_paths"] if str(path).endswith(".md"))
@@ -1320,8 +1638,8 @@ def test_workbench_runner_blocks_material_schema_missing_fields_with_preflight_r
     scene = SceneWorkspace()
     scene.input_source_profile.material_schema_id = "contract_parties_v1"
     scene.input_source_profile.failure_policy = "block"
-    scene.output.material_manifest = True
-    scene.output.material_package = True
+    scene.default_delivery_preset().artifacts.material_manifest = True
+    scene.default_delivery_preset().artifacts.material_package = True
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -1361,7 +1679,49 @@ def test_workbench_runner_blocks_material_schema_missing_fields_with_preflight_r
     assert "signing_date" in Path(package_paths["report"]).read_text(encoding="utf-8")
 
 
-def test_workbench_runner_blocks_unknown_material_schema_with_preflight_report(tmp_path):
+def test_blocked_preflight_reports_package_writer_failure_without_masking_reason(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "source.docx"
+    Document().save(source)
+    scene = SceneWorkspace()
+    scene.input_source_profile.material_schema_id = "contract_parties_v1"
+    scene.input_source_profile.failure_policy = "block"
+    scene.default_delivery_preset().artifacts.material_manifest = True
+    scene.default_delivery_preset().artifacts.material_package = True
+
+    def _raise_package_failure(**_kwargs):
+        raise OSError("package disk unavailable")
+
+    monkeypatch.setattr(
+        "src.services.production_runtime.material_preflight_reporting.write_material_package_artifacts",
+        _raise_package_failure,
+    )
+    payload = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=TemplateConfig(),
+        scene=scene,
+        material_context=MaterialExecutionContext(
+            entity_data={
+                "party_a": "Party A",
+                "party_b": "Party B",
+                "contract_amount": "100000",
+            },
+        ),
+    ).run(lambda *_args: None, lambda: False)
+
+    assert payload["status"] == "failed"
+    assert "signing_date" in payload["error_text"]
+    assert "package disk unavailable" in payload["error_text"]
+    assert payload["material_package_paths"] == {}
+    assert payload["artifact_failure_count"] == 1
+    assert payload["artifact_failures"][0]["kind"] == "material_package"
+
+
+def test_unknown_material_schema_blocks_even_when_missing_material_policy_is_warn(
+    tmp_path,
+):
     source = tmp_path / "source.docx"
     doc = Document()
     doc.add_paragraph("Unknown schema")
@@ -1369,9 +1729,9 @@ def test_workbench_runner_blocks_unknown_material_schema_with_preflight_report(t
 
     scene = SceneWorkspace()
     scene.input_source_profile.material_schema_id = "missing_schema_v1"
-    scene.input_source_profile.failure_policy = "block"
-    scene.output.material_manifest = True
-    scene.output.material_package = True
+    scene.input_source_profile.failure_policy = "warn"
+    scene.default_delivery_preset().artifacts.material_manifest = True
+    scene.default_delivery_preset().artifacts.material_package = True
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -1409,37 +1769,10 @@ def test_workbench_runner_blocks_unknown_material_schema_with_preflight_report(t
     assert "missing_schema_v1" in Path(package_paths["report"]).read_text(encoding="utf-8")
 
 
-def test_workbench_runner_applies_material_context_replacement_rules(tmp_path):
-    source = tmp_path / "source.docx"
-    doc = Document()
-    doc.add_paragraph("项目：{{project_name}}")
-    doc.save(source)
-
-    scene = SceneWorkspace()
-    scene.module_switches = {name: False for name in scene.module_switches}
-    scene.module_switches["placeholder_replace"] = True
-
-    payload = WorkbenchProductionRunner(
-        doc_path=str(source),
-        template=TemplateConfig(),
-        scene=scene,
-        material_context=MaterialExecutionContext(
-            replacements=[ReplacementRule(old="{{project_name}}", new="测试项目")],
-        ),
-    ).run(lambda *_args: None, lambda: False)
-
-    output_doc = Document(payload["output_path"])
-    output_text = "\n".join(paragraph.text for paragraph in output_doc.paragraphs)
-
-    assert payload["status"] == "success"
-    assert "测试项目" in output_text
-    assert "{{project_name}}" not in output_text
-
-
 def test_workbench_batch_runner_outputs_one_document_per_profile(tmp_path):
     source = tmp_path / "source.docx"
     doc = Document()
-    doc.add_paragraph("公司：{{company_name}}")
+    doc.add_paragraph("公司：{{@text:company_name}}")
     doc.save(source)
 
     archive = EntityArchive(
@@ -1474,7 +1807,8 @@ def test_workbench_batch_runner_outputs_one_document_per_profile(tmp_path):
     assert len(payload["items"]) == 2
     assert len(payload["output_paths"]) == 2
     output_texts = []
-    for output_path in payload["output_paths"]:
+    assert set(payload["output_paths"]) == {"a:final", "b:final"}
+    for output_path in payload["output_paths"].values():
         output_doc = Document(output_path)
         output_texts.append("\n".join(paragraph.text for paragraph in output_doc.paragraphs))
 
@@ -1484,10 +1818,10 @@ def test_workbench_batch_runner_outputs_one_document_per_profile(tmp_path):
     assert any(path.endswith("_batch_report.md") for path in payload["report_paths"])
 
 
-def test_workbench_batch_runner_uses_shared_replacements_and_blocks_missing_assets(tmp_path):
+def test_workbench_batch_runner_blocks_missing_assets(tmp_path):
     source = tmp_path / "source.docx"
     doc = Document()
-    doc.add_paragraph("Project: {{project}}")
+    doc.add_paragraph("Project: {{@text:project}}")
     doc.save(source)
 
     archive = EntityArchive(
@@ -1502,22 +1836,6 @@ def test_workbench_batch_runner_uses_shared_replacements_and_blocks_missing_asse
     )
     scene = SceneWorkspace()
     scene.module_switches = {name: False for name in scene.module_switches}
-    scene.module_switches["placeholder_replace"] = True
-
-    payload = WorkbenchBatchProductionRunner(
-        doc_path=str(source),
-        template=TemplateConfig(),
-        scene=scene,
-        archive=archive,
-        base_output_dir=tmp_path / "batch_output",
-        base_context=MaterialExecutionContext(
-            replacements=[ReplacementRule(old="{{project}}", new="Project A")]
-        ),
-    ).run(lambda *_args: None, lambda: False)
-
-    assert payload["status"] == "success"
-    output_doc = Document(payload["output_paths"][0])
-    assert "Project A" in "\n".join(paragraph.text for paragraph in output_doc.paragraphs)
 
     failed_payload = WorkbenchBatchProductionRunner(
         doc_path=str(source),
@@ -1526,7 +1844,7 @@ def test_workbench_batch_runner_uses_shared_replacements_and_blocks_missing_asse
         archive=archive,
         base_output_dir=tmp_path / "missing_output",
         base_context=MaterialExecutionContext(
-            image_rules=[AssetInsertionRule(asset_role="logo", target="{{logo}}")]
+            image_rules=[AssetInsertionRule(asset_role="logo", target="{{@img:logo}}")]
         ),
     ).run(lambda *_args: None, lambda: False)
 
@@ -1547,7 +1865,7 @@ def test_workbench_batch_runner_uses_shared_replacements_and_blocks_missing_asse
 def test_workbench_batch_runner_isolates_missing_assets_per_profile(tmp_path):
     source = tmp_path / "source.docx"
     doc = Document()
-    doc.add_paragraph("Company: {{company_name}}")
+    doc.add_paragraph("Company: {{@text:company_name}}")
     doc.save(source)
     logo_path = tmp_path / "logo.png"
     logo_path.write_bytes(
@@ -1557,19 +1875,23 @@ def test_workbench_batch_runner_isolates_missing_assets_per_profile(tmp_path):
         b"\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
     )
 
+    valid_profile_ids = [f"valid-{index:02d}" for index in range(1, 10)]
     archive = EntityArchive(
         archive_id="bid",
         profiles=[
             EntityProfile(
-                profile_id="ok",
-                profile_name="Company A",
-                fields={"company_name": "Company A"},
+                profile_id=profile_id,
+                profile_name=f"Company {index:02d}",
+                fields={"company_name": f"Company {index:02d}"},
                 asset_paths={"logo": str(logo_path)},
-            ),
+            )
+            for index, profile_id in enumerate(valid_profile_ids, start=1)
+        ]
+        + [
             EntityProfile(
                 profile_id="missing",
-                profile_name="Company B",
-                fields={"company_name": "Company B"},
+                profile_name="Company 10",
+                fields={"company_name": "Company 10"},
             ),
         ],
     )
@@ -1584,7 +1906,7 @@ def test_workbench_batch_runner_isolates_missing_assets_per_profile(tmp_path):
         archive=archive,
         base_output_dir=tmp_path / "batch_output",
         base_context=MaterialExecutionContext(
-            image_rules=[AssetInsertionRule(asset_role="logo", target="{{logo}}")]
+            image_rules=[AssetInsertionRule(asset_role="logo", target="{{@img:logo}}")]
         ),
     ).run(lambda *_args: None, lambda: False)
 
@@ -1597,21 +1919,33 @@ def test_workbench_batch_runner_isolates_missing_assets_per_profile(tmp_path):
     report_data = json.loads(batch_json.read_text(encoding="utf-8"))
 
     assert payload["status"] == "partial_success"
-    assert payload["batch_isolation"]["success_count"] == 1
+    assert payload["batch_isolation"]["total_count"] == 10
+    assert payload["batch_isolation"]["success_count"] == 9
     assert payload["batch_isolation"]["failed_count"] == 1
-    assert payload["batch_isolation"]["successful_profiles"][0]["profile_id"] == "ok"
+    assert {
+        item["profile_id"]
+        for item in payload["batch_isolation"]["successful_profiles"]
+    } == set(valid_profile_ids)
     assert payload["batch_isolation"]["failed_profiles"][0]["profile_id"] == "missing"
     assert payload["batch_isolation"]["failed_profiles"][0]["missing_asset_roles"] == [
         "logo"
     ]
     assert payload["batch_issue_items"][0]["profile_id"] == "missing"
     assert payload["batch_issue_items"][0]["repair_target_type"] == "asset"
-    assert "Company A" in "\n".join(
-        paragraph.text for paragraph in Document(payload["output_paths"][0]).paragraphs
-    )
+    assert set(payload["output_paths"]) == {
+        f"{profile_id}:final" for profile_id in valid_profile_ids
+    }
+    for index, profile_id in enumerate(valid_profile_ids, start=1):
+        assert f"Company {index:02d}" in "\n".join(
+            paragraph.text
+            for paragraph in Document(
+                payload["output_paths"][f"{profile_id}:final"]
+            ).paragraphs
+        )
     assert report_data["batch_isolation"]["failed_profiles"][0]["profile_id"] == "missing"
     batch_markdown = batch_md.read_text(encoding="utf-8")
     assert "## Batch Isolation" in batch_markdown
+    assert "success: 9" in batch_markdown
     assert "failed: 1" in batch_markdown
     assert "logo" in batch_markdown
 
@@ -1619,7 +1953,7 @@ def test_workbench_batch_runner_isolates_missing_assets_per_profile(tmp_path):
 def test_workbench_batch_runner_aggregates_material_schema_diagnostics(tmp_path):
     source = tmp_path / "source.docx"
     doc = Document()
-    doc.add_paragraph("Employee: {{employee_name}}")
+    doc.add_paragraph("Employee: {{@text:employee_name}}")
     doc.save(source)
 
     archive = EntityArchive(
@@ -1642,8 +1976,8 @@ def test_workbench_batch_runner_aggregates_material_schema_diagnostics(tmp_path)
     scene.module_switches["entity_fill"] = True
     scene.input_source_profile.material_schema_id = "personnel_records_v1"
     scene.input_source_profile.failure_policy = "block"
-    scene.output.material_manifest = True
-    scene.output.material_package = True
+    scene.default_delivery_preset().artifacts.material_manifest = True
+    scene.default_delivery_preset().artifacts.material_package = True
 
     payload = WorkbenchBatchProductionRunner(
         doc_path=str(source),
@@ -1661,6 +1995,8 @@ def test_workbench_batch_runner_aggregates_material_schema_diagnostics(tmp_path)
     assert len(payload["material_diagnostics"]) == 1
     assert len(payload["material_manifest_paths"]) == 2
     assert len(payload["material_package_paths"]) == 8
+    assert payload["material_package_receipts"]["ok"]["status"] == "complete"
+    assert payload["material_package_receipts"]["missing"]["status"] == "incomplete"
     assert payload["material_diagnostics"][0]["missing_field_keys"] == ["employee_id"]
     assert payload["batch_issue_items"][0]["profile_id"] == "missing"
     assert payload["batch_issue_items"][0]["profile_name"] == "缺编号员工"
@@ -1669,6 +2005,7 @@ def test_workbench_batch_runner_aggregates_material_schema_diagnostics(tmp_path)
     assert payload["batch_issue_items"][0]["repair_target_key"] == "employee_id"
     assert report_data["material_manifest_paths"] == payload["material_manifest_paths"]
     assert report_data["material_package_paths"] == payload["material_package_paths"]
+    assert report_data["material_package_receipts"] == payload["material_package_receipts"]
     assert report_data["material_diagnostics"][0]["missing_field_keys"] == ["employee_id"]
     assert report_data["batch_issue_items"][0]["profile_id"] == "missing"
     batch_markdown = batch_md.read_text(encoding="utf-8")
@@ -1732,7 +2069,9 @@ def test_workbench_batch_runner_reports_missing_question_figure_file_repair_targ
     )
     target = json.loads(issue["repair_target_key"])
 
-    assert payload["status"] == "success"
+    assert payload["status"] == "failed"
+    assert payload["output_paths"] == {}
+    assert "Terminal assembler 'exam' blocked delivery" in payload["error_text"]
     assert payload["material_diagnostics"][0]["change_type"] == (
         "preflight_missing_question_figure_file"
     )
@@ -1805,7 +2144,9 @@ def test_workbench_batch_runner_reports_missing_local_metadata_question_figure_r
     )
     target = json.loads(issue["repair_target_key"])
 
-    assert payload["status"] == "success"
+    assert payload["status"] == "failed"
+    assert payload["output_paths"] == {}
+    assert "Terminal assembler 'exam' blocked delivery" in payload["error_text"]
     assert payload["material_diagnostics"][0]["before"] == str(missing_local_path)
     assert payload["material_diagnostics"][0]["missing_asset_items"][0]["path"] == (
         str(missing_local_path)
@@ -1882,7 +2223,9 @@ def test_workbench_batch_runner_reports_suspicious_question_figure_filename_mism
     target = json.loads(issue["repair_target_key"])
     workbench_issue = batch_execution_issue_items([issue])[0]
 
-    assert payload["status"] == "success"
+    assert payload["status"] == "failed"
+    assert payload["output_paths"] == {}
+    assert "Terminal assembler 'exam' blocked delivery" in payload["error_text"]
     assert payload["material_diagnostics"][0]["change_type"] == (
         "preflight_suspicious_question_figure_mismatch"
     )
@@ -1968,7 +2311,9 @@ def test_workbench_batch_runner_reports_manual_question_figure_comparison_issue(
     target = json.loads(issue["repair_target_key"])
     workbench_issue = batch_execution_issue_items([issue])[0]
 
-    assert payload["status"] == "success"
+    assert payload["status"] == "failed"
+    assert payload["output_paths"] == {}
+    assert "Terminal assembler 'exam' blocked delivery" in payload["error_text"]
     assert payload["material_diagnostics"][0]["change_type"] == (
         "preflight_question_figure_manual_comparison_issue"
     )

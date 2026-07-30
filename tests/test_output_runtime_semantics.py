@@ -1,16 +1,19 @@
 import json
+import os
 import sys
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
 from docx import Document
+import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.config.resolver import resolve_config
+from src.config.resolved import ResolvedConfig
 from src.config.feature_configs import OutputConfig
 from src.config.scene import ContentVisibilityRule, DeliveryPreset, SceneWorkspace
 from src.config.scene_family_application import apply_planned_scene_family_defaults
@@ -24,8 +27,48 @@ from src.pipeline.tracker import ChangeTracker
 from src.pipeline.runner import Pipeline
 from src.report_writer import write_json_report, write_markdown_report
 from src.shared.engine.field_builder import iter_field_instructions
-import src.ui.panels.workbench.execution_runtime as execution_runtime
-from src.ui.panels.workbench.execution_runtime import WorkbenchProductionRunner
+import src.services.production_runtime.execution_runtime as execution_runtime
+from src.services.production_runtime import delivery_reporting, delivery_runtime
+from src.services.production_runtime.delivery_group_preflight import (
+    PreparedDeliveryTargetGroup,
+    build_delivery_group_output_preflight,
+)
+from src.services.production_runtime.execution_runtime import WorkbenchProductionRunner
+
+
+def test_unresolved_runtime_config_authorizes_no_artifacts():
+    config = ResolvedConfig()
+    output = config.output
+
+    assert config.default_delivery_preset_id == ""
+    assert config.delivery_presets == []
+
+    assert not any(
+        (
+            output.final_docx,
+            output.compare_docx,
+            output.compare_text,
+            output.compare_formatting,
+            output.report_json,
+            output.report_markdown,
+            output.material_manifest,
+            output.material_package,
+            output.review_pdf,
+        )
+    )
+
+
+def test_explicit_zero_delivery_scene_resolves_without_artifact_authorization():
+    scene = SceneWorkspace(
+        default_delivery_preset_id="",
+        delivery_presets=[],
+    )
+
+    resolved = resolve_config(TemplateConfig(), scene)
+
+    assert resolved.default_delivery_preset_id == ""
+    assert resolved.delivery_presets == []
+    assert not any(vars(resolved.output).values())
 
 
 def test_pipeline_skips_final_output_when_final_docx_is_disabled(tmp_path):
@@ -33,8 +76,9 @@ def test_pipeline_skips_final_output_when_final_docx_is_disabled(tmp_path):
     Document().save(source)
 
     template = TemplateConfig()
-    template.output.final_docx = False
-    config = resolve_config(template, SceneWorkspace())
+    scene = SceneWorkspace()
+    scene.default_delivery_preset().artifacts.final_docx = False
+    config = resolve_config(template, scene)
 
     output_dir = tmp_path / "out"
     result = Pipeline(
@@ -97,6 +141,109 @@ def test_pipeline_writes_docx_for_each_delivery_preset_with_final_artifact(tmp_p
     assert (output_dir / "source_final.docx").exists() is True
     assert (output_dir / "review" / "source_review.docx").exists() is True
     assert (output_dir / "source_compliance_report.docx").exists() is False
+
+
+@pytest.mark.parametrize(
+    ("corruption", "expected_issue"),
+    (
+        ("duplicate", "duplicate_delivery_preset_id:final"),
+        ("empty_preset", "delivery_preset_id_empty:0"),
+        ("empty_default", "default_delivery_preset_id_empty"),
+        ("unknown_default", "default_delivery_preset_id_unknown:missing"),
+    ),
+)
+def test_invalid_delivery_identity_blocks_before_mutation_or_output(
+    tmp_path,
+    corruption,
+    expected_issue,
+):
+    source = tmp_path / "source.docx"
+    source_doc = Document()
+    source_doc.add_paragraph("SOURCE MUST REMAIN UNCHANGED")
+    source_doc.save(source)
+    source_bytes = source.read_bytes()
+    output_dir = tmp_path / "out"
+    applied: list[str] = []
+
+    class _MutationProbeModule(BaseModule):
+        meta = ModuleMeta(
+            name="delivery_identity_mutation_probe",
+            description="must not run for invalid delivery identity",
+            category="test",
+            execution_phase="format",
+            scope_behavior="document_level",
+        )
+
+        def apply(self, doc, config, tracker, context):
+            applied.append("applied")
+            doc.add_paragraph("MUTATED")
+
+    scene = SceneWorkspace(
+        default_delivery_preset_id="final",
+        delivery_presets=[
+            DeliveryPreset(
+                preset_id="final",
+                filename_template="{stem}_first",
+                artifacts=OutputConfig(
+                    final_docx=True,
+                    report_json=False,
+                    report_markdown=False,
+                ),
+            ),
+            DeliveryPreset(
+                preset_id="review",
+                filename_template="{stem}_second",
+                artifacts=OutputConfig(
+                    final_docx=True,
+                    report_json=False,
+                    report_markdown=False,
+                ),
+            ),
+        ],
+    )
+    config = resolve_config(TemplateConfig(), scene)
+    if corruption == "duplicate":
+        config.delivery_presets[1].preset_id = "final"
+    elif corruption == "empty_preset":
+        config.delivery_presets[0].preset_id = ""
+    elif corruption == "empty_default":
+        config.default_delivery_preset_id = ""
+    else:
+        config.default_delivery_preset_id = "missing"
+
+    result = Pipeline(
+        modules=[_MutationProbeModule()],
+        config=config,
+        output_dir=str(output_dir),
+        force_delivery_presets=True,
+    ).execute(str(source))
+
+    assert result.success is False
+    assert result.status == "failed"
+    assert expected_issue in str(result.error)
+    assert applied == []
+    assert result.output_paths == {}
+    assert not output_dir.exists()
+    assert source.read_bytes() == source_bytes
+
+
+def test_publication_defense_rejects_duplicate_output_id_before_staging(tmp_path):
+    config = resolve_config(TemplateConfig(), SceneWorkspace())
+    pipeline = Pipeline(modules=[], config=config)
+    document = Document()
+    first = tmp_path / "first.docx"
+    second = tmp_path / "second.docx"
+
+    with pytest.raises(ValueError, match="duplicate_output_id:same"):
+        pipeline._publish_output_documents(
+            [
+                ("same", first, document),
+                ("same", second, document),
+            ]
+        )
+
+    assert not first.exists()
+    assert not second.exists()
 
 
 def test_pipeline_renders_preset_label_with_shared_display_name(tmp_path):
@@ -248,11 +395,15 @@ def test_pipeline_can_force_delivery_output_for_single_preset(tmp_path):
 
 def test_pipeline_reports_delivery_output_target_preflight_issues(tmp_path):
     source = tmp_path / "source.docx"
-    Document().save(source)
+    source_doc = Document()
+    source_doc.add_paragraph("SOURCE")
+    source_doc.save(source)
     output_dir = tmp_path / "out"
     output_dir.mkdir()
     existing_target = output_dir / "source.docx"
-    Document().save(existing_target)
+    existing_doc = Document()
+    existing_doc.add_paragraph("OLD TARGET")
+    existing_doc.save(existing_target)
 
     scene = SceneWorkspace(
         default_delivery_preset_id="final",
@@ -292,14 +443,32 @@ def test_pipeline_reports_delivery_output_target_preflight_issues(tmp_path):
         if item.rule_name == "output_target_preflight"
     ]
 
-    assert result.success is True
+    assert result.success is False
+    assert result.output_paths == {}
+    assert [paragraph.text for paragraph in Document(existing_target).paragraphs] == [
+        "OLD TARGET"
+    ]
     assert [item.path for item in preflight.items] == [
         str(existing_target),
         str(existing_target),
     ]
     assert preflight.has_issues is True
+    assert preflight.has_errors is True
+    assert preflight.error_count == 2
     assert issue_kinds.count("duplicate_target") == 2
     assert issue_kinds.count("target_exists") == 2
+    assert {
+        issue.severity
+        for item in preflight.items
+        for issue in item.issues
+        if issue.kind == "duplicate_target"
+    } == {"error"}
+    assert {
+        issue.severity
+        for item in preflight.items
+        for issue in item.issues
+        if issue.kind == "target_exists"
+    } == {"warning"}
     issue_messages = [
         issue.message
         for item in preflight.items
@@ -310,8 +479,15 @@ def test_pipeline_reports_delivery_output_target_preflight_issues(tmp_path):
     assert not any(message.startswith("final ") for message in issue_messages)
     assert not any(message.startswith("review ") for message in issue_messages)
     assert tracker_items
-    assert "输出文件已存在" in tracker_items[0].after
-    assert "同一输出文件" in tracker_items[0].after
+    assert {item.change_type for item in tracker_items} == {
+        "output_target_warning",
+        "output_target_blocked",
+    }
+    blocked = next(
+        item for item in tracker_items if item.change_type == "output_target_blocked"
+    )
+    assert blocked.success is False
+    assert blocked.failure_reason == result.error
 
 
 def test_pipeline_output_target_preflight_uses_shared_delivery_display_label(tmp_path):
@@ -418,6 +594,11 @@ def test_pipeline_applies_delivery_visibility_marker_blocks_per_preset(tmp_path)
     assert previews[0].removed_blocks[0].selector == "answer"
     assert previews[0].removed_blocks[0].context_before == "1. What is 1 + 1?"
     assert previews[0].removed_blocks[0].context_after == "End"
+    visibility_receipts = result.context.content_visibility_receipts
+    assert set(visibility_receipts) == {"student", "teacher"}
+    assert visibility_receipts["student"]["removed_body_element_count"] == 3
+    assert visibility_receipts["teacher"]["removed_body_element_count"] == 2
+    assert visibility_receipts["student"]["receipt_id"]
     visibility_changes = [
         item
         for item in result.tracker.get_all()
@@ -430,7 +611,10 @@ def test_pipeline_applies_delivery_visibility_marker_blocks_per_preset(tmp_path)
     ]
     assert visibility_changes
     assert "answer" in visibility_changes[0].after
-    assert "student: remove 3 in 1 block(s) sample=Answer: 2" in preflight_changes[0].after
+    assert (
+        "student: remove body=3, paragraphs=3, tables=0 "
+        "in 1 block(s) sample=Answer: 2"
+    ) in preflight_changes[0].after
 
 
 def test_pipeline_reports_visibility_preflight_without_blocking_output(tmp_path):
@@ -478,6 +662,231 @@ def test_pipeline_reports_visibility_preflight_without_blocking_output(tmp_path)
     assert result.context.content_visibility_preview[0].missing_selectors == ["answer"]
 
 
+def test_pipeline_blocks_invalid_visibility_action_before_docx_mutation(tmp_path):
+    source = tmp_path / "source.docx"
+    doc = Document()
+    doc.add_paragraph("Question")
+    doc.add_paragraph("{{#visibility:answer}}")
+    doc.add_paragraph("SENSITIVE ANSWER")
+    doc.add_paragraph("{{/visibility:answer}}")
+    doc.save(source)
+    source_before = source.read_bytes()
+    applied: list[str] = []
+
+    class _MutationProbeModule(BaseModule):
+        meta = ModuleMeta(
+            name="invalid_visibility_action_probe",
+            description="Invalid visibility action probe",
+            category="test",
+            execution_phase="fill",
+            scope_behavior="document_level",
+        )
+
+        def apply(self, doc, config, tracker, context):
+            applied.append("applied")
+            doc.add_paragraph("MUTATED")
+
+    scene = SceneWorkspace(
+        default_delivery_preset_id="student",
+        delivery_presets=[
+            DeliveryPreset(
+                preset_id="student",
+                artifacts=OutputConfig(
+                    final_docx=True,
+                    report_json=False,
+                    report_markdown=False,
+                ),
+                content_visibility_rules=[
+                    ContentVisibilityRule(
+                        rule_id="hide-answer",
+                        selector="answer",
+                        action="remvoe",
+                    )
+                ],
+            )
+        ],
+    )
+    scene.compliance_profile.object_preflight.enabled = False
+    output_dir = tmp_path / "out"
+
+    result = Pipeline(
+        modules=[_MutationProbeModule()],
+        config=resolve_config(TemplateConfig(), scene),
+        output_dir=str(output_dir),
+        force_delivery_presets=True,
+    ).execute(str(source))
+
+    assert result.success is False
+    assert result.status == "failed"
+    assert applied == []
+    assert result.output_paths == {}
+    assert not output_dir.exists()
+    assert source.read_bytes() == source_before
+    diagnostics = result.context.content_visibility_scan.blocking_diagnostics
+    assert {item["code"] for item in diagnostics} == {
+        "content_visibility_action_invalid"
+    }
+    assert "SENSITIVE ANSWER" in "\n".join(
+        paragraph.text for paragraph in Document(source).paragraphs
+    )
+
+
+def test_pipeline_blocks_sensitive_visibility_selector_typo_before_marker_strip(
+    tmp_path,
+):
+    source = tmp_path / "source.docx"
+    doc = Document()
+    doc.add_paragraph("Question")
+    doc.add_paragraph("{{#visibility:answer}}")
+    doc.add_paragraph("SENSITIVE ANSWER")
+    doc.add_paragraph("{{/visibility:answer}}")
+    doc.save(source)
+    source_before = source.read_bytes()
+    scene = SceneWorkspace(
+        default_delivery_preset_id="student",
+        delivery_presets=[
+            DeliveryPreset(
+                preset_id="student",
+                artifacts=OutputConfig(
+                    final_docx=True,
+                    report_json=False,
+                    report_markdown=False,
+                ),
+                content_visibility_rules=[
+                    ContentVisibilityRule(
+                        rule_id="hide-answer",
+                        selector="anwser",
+                        action="remove",
+                    )
+                ],
+            )
+        ],
+    )
+    scene.compliance_profile.object_preflight.enabled = False
+    output_dir = tmp_path / "out"
+
+    result = Pipeline(
+        modules=[],
+        config=resolve_config(TemplateConfig(), scene),
+        output_dir=str(output_dir),
+        force_delivery_presets=True,
+    ).execute(str(source))
+
+    assert result.success is False
+    assert result.status == "failed"
+    assert result.output_paths == {}
+    assert not output_dir.exists()
+    assert source.read_bytes() == source_before
+    scan = result.context.content_visibility_scan
+    assert scan.missing_rule_selectors == ["anwser"]
+    assert scan.unused_document_selectors == ["answer"]
+    assert {item["code"] for item in scan.blocking_diagnostics} == {
+        "content_visibility_sensitive_selector_mismatch"
+    }
+    assert "Content visibility preflight blocked execution" in result.error
+
+
+def test_pipeline_keeps_unrelated_optional_visibility_rule_nonblocking(tmp_path):
+    source = tmp_path / "source.docx"
+    doc = Document()
+    doc.add_paragraph("{{#visibility:appendix}}")
+    doc.add_paragraph("Optional appendix")
+    doc.add_paragraph("{{/visibility:appendix}}")
+    doc.save(source)
+    scene = SceneWorkspace(
+        default_delivery_preset_id="student",
+        delivery_presets=[
+            DeliveryPreset(
+                preset_id="student",
+                artifacts=OutputConfig(
+                    final_docx=True,
+                    report_json=False,
+                    report_markdown=False,
+                ),
+                content_visibility_rules=[
+                    ContentVisibilityRule(selector="answer", action="remove")
+                ],
+            )
+        ],
+    )
+    scene.compliance_profile.object_preflight.enabled = False
+
+    result = Pipeline(
+        modules=[],
+        config=resolve_config(TemplateConfig(), scene),
+        output_dir=str(tmp_path / "out"),
+        force_delivery_presets=True,
+    ).execute(str(source))
+
+    assert result.success is True
+    output_text = "\n".join(
+        paragraph.text
+        for paragraph in Document(result.output_paths["student"]).paragraphs
+    )
+    assert "Optional appendix" in output_text
+    assert "visibility:appendix" not in output_text
+    assert result.context.content_visibility_scan.has_blocking_issues is False
+
+
+def test_pipeline_blocks_invalid_visibility_grammar_before_module_apply(tmp_path):
+    source = tmp_path / "source.docx"
+    doc = Document()
+    table = doc.add_table(rows=1, cols=1)
+    table.cell(0, 0).text = "{{#visibility:answer}}"
+    doc.add_paragraph("{{/visibility:answer}}")
+    doc.save(source)
+    applied: list[str] = []
+
+    class _MutationProbeModule(BaseModule):
+        meta = ModuleMeta(
+            name="visibility_mutation_probe",
+            description="Visibility mutation probe",
+            category="test",
+            execution_phase="fill",
+            scope_behavior="document_level",
+        )
+
+        def apply(self, doc, config, tracker, context):
+            applied.append("applied")
+            doc.add_paragraph("MUTATED")
+
+    scene = SceneWorkspace(
+        default_delivery_preset_id="student",
+        delivery_presets=[
+            DeliveryPreset(
+                preset_id="student",
+                artifacts=OutputConfig(
+                    final_docx=True,
+                    report_json=False,
+                    report_markdown=False,
+                ),
+                content_visibility_rules=[
+                    ContentVisibilityRule(selector="answer", action="remove")
+                ],
+            )
+        ],
+    )
+    scene.compliance_profile.object_preflight.enabled = False
+    config = resolve_config(TemplateConfig(), scene)
+
+    result = Pipeline(
+        modules=[_MutationProbeModule()],
+        config=config,
+        output_dir=str(tmp_path / "out"),
+        force_delivery_presets=True,
+    ).execute(str(source))
+
+    assert result.success is False
+    assert applied == []
+    assert result.output_paths == {}
+    assert result.context.content_visibility_preview == []
+    assert result.context.content_visibility_scan.has_blocking_issues is True
+    assert "Content visibility preflight blocked execution" in result.error
+    failures = result.tracker.get_failures()
+    assert len(failures) == 1
+    assert failures[0].change_type == "visibility_preflight_blocked"
+
+
 def test_workbench_runner_reports_delivery_visibility_changes(tmp_path, monkeypatch):
     source = tmp_path / "source.docx"
     doc = Document()
@@ -510,11 +919,6 @@ def test_workbench_runner_reports_delivery_visibility_changes(tmp_path, monkeypa
     scene.compliance_profile.object_preflight.enabled = False
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -543,6 +947,11 @@ def test_workbench_runner_reports_delivery_visibility_changes(tmp_path, monkeypa
             "text_samples": ["Answer"],
             "context_before": "Question",
             "context_after": "",
+            "start_body_index": 1,
+            "end_body_index": 3,
+            "body_element_count": 3,
+            "table_count": 0,
+            "content_image_markers": [],
         }
     ]
     assert "Answer" not in student_text
@@ -551,6 +960,46 @@ def test_workbench_runner_reports_delivery_visibility_changes(tmp_path, monkeypa
         for item in report_data["changes"]
     )
     assert any(item["rule_name"] == "delivery_visibility" for item in report_data["changes"])
+
+
+def test_official_markdown_input_does_not_use_exam_paper_residual():
+    official_scene = SceneWorkspace(
+        scene_id="official",
+        mode_id="official",
+        category="government",
+        master_id="official_default",
+    )
+    official_user_scene = SceneWorkspace(
+        scene_id="official_custom",
+        mode_id="official",
+        category="government",
+        master_id="official_default",
+    )
+    exam_scene = SceneWorkspace(
+        scene_id="exam",
+        mode_id="exam",
+        category="exam_paper",
+        master_id="default_exam",
+    )
+
+    assert official_scene.exam_paper is not None
+    assert official_user_scene.exam_paper is not None
+    assert execution_runtime._is_exam_markdown_input(
+        official_scene,
+        Path("notice.md"),
+    ) is False
+    assert execution_runtime._is_exam_markdown_input(
+        official_user_scene,
+        Path("custom-official.md"),
+    ) is False
+    assert execution_runtime._is_exam_markdown_input(
+        exam_scene,
+        Path("exam_source.md"),
+    ) is True
+    assert execution_runtime._is_exam_markdown_input(
+        exam_scene,
+        Path("exam_source.docx"),
+    ) is False
 
 
 def test_workbench_runner_payload_includes_output_target_preflight(tmp_path, monkeypatch):
@@ -579,11 +1028,6 @@ def test_workbench_runner_payload_includes_output_target_preflight(tmp_path, mon
     scene.compliance_profile.object_preflight.enabled = False
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -598,47 +1042,36 @@ def test_workbench_runner_payload_includes_output_target_preflight(tmp_path, mon
         for issue in item["issues"]
     ]
 
-    assert payload["status"] == "success"
+    assert payload["status"] == "failed"
+    assert payload["output_paths"] == {}
     assert preflight["has_issues"] is True
+    assert preflight["has_errors"] is True
     assert preflight["issue_count"] == 4
+    assert preflight["error_count"] == 2
     assert issue_kinds.count("duplicate_target") == 2
     assert issue_kinds.count("target_exists") == 2
     assert preflight["items"][0]["path"] == str(existing_target)
 
 
-def test_workbench_runner_attaches_scene_sample_manifest_paths(tmp_path, monkeypatch):
+def test_workbench_runner_does_not_attach_engineering_sample_manifest(tmp_path, monkeypatch):
     source = tmp_path / "source.docx"
     Document().save(source)
-    manifest_path = tmp_path / "scene_sample_fixtures" / "manifest.json"
-    manifest_path.parent.mkdir()
-    manifest_path.write_text('{"artifact_count": 12}', encoding="utf-8")
 
     template = TemplateConfig()
-    template.output.report_json = False
-    template.output.report_markdown = False
+    scene = SceneWorkspace()
+    scene.default_delivery_preset().artifacts.report_json = False
+    scene.default_delivery_preset().artifacts.report_markdown = False
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
-    monkeypatch.setattr(
-        execution_runtime,
-        "scene_sample_fixture_manifest_paths",
-        lambda: {"fixture_manifest": str(manifest_path)},
-    )
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
         template=template,
-        scene=SceneWorkspace(),
+        scene=scene,
     ).run(lambda *_args: None, lambda: False)
 
     assert payload["status"] == "success"
-    assert payload["scene_sample_manifest_paths"] == {
-        "fixture_manifest": str(manifest_path)
-    }
+    assert "scene_sample_manifest_paths" not in payload
 
 
 def test_workbench_runner_can_emit_json_report_without_final_docx(tmp_path, monkeypatch):
@@ -646,21 +1079,18 @@ def test_workbench_runner_can_emit_json_report_without_final_docx(tmp_path, monk
     Document().save(source)
 
     template = TemplateConfig()
-    template.output.final_docx = False
-    template.output.report_json = True
-    template.output.report_markdown = False
+    scene = SceneWorkspace()
+    artifacts = scene.default_delivery_preset().artifacts
+    artifacts.final_docx = False
+    artifacts.report_json = True
+    artifacts.report_markdown = False
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
         template=template,
-        scene=SceneWorkspace(),
+        scene=scene,
     ).run(lambda *_args: None, lambda: False)
 
     report_json = source.parent / "output" / "source_changes.json"
@@ -685,9 +1115,11 @@ def test_workbench_runner_resolves_target_template_for_delivery_presets(tmp_path
     target_template.styles["body"] = StyleConfig(font_cn="TargetFont")
 
     scene = SceneWorkspace(
+        scene_id="exam",
+        mode_id="exam",
         template_id="base_template",
-        default_template_id="base_template",
         compatible_template_ids=["base_template", "target_template"],
+        master_id="default_exam",
         default_delivery_preset_id="submission",
         delivery_presets=[
             DeliveryPreset(
@@ -707,7 +1139,7 @@ def test_workbench_runner_resolves_target_template_for_delivery_presets(tmp_path
             ),
         ],
     )
-    loaded_template_ids = []
+    loaded_template_requests = []
     captured_runs = []
 
     class _StubPipeline:
@@ -727,19 +1159,19 @@ def test_workbench_runner_resolves_target_template_for_delivery_presets(tmp_path
                 output_paths=output_paths,
             )
 
-    def _load_template(template_id: str) -> TemplateConfig:
-        loaded_template_ids.append(template_id)
+    def _load_template(
+        template_id: str,
+        *,
+        mode_id: str | None = None,
+    ) -> TemplateConfig:
+        loaded_template_requests.append((template_id, mode_id))
         assert template_id == "target_template"
+        assert mode_id == "exam"
         return target_template
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
     monkeypatch.setattr(execution_runtime, "Pipeline", _StubPipeline)
-    monkeypatch.setattr(execution_runtime, "load_template_from_library", _load_template)
+    monkeypatch.setattr(delivery_runtime, "load_template_from_library", _load_template)
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -758,7 +1190,7 @@ def test_workbench_runner_resolves_target_template_for_delivery_presets(tmp_path
         "submission": str(source.parent / "output" / "submission.docx"),
         "review": str(source.parent / "output" / "review.docx"),
     }
-    assert loaded_template_ids == ["target_template"]
+    assert loaded_template_requests == [("target_template", "exam")]
     assert fonts_by_preset == {
         "submission": "TargetFont",
         "review": "BaseFont",
@@ -768,6 +1200,302 @@ def test_workbench_runner_resolves_target_template_for_delivery_presets(tmp_path
         "source_review_changes.md",
         "source_submission_changes.json",
     ]
+
+
+def test_delivery_target_groups_preflight_cross_group_hardlink_alias_before_execution(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "source.docx"
+    Document().save(source)
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    first_target = output_dir / "shared-a.docx"
+    second_target = output_dir / "shared-b.docx"
+    first_target.write_bytes(b"existing-final")
+    os.link(first_target, second_target)
+
+    scene = SceneWorkspace(
+        template_id="base_template",
+        compatible_template_ids=["base_template", "target_template"],
+        default_delivery_preset_id="submission",
+        delivery_presets=[
+            DeliveryPreset(
+                preset_id="submission",
+                target_template_id="target_template",
+                filename_template=first_target.name,
+                artifacts=OutputConfig(final_docx=True),
+            ),
+            DeliveryPreset(
+                preset_id="review",
+                target_template_id="base_template",
+                filename_template=second_target.name,
+                artifacts=OutputConfig(final_docx=True),
+            ),
+        ],
+    )
+    pipeline_calls: list[dict[str, object]] = []
+
+    class _ForbiddenPipeline:
+        def __init__(self, **kwargs):
+            pipeline_calls.append(kwargs)
+            raise AssertionError("no delivery group may start before global preflight")
+
+    monkeypatch.setattr(execution_runtime, "Pipeline", _ForbiddenPipeline)
+    monkeypatch.setattr(
+        delivery_runtime,
+        "load_template_from_library",
+        lambda *_args, **_kwargs: TemplateConfig(),
+    )
+
+    payload = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=TemplateConfig(),
+        scene=scene,
+        output_dir=output_dir,
+    ).run(lambda *_args: None, lambda: False)
+
+    assert payload["status"] == "failed"
+    assert payload["output_paths"] == {}
+    assert pipeline_calls == []
+    assert first_target.read_bytes() == b"existing-final"
+    assert second_target.read_bytes() == b"existing-final"
+    issue_kinds = {
+        issue["kind"]
+        for item in payload["output_target_preflight"]["items"]
+        for issue in item["issues"]
+    }
+    assert "duplicate_target" in issue_kinds
+
+
+def test_delivery_group_preflight_rejects_each_same_group_auxiliary_final_collision(
+    tmp_path,
+):
+    shared_path = str(tmp_path / "shared.docx")
+    artifact_kinds = (
+        "report_json",
+        "report_markdown",
+        "compare_docx",
+        "structured_intermediate",
+    )
+
+    for artifact_kind in artifact_kinds:
+        payload = build_delivery_group_output_preflight(
+            [
+                PreparedDeliveryTargetGroup(
+                    target_template_id="target_template",
+                    config=object(),
+                    planned_output_paths={"final": shared_path},
+                    terminal_owner="",
+                    error="",
+                    planned_artifact_paths={
+                        f"final:{artifact_kind}": shared_path,
+                    },
+                )
+            ]
+        )
+
+        assert payload["has_errors"] is True
+        issue_kinds = {
+            issue["kind"]
+            for item in payload["items"]
+            for issue in item["issues"]
+        }
+        assert "duplicate_artifact_target" in issue_kinds
+
+
+def test_delivery_target_group_preflight_blocks_same_group_hardlink_artifact(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "source.docx"
+    Document().save(source)
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    final_path = output_dir / "shared.docx"
+    report_path = output_dir / "shared_changes.json"
+    final_path.write_bytes(b"existing-shared-artifact")
+    os.link(final_path, report_path)
+    scene = SceneWorkspace(
+        template_id="base_template",
+        compatible_template_ids=["base_template", "target_template"],
+        default_delivery_preset_id="final",
+        delivery_presets=[
+            DeliveryPreset(
+                preset_id="final",
+                target_template_id="target_template",
+                filename_template="shared.docx",
+                artifacts=OutputConfig(final_docx=True, report_json=True),
+            )
+        ],
+    )
+    pipeline_calls: list[dict[str, object]] = []
+
+    class _ForbiddenPipeline:
+        def __init__(self, **kwargs):
+            pipeline_calls.append(kwargs)
+            raise AssertionError("same-group artifact collision must fail preflight")
+
+    monkeypatch.setattr(execution_runtime, "Pipeline", _ForbiddenPipeline)
+    monkeypatch.setattr(
+        delivery_runtime,
+        "load_template_from_library",
+        lambda *_args, **_kwargs: TemplateConfig(),
+    )
+
+    payload = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=TemplateConfig(),
+        scene=scene,
+        output_dir=output_dir,
+    ).run(lambda *_args: None, lambda: False)
+
+    assert payload["status"] == "failed"
+    assert pipeline_calls == []
+    assert final_path.read_bytes() == b"existing-shared-artifact"
+    assert report_path.read_bytes() == b"existing-shared-artifact"
+    issue_kinds = {
+        issue["kind"]
+        for item in payload["output_target_preflight"]["items"]
+        for issue in item["issues"]
+    }
+    assert "duplicate_artifact_target" in issue_kinds
+
+
+def test_delivery_target_groups_conflict_does_not_create_output_root(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "source.docx"
+    Document().save(source)
+    output_dir = tmp_path / "not-created"
+    scene = SceneWorkspace(
+        template_id="base_template",
+        default_delivery_preset_id="first",
+        delivery_presets=[
+            DeliveryPreset(
+                preset_id="first",
+                target_template_id="target_template",
+                filename_template="same-final.docx",
+                artifacts=OutputConfig(final_docx=True),
+            ),
+            DeliveryPreset(
+                preset_id="second",
+                target_template_id="base_template",
+                filename_template="same-final.docx",
+                artifacts=OutputConfig(final_docx=True),
+            ),
+        ],
+    )
+
+    class _ForbiddenPipeline:
+        def __init__(self, **_kwargs):
+            raise AssertionError("global preflight must run before any group pipeline")
+
+    monkeypatch.setattr(execution_runtime, "Pipeline", _ForbiddenPipeline)
+    monkeypatch.setattr(
+        delivery_runtime,
+        "load_template_from_library",
+        lambda *_args, **_kwargs: TemplateConfig(),
+    )
+
+    payload = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=TemplateConfig(),
+        scene=scene,
+        output_dir=output_dir,
+    ).run(lambda *_args: None, lambda: False)
+
+    assert payload["status"] == "failed"
+    assert "同一 final" in payload["error_text"]
+    assert not output_dir.exists()
+
+
+def test_delivery_target_groups_preflight_auxiliary_collision_without_final_docx(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "source.docx"
+    Document().save(source)
+    output_dir = tmp_path / "not-created"
+    scene = SceneWorkspace(
+        template_id="base_template",
+        default_delivery_preset_id="first",
+        delivery_presets=[
+            DeliveryPreset(
+                preset_id="first",
+                target_template_id="target_template",
+                filename_template="same-report.docx",
+                artifacts=OutputConfig(final_docx=False, report_json=True),
+            ),
+            DeliveryPreset(
+                preset_id="second",
+                target_template_id="base_template",
+                filename_template="same-report.docx",
+                artifacts=OutputConfig(final_docx=False, report_json=True),
+            ),
+        ],
+    )
+    pipeline_calls: list[dict[str, object]] = []
+
+    class _ForbiddenPipeline:
+        def __init__(self, **kwargs):
+            pipeline_calls.append(kwargs)
+            raise AssertionError("artifact collision must fail before execution")
+
+    monkeypatch.setattr(execution_runtime, "Pipeline", _ForbiddenPipeline)
+    monkeypatch.setattr(
+        delivery_runtime,
+        "load_template_from_library",
+        lambda *_args, **_kwargs: TemplateConfig(),
+    )
+
+    payload = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=TemplateConfig(),
+        scene=scene,
+        output_dir=output_dir,
+    ).run(lambda *_args: None, lambda: False)
+
+    assert payload["status"] == "failed"
+    assert pipeline_calls == []
+    assert not output_dir.exists()
+    issue_kinds = {
+        issue["kind"]
+        for item in payload["output_target_preflight"]["items"]
+        for issue in item["issues"]
+    }
+    assert "duplicate_artifact_target" in issue_kinds
+
+
+def test_delivery_template_load_prefers_explicit_scene_mode(monkeypatch):
+    current_template = TemplateConfig(name="Current")
+    loaded_template = TemplateConfig(name="Loaded")
+    calls = []
+
+    def _load_template(
+        template_id: str,
+        *,
+        mode_id: str | None = None,
+    ) -> TemplateConfig:
+        calls.append((template_id, mode_id))
+        return loaded_template
+
+    monkeypatch.setattr(delivery_runtime, "load_template_from_library", _load_template)
+    scene = SceneWorkspace(
+        scene_id="school_midterm_copy",
+        mode_id="exam",
+        template_id="base_template",
+    )
+
+    result = delivery_runtime.load_delivery_template(
+        current_template,
+        scene=scene,
+        target_template_id="target_template",
+    )
+
+    assert result is loaded_template
+    assert calls == [("target_template", "exam")]
 
 
 def test_workbench_runner_uses_delivery_preset_artifacts_for_outputs_and_reports(tmp_path, monkeypatch):
@@ -801,11 +1529,6 @@ def test_workbench_runner_uses_delivery_preset_artifacts_for_outputs_and_reports
     )
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -860,11 +1583,6 @@ def test_workbench_runner_delivery_markdown_report_uses_display_label(tmp_path, 
     scene.compliance_profile.object_preflight.enabled = False
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -907,16 +1625,10 @@ def test_workbench_runner_writes_technical_long_document_delivery_package(tmp_pa
         scene_id="technical",
         category="technical",
         template_id="tech_standard",
-        default_template_id="tech_standard",
     )
     apply_planned_scene_family_defaults(scene)
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -992,11 +1704,6 @@ def test_workbench_runner_writes_product_pre_sales_delivery_package(tmp_path, mo
     apply_planned_scene_family_defaults(scene)
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -1071,7 +1778,10 @@ def test_workbench_runner_writes_product_pre_sales_delivery_package(tmp_path, mo
     assert ("intermediate", "pre_sales_package") in packaged_files
 
 
-def test_workbench_runner_writes_regulated_disclosure_archive_package(tmp_path, monkeypatch):
+def test_workbench_runner_blocks_regulated_disclosure_without_external_receipt(
+    tmp_path,
+    monkeypatch,
+):
     source = tmp_path / "disclosure.docx"
     doc = Document()
     doc.add_paragraph("Annual disclosure")
@@ -1085,11 +1795,6 @@ def test_workbench_runner_writes_regulated_disclosure_archive_package(tmp_path, 
     apply_planned_scene_family_defaults(scene)
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -1098,80 +1803,15 @@ def test_workbench_runner_writes_regulated_disclosure_archive_package(tmp_path, 
     ).run(lambda *_args: None, lambda: False)
 
     output_dir = source.parent / "output"
-    assert payload["status"] == "success"
-    assert set(payload["output_paths"]) == {
-        "board_review_copy",
-        "public_release_copy",
-        "disclosure_archive_package",
-    }
-    assert Path(payload["output_paths"]["board_review_copy"]) == (
-        output_dir / "disclosure" / "board_review_copy" / "disclosure_board_review_copy.docx"
+    assert payload["status"] == "failed"
+    assert payload["error_text"] == (
+        "pipeline_configuration_invalid:plugin_manual_gate_required:"
+        "professional_disclosure_review_gate:regulated_disclosure_documents:"
+        "verified_external_receipt_missing"
     )
-    assert Path(payload["output_paths"]["public_release_copy"]) == (
-        output_dir / "disclosure" / "public_release_copy" / "disclosure_public_release_copy.docx"
-    )
-    assert Path(payload["output_paths"]["disclosure_archive_package"]) == (
-        output_dir
-        / "disclosure"
-        / "disclosure_archive_package"
-        / "disclosure_disclosure_archive_package.docx"
-    )
-    assert set(payload["compare_paths"]) == {
-        "board_review_copy",
-        "disclosure_archive_package",
-    }
-    assert set(payload["intermediate_paths"]) == {
-        "board_review_copy",
-        "public_release_copy",
-        "disclosure_archive_package",
-        "archive_manifest",
-    }
-    assert payload["material_manifest_paths"]["material"].endswith(
-        "disclosure_material_manifest.json"
-    )
-    assert payload["material_package_paths"]["package_manifest"].endswith(
-        "package_manifest.json"
-    )
-    assert Path(payload["material_package_paths"]["zip"]).exists() is True
-
-    manifest = json.loads(
-        Path(payload["material_manifest_paths"]["material"]).read_text(
-            encoding="utf-8"
-        )
-    )
-    assert manifest["material_schema"]["schema_id"] == (
-        "regulated_disclosure_materials_v1"
-    )
-    assert manifest["material_schema"]["schema_ids"] == [
-        "regulated_disclosure_materials_v1"
-    ]
-    assert manifest["delivery"]["output_paths"].keys() >= {
-        "board_review_copy",
-        "public_release_copy",
-        "disclosure_archive_package",
-    }
-    assert manifest["delivery"]["compare_paths"].keys() >= {
-        "board_review_copy",
-        "disclosure_archive_package",
-    }
-    assert "archive_manifest" in manifest["delivery"]["intermediate_paths"]
-
-    package_manifest = json.loads(
-        Path(payload["material_package_paths"]["package_manifest"]).read_text(
-            encoding="utf-8"
-        )
-    )
-    assert package_manifest["kind"] == "material_delivery_package"
-    assert package_manifest["material_schema"]["schema_id"] == (
-        "regulated_disclosure_materials_v1"
-    )
-    packaged_files = {
-        (item.get("category"), item.get("key"))
-        for item in package_manifest["files"]
-    }
-    assert ("output", "disclosure_archive_package") in packaged_files
-    assert ("compare", "disclosure_archive_package") in packaged_files
-    assert ("intermediate", "archive_manifest") in packaged_files
+    assert payload["output_paths"] == {}
+    assert payload["compare_paths"] == {}
+    assert list(output_dir.rglob("*.docx")) == []
 
 
 def test_workbench_runner_writes_material_package_for_failed_delivery_run(tmp_path, monkeypatch):
@@ -1208,11 +1848,6 @@ def test_workbench_runner_writes_material_package_for_failed_delivery_run(tmp_pa
             )
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
     monkeypatch.setattr(execution_runtime, "Pipeline", _FailingPipeline)
 
     payload = WorkbenchProductionRunner(
@@ -1227,7 +1862,11 @@ def test_workbench_runner_writes_material_package_for_failed_delivery_run(tmp_pa
     assert payload["output_paths"] == {}
     assert payload["compare_paths"] == {}
     assert payload["intermediate_paths"] == {}
-    assert payload["report_paths"] == []
+    assert {Path(path).suffix for path in payload["report_paths"]} == {
+        ".json",
+        ".md",
+    }
+    assert all(Path(path).is_file() for path in payload["report_paths"])
     assert payload["material_manifest_paths"]["material"].endswith(
         "source_material_manifest.json"
     )
@@ -1244,6 +1883,7 @@ def test_workbench_runner_writes_material_package_for_failed_delivery_run(tmp_pa
     )
     assert manifest["kind"] == "material_attachment_manifest"
     assert manifest["delivery"]["output_paths"] == {}
+    assert manifest["delivery"]["report_paths"] == payload["report_paths"]
     assert manifest["material_schema"]["required_field_keys"] == ["employee_id"]
 
 
@@ -1276,11 +1916,6 @@ def test_workbench_runner_writes_structured_intermediate_for_delivery_preset(tmp
     scene.compliance_profile.object_preflight.enabled = False
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
@@ -1330,7 +1965,7 @@ def test_pipeline_context_payload_includes_technical_chapter_inventory():
         inserted_images=[],
     )
 
-    payload = execution_runtime._pipeline_context_payload(context)
+    payload = delivery_reporting.pipeline_context_payload(context)
 
     assert payload["technical_chapter_inventory"]["status"] == "ok"
     assert payload["technical_chapter_inventory"]["summary"]["chapter_count"] == 1
@@ -1352,8 +1987,8 @@ def test_workbench_report_templates_render_preset_label_with_shared_display_name
         output_dir_template="{preset_label}",
         filename_template="{stem}_{preset_label}",
     )
-    assert execution_runtime._delivery_report_stem(source, preset) == "source_答案速查"
-    assert execution_runtime._delivery_report_dir(output_dir, source, preset) == (
+    assert delivery_reporting.delivery_report_stem(source, preset) == "source_答案速查"
+    assert delivery_reporting.delivery_report_dir(output_dir, source, preset) == (
         output_dir / "答案速查"
     )
 
@@ -1363,14 +1998,14 @@ def test_workbench_report_templates_render_preset_label_with_shared_display_name
         output_dir_template="{preset_label}",
         filename_template="{stem}_{preset_label}",
     )
-    assert execution_runtime._delivery_report_stem(source, custom) == "source_Review package"
-    assert execution_runtime._delivery_report_dir(output_dir, source, custom) == (
+    assert delivery_reporting.delivery_report_stem(source, custom) == "source_Review package"
+    assert delivery_reporting.delivery_report_dir(output_dir, source, custom) == (
         output_dir / "Review package"
     )
 
 
 def test_workbench_delivery_preset_payload_keeps_raw_and_display_labels():
-    payload = execution_runtime._delivery_preset_payload(
+    payload = delivery_reporting.delivery_preset_payload(
         DeliveryPreset(preset_id="answer_key", label="Answer key")
     )
 
@@ -1389,6 +2024,8 @@ def test_workbench_runner_writes_compare_docx_for_delivery_preset(tmp_path, monk
             name="replace_text",
             description="Replace text",
             category="test",
+            execution_phase="fill",
+            scope_behavior="region_filtered",
         )
 
         def apply(self, doc, config, tracker, context):
@@ -1423,11 +2060,17 @@ def test_workbench_runner_writes_compare_docx_for_delivery_preset(tmp_path, monk
     )
     scene.compliance_profile.object_preflight.enabled = False
 
-    monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [_ReplaceTextModule()])
     monkeypatch.setattr(
         execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: (modules, {}),
+        "create_all_modules",
+        lambda: [_ReplaceTextModule()],
+    )
+    monkeypatch.setattr(
+        execution_runtime,
+        "build_module_selection_plan",
+        lambda modules, predicate: SimpleNamespace(
+            select_modules=lambda available: tuple(available),
+        ),
     )
 
     payload = WorkbenchProductionRunner(
@@ -1458,9 +2101,11 @@ def test_workbench_runner_surfaces_diagnostics_summary(tmp_path, monkeypatch):
     Document().save(source)
 
     template = TemplateConfig()
-    template.output.final_docx = False
-    template.output.report_json = False
-    template.output.report_markdown = False
+    scene = SceneWorkspace()
+    artifacts = scene.default_delivery_preset().artifacts
+    artifacts.final_docx = False
+    artifacts.report_json = False
+    artifacts.report_markdown = False
 
     tracker = ChangeTracker()
     tracker.record(
@@ -1485,17 +2130,12 @@ def test_workbench_runner_surfaces_diagnostics_summary(tmp_path, monkeypatch):
             )
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
     monkeypatch.setattr(execution_runtime, "Pipeline", _StubPipeline)
 
     payload = WorkbenchProductionRunner(
         doc_path=str(source),
         template=template,
-        scene=SceneWorkspace(),
+        scene=scene,
     ).run(lambda *_args: None, lambda: False)
 
     assert payload["status"] == "success"
@@ -1521,11 +2161,6 @@ def test_workbench_runner_applies_session_overrides_before_pipeline(tmp_path, mo
             )
 
     monkeypatch.setattr(execution_runtime, "create_all_modules", lambda: [])
-    monkeypatch.setattr(
-        execution_runtime,
-        "select_enabled_modules",
-        lambda modules, predicate: ([], {}),
-    )
     monkeypatch.setattr(execution_runtime, "Pipeline", _StubPipeline)
 
     payload = WorkbenchProductionRunner(

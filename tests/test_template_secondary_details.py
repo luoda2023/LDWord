@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.qt_api import QApplication, QBoxLayout, QInputDialog, QLabel, QMessageBox, QPushButton, Qt, QVBoxLayout, QWidget
+from src.qt_api import QApplication, QBoxLayout, QLabel, QPoint, QPushButton, Qt, QVBoxLayout, QWidget
 from src.config.template import TemplateConfig
 from src.shared.ui.adaptive_pair_row import AdaptivePairRow
 from src.shared.ui.dashed_separator import DashedSeparator
@@ -89,8 +89,8 @@ def test_table_and_elements_details_reuse_shared_controls():
     assert "PageNumberPlanSection(owner, container=self._page_number_card, embedded=True)" in header_footer_source
     assert 'FlowSection("编号分组", expanded=True' in page_plan_source
     assert 'FlowSection("高级规则编辑器"' not in page_plan_source
-    assert "save_header_footer_user_preset" in header_footer_source
-    assert "delete_header_footer_user_preset" in header_footer_source
+    assert "save_header_footer_user_preset" not in header_footer_source
+    assert "delete_header_footer_user_preset" not in header_footer_source
     assert "Card(parent=owner._editor_column)" in toc_source
     assert '"toc_title"' in toc_source
     assert '"toc_level6"' in toc_source
@@ -718,11 +718,7 @@ def test_header_footer_shows_scheme_preview_and_collapses_structure_settings():
         app.processEvents()
 
 
-def test_header_footer_preset_actions_save_update_and_delete_user_scheme(tmp_path, monkeypatch):
-    import src.config.header_footer_presets as header_footer_presets
-
-    monkeypatch.setattr(header_footer_presets, "USER_PRESET_DIR", tmp_path)
-
+def test_header_footer_preset_management_is_folder_only():
     app = _app()
     detail = ElementsDetail(scope="header_footer")
 
@@ -734,56 +730,13 @@ def test_header_footer_preset_actions_save_update_and_delete_user_scheme(tmp_pat
         app.processEvents()
 
         header_footer = detail._header_footer_detail
-        assert header_footer._scheme_save_as_btn.isEnabled()
-        assert not header_footer._scheme_update_btn.isEnabled()
-        assert not header_footer._scheme_delete_btn.isEnabled()
-
-        header_footer._header_mode_combo.setCurrentIndex(header_footer._header_mode_combo.findData("fixed"))
-        header_footer._header_text_edit.setText("方案页眉")
-        app.processEvents()
-
-        monkeypatch.setattr(
-            QInputDialog,
-            "getText",
-            lambda *args, **kwargs: ("我的页眉页脚方案", True),
-        )
-        header_footer._scheme_save_as_btn.click()
-        app.processEvents()
-
-        active_key = header_footer._active_scheme_key
-        assert active_key and active_key.startswith("user.")
-        assert header_footer_presets.is_user_preset(active_key)
-        assert header_footer._scheme_combo.findData(active_key) >= 0
-        assert header_footer._scheme_combo.currentData() == active_key
-        assert header_footer._scheme_delete_btn.isEnabled()
-        assert not header_footer._scheme_update_btn.isEnabled()
-
-        header_footer._header_text_edit.setText("更新后的页眉")
-        app.processEvents()
-
-        assert header_footer._scheme_update_btn.isEnabled()
-        header_footer._scheme_update_btn.click()
-        app.processEvents()
-
-        saved = header_footer_presets.get_preset_config(active_key)
-        assert saved is not None
-        assert saved.header_text == "更新后的页眉"
-        assert not header_footer._scheme_update_btn.isEnabled()
-
-        monkeypatch.setattr(
-            QMessageBox,
-            "question",
-            lambda *args, **kwargs: QMessageBox.Yes,
-        )
-        header_footer._scheme_delete_btn.click()
-        app.processEvents()
-
-        assert not header_footer_presets.is_user_preset(active_key)
-        assert header_footer._scheme_combo.findData(active_key) == -1
-        assert header_footer._active_scheme_key is None
-        assert template.header_footer.header_text == "更新后的页眉"
-        assert not header_footer._scheme_update_btn.isEnabled()
-        assert not header_footer._scheme_delete_btn.isEnabled()
+        assert header_footer._scheme_open_folder_btn.text() == "打开方案文件夹"
+        assert not hasattr(header_footer, "_scheme_save_as_btn")
+        assert not hasattr(header_footer, "_scheme_update_btn")
+        assert not hasattr(header_footer, "_scheme_delete_btn")
+        assert not hasattr(header_footer, "_on_scheme_save_as_requested")
+        assert not hasattr(header_footer, "_on_scheme_update_requested")
+        assert not hasattr(header_footer, "_on_scheme_delete_requested")
     finally:
         detail.close()
         app.processEvents()
@@ -799,11 +752,7 @@ def test_header_footer_preset_action_row_keeps_buttons_fully_visible():
         app.processEvents()
 
         header_footer = detail._header_footer_detail
-        buttons = (
-            header_footer._scheme_save_as_btn,
-            header_footer._scheme_update_btn,
-            header_footer._scheme_delete_btn,
-        )
+        buttons = (header_footer._scheme_open_folder_btn,)
 
         assert all(button.property("sizeClass") == "md" for button in buttons)
         assert header_footer._scheme_actions.layout().alignment() & Qt.AlignVCenter
@@ -920,7 +869,7 @@ def test_template_caption_formula_other_details_share_single_label_baseline():
         (FormulaDetail(), ("公式字体", "公式字号", "块对齐", "编号方式", "统一间距")),
         (
             OtherDetail(),
-            ("最终稿 DOCX", "对比稿 DOCX", "JSON 报告", "Markdown 报告", "资料清单", "资料包"),
+            ("启用文字水印", "水印文字", "水印颜色", "旋转角度", "水印字号"),
         ),
     )
 
@@ -938,6 +887,64 @@ def test_template_caption_formula_other_details_share_single_label_baseline():
     finally:
         for detail, _labels in details:
             detail.close()
+        app.processEvents()
+
+
+def test_hidden_formula_and_watermark_editors_preserve_their_owned_fields():
+    app = _app()
+    formula = FormulaDetail()
+    other = OtherDetail()
+    template = TemplateConfig()
+    try:
+        formula.set_template(template)
+        other.set_template(template)
+
+        formula._table_alignment_combo.setCurrentIndex(
+            formula._table_alignment_combo.findData("right")
+        )
+        formula._number_font_combo.set_font_name("Arial")
+        formula._line_spacing.set_value(1.5, "multiple")
+        formula._space_before.set_value(9.0, "pt")
+        formula._auto_shrink_number.click()
+
+        other._watermark_enabled.setChecked(True)
+        other._watermark_text.setText("内部传阅")
+        other._watermark_color.setText("#336699")
+        other._watermark_rotation.setValue(-30)
+        other._watermark_font_size.setValue(56)
+        other._on_form_edited()
+        app.processEvents()
+
+        assert template.formula_table.table_alignment == "right"
+        assert template.formula_table.number_font_name == "Arial"
+        assert template.formula_table.formula_line_spacing == 1.5
+        assert template.formula_table.formula_space_before_pt == 9.0
+        assert template.formula_table.auto_shrink_number_column is False
+        assert template.watermark.enabled is True
+        assert template.watermark.text == "内部传阅"
+        assert template.watermark.color == "#336699"
+        assert template.watermark.rotation == -30
+        assert template.watermark.font_size == 56
+        assert not hasattr(template, "output")
+        assert {item.key for item in formula._summary_card.summary_grid.items()} == {
+            "formula_typography",
+            "formula_layout",
+            "formula_numbering",
+        }
+        assert {item.key for item in other._summary_card.summary_grid.items()} == {"watermark"}
+
+        formula.set_save_enabled(True)
+        other.set_save_enabled(True)
+        formula._restore_btn.click()
+        other._restore_btn.click()
+        app.processEvents()
+
+        assert template.formula_table.table_alignment == "center"
+        assert template.formula_table.auto_shrink_number_column is True
+        assert template.watermark.enabled is False
+    finally:
+        formula.close()
+        other.close()
         app.processEvents()
 
 
@@ -1054,7 +1061,7 @@ def test_template_toc_detail_uses_toc_level_style_editor_controls():
         toc = detail._toc_detail
         structure_grids = toc.structure_section.findChildren(TemplateFormGrid)
         assert len(structure_grids) == 1
-        assert [len(row) for row in structure_grids[0]._rows] == [2, 2]
+        assert [len(row) for row in structure_grids[0]._rows] == [2, 1]
         assert structure_grids[0]._align_trailing_labels is False
 
         assert not hasattr(toc, "_toc_preview_card")
@@ -1103,6 +1110,179 @@ def test_template_toc_style_editor_pairs_rows_like_main_style_forms():
             (toc._toc_line_type_row, toc._toc_line_value_row),
             (toc._toc_space_before_row, toc._toc_space_after_row),
         ]
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_template_toc_role_list_rebuild_preserves_items_widgets_and_selection(
+    monkeypatch,
+):
+    app = _app()
+    detail = ElementsDetail(scope="toc")
+
+    try:
+        detail.set_template(TemplateConfig())
+        toc = detail._toc_detail
+        role_list = toc._toc_style_role_list
+        role_list.setCurrentRow(2)
+        app.processEvents()
+        original_items = {
+            item.data(Qt.UserRole): item
+            for row in range(role_list.count())
+            if (item := role_list.item(row)) is not None
+        }
+        original_widgets = {
+            key: role_list.itemWidget(item)
+            for key, item in original_items.items()
+        }
+        original_specs = toc._role_specs()
+        spec_type = type(original_specs[0])
+        monkeypatch.setattr(
+            toc,
+            "_role_specs",
+            lambda: [
+                spec_type(
+                    spec.key,
+                    "二级目录（更新）" if spec.key == "toc_level2" else spec.label,
+                    "TOC Two" if spec.key == "toc_level2" else spec.word_style,
+                )
+                for spec in original_specs
+            ],
+        )
+
+        toc._rebuild_role_list()
+
+        assert role_list.currentItem().data(Qt.UserRole) == "toc_level2"
+        assert all(
+            toc._toc_role_items[key] is item
+            for key, item in original_items.items()
+        )
+        assert all(
+            role_list.itemWidget(toc._toc_role_items[key]) is widget
+            for key, widget in original_widgets.items()
+        )
+        selected_widget = role_list.itemWidget(role_list.currentItem())
+        assert selected_widget.findChild(QLabel, "toc_list_txt").text() == "二级目录（更新）"
+        assert selected_widget.findChild(QLabel, "toc_list_lv").text() == "TOC Two"
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_template_toc_style_edit_updates_brief_without_rebuilding_role_row():
+    app = _app()
+    detail = ElementsDetail(scope="toc")
+
+    try:
+        detail.set_template(TemplateConfig())
+        toc = detail._toc_detail
+        role_list = toc._toc_style_role_list
+        role_list.setCurrentRow(1)
+        app.processEvents()
+        item = role_list.currentItem()
+        widget = role_list.itemWidget(item)
+        title = widget.findChild(QLabel, "toc_list_txt")
+        word_style = widget.findChild(QLabel, "toc_list_lv")
+        meta = widget.findChild(QLabel, "toc_preview_meta")
+        before_meta = meta.text()
+
+        toc._toc_alignment_combo.setCurrentIndex(
+            toc._toc_alignment_combo.findData("right")
+        )
+        app.processEvents()
+
+        assert role_list.currentItem() is item
+        assert role_list.itemWidget(item) is widget
+        assert widget.findChild(QLabel, "toc_list_txt") is title
+        assert widget.findChild(QLabel, "toc_list_lv") is word_style
+        assert widget.findChild(QLabel, "toc_preview_meta") is meta
+        assert title.text() == "1 级目录"
+        assert word_style.text() == "TOC 1"
+        assert meta.text() != before_meta
+        assert meta.text().endswith("右对齐")
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_template_toc_depth_changes_only_add_and_remove_tail_roles():
+    app = _app()
+    detail = ElementsDetail(scope="toc")
+
+    try:
+        detail.set_template(TemplateConfig())
+        toc = detail._toc_detail
+        role_list = toc._toc_style_role_list
+        role_list.setCurrentRow(2)
+        app.processEvents()
+        original_items = dict(toc._toc_role_items)
+        original_widgets = dict(toc._toc_role_widgets)
+
+        toc._toc_depth_combo.setCurrentIndex(toc._toc_depth_combo.findData(5))
+        app.processEvents()
+
+        assert list(toc._toc_role_items) == [
+            "toc_title",
+            "toc_level1",
+            "toc_level2",
+            "toc_level3",
+            "toc_level4",
+            "toc_level5",
+        ]
+        assert role_list.currentItem().data(Qt.UserRole) == "toc_level2"
+        assert all(
+            toc._toc_role_items[key] is item
+            for key, item in original_items.items()
+        )
+        assert all(
+            toc._toc_role_widgets[key] is widget
+            for key, widget in original_widgets.items()
+        )
+        grown_items = dict(toc._toc_role_items)
+        grown_widgets = dict(toc._toc_role_widgets)
+
+        toc._toc_depth_combo.setCurrentIndex(toc._toc_depth_combo.findData(2))
+        app.processEvents()
+
+        assert list(toc._toc_role_items) == [
+            "toc_title",
+            "toc_level1",
+            "toc_level2",
+        ]
+        assert role_list.currentItem().data(Qt.UserRole) == "toc_level2"
+        assert all(
+            toc._toc_role_items[key] is grown_items[key]
+            for key in ("toc_title", "toc_level1", "toc_level2")
+        )
+        assert all(
+            toc._toc_role_widgets[key] is grown_widgets[key]
+            for key in ("toc_title", "toc_level1", "toc_level2")
+        )
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_template_toc_style_editor_switches_all_pairs_as_one_responsive_group():
+    app = _app()
+    detail = ElementsDetail(scope="toc")
+
+    try:
+        detail.set_template(TemplateConfig())
+        detail.resize(760, 900)
+        detail.show()
+        app.processEvents()
+        app.processEvents()
+
+        grid = detail._toc_detail._toc_style_grid
+        assert all(row._forced_stacked is True for row in grid._pair_rows)
+
+        detail.resize(848, 900)
+        app.processEvents()
+        app.processEvents()
+
+        assert all(row._forced_stacked is False for row in grid._pair_rows)
     finally:
         detail.close()
         app.processEvents()
@@ -1251,7 +1431,7 @@ def test_page_selector_editor_does_not_stretch_chips_into_blank_space():
         app.processEvents()
 
 
-def test_elements_detail_materializes_default_page_number_phase():
+def test_elements_detail_projects_default_page_number_phase_without_model_mutation():
     app = _app()
     detail = ElementsDetail()
     template = TemplateConfig()
@@ -1264,10 +1444,12 @@ def test_elements_detail_materializes_default_page_number_phase():
         app.processEvents()
 
         phases = template.header_footer.page_number_plan.phases
-        assert len(phases) == 1
-        assert phases[0].phase_id == "main"
-        assert phases[0].selectors == ["all_numbered_content"]
-        assert phases[0].number_format == "decimal"
+        assert phases == []
+        projected = detail._header_footer_detail.phase_rows_to_configs()
+        assert len(projected) == 1
+        assert projected[0].phase_id == "main"
+        assert projected[0].selectors == ["all_numbered_content"]
+        assert projected[0].number_format == "decimal"
         assert detail._page_validation_mode_combo.isHidden()
         assert detail._page_missing_doc_tree_combo.isHidden()
         assert detail._page_validation_mode_combo.isVisible() is False
@@ -1364,13 +1546,10 @@ def test_template_panel_elements_detail_summary_and_dependent_state():
         assert detail._summary_grid.value_for("footer_text") == "页脚关闭"
         assert detail._summary_grid.value_for("page_number") == "不显示页码"
 
-        toc_detail._toc_enabled_toggle.click()
-        app.processEvents()
-
-        assert panel._current_template.toc.enabled is False
-        assert toc_detail._toc_mode_row.isEnabled() is False
-        assert toc_detail._toc_styles_section.isHidden() is True
-        assert toc_detail._summary_grid.value_for("toc") == "目录关闭"
+        assert not hasattr(toc_detail, "_toc_enabled_toggle")
+        assert toc_detail._toc_mode_row.isEnabled() is True
+        assert toc_detail._toc_styles_section.isHidden() is False
+        assert toc_detail._summary_grid.value_for("toc") != "目录关闭"
     finally:
         panel.close()
         app.processEvents()
@@ -1526,12 +1705,14 @@ def test_template_panel_elements_detail_updates_preview_and_dirty_state():
     panel = TemplatePanel(bridge)
 
     try:
-        panel._toc_detail._toc_enabled_toggle.click()
+        panel._toc_detail._toc_mode_combo.setCurrentIndex(
+            panel._toc_detail._toc_mode_combo.findData("plain")
+        )
         app.processEvents()
 
-        assert panel._current_template.toc.enabled is False
-        assert "目录关闭" in panel._overview_detail._rows["toc"]._value.text()
-        assert "目录关闭" in panel._nav_cards["tpl_toc"]._full_subtitle
+        assert panel._current_template.toc.mode == "plain"
+        assert "普通目录" in panel._overview_detail._rows["toc"]._value.text()
+        assert "普通目录" in panel._nav_cards["tpl_toc"]._full_subtitle
         assert bridge.is_template_dirty() is True
     finally:
         panel.close()
@@ -1886,7 +2067,7 @@ def test_template_panel_table_detail_smart_levels_match_engine_supported_range()
         detail.set_template(legacy)
         app.processEvents()
 
-        assert legacy.table.smart_levels == 4
+        assert legacy.table.smart_levels == 2
         assert detail._smart_levels_combo.currentData() == 4
     finally:
         panel.close()
@@ -2109,22 +2290,87 @@ def test_template_panel_elements_detail_can_duplicate_and_reorder_phase_rows():
         detail = panel._header_footer_detail
         first = detail._page_phase_rows[0]
         first.selector_editor._selector_buttons["body"].click()
+        detail._add_phase_btn.click()
         app.processEvents()
+        trailing = detail._page_phase_rows[1]
 
         first.duplicate_btn.click()
         app.processEvents()
 
-        assert len(detail._page_phase_rows) == 2
+        assert len(detail._page_phase_rows) == 3
+        copied = detail._page_phase_rows[1]
+        assert detail._page_phase_rows[0] is first
+        assert detail._page_phase_rows[0].section is first.section
+        assert detail._page_phase_rows[2] is trailing
+        assert detail._page_phase_rows[2].section is trailing.section
+        assert copied is not first
+        assert copied.section is not first.section
+        assert detail._page_phase_rows_layout.itemAt(0).widget() is first.section
+        assert detail._page_phase_rows_layout.itemAt(1).widget() is copied.section
+        assert detail._page_phase_rows_layout.itemAt(2).widget() is trailing.section
         phases = panel._current_template.header_footer.page_number_plan.phases
         assert phases[1].phase_id.endswith("_copy")
         assert phases[1].selectors == phases[0].selectors
-        assert "同时出现在多个编号分组中" in detail._page_phase_rows[1].selector_preview.text()
+        assert "同时出现在多个编号分组中" in copied.selector_preview.text()
 
-        detail._page_phase_rows[1].move_up_btn.click()
+        copied.move_up_btn.click()
         app.processEvents()
 
+        assert detail._page_phase_rows == [copied, first, trailing]
+        assert detail._page_phase_rows_layout.itemAt(0).widget() is copied.section
+        assert detail._page_phase_rows_layout.itemAt(1).widget() is first.section
+        assert detail._page_phase_rows_layout.itemAt(2).widget() is trailing.section
         phases = panel._current_template.header_footer.page_number_plan.phases
         assert phases[0].phase_id.endswith("_copy")
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_template_page_phase_delete_preserves_outer_scroll_anchor():
+    app = _app()
+    panel = TemplatePanel(PanelBridge())
+
+    try:
+        panel.resize(1280, 700)
+        panel.show()
+        panel._nav_rail.select_card("tpl_header_footer")
+        for _ in range(4):
+            app.processEvents()
+        detail = panel._header_footer_detail
+        page_plan = detail._header_footer_detail._page_plan
+        while len(page_plan._page_phase_rows) < 6:
+            page_plan._on_add_phase()
+        for row in page_plan._page_phase_rows:
+            row.section.set_expanded(True)
+        for _ in range(4):
+            app.processEvents()
+
+        removed = page_plan._page_phase_rows[2]
+        anchor_row = page_plan._page_phase_rows[3]
+        surviving_sections = [
+            row.section for row in page_plan._page_phase_rows if row is not removed
+        ]
+        scroll = panel._detail_scroll
+        scroll.ensureWidgetVisible(anchor_row.section)
+        app.processEvents()
+        bar = scroll.verticalScrollBar()
+        assert bar.value() > 0
+        before_y = anchor_row.section.mapTo(scroll.viewport(), QPoint(0, 0)).y()
+        observed_values: list[int] = []
+        bar.valueChanged.connect(observed_values.append)
+
+        page_plan._remove_phase_row(removed)
+        for _ in range(8):
+            app.processEvents()
+
+        after_y = anchor_row.section.mapTo(scroll.viewport(), QPoint(0, 0)).y()
+        assert abs(after_y - before_y) <= 1
+        assert all(
+            row.section is section
+            for row, section in zip(page_plan._page_phase_rows, surviving_sections)
+        )
+        assert 0 not in observed_values
     finally:
         panel.close()
         app.processEvents()

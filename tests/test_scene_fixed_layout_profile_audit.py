@@ -113,6 +113,12 @@ def test_scene_fixed_layout_profile_audit_locks_n2_178_channels():
     assert "WorkbenchPanel._open_issue_repair_target" in (
         repair_route.runtime_surface_ids
     )
+    repair_evidence = {
+        evidence.evidence_id: evidence for evidence in report.source_evidence
+    }
+    assert repair_evidence[
+        "ui.workbench.fixed_layout_repair_route"
+    ].source_path == "src/ui/adapters/workbench_product_issue_navigation.py"
 
     report_evidence = rows["fixed_layout_report_evidence"]
     assert "word.w:trHeight" in report_evidence.word_ooxml_touchpoints

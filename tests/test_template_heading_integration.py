@@ -11,11 +11,12 @@ sys.path.insert(0, str(ROOT))
 from src.config.builtin_templates import create_builtin_template
 from src.config.resolver import resolve_config
 from src.config.scene import SceneWorkspace
+from src.config.template import HeadingLevelBindingConfig
 from src.qt_api import QApplication
 from src.pipeline.runner import Pipeline
 from src.ui.bridge import PanelBridge
 from src.ui.panels.template_panel import TemplatePanel
-from src.ui.panels.template_panel import _build_template_preview_paragraphs
+from src.ui.panels.template_preview.model import PreviewBlockKind
 from src.config.loader import load_template
 from src.modules.basic.paragraph_style import ParagraphStyleModule
 from src.modules.structure.heading_numbering import HeadingNumberingModule
@@ -48,7 +49,7 @@ def test_heading_detail_updates_heading_preview_summary_when_levels_change():
         app.processEvents()
 
 
-def test_template_overview_preview_matches_heading_panel_on_initial_load():
+def test_projected_overview_matches_heading_panel_on_initial_load():
     app = _app()
     bridge = PanelBridge()
     panel = TemplatePanel(bridge)
@@ -57,16 +58,17 @@ def test_template_overview_preview_matches_heading_panel_on_initial_load():
         panel.show()
         app.processEvents()
 
-        overview_preview = panel._overview_detail._preview._cached_layout
+        overview_preview = panel._overview_detail._preview.projection
         heading_adapter = panel._heading_detail._adapter
 
         heading1_text = next(
-            paragraph.text for paragraph in overview_preview.paragraphs if paragraph.style_key == "heading1"
+            block.text
+            for block in overview_preview.blocks
+            if block.kind is PreviewBlockKind.HEADING and block.level == 1
         )
-        expected_prefix = heading_adapter.preview_number(1)
+        expected_text = heading_adapter.preview_heading_text(1, "绪论")
 
-        assert expected_prefix
-        assert heading1_text.startswith(expected_prefix)
+        assert heading1_text == expected_text
     finally:
         panel.close()
         app.processEvents()
@@ -113,9 +115,10 @@ def test_heading_detail_preset_change_enters_save_restore_state_machine():
         }
 
         target_index = None
+        active_preset = heading._adapter.detect_active_preset()
         for index in range(heading._preset_cb.count()):
             key = heading._preset_cb.itemData(index)
-            if key:
+            if key and key != active_preset:
                 target_index = index
                 break
 
@@ -156,6 +159,7 @@ def test_heading_detail_save_button_persists_template_via_template_panel(tmp_pat
 
     try:
         target = tmp_path / "heading_saved_template.json"
+        panel._current_template_id = ""
         panel._current_template_path = str(target)
         panel._current_template_source = "file"
         panel._sync_template_file_status()
@@ -194,24 +198,23 @@ def test_heading_detail_updates_overview_preview_on_every_style_edit():
         app.processEvents()
         preview = panel._overview_detail._preview
 
-        def heading_px():
-            layout = preview._cached_layout
-            for line in layout.line_layouts:
-                if getattr(line, "style_key", "") == "heading1":
-                    return line.font.pixelSize()
+        def heading_size_pt():
+            for block in preview.projection.blocks:
+                if block.kind is PreviewBlockKind.HEADING and block.level == 1:
+                    return block.style.size_pt
             raise AssertionError("heading1 preview line not found")
 
         heading = panel._heading_detail
         heading._adv_list.setCurrentRow(0)
         app.processEvents()
 
-        px0 = heading_px()
+        px0 = heading_size_pt()
         heading._hd_size_combo.setEditText("18")
         app.processEvents()
-        px18 = heading_px()
+        px18 = heading_size_pt()
         heading._hd_size_combo.setEditText("24")
         app.processEvents()
-        px24 = heading_px()
+        px24 = heading_size_pt()
 
         assert px18 > px0
         assert px24 > px18
@@ -266,13 +269,18 @@ def test_heading_preview_text_matches_runtime_number_separator_once(tmp_path):
 
     try:
         template = panel._current_template
-        binding = template.heading_numbering.level_bindings["heading1"]
+        binding = HeadingLevelBindingConfig(enabled=True)
+        template.heading_numbering.level_bindings["heading1"] = binding
         binding.display_core_style = "arabic"
         binding.display_template = "{nn}"
         binding.title_separator = "::"
 
-        paragraphs = _build_template_preview_paragraphs(template)
-        heading_text = next(paragraph.text for paragraph in paragraphs if paragraph.style_key == "heading1")
+        panel._on_template_edited(template)
+        heading_text = next(
+            block.text
+            for block in panel._overview_detail._preview.projection.blocks
+            if block.kind is PreviewBlockKind.HEADING and block.level == 1
+        )
 
         assert heading_text == "1::绪论"
 

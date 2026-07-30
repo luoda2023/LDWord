@@ -78,28 +78,23 @@ def test_scene_panel_uses_template_form_baseline():
     assert "from src.shared.ui.form_row import FormRow" not in source
 
 
-def test_config_management_uses_design_system_cards_and_lightweight_list_items():
-    management_source = (ROOT / "src/ui/panels/workbench/config_management_detail.py").read_text(encoding="utf-8")
-    list_source = (ROOT / "src/shared/ui/config_list_widget.py").read_text(encoding="utf-8")
-
-    assert 'Card("Save' not in management_source
-    assert 'Card("Session Configs' not in management_source
-    assert ".set_header(" in management_source
-    assert "Save Current" not in management_source
-    assert "Save Config" not in management_source
-    assert "class _ConfigItemCard(Card)" not in list_source
-    assert "RoundedSurfaceFrame" in list_source
-
-
-def test_template_file_management_buttons_use_icon_system_not_emoji():
-    source = (ROOT / "src/ui/panels/template_panel.py").read_text(encoding="utf-8")
+def test_template_library_actions_use_icon_system_not_emoji():
+    panel_source = (ROOT / "src/ui/panels/template_panel.py").read_text(
+        encoding="utf-8"
+    )
+    overview_source = (
+        ROOT / "src/ui/panels/template_overview_detail.py"
+    ).read_text(encoding="utf-8")
+    source = panel_source + overview_source
 
     assert "📥" not in source
     assert "📤" not in source
     assert "♻" not in source
-    assert 'get_icon("folder-open"' in source
-    assert 'get_icon("download"' in source
-    assert 'get_icon("refresh-ccw"' in source
+    assert 'icon_name="folder-open"' in overview_source
+    assert 'icon_name="plus"' in overview_source
+    assert 'icon_name="copy"' in overview_source
+    assert 'icon_name="pencil-line"' in overview_source
+    assert 'icon_name="trash-2"' in overview_source
 
 
 def test_heading_numbering_pair_rows_delegate_to_template_form_grid():
@@ -112,6 +107,9 @@ def test_heading_numbering_pair_rows_delegate_to_template_form_grid():
 
 def test_quick_execution_and_theme_panel_share_flow_and_tokens():
     quick_source = (ROOT / "src/ui/panels/workbench/quick_execution_detail.py").read_text(encoding="utf-8")
+    feedback_source = (
+        ROOT / "src/ui/panels/workbench/quick_execution_feedback_mixin.py"
+    ).read_text(encoding="utf-8")
     drop_source = (ROOT / "src/ui/panels/workbench/quick_execution_drop_area.py").read_text(encoding="utf-8")
     theme_source = (ROOT / "src/ui/panels/theme_panel.py").read_text(encoding="utf-8")
 
@@ -123,27 +121,25 @@ def test_quick_execution_and_theme_panel_share_flow_and_tokens():
     assert "_FlowLayout(" not in theme_source
     assert "class _FlowLayout(QHBoxLayout)" not in quick_source
     assert "class _FlowLayout(QLayout)" not in theme_source
-    assert '"warning": t.warning' in quick_source
-    assert '"error": t.error' in quick_source
-    assert '"success": t.success' in quick_source
+    assert '"warning": theme.warning' in feedback_source
+    assert '"error": theme.error' in feedback_source
+    assert '"success": theme.success' in feedback_source
     assert "#D97706" not in quick_source
     assert "#DC2626" not in quick_source
     assert "#16A34A" not in quick_source
     assert "#64748B" not in quick_source
     assert "#FFFFFF" not in quick_source
     assert "#ffffff" not in drop_source
-    assert "t.text_on_primary" in quick_source
+    assert "get_theme().text_on_primary" in quick_source
     assert "theme.text_on_primary" in drop_source
 
 
 def test_quick_execution_plain_card_headers_use_design_system_card_slots():
     source = (ROOT / "src/ui/panels/workbench/quick_execution_detail.py").read_text(encoding="utf-8")
 
-    assert 'title="场景与模板"' in source
-    assert 'mode="execution_prereview"' in source
-    assert "source_slot=self._scene_template_selector_row" in source
-    assert "StyleSourceSlot(" not in source
-    assert "difference_slot=self._style_difference_slot" in source
+    assert 'self._scene_card.set_header("处理方案与模板", icon_name="boxes")' in source
+    assert 'row.setObjectName("wb_strategy_selector_row")' in source
+    assert "self._scene_card.add_widget(self._scene_template_selector_row)" in source
     assert 'self._output_card.set_header("输出目录", icon_name="square-arrow-out-up-right")' in source
     assert 'self._execution_card.set_header("执行输出", icon_name="terminal")' in source
     assert "_scene_card_icon" not in source

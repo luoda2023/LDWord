@@ -16,7 +16,7 @@ from src.shared.engine.object_preflight import (
     inspect_docx_package,
     object_preflight_targets_for_touchpoints,
 )
-from src.ui.panels.workbench.execution_runtime import WorkbenchProductionRunner
+from src.services.production_runtime.execution_runtime import WorkbenchProductionRunner
 
 
 def test_object_preflight_detects_fragile_docx_parts(tmp_path):
@@ -27,7 +27,10 @@ def test_object_preflight_detects_fragile_docx_parts(tmp_path):
             "word/embeddings/oleObject1.bin": b"ole",
             "word/embeddings/workbook.xlsx": b"not-a-real-xlsx",
             "word/vbaProject.bin": b"macro",
-            "word/comments.xml": b"<w:comments />",
+            "word/comments.xml": (
+                b'<w:comments xmlns:w="http://schemas.openxmlformats.org/'
+                b'wordprocessingml/2006/main" />'
+            ),
             "word/header1.xml": (
                 b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
                 b"<w:body><w:p><w:r><w:instrText>PAGE</w:instrText></w:r></w:p></w:body>"
@@ -83,7 +86,10 @@ def test_object_preflight_respects_policy_scan_targets(tmp_path):
         {
             "word/embeddings/oleObject1.bin": b"ole",
             "word/vbaProject.bin": b"macro",
-            "word/comments.xml": b"<w:comments />",
+            "word/comments.xml": (
+                b'<w:comments xmlns:w="http://schemas.openxmlformats.org/'
+                b'wordprocessingml/2006/main" />'
+            ),
             "word/header1.xml": (
                 b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
                 b"<w:body><w:p><w:r><w:instrText>PAGE</w:instrText></w:r></w:p></w:body>"
@@ -159,7 +165,10 @@ def test_object_preflight_report_includes_policy_and_planning_evidence(tmp_path)
         tmp_path,
         "report-evidence.docx",
         {
-            "word/comments.xml": b"<w:comments />",
+            "word/comments.xml": (
+                b'<w:comments xmlns:w="http://schemas.openxmlformats.org/'
+                b'wordprocessingml/2006/main" />'
+            ),
             "word/header1.xml": (
                 b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
                 b"<w:body><w:p><w:r><w:instrText>PAGE</w:instrText></w:r></w:p></w:body>"
@@ -221,7 +230,10 @@ def test_workbench_runner_payload_includes_object_preflight_evidence(tmp_path):
         tmp_path,
         "workbench-preflight.docx",
         {
-            "word/comments.xml": b"<w:comments />",
+            "word/comments.xml": (
+                b'<w:comments xmlns:w="http://schemas.openxmlformats.org/'
+                b'wordprocessingml/2006/main" />'
+            ),
             "word/header1.xml": (
                 b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
                 b"<w:body><w:p><w:r><w:instrText>PAGE</w:instrText></w:r></w:p></w:body>"
@@ -414,6 +426,8 @@ class _RiskyRewriteModule(BaseModule):
         name="risky_rewriter",
         description="Risky package rewriter",
         category="test",
+        execution_phase="format",
+        scope_behavior="document_level",
     )
 
     def apply(self, doc, config, tracker: ChangeTracker, context) -> None:

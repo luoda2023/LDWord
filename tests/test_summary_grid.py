@@ -5,7 +5,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.qt_api import QApplication
+from src.qt_api import QApplication, QWidget
+import src.shared.ui.summary_grid as summary_grid_module
 from src.shared.ui.summary_grid import SummaryGrid, SummaryGridItem
 from src.shared.ui.template_summary_card import (
     DetailSummaryCard,
@@ -77,6 +78,177 @@ def test_summary_grid_non_emphasis_detail_keeps_secondary_font_tone():
 
         assert tile._detail.font().weight() == theme.font_weight_normal
         assert tile._detail.font().pixelSize() == theme.font_size_sm
+    finally:
+        grid.close()
+
+
+def test_hidden_summary_grid_defers_parent_layout_chain_until_visible(monkeypatch):
+    app = _app()
+    parent = QWidget()
+    grid = SummaryGrid(columns=1, parent=parent)
+    refresh_calls: list[object] = []
+    monkeypatch.setattr(
+        summary_grid_module,
+        "refresh_layout_chain",
+        lambda widget, **_kwargs: refresh_calls.append(widget),
+    )
+
+    try:
+        grid.set_items([SummaryGridItem(key="status", label="Status", value="1")])
+        assert refresh_calls == []
+
+        parent.show()
+        grid.show()
+        app.processEvents()
+        grid.set_items([SummaryGridItem(key="status", label="Status", value="2")])
+        assert refresh_calls == [parent]
+    finally:
+        parent.close()
+        app.processEvents()
+
+
+def test_hidden_detail_summary_card_does_not_queue_height_commit():
+    _app()
+    card = DetailSummaryCard("Summary", "ruler")
+    try:
+        card.set_summary_items(
+            [SummaryGridItem(key="status", label="Status", value="Ready")]
+        )
+        assert card.isVisible() is False
+        assert card._content_height_sync_queued is False
+        assert card.minimumHeight() == card._content_height_hint()
+    finally:
+        card.close()
+
+
+def test_summary_grid_reuses_tile_when_item_content_and_variant_change():
+    _app()
+    grid = SummaryGrid(columns=2)
+
+    try:
+        grid.set_items(
+            [
+                SummaryGridItem(key="ready", label="Status", value="Pending"),
+                SummaryGridItem(key="count", label="Count", value="1"),
+            ]
+        )
+        original_ready_tile = grid._tiles["ready"]
+        original_count_tile = grid._tiles["count"]
+
+        updated_ready = SummaryGridItem(
+            key="ready",
+            label="Readiness",
+            value="Complete",
+            detail="All inputs are available",
+            detail_emphasis=True,
+            variant="success",
+            tooltip="Current status is complete",
+        )
+        grid.set_items(
+            [
+                updated_ready,
+                SummaryGridItem(key="count", label="Count", value="2"),
+            ]
+        )
+
+        assert grid._tiles["ready"] is original_ready_tile
+        assert grid._tiles["count"] is original_count_tile
+        assert original_ready_tile.item == updated_ready
+        assert original_ready_tile._label.text() == "Readiness"
+        assert original_ready_tile._value.text() == "Complete"
+        assert original_ready_tile._detail.text() == "All inputs are available"
+        assert original_ready_tile.toolTip() == "Current status is complete"
+        assert get_theme().success_bg in original_ready_tile.styleSheet()
+        assert (
+            original_ready_tile._detail.font().weight()
+            == get_theme().font_weight_emphasis
+        )
+        assert grid.value_for("count") == "2"
+    finally:
+        grid.close()
+
+
+def test_summary_grid_reorders_and_changes_spans_without_replacing_tiles():
+    _app()
+    grid = SummaryGrid(columns=3)
+
+    try:
+        grid.set_items(
+            [
+                SummaryGridItem(key="a", label="A", value="1"),
+                SummaryGridItem(key="b", label="B", value="2"),
+                SummaryGridItem(key="c", label="C", value="3"),
+            ]
+        )
+        original_tiles = dict(grid._tiles)
+
+        grid.set_items(
+            [
+                SummaryGridItem(key="c", label="C", value="3", column_span=2),
+                SummaryGridItem(key="a", label="A", value="1"),
+                SummaryGridItem(key="b", label="B", value="2", column_span=3),
+            ]
+        )
+
+        assert all(grid._tiles[key] is tile for key, tile in original_tiles.items())
+        assert grid._layout.itemAtPosition(0, 0).widget() is original_tiles["c"]
+        assert grid._layout.itemAtPosition(0, 2).widget() is original_tiles["a"]
+        assert grid._layout.itemAtPosition(1, 0).widget() is original_tiles["b"]
+        assert grid._row_count == 2
+    finally:
+        grid.close()
+
+
+def test_summary_grid_only_creates_and_removes_changed_keys():
+    app = _app()
+    grid = SummaryGrid(columns=2)
+
+    try:
+        grid.set_items(
+            [
+                SummaryGridItem(key="keep", label="Keep", value="1"),
+                SummaryGridItem(key="remove", label="Remove", value="2"),
+            ]
+        )
+        kept_tile = grid._tiles["keep"]
+        removed_tile = grid._tiles["remove"]
+
+        grid.set_items(
+            [
+                SummaryGridItem(key="keep", label="Keep", value="updated"),
+                SummaryGridItem(key="new", label="New", value="3"),
+            ]
+        )
+        app.processEvents()
+
+        layout_widgets = {
+            grid._layout.itemAt(index).widget()
+            for index in range(grid._layout.count())
+        }
+        assert grid._tiles["keep"] is kept_tile
+        assert grid._tiles["new"] is not removed_tile
+        assert removed_tile not in layout_widgets
+        assert removed_tile.isHidden()
+    finally:
+        grid.close()
+
+
+def test_summary_grid_rejects_duplicate_stable_keys():
+    _app()
+    grid = SummaryGrid(columns=2)
+
+    try:
+        try:
+            grid.set_items(
+                [
+                    SummaryGridItem(key="duplicate", label="First", value="1"),
+                    SummaryGridItem(key="duplicate", label="Second", value="2"),
+                ]
+            )
+        except ValueError as exc:
+            assert "'duplicate'" in str(exc)
+        else:
+            raise AssertionError("duplicate SummaryGrid keys must be rejected")
     finally:
         grid.close()
 

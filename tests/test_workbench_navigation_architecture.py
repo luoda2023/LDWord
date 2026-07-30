@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.ui.panels.workbench.navigation_controller import WorkbenchNavigationController
 from src.ui.panels.workbench.panel_v2 import WorkbenchPanel
-from src.ui.panels.workbench.scene_presets import (
+from src.config.scene_presets import (
     CAPABILITY_FEATURE_CARD_DEFINITIONS,
     CAPABILITY_FEATURE_CARD_ORDER,
     UI_GROUP_MAP,
@@ -31,7 +31,7 @@ def test_navigation_controller_owns_snapshot_and_dynamic_card_logic():
     controller_source = inspect.getsource(WorkbenchNavigationController)
 
     assert "def build_quick_execute_snapshot" in controller_source
-    assert "def build_config_management_snapshot" in controller_source
+    assert "config_management" not in controller_source
     assert "def refresh_fixed_cards" in controller_source
     assert "def sync_dynamic_cards" in controller_source
     assert "def open_feature_card" in controller_source
@@ -50,7 +50,7 @@ def test_workbench_panel_uses_shared_capability_feature_card_registry():
     )
     assert CAPABILITY_FEATURE_CARD_DEFINITIONS["table_chart"] == ("图表处理", "table")
     assert CAPABILITY_FEATURE_CARD_DEFINITIONS["cleanup"] == ("风险检查", "scan")
-    assert CAPABILITY_FEATURE_CARD_DEFINITIONS["content_fill"] == ("资料包与填充", "pen-tool")
+    assert CAPABILITY_FEATURE_CARD_DEFINITIONS["content_fill"] == ("资料包填充", "pen-tool")
     assert "page_elements" not in CAPABILITY_FEATURE_CARD_DEFINITIONS
     assert "page_elements" not in UI_GROUP_MAP
     assert "figure_table_center" in UI_GROUP_MAP["table_chart"].module_names

@@ -36,6 +36,11 @@ def test_scene_object_preflight_action_audit_baseline_counts():
     assert report.issue_count == 0
     assert report.warning_count == 0
     assert report.missing_source_evidence_count == 0
+    source_evidence = {item.source_id: item for item in report.source_evidence}
+    assert "workbench_compact_confirmation" in source_evidence
+    assert "workbench_confirmation_gate" in source_evidence
+    assert "workbench_confirmation_tests" in source_evidence
+    assert "workbench_execution_adapter" not in source_evidence
 
 
 def test_scene_object_preflight_targets_expose_actions_and_boundaries():

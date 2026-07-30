@@ -1,3 +1,4 @@
+from src.config.materials import ASSET_ROLE_ALIASES, normalize_asset_role
 from src.ui.panels import assets_panel
 from src.ui.panels.assets import (
     archive_presenter,
@@ -7,15 +8,10 @@ from src.ui.panels.assets import (
     batch_import,
     batch_output_presenter,
     field_editor_state_presenter,
-    fields,
-    image_helpers,
     image_inventory_presenter,
     image_preview_presenter,
-    items,
-    layout_helpers,
     material_context_application_presenter,
     material_repair_navigation_presenter,
-    material_settings_presenter,
     preview_table_presenter,
     profile_editor_presenter,
     profile_presenter,
@@ -26,47 +22,38 @@ from src.ui.panels.assets import (
     question_library_master_version_presenter,
     question_library_presenter,
     responsive_layout_presenter,
-    roles,
     scene_spec_presenter,
     section_summary_presenter,
-    text_helpers,
     theme_presenter,
 )
 
 
-def test_assets_panel_keeps_extracted_helpers_in_module_namespace():
-    assert assets_panel._parse_fields_text is fields._parse_fields_text
-    assert assets_panel._normalized_asset_metadata is items._normalized_asset_metadata
-    assert assets_panel._asset_role_min_short_side is image_helpers._asset_role_min_short_side
-    assert assets_panel._first_image_path_from_mime is image_helpers._first_image_path_from_mime
-    assert assets_panel._image_quality_text is image_helpers._image_quality_text
-    assert assets_panel._load_scaled_pixmap is image_helpers._load_scaled_pixmap
-    assert assets_panel._chunk_form_rows is layout_helpers._chunk_form_rows
-    assert assets_panel._asset_slot_supports_alt_text is roles._asset_slot_supports_alt_text
-    assert assets_panel._asset_slot_role_for_token is roles._asset_slot_role_for_token
-    assert assets_panel._parse_replacements_text is text_helpers._parse_replacements_text
-    assert assets_panel._format_replacements_text is text_helpers._format_replacements_text
-    assert assets_panel._format_image_rules_text is text_helpers._format_image_rules_text
-    assert assets_panel._profiles_from_table_rows is batch_import._profiles_from_table_rows
+def test_assets_panel_does_not_republish_extracted_helper_functions():
+    names = {
+        "_parse_fields_text",
+        "_normalized_asset_metadata",
+        "_asset_role_min_short_side",
+        "_image_quality_text",
+        "_load_scaled_pixmap",
+        "_chunk_form_rows",
+        "_asset_slot_supports_alt_text",
+        "_asset_slot_role_for_token",
+        "_profiles_from_table_rows",
+    }
+
+    assert not (names & vars(assets_panel).keys())
 
 
 def test_assets_panel_uses_image_preview_presenter_mixin():
     moved_methods = {
         "_set_current_image_preview_path",
         "_set_image_preview",
-        "_configure_full_image_preview_tool_button",
-        "_refresh_full_image_preview_zoom_label",
-        "_refresh_full_image_preview_pixmap",
-        "_set_full_image_preview_zoom",
-        "_zoom_full_image_preview",
-        "_reset_full_image_preview_zoom",
-        "_fit_full_image_preview_to_window",
         "_selected_full_image_preview_compare_option",
-        "_open_full_image_preview_compare",
         "_current_full_image_preview_region_payload",
         "_current_full_image_preview_region_summary",
         "_mark_current_full_image_preview_compare_issue",
         "_open_current_image_preview_dialog",
+        "_clear_image_preview_dialog",
     }
 
     assert image_preview_presenter.ImagePreviewPresenterMixin in assets_panel.AssetsPanel.__mro__
@@ -77,13 +64,25 @@ def test_assets_panel_uses_image_preview_presenter_mixin():
             name,
         )
 
+    legacy_window_methods = {
+        "_configure_full_image_preview_tool_button",
+        "_refresh_full_image_preview_zoom_label",
+        "_refresh_full_image_preview_pixmap",
+        "_set_full_image_preview_zoom",
+        "_zoom_full_image_preview",
+        "_reset_full_image_preview_zoom",
+        "_fit_full_image_preview_to_window",
+        "_open_full_image_preview_compare",
+    }
+    assert not legacy_window_methods.intersection(
+        image_preview_presenter.ImagePreviewPresenterMixin.__dict__
+    )
+
 
 def test_assets_panel_uses_field_editor_state_presenter_mixin():
     moved_methods = {
         "_on_structured_field_changed",
         "_on_more_fields_changed",
-        "_on_required_fields_changed",
-        "_required_field_keys",
         "_editor_fields",
         "_set_structured_fields",
     }
@@ -120,7 +119,6 @@ def test_assets_panel_uses_asset_collection_state_presenter_mixin():
 def test_assets_panel_uses_archive_presenter_mixin():
     moved_methods = {
         "_setup_archive_overview_card",
-        "_setup_import_export_card",
         "current_archive",
         "set_archive",
         "save_archive_to_path",
@@ -134,6 +132,9 @@ def test_assets_panel_uses_archive_presenter_mixin():
         "_rename_archive",
         "_open_archive_folder",
         "_delete_archive",
+    }
+    removed_legacy_methods = {
+        "_setup_import_export_card",
         "_load_archive_dialog",
         "_save_archive_dialog",
     }
@@ -145,6 +146,9 @@ def test_assets_panel_uses_archive_presenter_mixin():
             archive_presenter.ArchivePresenterMixin,
             name,
         )
+    for name in removed_legacy_methods:
+        assert not hasattr(assets_panel.AssetsPanel, name)
+        assert not hasattr(archive_presenter.ArchivePresenterMixin, name)
 
 
 def test_assets_panel_uses_asset_rows_presenter_mixin():
@@ -211,7 +215,6 @@ def test_assets_panel_uses_asset_file_operations_presenter_mixin():
         "_select_asset_file",
         "_select_attachment_file",
         "_attachment_role_spec",
-        "_handle_asset_drag_event",
         "_apply_asset_slot_path",
         "_clear_asset_file",
         "_clear_attachment_file",
@@ -241,7 +244,6 @@ def test_assets_panel_uses_batch_output_presenter_mixin():
         "selected_batch_profile_ids",
         "batch_output_preview",
         "load_batch_profiles_from_path",
-        "_load_batch_profiles_dialog",
         "_on_batch_output_template_changed",
         "_on_batch_output_naming_changed",
         "_batch_output_template",
@@ -250,6 +252,7 @@ def test_assets_panel_uses_batch_output_presenter_mixin():
         "_shared_batch_context",
         "_sync_material_batch_selection",
     }
+    removed_legacy_methods = {"_load_batch_profiles_dialog"}
 
     assert batch_output_presenter.BatchOutputPresenterMixin in assets_panel.AssetsPanel.__mro__
     for name in moved_methods:
@@ -258,6 +261,9 @@ def test_assets_panel_uses_batch_output_presenter_mixin():
             batch_output_presenter.BatchOutputPresenterMixin,
             name,
         )
+    for name in removed_legacy_methods:
+        assert not hasattr(assets_panel.AssetsPanel, name)
+        assert not hasattr(batch_output_presenter.BatchOutputPresenterMixin, name)
 
 
 def test_assets_panel_uses_material_repair_navigation_mixin():
@@ -336,11 +342,11 @@ def test_assets_panel_uses_material_context_application_presenter_mixin():
         "load_mapping_from_path",
         "_apply_current_profile",
         "_open_document_generation",
-        "_load_mapping_dialog",
         "_apply_mapping_payload",
         "_on_material_context_changed",
         "_set_editor_values",
     }
+    removed_legacy_methods = {"_load_mapping_dialog"}
 
     assert (
         material_context_application_presenter.MaterialContextApplicationPresenterMixin
@@ -352,18 +358,10 @@ def test_assets_panel_uses_material_context_application_presenter_mixin():
             material_context_application_presenter.MaterialContextApplicationPresenterMixin,
             name,
         )
-
-
-def test_assets_panel_uses_material_settings_presenter_mixin():
-    moved_methods = {
-        "_setup_material_settings_card",
-    }
-
-    assert material_settings_presenter.MaterialSettingsPresenterMixin in assets_panel.AssetsPanel.__mro__
-    for name in moved_methods:
-        assert name not in assets_panel.AssetsPanel.__dict__
-        assert getattr(assets_panel.AssetsPanel, name) is getattr(
-            material_settings_presenter.MaterialSettingsPresenterMixin,
+    for name in removed_legacy_methods:
+        assert not hasattr(assets_panel.AssetsPanel, name)
+        assert not hasattr(
+            material_context_application_presenter.MaterialContextApplicationPresenterMixin,
             name,
         )
 
@@ -544,9 +542,6 @@ def test_assets_panel_uses_responsive_layout_presenter_mixin():
 def test_assets_panel_uses_scene_spec_presenter_mixin():
     moved_methods = {
         "_on_scene_changed",
-        "_default_required_field_keys",
-        "_required_fields_from_scene",
-        "_required_fields_match_default",
         "_asset_slots_from_scene",
         "_attachment_roles_from_scene",
         "_sync_asset_slot_rows",
@@ -632,3 +627,59 @@ def test_batch_import_helper_preserves_fields_assets_and_question_figures():
             },
         }
     ]
+
+
+def test_batch_import_and_runtime_share_one_complete_asset_role_alias_map():
+    expected = {
+        "logo": "logo",
+        "标志": "logo",
+        "徽标": "logo",
+        "品牌标志": "logo",
+        "seal": "seal",
+        "stamp": "seal",
+        "公章": "seal",
+        "印章": "seal",
+        "signature": "signature",
+        "签名": "signature",
+        "legal_signature": "legal_signature",
+        "legalsignature": "legal_signature",
+        "法人签名": "legal_signature",
+        "法定代表人签名": "legal_signature",
+        "agent_signature": "agent_signature",
+        "agentsignature": "agent_signature",
+        "授权代表签名": "agent_signature",
+        "委托代理人签名": "agent_signature",
+        "qualification": "qualification",
+        "资质": "qualification",
+        "资质证书": "qualification",
+        "product_image": "product_image",
+        "productimage": "product_image",
+        "产品图片": "product_image",
+        "case_image": "case_image",
+        "caseimage": "case_image",
+        "案例图片": "case_image",
+        "diagram": "diagram",
+        "示意图": "diagram",
+        "figure": "figure",
+        "插图": "figure",
+        "qr": "qrcode",
+        "qrcode": "qrcode",
+        "二维码": "qrcode",
+        "cover": "cover",
+        "封面": "cover",
+        "封面图": "cover",
+        "question_figure": "question_figure",
+        "questionfigure": "question_figure",
+        "question_image": "question_figure",
+        "questionimage": "question_figure",
+        "question_asset": "question_figure",
+        "questionasset": "question_figure",
+        "题目图片": "question_figure",
+        "试题图片": "question_figure",
+        "题图": "question_figure",
+    }
+
+    assert batch_import._ASSET_IMPORT_ALIASES is ASSET_ROLE_ALIASES
+    for alias, role in expected.items():
+        assert normalize_asset_role(alias) == role
+        assert batch_import._asset_role_for_import_key(alias) == role
