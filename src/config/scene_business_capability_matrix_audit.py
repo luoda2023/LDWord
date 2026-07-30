@@ -48,6 +48,7 @@ from src.config.scene_report_artifact_drilldown_audit import (
 from src.config.scene_request_cell_fixture_registry import (
     SceneRequestCellFixtureSpec,
     list_scene_request_cell_fixtures,
+    request_cell_family_ids,
 )
 from src.config.scene_sample_fixture_registry import (
     SCENE_SAMPLE_FIXTURE_MAP,
@@ -969,7 +970,7 @@ def _matching_request_cells(
         return tuple(
             cell
             for cell in cells
-            if set(cell.expected_family_ids) & family_ids
+            if set(request_cell_family_ids(cell)) & family_ids
         )
     return tuple(
         cell

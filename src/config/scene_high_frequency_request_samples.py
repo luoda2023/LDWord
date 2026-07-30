@@ -200,9 +200,8 @@ HIGH_FREQUENCY_REQUEST_SAMPLES: tuple[HighFrequencyRequestSample, ...] = (
         "bidding_original_copy",
         "标书正本副本盖章",
         "matched",
-        ("bidding_qualification_archive",),
+        ("bidding_document_authoring",),
         ("bidding_materials",),
-        expected_family_ids=("qualification_archive_packages",),
     ),
     _sample(
         "bidding_license_archive",
@@ -528,7 +527,7 @@ HIGH_FREQUENCY_REQUEST_SAMPLES: tuple[HighFrequencyRequestSample, ...] = (
         (),
         (),
         disambiguation_required=True,
-        boundary_phrase="未找到稳定场景落点",
+        boundary_phrase="未找到稳定方案落点",
         notes="Non-Word native slide/poster design must not be absorbed by Word scene packs.",
     ),
     _sample(
@@ -538,7 +537,7 @@ HIGH_FREQUENCY_REQUEST_SAMPLES: tuple[HighFrequencyRequestSample, ...] = (
         (),
         (),
         disambiguation_required=True,
-        boundary_phrase="未找到稳定场景落点",
+        boundary_phrase="未找到稳定方案落点",
         notes="Web publishing is a negative control unless an external handoff is explicit.",
     ),
     _sample(
@@ -548,7 +547,7 @@ HIGH_FREQUENCY_REQUEST_SAMPLES: tuple[HighFrequencyRequestSample, ...] = (
         (),
         (),
         disambiguation_required=True,
-        boundary_phrase="未找到稳定场景落点",
+        boundary_phrase="未找到稳定方案落点",
     ),
 )
 

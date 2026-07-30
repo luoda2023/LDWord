@@ -12,6 +12,7 @@ from dataclasses import asdict
 from typing import Any, Mapping, Sequence
 
 from src.config.dataclass_utils import dict_to_dataclass, merge_dict_layers
+from src.config.execution_config_integrity import delivery_preset_identity_issue
 from src.config.migration import (
     add_template_compat_aliases,
     flatten_dict,
@@ -20,11 +21,11 @@ from src.config.migration import (
     unflatten_dict,
 )
 from src.config.template import TemplateConfig
+from src.config.feature_configs import disabled_output_config
+from src.config.document_scope import coerce_document_scope_policy
 from src.config.scene import (
     SceneWorkspace,
     coerce_exam_paper_config,
-    format_scope_for_application_boundary,
-    scene_application_boundary_for_runtime,
 )
 from src.config.resolved import (
     ResolvedConfig,
@@ -33,16 +34,6 @@ from src.config.resolved import (
     ReplacementRule,
 )
 
-_SCENE_HEADER_FOOTER_ALLOWED_HEADER_KEYS = {
-    "mode",
-    "fixed_text",
-    "styleref_level",
-    "border",
-}
-_SCENE_HEADER_FOOTER_ALLOWED_ROOT_KEYS = {
-    "typography",
-    "header",
-}
 _SCENE_IGNORED_PAGE_NUMBER_OVERRIDE_KEYS = {
     "header_footer.page_number_enabled",
     "header_footer.hide_cover_header_footer",
@@ -65,16 +56,26 @@ def resolve_config(
     scene: SceneWorkspace,
     session_overrides: dict[str, Any] | None = None,
     entity_data: Mapping[str, str] | None = None,
+    field_scopes: Mapping[str, str] | None = None,
     field_aliases: Mapping[str, str] | None = None,
+    timeline_field_keys: Sequence[str] | None = None,
+    exact_material_placeholders: bool = False,
     entity_assets_dir: str | None = None,
     images: Sequence[ImageInsertionItem | Mapping[str, Any]] | None = None,
     replacements: Sequence[ReplacementRule | Mapping[str, Any]] | None = None,
 ) -> ResolvedConfig:
     """Merge template, scene and session values into a ResolvedConfig."""
+    delivery_issue = delivery_preset_identity_issue(scene)
+    if delivery_issue:
+        raise ValueError(f"execution_config_invalid:{delivery_issue}")
+
     scene_overrides = _filter_scene_template_overrides(
         normalize_template_overrides(scene.template_overrides)
     )
-    session_overrides = normalize_template_overrides(session_overrides)
+    scene_overrides = _filter_delivery_artifact_overrides(scene_overrides)
+    session_overrides = _filter_delivery_artifact_overrides(
+        normalize_template_overrides(session_overrides)
+    )
     scene_feature_overrides = _extract_scene_feature_overrides(scene)
 
     template_payload = asdict(template)
@@ -99,19 +100,31 @@ def resolve_config(
         scene_overrides=scene_overrides,
         session_overrides=session_overrides,
     )
-    application_boundary = scene_application_boundary_for_runtime(scene)
-
+    artifact_output = (
+        copy.deepcopy(scene.default_delivery_preset().artifacts)
+        if scene.delivery_presets
+        else disabled_output_config()
+    )
+    for key, value in flatten_dict("output", asdict(artifact_output)).items():
+        provenance[key] = ConfigValue(
+            value=copy.deepcopy(value),
+            source="scene",
+            template_default=None,
+        )
     return ResolvedConfig(
         # From template (core appearance)
         page_setup=merged_template.page_setup,
-        styles={**merged_template.styles, **copy.deepcopy(scene.section_styles)},
+        styles=merged_template.styles,
         heading_numbering=merged_template.heading_numbering,
         heading_model=merged_template.heading_model,
         section=merged_template.section,
         # Template visual baseline plus explicit overrides. Scene-owned policy fields
         # below may still project into TemplateConfig-shaped runtime slots.
         table=merged_template.table,
-        output=merged_template.output,
+        # Delivery artifacts have one state owner: the scene's default preset.
+        # ResolvedConfig keeps this copy only as a runtime projection for existing
+        # consumers that expect an OutputConfig-shaped value.
+        output=artifact_output,
         toc=merged_template.toc,
         caption=merged_template.caption,
         header_footer=merged_template.header_footer,
@@ -122,11 +135,8 @@ def resolve_config(
         equation_numbering=merged_template.equation_numbering,
         # From scene (behavior)
         module_switches=normalize_module_switches(scene.module_switches),
-        application_boundary=copy.deepcopy(application_boundary),
-        format_scope=format_scope_for_application_boundary(
-            application_boundary,
-            scene.format_scope,
-        ),
+        mode_id=str(scene.mode_id or "").strip() or "custom",
+        document_scope=coerce_document_scope_policy(scene.document_scope),
         strict_mode=scene.strict_mode,
         md_cleanup=copy.deepcopy(scene.md_cleanup),
         whitespace=copy.deepcopy(scene.whitespace),
@@ -139,10 +149,55 @@ def resolve_config(
         delivery_presets=copy.deepcopy(scene.delivery_presets),
         exam_paper=coerce_exam_paper_config(getattr(scene, "exam_paper", None)),
         entity_data=dict(entity_data or {}),
+        field_scopes=dict(field_scopes or {}),
         field_aliases=dict(field_aliases or {}),
+        timeline_field_keys=tuple(
+            dict.fromkeys(
+                str(item or "").strip()
+                for item in tuple(timeline_field_keys or ())
+                if str(item or "").strip()
+            )
+        ),
+        exact_material_placeholders=bool(exact_material_placeholders),
         entity_assets_dir=entity_assets_dir or "",
         images=_normalize_image_items(images),
         replacements=_normalize_replacement_rules(replacements),
+        _provenance=provenance,
+    )
+
+
+def resolve_template_baseline(template: TemplateConfig) -> ResolvedConfig:
+    """Project appearance-only template values without output authorization."""
+
+    baseline = copy.deepcopy(template)
+    template_flat = add_template_compat_aliases(
+        flatten_dict("", asdict(baseline))
+    )
+    provenance = {
+        key: ConfigValue(
+            value=copy.deepcopy(value),
+            source="template",
+            template_default=copy.deepcopy(value),
+        )
+        for key, value in template_flat.items()
+    }
+    return ResolvedConfig(
+        page_setup=baseline.page_setup,
+        styles=baseline.styles,
+        heading_numbering=baseline.heading_numbering,
+        heading_model=baseline.heading_model,
+        section=baseline.section,
+        table=baseline.table,
+        output=disabled_output_config(),
+        toc=baseline.toc,
+        caption=baseline.caption,
+        header_footer=baseline.header_footer,
+        watermark=baseline.watermark,
+        reference_style=baseline.reference_style,
+        formula_table=baseline.formula_table,
+        formula_style=baseline.formula_style,
+        equation_numbering=baseline.equation_numbering,
+        module_switches={},
         _provenance=provenance,
     )
 
@@ -181,7 +236,6 @@ _SCENE_FEATURE_FIELDS = (
     "equation_numbering",
     "reference_style",
     "watermark",
-    "output",
 )
 
 
@@ -199,34 +253,19 @@ def _extract_scene_feature_overrides(scene: SceneWorkspace) -> dict[str, Any]:
             for key, value in current_payload.items()
             if value != default_payload.get(key)
         }
-        if field_name == "header_footer":
-            diff = _filter_scene_header_footer_overrides(diff)
         if diff:
             overrides[field_name] = diff
     return overrides
 
 
-def _filter_scene_header_footer_overrides(diff: dict[str, Any]) -> dict[str, Any]:
-    filtered: dict[str, Any] = {}
-
-    typography = diff.get("typography")
-    if isinstance(typography, Mapping) and typography:
-        filtered["typography"] = copy.deepcopy(dict(typography))
-
-    header = diff.get("header")
-    if isinstance(header, Mapping):
-        header_filtered = {
-            key: copy.deepcopy(value)
-            for key, value in dict(header).items()
-            if key in _SCENE_HEADER_FOOTER_ALLOWED_HEADER_KEYS
-        }
-        if header_filtered:
-            filtered["header"] = header_filtered
-
+def _filter_delivery_artifact_overrides(
+    overrides: dict[str, Any],
+) -> dict[str, Any]:
+    """Reject loose output overrides; delivery presets are the sole owner."""
     return {
         key: value
-        for key, value in filtered.items()
-        if key in _SCENE_HEADER_FOOTER_ALLOWED_ROOT_KEYS and value
+        for key, value in overrides.items()
+        if key != "output" and not key.startswith("output.")
     }
 
 

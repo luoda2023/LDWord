@@ -9,208 +9,24 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
+from typing import Literal
+
 from src.config.migration import (
     get_default_module_switches,
     normalize_module_name,
     normalize_module_switches,
 )
 from src.config.feature_configs import (
-    HeaderFooterConfig,
-    TocConfig,
-    CaptionConfig,
-    FormulaTableConfig,
     FormulaStyleConfig,
     EquationNumberingConfig,
     ReferenceStyleConfig,
     WatermarkConfig,
-    TableConfig,
     OutputConfig,
 )
-
-
-@dataclass
-class FormatScopeConfig:
-    """Legacy processing gate kept for old scene configs and runtime consumers."""
-    mode: str = "auto"
-    page_ranges_text: str = ""
-    body_start_index: int | None = None
-    body_start_page: int | None = None
-    body_start_keyword: str = ""
-    sections: dict[str, bool] = field(default_factory=lambda: {
-        "body": True,
-        "references": True,
-        "errata": True,
-        "acknowledgment": True,
-        "appendix": False,
-        "abstract_cn": False,
-        "abstract_en": False,
-        "toc": False,
-        "resume": False,
-    })
-
-    def is_section_enabled(self, section_type: str) -> bool:
-        if str(section_type or "").strip().lower() == "cover":
-            return False
-        return self.sections.get(section_type, False)
-
-
-SCENE_APPLICATION_BOUNDARY_MODES = (
-    "follow_template",
-    "body_only",
-    "full_document",
-    "confirm_before_apply",
+from src.config.document_scope import (
+    DocumentScopePolicy,
+    coerce_document_scope_policy,
 )
-
-
-@dataclass
-class SceneApplicationBoundaryConfig:
-    """High-level task boundary; it filters template/runtime structure only."""
-
-    mode: str = "follow_template"
-    confirm_before_apply: bool = False
-
-    def __post_init__(self) -> None:
-        mode = str(self.mode or "").strip() or "follow_template"
-        if mode not in SCENE_APPLICATION_BOUNDARY_MODES:
-            mode = "follow_template"
-        self.mode = mode
-        self.confirm_before_apply = bool(
-            self.confirm_before_apply or mode == "confirm_before_apply"
-        )
-
-
-def coerce_scene_application_boundary(
-    boundary: SceneApplicationBoundaryConfig | dict | None,
-) -> SceneApplicationBoundaryConfig:
-    """Return a normalized copy of a scene application boundary."""
-
-    if isinstance(boundary, SceneApplicationBoundaryConfig):
-        result = copy.deepcopy(boundary)
-        result.__post_init__()
-        return result
-    if isinstance(boundary, dict):
-        return SceneApplicationBoundaryConfig(
-            **{
-                key: value
-                for key, value in boundary.items()
-                if key in {"mode", "confirm_before_apply"}
-            }
-        )
-    return SceneApplicationBoundaryConfig()
-
-
-def coerce_format_scope(scope: FormatScopeConfig | dict | None) -> FormatScopeConfig:
-    """Return a normalized copy of the legacy runtime format scope."""
-
-    if isinstance(scope, FormatScopeConfig):
-        return copy.deepcopy(scope)
-    if isinstance(scope, dict):
-        payload = {
-            key: value
-            for key, value in scope.items()
-            if key in {
-                "mode",
-                "page_ranges_text",
-                "body_start_index",
-                "body_start_page",
-                "body_start_keyword",
-                "sections",
-            }
-        }
-        return FormatScopeConfig(**payload)
-    return FormatScopeConfig()
-
-
-def infer_application_boundary_from_format_scope(
-    format_scope: FormatScopeConfig | dict | None,
-) -> SceneApplicationBoundaryConfig:
-    """Infer the high-level boundary from old section gates."""
-
-    scope = coerce_format_scope(format_scope)
-    raw_mode = str(scope.mode or "").strip()
-    if raw_mode in SCENE_APPLICATION_BOUNDARY_MODES:
-        return SceneApplicationBoundaryConfig(mode=raw_mode)
-    if raw_mode in {"manual", "manual_review", "confirm"}:
-        return SceneApplicationBoundaryConfig(mode="confirm_before_apply")
-
-    sections = scope.sections or {}
-    enabled = {str(key) for key, value in sections.items() if bool(value)}
-    total = len(sections)
-    if enabled == {"body"}:
-        return SceneApplicationBoundaryConfig(mode="body_only")
-    if total and len(enabled) == total:
-        return SceneApplicationBoundaryConfig(mode="full_document")
-    if total and len(enabled) >= max(3, total // 2):
-        return SceneApplicationBoundaryConfig(mode="follow_template")
-    return SceneApplicationBoundaryConfig(mode="confirm_before_apply")
-
-
-def is_default_format_scope(scope: FormatScopeConfig | dict | None) -> bool:
-    """Return True when the legacy scope is still at factory defaults."""
-
-    current = coerce_format_scope(scope)
-    default = FormatScopeConfig()
-    return (
-        current.mode == default.mode
-        and current.page_ranges_text == default.page_ranges_text
-        and current.body_start_index == default.body_start_index
-        and current.body_start_page == default.body_start_page
-        and current.body_start_keyword == default.body_start_keyword
-        and current.sections == default.sections
-    )
-
-
-def scene_application_boundary_for_runtime(scene) -> SceneApplicationBoundaryConfig:
-    """Resolve the scene's runtime boundary, preserving legacy-only configs."""
-
-    boundary = coerce_scene_application_boundary(
-        getattr(scene, "application_boundary", None)
-    )
-    if (
-        boundary.mode == "follow_template"
-        and not boundary.confirm_before_apply
-        and not is_default_format_scope(getattr(scene, "format_scope", None))
-    ):
-        return infer_application_boundary_from_format_scope(
-            getattr(scene, "format_scope", None)
-        )
-    return boundary
-
-
-def format_scope_for_application_boundary(
-    boundary: SceneApplicationBoundaryConfig | dict | None,
-    legacy_scope: FormatScopeConfig | dict | None = None,
-) -> FormatScopeConfig:
-    """Project the high-level boundary into the legacy runtime scope."""
-
-    resolved_boundary = coerce_scene_application_boundary(boundary)
-    mode = resolved_boundary.mode
-    if mode == "follow_template":
-        return FormatScopeConfig()
-
-    scope = coerce_format_scope(legacy_scope)
-    default_sections = dict(FormatScopeConfig().sections)
-    section_keys = tuple(dict.fromkeys([*default_sections, *(scope.sections or {})]))
-    if mode == "body_only":
-        scope.sections = {key: key == "body" for key in section_keys}
-        scope.mode = "auto"
-    elif mode == "full_document":
-        scope.sections = {key: True for key in section_keys}
-        scope.mode = "auto"
-    elif mode == "confirm_before_apply":
-        if not scope.sections:
-            scope.sections = default_sections
-        scope.mode = "manual_review"
-    return scope
-
-
-def format_scope_for_scene_runtime(scene) -> FormatScopeConfig:
-    """Return the legacy scope that old runtime modules should consume."""
-
-    return format_scope_for_application_boundary(
-        scene_application_boundary_for_runtime(scene),
-        getattr(scene, "format_scope", None),
-    )
 
 
 @dataclass
@@ -301,7 +117,7 @@ class InputSourceProfile:
     required_material_fields: list[str] = field(default_factory=list)
     required_image_roles: list[str] = field(default_factory=list)
     high_risk_imports: list[str] = field(default_factory=lambda: ["full_latex_project"])
-    failure_policy: str = "warn"
+    failure_policy: Literal["warn", "block", "confirm"] = "warn"
 
 
 @dataclass
@@ -351,7 +167,7 @@ class ComplianceProfile:
         "headers_footers",
     ])
     report_level: str = "summary"
-    failure_policy: str = "warn"
+    failure_policy: Literal["warn", "block", "confirm"] = "warn"
     object_preflight: ObjectPreflightPolicy = field(default_factory=ObjectPreflightPolicy)
 
 
@@ -361,9 +177,9 @@ class ContentVisibilityRule:
 
     rule_id: str = ""
     label: str = ""
-    selector_type: str = "marker_block"
+    selector_type: Literal["marker_block"] = "marker_block"
     selector: str = ""
-    action: str = "remove"
+    action: Literal["remove"] = "remove"
 
 
 @dataclass
@@ -400,7 +216,7 @@ class ExamBlankStyleConfig:
         label = str(self.label or "").strip()
         self.label = label or style_id or "试卷样式副本"
         base_style = str(self.base_style_id or "").strip() or "default_exam"
-        if base_style not in {"default_exam"}:
+        if base_style not in BUILTIN_EXAM_BLANK_STYLE_IDS:
             base_style = "default_exam"
         self.base_style_id = base_style
         self.master_docx_path = str(self.master_docx_path or "").strip()
@@ -425,6 +241,24 @@ def _coerce_exam_blank_style_config(
     return None
 
 
+BUILTIN_EXAM_BLANK_STYLE_IDS: tuple[str, ...] = (
+    "default_exam",
+)
+
+
+def _normalized_user_exam_blank_style_id(
+    builtin_style_id: str,
+    reserved_ids: set[str],
+) -> str:
+    base_id = f"user_{str(builtin_style_id or '').strip()}_copy"
+    candidate = base_id
+    index = 2
+    while candidate in reserved_ids:
+        candidate = f"{base_id}{index}"
+        index += 1
+    return candidate
+
+
 @dataclass
 class ExamPaperConfig:
     """Scene-level assembly rules for exam paper scenarios.
@@ -433,7 +267,6 @@ class ExamPaperConfig:
     records which stable assembly decisions the workbench should follow.
     """
 
-    blank_style_id: str = "default_exam"
     question_structure_mode: str = "markdown_headings"
     answer_policy: str = "student_plus_answer"
     custom_blank_styles: list[ExamBlankStyleConfig] = field(default_factory=list)
@@ -442,24 +275,37 @@ class ExamPaperConfig:
     )
 
     def __post_init__(self) -> None:
-        custom_styles: list[ExamBlankStyleConfig] = []
-        seen_style_ids: set[str] = set()
+        coerced_styles: list[ExamBlankStyleConfig] = []
+        seen_original_style_ids: set[str] = set()
         incoming_styles = (
             self.custom_blank_styles if isinstance(self.custom_blank_styles, list) else []
         )
         for item in incoming_styles:
             style = _coerce_exam_blank_style_config(item)
-            if style is None or style.style_id in seen_style_ids:
+            if style is None or style.style_id in seen_original_style_ids:
                 continue
-            seen_style_ids.add(style.style_id)
+            seen_original_style_ids.add(style.style_id)
+            coerced_styles.append(style)
+
+        reserved_style_ids = {
+            *BUILTIN_EXAM_BLANK_STYLE_IDS,
+            *(
+                style.style_id
+                for style in coerced_styles
+                if style.style_id not in BUILTIN_EXAM_BLANK_STYLE_IDS
+            ),
+        }
+        custom_styles: list[ExamBlankStyleConfig] = []
+        for style in coerced_styles:
+            original_style_id = style.style_id
+            if original_style_id in BUILTIN_EXAM_BLANK_STYLE_IDS:
+                style.style_id = _normalized_user_exam_blank_style_id(
+                    original_style_id,
+                    reserved_style_ids,
+                )
+                reserved_style_ids.add(style.style_id)
             custom_styles.append(style)
         self.custom_blank_styles = custom_styles
-
-        blank_style = str(self.blank_style_id or "").strip() or "default_exam"
-        allowed_styles = {"default_exam", *seen_style_ids}
-        if blank_style not in allowed_styles:
-            blank_style = "default_exam"
-        self.blank_style_id = blank_style
 
         structure_mode = str(self.question_structure_mode or "").strip() or "markdown_headings"
         if structure_mode not in {"markdown_headings", "numbered_questions"}:
@@ -497,7 +343,6 @@ def coerce_exam_paper_config(
                 key: value
                 for key, value in config.items()
                 if key in {
-                    "blank_style_id",
                     "question_structure_mode",
                     "answer_policy",
                     "custom_blank_styles",
@@ -522,21 +367,17 @@ class SceneWorkspace:
     category: str = "general"
     category_label: str = "通用文档"
     scene_id: str = ""
-    template_id: str = ""               # 绑定的模板 ID
-    default_template_id: str = ""
+    mode_id: str = ""
+    display_order: int = 0
+    template_id: str = ""               # 唯一持久化模板 ID
     compatible_template_ids: list[str] = field(default_factory=list)
+    master_id: str = ""                 # 唯一持久化母版 ID（无母版的方案留空）
+    default_material_profile_id: str = ""
 
     # ── 处理范围 ───────────────────────────
-    application_boundary: SceneApplicationBoundaryConfig = field(
-        default_factory=SceneApplicationBoundaryConfig
+    document_scope: DocumentScopePolicy = field(
+        default_factory=DocumentScopePolicy
     )
-
-    # ── 兼容范围：旧场景和旧运行时仍会读取 ──────────────
-    format_scope: FormatScopeConfig = field(default_factory=FormatScopeConfig)
-    available_sections: list[str] = field(default_factory=lambda: [
-        "body", "references", "errata", "acknowledgment", "appendix",
-        "resume", "abstract_cn", "abstract_en", "toc",
-    ])
 
     # ── 模块开关 ───────────────────────────
     module_switches: dict[str, bool] = field(
@@ -557,26 +398,12 @@ class SceneWorkspace:
     formula_convert: FormulaConvertOptions = field(default_factory=FormulaConvertOptions)
     chem_typography: ChemTypographyOptions = field(default_factory=ChemTypographyOptions)
 
-    # ── 旧版场景内嵌模板字段（兼容保存 / 迁移读取） ────
-    # 新路径不再通过这些同名字段自动覆盖模板外观；显式模板差异进入
-    # template_overrides，运行时行为使用上方 scene-owned policy 字段。
-    table: TableConfig = field(default_factory=TableConfig)
-    header_footer: HeaderFooterConfig = field(default_factory=HeaderFooterConfig)
-    toc: TocConfig = field(default_factory=TocConfig)
-    caption: CaptionConfig = field(default_factory=CaptionConfig)
-    formula_table: FormulaTableConfig = field(default_factory=FormulaTableConfig)
+    # Template appearance lives only in TemplateConfig/template_overrides.
+    # Scene-owned runtime policy fields remain below.
     formula_style: FormulaStyleConfig = field(default_factory=FormulaStyleConfig)
     equation_numbering: EquationNumberingConfig = field(default_factory=EquationNumberingConfig)
     reference_style: ReferenceStyleConfig = field(default_factory=ReferenceStyleConfig)
     watermark: WatermarkConfig = field(default_factory=WatermarkConfig)
-
-    # ── 格式例外（绑定模板识别出的结构） ───────────────
-    # key = style_variant_semantics 中的 variant key，如 "references_body"
-    # 值 = StyleConfig 对象。缺席表示“跟随模板”。
-    section_styles: dict = field(default_factory=dict)
-
-    # ── 输出配置 ─────────────────────
-    output: OutputConfig = field(default_factory=OutputConfig)
 
     # ── 模板参数覆盖（场景级） ────────────────
     template_overrides: dict = field(default_factory=dict)
@@ -588,65 +415,47 @@ class SceneWorkspace:
     strict_mode: bool = True
 
     def __post_init__(self) -> None:
-        if isinstance(self.application_boundary, dict):
-            self.application_boundary = SceneApplicationBoundaryConfig(
-                **{
-                    key: value
-                    for key, value in self.application_boundary.items()
-                    if key in {"mode", "confirm_before_apply"}
-                }
-            )
-        elif self.application_boundary is None:
-            self.application_boundary = SceneApplicationBoundaryConfig()
-        elif isinstance(self.application_boundary, SceneApplicationBoundaryConfig):
-            self.application_boundary.__post_init__()
-        else:
-            self.application_boundary = SceneApplicationBoundaryConfig()
+        self.document_scope = coerce_document_scope_policy(self.document_scope)
 
         self.module_switches = normalize_module_switches(self.module_switches)
         self.scene_id = str(self.scene_id or "").strip()
+        self.mode_id = str(self.mode_id or "").strip()
+        if type(self.display_order) is not int:
+            self.display_order = 0
         self.template_id = str(self.template_id or "").strip()
-        self.default_template_id = str(self.default_template_id or "").strip()
+        self.master_id = str(self.master_id or "").strip()
+        self.default_material_profile_id = str(
+            self.default_material_profile_id or ""
+        ).strip()
+        # Preserve an explicit empty/unknown ID.  Execution integrity is the
+        # single owner that rejects it; construction must not silently select
+        # a different delivery contract.
         self.default_delivery_preset_id = str(
-            self.default_delivery_preset_id or "final"
-        ).strip() or "final"
+            self.default_delivery_preset_id or ""
+        ).strip()
         self.exam_paper = coerce_exam_paper_config(self.exam_paper)
 
         compatible_ids = [str(item or "").strip() for item in self.compatible_template_ids]
-        self.compatible_template_ids = [item for item in compatible_ids if item]
+        self.compatible_template_ids = list(
+            dict.fromkeys(item for item in compatible_ids if item)
+        )
 
-        if not self.default_template_id and self.template_id:
-            self.default_template_id = self.template_id
-        if not self.template_id and self.default_template_id:
-            self.template_id = self.default_template_id
-        if not self.compatible_template_ids:
-            seed = self.template_id or self.default_template_id
-            self.compatible_template_ids = [seed] if seed else []
-        elif self.template_id and self.template_id not in self.compatible_template_ids:
-            self.compatible_template_ids.insert(0, self.template_id)
-        elif not self.template_id and self.compatible_template_ids:
-            self.template_id = self.compatible_template_ids[0]
-
-        if not self.delivery_presets:
-            self.delivery_presets = [
-                DeliveryPreset(
-                    preset_id=self.default_delivery_preset_id,
-                    artifacts=copy.deepcopy(self.output),
-                )
-            ]
-        preset_ids = {
-            str(getattr(preset, "preset_id", "") or "").strip()
-            for preset in self.delivery_presets
-        }
-        if self.default_delivery_preset_id not in preset_ids:
-            first = self.delivery_presets[0]
-            first_id = str(getattr(first, "preset_id", "") or "").strip()
-            if first_id:
-                self.default_delivery_preset_id = first_id
+        if self.delivery_presets is None:
+            self.delivery_presets = []
 
     def is_module_enabled(self, module_name: str) -> bool:
         """查询模块是否在本场景中启用。"""
         return self.module_switches.get(
             normalize_module_name(module_name),
             False,
+        )
+
+    def default_delivery_preset(self) -> DeliveryPreset:
+        """Return the canonical artifact owner selected for default delivery."""
+        target_id = str(self.default_delivery_preset_id or "").strip()
+        for preset in self.delivery_presets:
+            if str(preset.preset_id or "").strip() == target_id:
+                return preset
+        raise RuntimeError(
+            f"default delivery preset {target_id!r} is not present in the scene"
         )

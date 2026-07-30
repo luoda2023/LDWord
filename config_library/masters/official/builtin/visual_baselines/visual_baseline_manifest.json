@@ -1,0 +1,115 @@
+{
+  "schema_version": 2,
+  "generated_on": "2026-07-13",
+  "renderer": {
+    "docx_to_pdf": "word_com",
+    "word_version": "16.0.20131.20112",
+    "office_platform": "x64",
+    "python_version": "3.12.10"
+  },
+  "rasterizer": {
+    "name": "pypdfium2",
+    "version": "5.11.0",
+    "pdfium_version": "151.0.7920.0"
+  },
+  "master": {
+    "master_id": "official_gbt_standard",
+    "path": "../official_gbt_standard.docx",
+    "sha256": "9391627317e1a6785c4c3add16e9904483e50d621a163b9a6bcc3793d224649f"
+  },
+  "masters": {
+    "official_gbt_standard": {
+      "path": "../official_gbt_standard.docx",
+      "sha256": "9391627317e1a6785c4c3add16e9904483e50d621a163b9a6bcc3793d224649f"
+    },
+    "official_gbt_upward": {
+      "path": "../official_gbt_upward.docx",
+      "sha256": "de558ed83b0af7d4b48902923ac984928fe2e9b60ba69c32e6f3bcd5cae6709e"
+    },
+    "official_gbt_letter": {
+      "path": "../official_gbt_letter.docx",
+      "sha256": "12a097dc418f97b29d80cefd493aa9a31e54e1b3399ca75ab9866c1ca7e59bad"
+    },
+    "official_gbt_minutes": {
+      "path": "../official_gbt_minutes.docx",
+      "sha256": "8515c8c1356b0b371a40e20b89d0909669ad2c746d09307b40e329a75261bd81"
+    },
+    "official_gbt_order": {
+      "path": "../official_gbt_order.docx",
+      "sha256": "44dbc2c1539e53d30b2a8031e5cba1f7ed5c4ef2f35cec18cab4d0f6ee3ee689"
+    }
+  },
+  "profiles": {
+    "notice": {
+      "master_id": "official_gbt_standard",
+      "png": "notice_official_sample_page-1.png",
+      "sha256": "11f2686f22a046815dbd908bc897cb597d83918c9223a7d5428e591b1fc6d756",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    },
+    "letter": {
+      "master_id": "official_gbt_letter",
+      "png": "letter_official_sample_page-1.png",
+      "sha256": "fa5094a1c06d9455371f447a5444351fa397334a8201b23f864a49aca105ef81",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    },
+    "minutes": {
+      "master_id": "official_gbt_minutes",
+      "png": "minutes_official_sample_page-1.png",
+      "sha256": "25449c64e876f61da42b327a05ad8b7e4ec9a76322633305ae6092dd8205f651",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    },
+    "report": {
+      "master_id": "official_gbt_upward",
+      "png": "report_official_sample_page-1.png",
+      "sha256": "1ae1aece3a94c5a14e9bb75a77b4aa6a9bcfdeb893c2abf90ab87329bfc84f10",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    },
+    "request": {
+      "master_id": "official_gbt_upward",
+      "png": "request_official_sample_page-1.png",
+      "sha256": "a378cfd6d658f97114dd3c283e5d317591dc233841a5385567b203bb6bfa9b3d",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    },
+    "approval": {
+      "master_id": "official_gbt_standard",
+      "png": "approval_official_sample_page-1.png",
+      "sha256": "7e791c75d79d823d708702a3f3a89640892ef10b4a2363434e95d1174d77f87f",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    }
+  },
+  "review": {
+    "status": "passed",
+    "master_family_decision": "split_master_family_accepted",
+    "notes": [
+      "notice and approval use the ordinary redhead family",
+      "report and request use the upward signer family",
+      "letter uses the letter-form double-rule family and hides the first-page number",
+      "minutes uses a dedicated minutes mark and meeting-information structure",
+      "all six core samples render as one nonblank page without clipping, placeholder residue or trailing blank pages"
+    ]
+  }
+}

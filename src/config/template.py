@@ -191,7 +191,6 @@ from src.config.feature_configs import (  # noqa: E402, F401
     ReferenceStyleConfig,
     WatermarkConfig,
     TableConfig,
-    OutputConfig,
 )
 
 
@@ -221,4 +220,3 @@ class TemplateConfig:
     equation_numbering: EquationNumberingConfig = field(default_factory=EquationNumberingConfig)
     reference_style: ReferenceStyleConfig = field(default_factory=ReferenceStyleConfig)
     watermark: WatermarkConfig = field(default_factory=WatermarkConfig)
-    output: OutputConfig = field(default_factory=OutputConfig)

@@ -261,7 +261,7 @@ SCENE_RELEASE_RESIDUAL_RATIO_LEDGER_SOURCE_MARKERS: tuple[
     ),
     (
         "summary_projection",
-        "src/ui/panels/scene_summary_projection.py",
+        "scripts/verify_scene_matrix_release_gate.py",
         (
             "release_residual_ratio_ledger_published_count",
             "release residual ratios",

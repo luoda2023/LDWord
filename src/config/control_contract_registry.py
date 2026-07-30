@@ -1,8 +1,7 @@
-"""UI control contracts shared by template, scene, and workbench surfaces.
+"""UI control contracts shared by template and workbench surfaces.
 
-The scene matrix keeps boundary-sensitive parameters in one product language.
 This registry records canonical controls, units, pairing, owners, and source
-evidence so future scene controls do not drift back into template management.
+evidence so formatting ownership remains explicit.
 """
 
 from __future__ import annotations
@@ -124,9 +123,8 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
         "中文字体",
         "template",
         "FontCombo(lang='cn')",
-        ("template.styles.body.font_cn", "scene.section_styles.*.font_cn"),
+        ("template.styles.body.font_cn",),
         template_surface="TemplatePanel StyleDetail",
-        scene_surface="scene style override must reuse ParagraphStyleEditor FontCombo",
         evidence=(
             _evidence(
                 "src/shared/ui/paragraph_style_editor.py",
@@ -141,9 +139,8 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
         "英文字体",
         "template",
         "FontCombo(lang='en')",
-        ("template.styles.body.font_en", "scene.section_styles.*.font_en"),
+        ("template.styles.body.font_en",),
         template_surface="TemplatePanel StyleDetail",
-        scene_surface="scene style override must reuse ParagraphStyleEditor FontCombo",
         evidence=(
             _evidence(
                 "src/shared/ui/paragraph_style_editor.py",
@@ -158,10 +155,9 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
         "字号",
         "template",
         "SizeCombo",
-        ("template.styles.body.size_pt", "scene.section_styles.*.size_pt"),
+        ("template.styles.body.size_pt",),
         unit_set=("pt", "word_named_size"),
         template_surface="TemplatePanel StyleDetail",
-        scene_surface="scene style override must reuse ParagraphStyleEditor SizeCombo",
         evidence=(
             _evidence(
                 "src/shared/ui/paragraph_style_editor.py",
@@ -179,13 +175,10 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
         (
             "template.styles.body.left_indent_chars",
             "template.styles.body.left_indent_unit",
-            "scene.section_styles.*.left_indent_chars",
-            "scene.section_styles.*.left_indent_unit",
         ),
         unit_set=PARAGRAPH_INDENT_UNITS,
         paired_contract_ids=("body.right_indent",),
         template_surface="TemplatePanel StyleDetail",
-        scene_surface="scene style override must show left/right indent on one row",
         evidence=(
             _evidence(
                 "src/shared/ui/paragraph_style_inputs.py",
@@ -209,13 +202,10 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
         (
             "template.styles.body.right_indent_chars",
             "template.styles.body.right_indent_unit",
-            "scene.section_styles.*.right_indent_chars",
-            "scene.section_styles.*.right_indent_unit",
         ),
         unit_set=PARAGRAPH_INDENT_UNITS,
         paired_contract_ids=("body.left_indent",),
         template_surface="TemplatePanel StyleDetail",
-        scene_surface="scene style override must show left/right indent on one row",
         evidence=(
             _evidence(
                 "src/shared/ui/paragraph_style_inputs.py",
@@ -240,14 +230,10 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
             "template.styles.body.special_indent_mode",
             "template.styles.body.special_indent_value",
             "template.styles.body.special_indent_unit",
-            "scene.section_styles.*.special_indent_mode",
-            "scene.section_styles.*.special_indent_value",
-            "scene.section_styles.*.special_indent_unit",
         ),
         unit_set=PARAGRAPH_INDENT_UNITS,
         disabled_state_rule="mode=none disables the value/unit editor and returns value 0",
         template_surface="TemplatePanel StyleDetail",
-        scene_surface="scene style override must expose none/first_line/hanging switching",
         evidence=(
             _evidence(
                 "src/shared/ui/paragraph_style_inputs.py",
@@ -271,13 +257,10 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
         (
             "template.styles.body.line_spacing_type",
             "template.styles.body.line_spacing_pt",
-            "scene.section_styles.*.line_spacing_type",
-            "scene.section_styles.*.line_spacing_pt",
         ),
         unit_set=LINE_SPACING_KINDS,
         disabled_state_rule="single/one_half/double lock the value editor; exact/multiple enable it",
         template_surface="TemplatePanel StyleDetail",
-        scene_surface="scene style override must keep line type/value as a coupled control",
         evidence=(
             _evidence(
                 "src/config/style_semantics.py",
@@ -301,14 +284,11 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
         (
             "template.styles.body.space_before_pt",
             "template.styles.body.space_before_unit",
-            "scene.section_styles.*.space_before_pt",
-            "scene.section_styles.*.space_before_unit",
         ),
         unit_set=PARAGRAPH_SPACING_UNITS,
         paired_contract_ids=("body.space_after",),
         disabled_state_rule="unit=auto disables numeric editing",
         template_surface="TemplatePanel StyleDetail",
-        scene_surface="scene style override must show before/after spacing on one row",
         evidence=(
             _evidence("src/shared/ui/spacing_input.py", "class SpacingInput"),
             _evidence(
@@ -328,14 +308,11 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
         (
             "template.styles.body.space_after_pt",
             "template.styles.body.space_after_unit",
-            "scene.section_styles.*.space_after_pt",
-            "scene.section_styles.*.space_after_unit",
         ),
         unit_set=PARAGRAPH_SPACING_UNITS,
         paired_contract_ids=("body.space_before",),
         disabled_state_rule="unit=auto disables numeric editing",
         template_surface="TemplatePanel StyleDetail",
-        scene_surface="scene style override must show before/after spacing on one row",
         evidence=(
             _evidence("src/shared/ui/spacing_input.py", "class SpacingInput"),
             _evidence(
@@ -367,11 +344,6 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
             _evidence(
                 "src/shared/engine/fixed_layout_tables.py",
                 "apply_fixed_layout_row_height_policy",
-                "w:trHeight",
-            ),
-            _evidence(
-                "src/config/scene_coverage_manifest.py",
-                "form_batch_documents",
                 "w:trHeight",
             ),
             _evidence(
@@ -448,7 +420,7 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
                 "watermark.text",
             ),
             _evidence(
-                "src/ui/panels/scene_panel.py",
+                "src/ui/panels/scene_content_detail.py",
                 "_watermark_enabled",
                 "_watermark_text",
                 '"水印文本"',
@@ -483,7 +455,7 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
                 "missing_material_schema_ids",
             ),
             _evidence(
-                "src/ui/panels/scene_panel.py",
+                "src/ui/panels/scene_content_detail.py",
                 "_schema_registry_combo",
                 "_material_schema_id",
                 "_set_primary_schema_btn",
@@ -512,7 +484,6 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
         (
             "scene.default_delivery_preset_id",
             "scene.delivery_presets.*",
-            "scene.output.*",
         ),
         disabled_state_rule="family defaults button is enabled only when a planned family has delivery defaults",
         scene_surface="ScenePanel scene rules generated-result editor",
@@ -524,7 +495,7 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
                 "default_delivery_preset_id",
             ),
             _evidence(
-                "src/ui/panels/scene_panel.py",
+                "src/ui/panels/scene_output_detail.py",
                 "_default_delivery = StyledComboBox",
                 "_apply_family_delivery_btn",
                 "_delivery_summary",
@@ -536,10 +507,10 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
                 "_scene_family_delivery_preview_tooltip",
             ),
             _evidence(
-                "src/ui/panels/workbench/execution_runtime.py",
-                "_uses_delivery_presets",
-                "_write_delivery_reports",
-                "_delivery_preset_payload",
+                "src/services/production_runtime/delivery_reporting.py",
+                "should_force_delivery_presets",
+                "write_delivery_reports",
+                "delivery_preset_payload",
             ),
         ),
         notes="Business versions are DeliveryPreset objects; loose output toggles remain artifact-level details.",
@@ -564,7 +535,7 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
                 "content_visibility_rules",
             ),
             _evidence(
-                "src/ui/panels/scene_panel.py",
+                "src/ui/panels/scene_output_detail.py",
                 "_visibility_selector_input",
                 "_visibility_action_combo",
                 "_insert_visibility_rule_btn",
@@ -588,15 +559,15 @@ CONTROL_CONTRACTS: tuple[ControlContract, ...] = (
         "plugin.manual_gate",
         "插件人工确认",
         "plugin",
-        "Workbench issue + manual confirmation payload",
+        "Unified execution gate + manual confirmation handoff",
         (
             "plugin_manual_gate.*",
             "coverage_pack.plugin_boundary",
-            "WorkbenchIssueItem.repair_target_type=plugin_manual_gate",
+            "ExecutionGateDecision.primary_action=plugin_manual_gate",
         ),
         disabled_state_rule="high-risk import/professional work blocks or warns until manual confirmation/plugin handoff",
         scene_surface="coverage pack plugin boundary projection",
-        workbench_surface="Workbench issue queue plugin_manual_gate repair target",
+        workbench_surface="Workbench execution gate manual-confirmation action",
         evidence=(
             _evidence(
                 "src/config/plugin_manual_gate.py",

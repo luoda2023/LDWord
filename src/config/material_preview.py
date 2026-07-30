@@ -2,52 +2,36 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from docx import Document
 
+from src.shared.engine.exact_material_placeholders import (
+    EXACT_PLACEHOLDER_PATTERN,
+    ExactMaterialPlaceholder,
+    scan_document_exact_placeholders,
+)
 
-PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([A-Za-z0-9_\-.\u4e00-\u9fff]+)\s*\}\}")
+
+PLACEHOLDER_PATTERN = EXACT_PLACEHOLDER_PATTERN
+MaterialPlaceholder = ExactMaterialPlaceholder
 
 
 def scan_docx_placeholders(path: str | Path) -> list[str]:
+    return [item.key for item in scan_docx_placeholder_inventory(path)]
+
+
+def scan_docx_placeholder_inventory(path: str | Path) -> list[MaterialPlaceholder]:
     target = Path(str(path or ""))
     if not target.exists() or target.suffix.lower() != ".docx":
         return []
 
-    document = Document(str(target))
-    tokens: list[str] = []
-    seen: set[str] = set()
-
-    for text in _iter_document_text(document):
-        for match in PLACEHOLDER_PATTERN.finditer(text or ""):
-            token = match.group(1).strip()
-            if token and token not in seen:
-                seen.add(token)
-                tokens.append(token)
-    return tokens
+    return scan_document_exact_placeholders(Document(str(target)))
 
 
-def _iter_document_text(document) -> list[str]:
-    text_parts: list[str] = []
-    for paragraph in document.paragraphs:
-        text_parts.append(paragraph.text)
-    for table in document.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for paragraph in cell.paragraphs:
-                    text_parts.append(paragraph.text)
-    for section in document.sections:
-        for part in (section.header, section.footer):
-            for paragraph in part.paragraphs:
-                text_parts.append(paragraph.text)
-            for table in part.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            text_parts.append(paragraph.text)
-    return text_parts
-
-
-__all__ = ["scan_docx_placeholders"]
+__all__ = [
+    "MaterialPlaceholder",
+    "PLACEHOLDER_PATTERN",
+    "scan_docx_placeholder_inventory",
+    "scan_docx_placeholders",
+]

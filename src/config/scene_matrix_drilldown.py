@@ -28,7 +28,6 @@ from src.config.scene_matrix_drilldown_sources import (
 from src.config.scene_matrix_drilldown_projection_profiles import (
     SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILES,
     SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILE_MAP,
-    SceneMatrixDrilldownProjectionProfile,
 )
 from src.config.scene_matrix_drilldown_projection_references import (
     _projection_control_runtime_reference_map,
@@ -74,12 +73,6 @@ from src.shared.engine.count_engine import list_count_profiles
 def _pytest_scene_matrix_drilldown_cache_enabled() -> bool:
     return bool(os.environ.get("PYTEST_CURRENT_TEST")) and not bool(
         os.environ.get("LARK_DISABLE_SCENE_MATRIX_TEST_CACHE")
-    )
-
-
-def _scene_matrix_drilldown_build_audit_enabled() -> bool:
-    return not bool(os.environ.get("PYTEST_CURRENT_TEST")) or bool(
-        os.environ.get("LARK_FULL_SCENE_DRILLDOWN_AUDIT_IN_TESTS")
     )
 
 
@@ -199,11 +192,7 @@ def _build_scene_matrix_drilldown_report_uncached(
         source_filter=normalized_source,
         query=str(query or "").strip(),
     )
-    issues = (
-        audit_scene_matrix_drilldown_report(report_without_issues)
-        if _scene_matrix_drilldown_build_audit_enabled()
-        else ()
-    )
+    issues = audit_scene_matrix_drilldown_report(report_without_issues)
     return SceneMatrixDrilldownReport(
         items=items,
         issues=issues,

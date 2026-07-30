@@ -18,7 +18,7 @@ from src.config.plugin_manual_gate import list_plugin_manual_gates
 from src.config.scene_coverage_manifest import coverage_packs_for_family
 from src.config.scene_family_application import (
     apply_planned_scene_family_defaults,
-    planned_family_is_application_boundary_only,
+    planned_family_is_plugin_boundary_only,
 )
 from src.config.scene_family_registry import (
     PlannedSceneFamily,
@@ -27,6 +27,7 @@ from src.config.scene_family_registry import (
 from src.config.scene_request_cell_fixture_registry import (
     SceneRequestCellFixtureSpec,
     list_scene_request_cell_fixtures,
+    request_cell_family_ids,
 )
 from src.config.scene_rule_source_governance import scene_rule_sources_for_family
 from src.config.scene_sample_fixture_registry import (
@@ -248,7 +249,7 @@ def _build_family_row(
     fixtures: tuple[SceneSampleFixtureSpec, ...],
 ) -> SceneFamilySubsceneAuditRow:
     family_cells = tuple(
-        cell for cell in cells if family.family_id in cell.expected_family_ids
+        cell for cell in cells if family.family_id in request_cell_family_ids(cell)
     )
     family_fixtures = tuple(
         fixture for fixture in fixtures if fixture.family_id == family.family_id
@@ -260,7 +261,7 @@ def _build_family_row(
         fixture_id for cell in manual_boundary_cells for fixture_id in cell.fixture_ids
     )
     application = _application_result_for_family(family.family_id)
-    plugin_boundary_only = planned_family_is_application_boundary_only(family.family_id)
+    plugin_boundary_only = planned_family_is_plugin_boundary_only(family.family_id)
     plugin_gate_ids = _plugin_gate_ids_for_family(family, family_cells)
     row = SceneFamilySubsceneAuditRow(
         family_id=family.family_id,

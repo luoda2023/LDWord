@@ -957,7 +957,7 @@ def has_planned_scene_family_application(scene: SceneWorkspace) -> bool:
     return planned_family_id_for_scene(scene) in _SUPPORTED_FAMILY_IDS
 
 
-def planned_family_is_application_boundary_only(family_id: str) -> bool:
+def planned_family_is_plugin_boundary_only(family_id: str) -> bool:
     return str(family_id or "").strip() in _PLUGIN_MANUAL_ONLY_FAMILY_IDS
 
 
@@ -968,7 +968,7 @@ def audit_planned_scene_family_application_parity() -> dict[str, str]:
     for family in list_planned_scene_families():
         if family.family_id in _SUPPORTED_FAMILY_IDS:
             continue
-        if planned_family_is_application_boundary_only(family.family_id):
+        if planned_family_is_plugin_boundary_only(family.family_id):
             continue
         gaps[family.family_id] = (
             "missing scene_family_application defaults or plugin/manual-only boundary"
@@ -1079,9 +1079,6 @@ def _apply_thesis_cn_defaults(scene: SceneWorkspace) -> SceneFamilyApplicationRe
     )
     added, updated = _upsert_delivery_presets(scene, _THESIS_CN_DELIVERY_PRESET_SPECS)
     scene.default_delivery_preset_id = "final"
-    default = _delivery_preset_by_id(scene, "final")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="thesis_cn",
@@ -1158,9 +1155,6 @@ def _apply_journal_en_defaults(scene: SceneWorkspace) -> SceneFamilyApplicationR
     )
     added, updated = _upsert_delivery_presets(scene, _JOURNAL_EN_DELIVERY_PRESET_SPECS)
     scene.default_delivery_preset_id = "submission_manuscript"
-    default = _delivery_preset_by_id(scene, "submission_manuscript")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="journal_en",
@@ -1229,9 +1223,6 @@ def _apply_contract_delivery_defaults(scene: SceneWorkspace) -> SceneFamilyAppli
     )
     added, updated = _upsert_delivery_presets(scene, _CONTRACT_DELIVERY_PRESET_SPECS)
     scene.default_delivery_preset_id = "review_copy"
-    default = _delivery_preset_by_id(scene, "review_copy")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="contract_delivery",
@@ -1297,9 +1288,6 @@ def _apply_hr_batch_defaults(scene: SceneWorkspace) -> SceneFamilyApplicationRes
     _remove_delivery_presets(scene, ("final", "review", "change_report", "package_report"))
     added, updated = _upsert_delivery_presets(scene, _HR_BATCH_DELIVERY_PRESET_SPECS)
     scene.default_delivery_preset_id = "per_person_docx"
-    default = _delivery_preset_by_id(scene, "per_person_docx")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="hr_batch_documents",
@@ -1367,9 +1355,6 @@ def _apply_exam_teaching_defaults(scene: SceneWorkspace) -> SceneFamilyApplicati
     )
     added, updated = _upsert_delivery_presets(scene, _EXAM_DELIVERY_PRESET_SPECS)
     scene.default_delivery_preset_id = "student_version"
-    default = _delivery_preset_by_id(scene, "student_version")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="exam_teaching",
@@ -1461,9 +1446,6 @@ def _apply_long_document_publishing_defaults(
         _TECHNICAL_LONG_DOC_DELIVERY_PRESET_SPECS,
     )
     scene.default_delivery_preset_id = "final_docx"
-    default = _delivery_preset_by_id(scene, "final_docx")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="long_document_publishing",
@@ -1536,9 +1518,6 @@ def _apply_project_application_defaults(scene: SceneWorkspace) -> SceneFamilyApp
         _PROJECT_APPLICATION_DELIVERY_PRESET_SPECS,
     )
     scene.default_delivery_preset_id = "application_package"
-    default = _delivery_preset_by_id(scene, "application_package")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="project_application",
@@ -1604,9 +1583,6 @@ def _apply_form_batch_defaults(scene: SceneWorkspace) -> SceneFamilyApplicationR
     _remove_delivery_presets(scene, ("final", "review", "change_report", "package_report"))
     added, updated = _upsert_delivery_presets(scene, _FORM_BATCH_DELIVERY_PRESET_SPECS)
     scene.default_delivery_preset_id = "per_record_docx"
-    default = _delivery_preset_by_id(scene, "per_record_docx")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="form_batch_documents",
@@ -1684,9 +1660,6 @@ def _apply_product_sales_defaults(scene: SceneWorkspace) -> SceneFamilyApplicati
         _PRODUCT_SALES_DELIVERY_PRESET_SPECS,
     )
     scene.default_delivery_preset_id = "customer_copy"
-    default = _delivery_preset_by_id(scene, "customer_copy")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="product_sales_documents",
@@ -1706,10 +1679,13 @@ def _apply_qualification_archive_defaults(scene: SceneWorkspace) -> SceneFamilyA
     profile.latex_policy = "disabled"
     profile.require_material_package = True
     profile.material_schema_id = "qualification_archive_assets_v1"
-    profile.material_schema_ids = _merged_values(
-        profile.material_schema_ids,
-        ("qualification_archive_assets_v1",),
-    )
+    # This family is an archive package, not an additive variant of the base
+    # bidding document.  Keeping bid_materials_v1 (or its required fields and
+    # images) would falsely require project/legal-person/logo/seal data for a
+    # certificate-and-license archive.
+    profile.material_schema_ids = ["qualification_archive_assets_v1"]
+    profile.required_material_fields = []
+    profile.required_image_roles = []
     profile.failure_policy = "warn"
 
     compliance = scene.compliance_profile
@@ -1749,15 +1725,22 @@ def _apply_qualification_archive_defaults(scene: SceneWorkspace) -> SceneFamilyA
             "validation",
         ),
     )
-    _remove_delivery_presets(scene, ("final", "review", "change_report", "package_report"))
+    _remove_delivery_presets(
+        scene,
+        (
+            "final",
+            "review",
+            "change_report",
+            "package_report",
+            "original",
+            "copy",
+        ),
+    )
     added, updated = _upsert_delivery_presets(
         scene,
         _QUALIFICATION_ARCHIVE_DELIVERY_PRESET_SPECS,
     )
     scene.default_delivery_preset_id = "attachment_package"
-    default = _delivery_preset_by_id(scene, "attachment_package")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="qualification_archive_packages",
@@ -1830,9 +1813,6 @@ def _apply_finance_quote_defaults(scene: SceneWorkspace) -> SceneFamilyApplicati
     _remove_delivery_presets(scene, ("final", "review", "change_report", "package_report"))
     added, updated = _upsert_delivery_presets(scene, _FINANCE_QUOTE_DELIVERY_PRESET_SPECS)
     scene.default_delivery_preset_id = "customer_quote"
-    default = _delivery_preset_by_id(scene, "customer_quote")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="finance_quote_documents",
@@ -1898,9 +1878,6 @@ def _apply_bilingual_review_defaults(scene: SceneWorkspace) -> SceneFamilyApplic
     _remove_delivery_presets(scene, ("final", "review", "change_report", "package_report"))
     added, updated = _upsert_delivery_presets(scene, _BILINGUAL_REVIEW_DELIVERY_PRESET_SPECS)
     scene.default_delivery_preset_id = "bilingual_review_copy"
-    default = _delivery_preset_by_id(scene, "bilingual_review_copy")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="bilingual_translation_documents",
@@ -1989,9 +1966,6 @@ def _apply_regulated_disclosure_defaults(scene: SceneWorkspace) -> SceneFamilyAp
         _REGULATED_DISCLOSURE_DELIVERY_PRESET_SPECS,
     )
     scene.default_delivery_preset_id = "board_review_copy"
-    default = _delivery_preset_by_id(scene, "board_review_copy")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="regulated_disclosure_documents",
@@ -2076,9 +2050,6 @@ def _apply_meeting_policy_defaults(scene: SceneWorkspace) -> SceneFamilyApplicat
         _MEETING_POLICY_DELIVERY_PRESET_SPECS,
     )
     scene.default_delivery_preset_id = "formal_minutes"
-    default = _delivery_preset_by_id(scene, "formal_minutes")
-    if default is not None:
-        scene.output = copy.deepcopy(default.artifacts)
 
     return SceneFamilyApplicationResult(
         family_id="meeting_policy_documents",
@@ -2201,6 +2172,6 @@ __all__ = [
     "audit_planned_scene_family_application_parity",
     "apply_planned_scene_family_defaults",
     "has_planned_scene_family_application",
-    "planned_family_is_application_boundary_only",
+    "planned_family_is_plugin_boundary_only",
     "planned_family_id_for_scene",
 ]

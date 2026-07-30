@@ -103,7 +103,7 @@ SCENE_BOUNDARY_MATURITY_RELEASE_ENVELOPE_SOURCE_MARKERS: tuple[
     ),
     (
         "summary_projection",
-        "src/ui/panels/scene_summary_projection.py",
+        "scripts/verify_scene_matrix_release_gate.py",
         (
             "boundary_maturity_release_envelope_ready_count",
             "boundary release envelopes",

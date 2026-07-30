@@ -239,7 +239,7 @@ SCENE_RETAINED_GAP_EXIT_CRITERIA_SOURCE_MARKERS: tuple[
     ),
     (
         "summary_projection",
-        "src/ui/panels/scene_summary_projection.py",
+        "scripts/verify_scene_matrix_release_gate.py",
         (
             "retained_gap_exit_criteria_release_allowed_count",
             "retained gap exit criteria",

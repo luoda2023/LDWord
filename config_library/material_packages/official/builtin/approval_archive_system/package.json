@@ -1,0 +1,60 @@
+{
+  "kind": "alavette.material_package",
+  "version": 5,
+  "mode_id": "official",
+  "package_id": "approval_archive_system",
+  "material_schema_ids": [
+    "official_document_v1"
+  ],
+  "archive_id": "approval_archive_system",
+  "archive_name": "批复资料包样例",
+  "profiles": [
+    {
+      "profile_id": "official:approval",
+      "profile_name": "批复",
+      "fields": {
+        "document_type": "approval",
+        "title": "关于电子档案管理系统升级事项的批复",
+        "body": "你局有关请示收悉。经研究，同意按程序推进电子档案管理系统升级工作。",
+        "organization": "示例市人民政府",
+        "document_no": "示政复〔2026〕12号",
+        "recipient": "示例市档案局",
+        "issuer": "示例市人民政府",
+        "issue_date": "2026年7月10日",
+        "copy_scope": "市财政局、市政务服务管理局",
+        "printing_org": "示例市人民政府办公室",
+        "printing_date": "2026年7月10日"
+      },
+      "assets_dir": "",
+      "field_scopes": {},
+      "field_functions": {},
+      "timeline_plans": {},
+      "declared_field_keys": [
+        "document_type",
+        "title",
+        "body",
+        "organization",
+        "document_no",
+        "recipient",
+        "issuer",
+        "issue_date",
+        "copy_scope",
+        "printing_org",
+        "printing_date"
+      ],
+      "field_sources": {},
+      "field_aliases": {},
+      "asset_paths": {},
+      "asset_bindings": {},
+      "asset_metadata": {},
+      "asset_token_specs": [],
+      "asset_items": [],
+      "asset_item_history": [],
+      "image_material_rules": {},
+      "content_bindings": {},
+      "content_rules": [],
+      "attachment_role_specs": [],
+      "attachment_bindings": {}
+    }
+  ]
+}

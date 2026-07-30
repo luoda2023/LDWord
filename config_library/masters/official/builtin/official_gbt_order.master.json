@@ -1,0 +1,123 @@
+{
+  "master_id": "official_gbt_order",
+  "mode_id": "official",
+  "label": "GB/T 9704 命令（令）格式",
+  "family": "official",
+  "layout_family": "order",
+  "source_type": "builtin",
+  "docx_path": "config_library/masters/official/builtin/official_gbt_order.docx",
+  "summary": "命令（令）的机关标志、令号、签发人和日期专用版式。",
+  "status": "内置，已接入文种版式路由和 runtime 公文装配",
+  "template_config_id": "official_gbt",
+  "compatible_template_config_ids": [
+    "official_gbt",
+    "official_custom"
+  ],
+  "master_version": "official-master-family-gbt-2026-07-11",
+  "placeholder_contract": {
+    "required": [
+      "official_title",
+      "official_body"
+    ],
+    "optional": [
+      "official_security_level",
+      "official_urgency",
+      "official_organization",
+      "official_document_no",
+      "official_issue_date",
+      "official_signer"
+    ],
+    "runtime_fields": [
+      "title",
+      "body",
+      "organization",
+      "document_no",
+      "recipient",
+      "attachment_note",
+      "issuer",
+      "issue_date",
+      "security_level",
+      "urgency",
+      "signer",
+      "copy_scope",
+      "printing_org",
+      "printing_date",
+      "meeting_date",
+      "participants"
+    ],
+    "generated_fields": [
+      "delivery_version"
+    ],
+    "runtime_inserted_placeholders": [],
+    "legacy_aliases": []
+  },
+  "placeholder_index": {
+    "sha256": "44dbc2c1539e53d30b2a8031e5cba1f7ed5c4ef2f35cec18cab4d0f6ee3ee689",
+    "scanner_version": "master-placeholder-index-v1",
+    "placeholder_ids": [
+      "@text:official_security_level",
+      "@text:official_urgency",
+      "@text:official_organization",
+      "@text:official_document_no",
+      "@text:official_title",
+      "@text:official_body",
+      "@text:official_signer",
+      "@text:official_issue_date"
+    ],
+    "raw_occurrence_counts": {
+      "@text:official_security_level": 1,
+      "@text:official_urgency": 1,
+      "@text:official_organization": 1,
+      "@text:official_document_no": 1,
+      "@text:official_title": 1,
+      "@text:official_body": 1,
+      "@text:official_signer": 1,
+      "@text:official_issue_date": 1
+    },
+    "replaceable_occurrence_counts": {
+      "@text:official_security_level": 1,
+      "@text:official_urgency": 1,
+      "@text:official_organization": 1,
+      "@text:official_document_no": 1,
+      "@text:official_title": 1,
+      "@text:official_body": 1,
+      "@text:official_signer": 1,
+      "@text:official_issue_date": 1
+    },
+    "placeholder_surfaces": {
+      "@text:official_security_level": [
+        "word/document.xml:/w:document/w:body/w:p[1]"
+      ],
+      "@text:official_urgency": [
+        "word/document.xml:/w:document/w:body/w:p[2]"
+      ],
+      "@text:official_organization": [
+        "word/document.xml:/w:document/w:body/w:p[3]"
+      ],
+      "@text:official_document_no": [
+        "word/document.xml:/w:document/w:body/w:p[4]"
+      ],
+      "@text:official_title": [
+        "word/document.xml:/w:document/w:body/w:p[5]"
+      ],
+      "@text:official_body": [
+        "word/document.xml:/w:document/w:body/w:p[6]"
+      ],
+      "@text:official_signer": [
+        "word/document.xml:/w:document/w:body/w:p[7]"
+      ],
+      "@text:official_issue_date": [
+        "word/document.xml:/w:document/w:body/w:p[8]"
+      ]
+    },
+    "reference_page_excluded": false
+  },
+  "supported_assembly_types": [
+    "order"
+  ],
+  "boundaries": [
+    "does not certify official release validity",
+    "does not verify seal legality",
+    "does not replace archive-office approval"
+  ]
+}

@@ -25,12 +25,11 @@ from src.config.template import (
     FormulaTableConfig,
     FormulaStyleConfig,
     EquationNumberingConfig,
-    OutputConfig,
 )
+from src.config.feature_configs import OutputConfig, disabled_output_config
+from src.config.document_scope import DocumentScopePolicy
 from src.config.scene import (
     ExamPaperConfig,
-    FormatScopeConfig,
-    SceneApplicationBoundaryConfig,
     MdCleanupOptions,
     WhitespaceOptions,
     CitationLinkOptions,
@@ -57,6 +56,11 @@ class ImageInsertionItem:
     path: str = ""
     position: int | str = "end"
     width_cm: float = 14.0
+    role: str = ""
+    item_id: str = ""
+    group_id: str = ""
+    sequence: int | None = None
+    normalized_name: str = ""
 
 
 @dataclass
@@ -97,13 +101,11 @@ class ResolvedConfig:
     formula_table: FormulaTableConfig = field(default_factory=FormulaTableConfig)
     formula_style: FormulaStyleConfig = field(default_factory=FormulaStyleConfig)
     equation_numbering: EquationNumberingConfig = field(default_factory=EquationNumberingConfig)
-    output: OutputConfig = field(default_factory=OutputConfig)
+    output: OutputConfig = field(default_factory=disabled_output_config)
 
     module_switches: dict[str, bool] = field(default_factory=dict)
-    application_boundary: SceneApplicationBoundaryConfig = field(
-        default_factory=SceneApplicationBoundaryConfig
-    )
-    format_scope: FormatScopeConfig = field(default_factory=FormatScopeConfig)
+    mode_id: str = "custom"
+    document_scope: DocumentScopePolicy = field(default_factory=DocumentScopePolicy)
     strict_mode: bool = True
 
     md_cleanup: MdCleanupOptions = field(default_factory=MdCleanupOptions)
@@ -113,15 +115,18 @@ class ResolvedConfig:
     chem_typography: ChemTypographyOptions = field(default_factory=ChemTypographyOptions)
     input_source_profile: InputSourceProfile = field(default_factory=InputSourceProfile)
     compliance_profile: ComplianceProfile = field(default_factory=ComplianceProfile)
-    default_delivery_preset_id: str = "final"
+    default_delivery_preset_id: str = ""
     delivery_presets: list[DeliveryPreset] = field(default_factory=list)
     exam_paper: ExamPaperConfig | None = None
 
     entity_data: dict[str, str] = field(default_factory=dict)
+    field_scopes: dict[str, str] = field(default_factory=dict)
     field_aliases: dict[str, str] = field(default_factory=dict)
+    timeline_field_keys: tuple[str, ...] = ()
     entity_assets_dir: str = ""
     images: list[ImageInsertionItem] = field(default_factory=list)
     replacements: list[ReplacementRule] = field(default_factory=list)
+    exact_material_placeholders: bool = False
 
     _provenance: dict[str, ConfigValue] = field(default_factory=dict)
 

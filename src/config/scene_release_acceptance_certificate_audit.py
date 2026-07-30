@@ -517,7 +517,7 @@ SCENE_RELEASE_ACCEPTANCE_CERTIFICATE_SOURCE_MARKERS: tuple[
     ),
     (
         "summary_projection",
-        "src/ui/panels/scene_summary_projection.py",
+        "scripts/verify_scene_matrix_release_gate.py",
         (
             "high_frequency_coverage=",
             "count/delivery boundary links aligned",

@@ -79,6 +79,29 @@ class SceneRequestCellFixtureSpec:
         }
 
 
+def request_cell_family_ids(
+    cell: SceneRequestCellFixtureSpec,
+) -> tuple[str, ...]:
+    """Return the canonical family ownership for one request cell.
+
+    Explicit request routing remains authoritative.  A direct family fixture
+    may additionally establish ownership when the natural-language sample
+    intentionally lands at pack level.  Proxy and ambiguous fixture sets must
+    not spread one request across every linked family.
+    """
+
+    explicit_family_ids = _unique_values(cell.expected_family_ids)
+    if explicit_family_ids:
+        return explicit_family_ids
+    fixture_family_ids = _unique_values(cell.fixture_family_ids)
+    if (
+        cell.coverage_level == "direct_family_fixture"
+        and len(fixture_family_ids) == 1
+    ):
+        return fixture_family_ids
+    return ()
+
+
 @dataclass(frozen=True, slots=True)
 class SceneRequestCellFixtureAuditIssue:
     sample_id: str
@@ -623,5 +646,6 @@ __all__ = [
     "build_scene_request_cell_fixture_summary",
     "build_scene_request_cell_registry_browser",
     "list_scene_request_cell_fixtures",
+    "request_cell_family_ids",
     "request_cell_fixtures_for_pack",
 ]

@@ -29,6 +29,7 @@ class PluginManualGate:
         "needs_plugin_handoff",
     )
     report_fields: tuple[str, ...] = ()
+    blocking_family_ids: tuple[str, ...] = ()
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -52,6 +53,7 @@ class PluginManualGate:
                 self.confirmation_decision_states
             ),
             "report_fields": list(self.report_fields),
+            "blocking_family_ids": list(self.blocking_family_ids),
         }
 
 
@@ -143,6 +145,12 @@ PLUGIN_MANUAL_GATES: tuple[PluginManualGate, ...] = (
             "archive package does not equal compliance proof",
         ),
         report_fields=("boundary_text", "review_owner", "manual_decision"),
+        blocking_family_ids=(
+            "finance_quote_documents",
+            "ip_patent_documents",
+            "bilingual_translation_documents",
+            "regulated_disclosure_documents",
+        ),
     ),
     PluginManualGate(
         gate_id="import_ai_conversion_gate",
@@ -209,12 +217,39 @@ def list_plugin_manual_gates() -> tuple[PluginManualGate, ...]:
     return PLUGIN_MANUAL_GATES
 
 
+def plugin_manual_gate_execution_issue(config: object) -> str:
+    """Return the exact whole-family gate that blocks core execution.
+
+    Coverage-pack membership is intentionally insufficient: journal and exam
+    gates apply only to high-risk sub-workflows.  A whole-family block is
+    activated solely by the canonical compliance ``rule_family`` explicitly
+    listed on a gate.  Until a verifiable external-receipt contract exists,
+    there is deliberately no boolean confirmation escape hatch here.
+    """
+
+    compliance = getattr(config, "compliance_profile", None)
+    family_id = str(getattr(compliance, "rule_family", "") or "").strip()
+    if not family_id:
+        return ""
+    for gate in PLUGIN_MANUAL_GATES:
+        if (
+            gate.blocks_core_execution_until_confirmed
+            and family_id in gate.blocking_family_ids
+        ):
+            return (
+                "plugin_manual_gate_required:"
+                f"{gate.gate_id}:{family_id}:verified_external_receipt_missing"
+            )
+    return ""
+
+
 __all__ = [
     "PLUGIN_MANUAL_GATE_MAP",
     "PLUGIN_MANUAL_GATES",
     "PluginManualGate",
     "get_plugin_manual_gate",
     "list_plugin_manual_gates",
+    "plugin_manual_gate_execution_issue",
     "plugin_manual_gate_for_pack",
     "plugin_manual_gate_payload",
 ]

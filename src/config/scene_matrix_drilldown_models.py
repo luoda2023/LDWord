@@ -182,7 +182,21 @@ class SceneMatrixDrilldownReport:
 
     @property
     def status(self) -> str:
-        return "passed" if not self.issues else "failed"
+        if self.issues:
+            return "failed"
+        if not self.source_evidence or (
+            self.ready_source_evidence_count != self.source_evidence_count
+        ):
+            return "failed"
+        if self.ready_count != self.item_count:
+            return "failed"
+        if not self.source_filter:
+            drilldown_ids = tuple(item.drilldown_id for item in self.items)
+            if len(drilldown_ids) != len(REQUIRED_SCENE_MATRIX_DRILLDOWN_IDS) or set(
+                drilldown_ids
+            ) != set(REQUIRED_SCENE_MATRIX_DRILLDOWN_IDS):
+                return "failed"
+        return "passed"
 
     @property
     def item_count(self) -> int:

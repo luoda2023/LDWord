@@ -16,6 +16,7 @@ from src.config.scene_delivery_preset_audit import (
     SceneDeliveryPresetAuditReport,
     build_scene_delivery_preset_audit_report,
 )
+from src.config.plugin_manual_gate import list_plugin_manual_gates
 from src.config.scene_source_evidence import scan_scene_source_markers
 
 
@@ -303,7 +304,8 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
                 "runtime",
                 "def _save_delivery_outputs",
                 'getattr(artifacts, "final_docx", False)',
-                "output_paths[preset_id] = str(final_path)",
+                "def _publish_output_documents",
+                "transaction.publish(candidates)",
             ),
             _evidence(
                 "test.pipeline.final_docx",
@@ -345,12 +347,12 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
                 'rule_name="delivery_visibility"',
             ),
             _evidence(
-                "runtime.workbench.visibility_payload",
-                "src/ui/panels/workbench/execution_runtime.py",
+                "reporting.execution_payload.visibility",
+                "src/reporting/execution_payload.py",
                 "runtime_payload",
-                "_content_visibility_scan_payload(result)",
-                "_content_visibility_preview_payload(result)",
-                '"content_visibility_preview": visibility_preview',
+                "def content_visibility_scan_payload",
+                "def content_visibility_preview_payload",
+                'payload["has_issues"]',
             ),
             _evidence(
                 "test.visibility",
@@ -369,8 +371,8 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
         ("target_template_docx", "target_group_report", "partial_success"),
         ("status", "output_path", "output_paths", "failed_count", "error_text"),
         (
-            "WorkbenchProductionRunner._run_delivery_target_groups",
-            "_aggregate_delivery_status",
+            "run_delivery_target_groups",
+            "aggregate_delivery_status",
         ),
         ("delivery report_paths per target group",),
         (),
@@ -378,20 +380,19 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
         (
             _evidence(
                 "runtime.target_groups",
-                "src/ui/panels/workbench/execution_runtime.py",
+                "src/services/production_runtime/delivery_runtime.py",
                 "runtime",
-                "def _run_delivery_target_groups",
-                "_load_delivery_template",
-                "statuses.append(\"failed\")",
-                "continue",
-                "status = _aggregate_delivery_status(statuses)",
+                "def run_delivery_target_groups",
+                "load_delivery_template",
+                "state.record_configuration_failure(prepared_group)",
+                "status = aggregate_delivery_status(state.statuses)",
             ),
             _evidence(
                 "test.target_groups",
                 "tests/test_output_runtime_semantics.py",
                 "test",
                 "def test_workbench_runner_resolves_target_template_for_delivery_presets",
-                'assert loaded_template_ids == ["target_template"]',
+                'assert loaded_template_requests == [("target_template", "exam")]',
                 'assert all(run["force_delivery_presets"] is True',
             ),
         ),
@@ -409,7 +410,7 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
         (
             _evidence(
                 "runtime.compare",
-                "src/ui/panels/workbench/execution_runtime.py",
+                "src/services/production_runtime/delivery_reporting.py",
                 "runtime",
                 "def _write_compare_docx_artifacts",
                 "write_compare_docx(",
@@ -431,16 +432,16 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
         "report",
         ("report_json", "report_markdown", "report_paths"),
         ("report_paths",),
-        ("_write_delivery_reports", "write_json_report", "write_markdown_report"),
+        ("write_delivery_reports", "write_json_report", "write_markdown_report"),
         ("delivery_changes_json", "delivery_changes_markdown"),
         ("QuickExecutionDetail.report_paths",),
         ("test_workbench_runner_uses_delivery_preset_artifacts_for_outputs_and_reports",),
         (
             _evidence(
                 "runtime.reports",
-                "src/ui/panels/workbench/execution_runtime.py",
+                "src/services/production_runtime/delivery_reporting.py",
                 "runtime",
-                "def _write_delivery_reports",
+                "def write_delivery_reports",
                 "write_json_report(",
                 "write_markdown_report(",
                 "report_paths.append(str(report_md))",
@@ -461,16 +462,16 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
         "structured_intermediate",
         ("structured_intermediate_json", "intermediate_paths"),
         ("intermediate_paths",),
-        ("_write_structured_intermediates", "_structured_intermediate_payload"),
+        ("write_structured_intermediates", "_structured_intermediate_payload"),
         ("delivery_structured_intermediate",),
         ("WorkbenchExecutionAdapter.intermediate_paths",),
         ("test_workbench_runner_writes_structured_intermediate_for_delivery_preset",),
         (
             _evidence(
                 "runtime.intermediate",
-                "src/ui/panels/workbench/execution_runtime.py",
+                "src/services/production_runtime/delivery_reporting.py",
                 "runtime",
-                "def _write_structured_intermediates",
+                "def write_structured_intermediates",
                 "def _structured_intermediate_payload",
                 '"kind": "delivery_structured_intermediate"',
                 "intermediate_paths[preset_id] = str(artifact_path)",
@@ -491,23 +492,22 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
         "material_package",
         ("material_manifest_json", "material_package_manifest", "material_package_zip"),
         ("material_manifest_paths", "material_package_paths"),
-        ("_write_material_manifest", "_write_material_package_artifacts"),
+        ("write_material_manifest", "write_material_package_artifacts"),
         ("material_delivery_package", "material_attachment_manifest"),
         ("WorkbenchExecutionAdapter.material_package_paths",),
         (
             "test_workbench_runner_writes_technical_long_document_delivery_package",
             "test_workbench_runner_writes_product_pre_sales_delivery_package",
-            "test_workbench_runner_writes_regulated_disclosure_archive_package",
         ),
         (
             _evidence(
                 "runtime.material_package",
-                "src/ui/panels/workbench/material_artifacts.py",
+                "src/services/production_runtime/material_artifacts.py",
                 "runtime",
-                "def _write_material_manifest",
-                "def _write_material_package_artifacts",
+                "def write_material_manifest",
+                "def write_material_package_artifacts",
                 '"kind": "material_attachment_manifest"',
-                '"kind": "material_delivery_package"',
+                "build_material_delivery_package(",
             ),
             _evidence(
                 "test.material_package",
@@ -515,7 +515,6 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
                 "test",
                 "def test_workbench_runner_writes_technical_long_document_delivery_package",
                 "def test_workbench_runner_writes_product_pre_sales_delivery_package",
-                "def test_workbench_runner_writes_regulated_disclosure_archive_package",
                 'payload["material_package_paths"]["package_manifest"]',
             ),
         ),
@@ -536,20 +535,20 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
             "failed_count",
             "error_text",
         ),
-        ("WorkbenchProductionRunner._payload_from_result.failed",),
+        ("project_execution_result.failed",),
         ("failed execution material manifest",),
         ("WorkbenchExecutionAdapter.failed_count",),
         ("test_workbench_runner_writes_material_package_for_failed_delivery_run",),
         (
             _evidence(
                 "runtime.failed_package",
-                "src/ui/panels/workbench/execution_runtime.py",
+                "src/services/production_runtime/result_projection.py",
                 "runtime",
-                "if not getattr(result, \"success\", False):",
-                '"status": "failed"',
-                '"material_manifest_paths": material_manifest_paths',
-                '"material_package_paths": material_package_paths',
-                '"failed_count": failed_count',
+                'if branch == "failed":',
+                'include_material_artifacts=branch != "cancelled"',
+                '"material_manifest_paths": artifact_outcome.material_manifest_paths',
+                '"material_package_paths": artifact_outcome.material_package_paths',
+                '"failed_count": len(list(getattr(result, "failed_items", []) or []))',
             ),
             _evidence(
                 "test.failed_package",
@@ -573,17 +572,17 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
             "report_paths",
             "failed_count",
         ),
-        ("_attach_batch_reports", "_batch_payload", "_batch_isolation_payload"),
+        ("attach_batch_reports", "build_batch_payload", "_batch_isolation_payload"),
         ("Batch Material Execution Report",),
         ("WorkbenchIssueItem batch_issue",),
         ("test_execution_adapter_converts_batch_issue_payloads_to_workbench_issues",),
         (
             _evidence(
                 "runtime.batch_isolation",
-                "src/ui/panels/workbench/execution_runtime.py",
-                "runtime",
-                "def _attach_batch_reports",
-                "def _batch_payload",
+                "src/services/production_runtime/batch_reporting.py",
+                "batch_reporting",
+                "def attach_batch_reports",
+                "def build_batch_payload",
                 "def _batch_isolation_payload",
                 '"kind": "batch_failure_isolation"',
                 '"batch_issue_items": batch_issue_items',
@@ -616,7 +615,7 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
         ("RecentRunState artifact labels",),
         (
             "QuickExecutionDetail.set_execution_result",
-            "ExecutionController._sync_execution_history_result",
+            "WorkbenchExecutionController.apply_execution_result",
             "RecentRunPanel.artifact_items",
         ),
         (
@@ -625,24 +624,26 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
         ),
         (
             _evidence(
-                "runtime.artifact_controller",
-                "src/ui/panels/workbench/execution_controller.py",
+                "runtime.artifact_adapter",
+                "src/ui/adapters/workbench_execution_adapter.py",
                 "ui",
-                "output_paths=_path_map(payload.get(\"output_paths\"))",
-                "compare_paths=_path_map(payload.get(\"compare_paths\"))",
-                "material_package_paths=_path_map(payload.get(\"material_package_paths\"))",
-                "progress_widget.append_log(\"info\", f\"资料包[{label}]：{path}\")",
+                "def _execution_result_state_from_terminal",
+                "paths = _terminal_result_paths(payload)",
+                "def _terminal_result_paths",
+                '_terminal_dict_projection(payload, "output_paths")',
+                '_terminal_dict_projection(payload, "compare_paths")',
+                '_terminal_dict_projection(payload, "material_package_paths")',
             ),
             _evidence(
-                "runtime.artifact_quick_detail",
-                "src/ui/panels/workbench/quick_execution_detail.py",
-                "ui",
+                "runtime.artifact_quick_result_presenter",
+                "src/ui/panels/workbench/quick_execution_result_presenter.py",
+                "ui_presenter",
+                "def build_execution_result_presentation",
+                "def _append_artifact_log_entries",
                 "for label, path in workbench_artifact_display_items(",
-                "state.output_paths",
-                "delivery_preset_labels=True",
-                "self._append_exec_log(\"info\", f\"对比稿[{label}]：{path}\")",
-                "self._append_exec_log(\"info\", f\"资料包[{label}]：{path}\")",
-                "self._append_exec_log(\"info\", f\"报告文件：{', '.join(state.report_paths)}\")",
+                '(state.compare_paths, "对比稿", True)',
+                '(state.material_package_paths, "资料包", False)',
+                "f\"报告文件：{', '.join(state.report_paths)}\"",
             ),
             _evidence(
                 "test.artifact_surface",
@@ -792,10 +793,17 @@ def _coverage_links(
     selector: str,
     delivery_report: SceneDeliveryPresetAuditReport,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    blocked_family_ids = {
+        family_id
+        for gate in list_plugin_manual_gates()
+        if gate.blocks_core_execution_until_confirmed
+        for family_id in gate.blocking_family_ids
+    }
     family_rows = tuple(
         row
         for row in delivery_report.family_rows
-        if _family_matches_selector(row, selector)
+        if row.family_id not in blocked_family_ids
+        and _family_matches_selector(row, selector)
     )
     family_ids = _unique_values(row.family_id for row in family_rows)
     pack_ids = _unique_values(pack_id for row in family_rows for pack_id in row.pack_ids)

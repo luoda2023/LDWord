@@ -113,9 +113,10 @@ PREFLIGHT_GLOBAL_EVIDENCE: tuple[WordRiskSourceEvidenceSpec, ...] = (
     _evidence(
         "object_preflight.workbench",
         "workbench",
-        "src/ui/adapters/workbench_execution_adapter.py",
-        "object_preflight_issue_items",
-        "_object_preflight_summary",
+        "src/ui/panels/workbench/quick_execution_result_presenter.py",
+        "def _append_evidence_log_entries",
+        "state.object_preflight_summary",
+        "state.object_preflight_details",
     ),
     _evidence(
         "object_preflight.tests",

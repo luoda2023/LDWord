@@ -1,9 +1,8 @@
-"""Scene-facing control consistency audit for the high-level scene matrix.
+"""Owner-facing control consistency audit for the high-level scene matrix.
 
 N2.157C turns the shared control-contract registry into a scene-matrix gate:
-scene and workbench surfaces must expose the same canonical controls, units,
-pairing, disabled-state rules, and evidence that template management already
-uses for shared formatting parameters.
+each contract must expose its canonical control, units, pairing, disabled-state
+rules, and evidence on the surface owned by its declared layer.
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from pathlib import Path
 from src.config.control_contract_registry import (
     ControlContract,
     audit_control_contract_registry,
-    get_control_contract,
     list_control_contracts,
     resolve_control_contract_evidence_locations,
 )
@@ -61,13 +59,17 @@ N2_157C_GLOBAL_SURFACE_EVIDENCE: tuple[tuple[str, str, tuple[str, ...]], ...] = 
     ),
     (
         "workbench_scene_summary",
-        "src/config/scene_presets.py",
+        "src/config/scene_engineering_summary.py",
         ("build_scene_control_contract_summary", "list_control_contracts"),
     ),
     (
-        "workbench_issue_queue",
-        "src/ui/panels/workbench/quick_execution_detail.py",
-        ("control_contract_issue_items", "set_issue_queue_filter"),
+        "workbench_execution_gate",
+        "src/ui/adapters/workbench_execution_gate.py",
+        (
+            "class ExecutionGateDecision",
+            "def decide_execution_gate",
+            "primary_action",
+        ),
     ),
     (
         "report_writer",
@@ -284,7 +286,15 @@ def _build_row(
             "missing_parameter_paths",
             "Scene control contract must list parameter paths.",
         )
-    if not contract.scene_surface.strip():
+    if contract.owner_layer == "template" and not contract.template_surface.strip():
+        _append_issue(
+            issues,
+            issue_ids,
+            contract.contract_id,
+            "missing_template_surface",
+            "A template-owned control requires a template-facing surface description.",
+        )
+    elif contract.owner_layer != "template" and not contract.scene_surface.strip():
         _append_issue(
             issues,
             issue_ids,

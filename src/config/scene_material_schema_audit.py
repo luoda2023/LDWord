@@ -10,7 +10,6 @@ source of truth.  The audit keeps three views together:
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,9 +62,14 @@ SCENE_MATERIAL_SCHEMA_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], ..
         ("material_schema_id", "material_schema_ids"),
     ),
     (
-        "config_scene_presets",
-        "src/config/scene_presets.py",
-        ("SCENE_FACTORIES", "material_schema_id"),
+        "canonical_builtin_plan_registry",
+        "src/config/builtin_scenes.py",
+        ("_BUILTIN_SCENE_RESOURCES", "create_builtin_scene", "load_scene"),
+    ),
+    (
+        "canonical_builtin_plan_material_contract",
+        "config_library/plans/custom/builtin/custom.json",
+        ('"input_source_profile"', '"material_schema_id"', '"material_schema_ids"'),
     ),
 )
 

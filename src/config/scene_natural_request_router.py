@@ -6,10 +6,9 @@ from dataclasses import dataclass
 import re
 
 from src.config.plugin_manual_gate import plugin_manual_gate_for_pack
-from src.config.scene_coverage_manifest import (
+from src.config.scene_product_coverage_manifest import (
     SCENE_COVERAGE_PACK_MAP,
     coverage_packs_for_family,
-    get_scene_coverage_pack,
     list_scene_coverage_packs,
 )
 from src.config.scene_family_registry import get_planned_scene_family
@@ -86,6 +85,11 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
             "修目录",
             "页码不对",
             "普通排版",
+            "格式要求",
+            "格式规则",
+            "格式规范",
+            "标准样稿",
+            "参考样稿",
         ),
         route_type="executable_scene",
         context_tokens=("格式", "目录", "页码", "template", "cleanup"),
@@ -194,27 +198,49 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
         reason="Exam requests derive student/teacher/answer outputs from one structured source.",
     ),
     NaturalRequestRoute(
-        route_id="bidding_qualification_archive",
-        label="Bidding and qualification archive",
+        route_id="bidding_document_authoring",
+        label="Bidding document authoring and formatting",
         pack_id="bidding_materials",
         aliases=(
             "bid document",
             "tender copy",
+            "标书",
+            "投标文件",
+            "投标书",
+            "正本副本",
+        ),
+        profile_id="bidding_document_default",
+        delivery_preset_id="original",
+        route_type="executable_scene",
+        # Generic authoring verbs must never route a project report into the
+        # bidding work mode.  The domain aliases above are the required anchor.
+        context_tokens=(),
+        anti_tokens=("资质", "证照", "营业执照", "证书材料", "附件包", "资料包"),
+        reason=(
+            "Bid document authoring and formatting produce reviewable DOCX "
+            "original/copy outputs; they are not qualification attachment archives."
+        ),
+    ),
+    NaturalRequestRoute(
+        route_id="bidding_qualification_archive",
+        label="Bidding and qualification archive",
+        pack_id="bidding_materials",
+        aliases=(
             "seal assets",
             "qualification archive",
-            "标书",
-            "投标",
             "资质证照",
             "营业执照",
             "投标证书材料",
             "证书材料",
+            "资质附件包",
+            "投标资料包",
         ),
         family_id="qualification_archive_packages",
         profile_id="qualification_archive_packages_default",
         delivery_preset_id="attachment_package",
         route_type="planned_family",
-        context_tokens=("投标", "资质", "营业执照", "盖章", "正本", "副本"),
-        anti_tokens=("套打", "生成证书", "奖状", "登记表"),
+        context_tokens=("投标", "资质", "营业执照", "附件", "资料包", "归档"),
+        anti_tokens=("套打", "生成证书", "奖状", "登记表", "标书正文", "正本", "副本"),
         reason="Qualification certificates used as bid evidence belong to bidding material archive workflows.",
         disambiguation_prompt="请确认证书材料是投标资质附件，还是要批量套打生成证书。",
     ),
@@ -373,13 +399,30 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
         route_id="finance_quote_documents",
         label="Finance quote and attachment report",
         pack_id="professional_disclosure",
-        aliases=("quote", "budget", "报价单", "预算书", "报价方案", "财务附件"),
+        aliases=(
+            "quote",
+            "budget",
+            "报价单",
+            "预算书",
+            "报价方案",
+            "财务附件",
+            "客户报价",
+            "成本表报价",
+        ),
         family_id="finance_quote_documents",
         profile_id="finance_quote_documents_default",
         delivery_preset_id="customer_quote",
         plugin_gate_id="professional_disclosure_review_gate",
         route_type="professional_boundary",
-        context_tokens=("金额", "预算", "财务", "报价单", "报价表", "附件"),
+        context_tokens=(
+            "金额",
+            "预算",
+            "财务",
+            "报价单",
+            "报价表",
+            "成本表",
+            "附件",
+        ),
         anti_tokens=("产品", "售前", "方案正文", "营销"),
         reason="Quote/budget tables can be formatted and packaged, but financial correctness stays outside core.",
         disambiguation_prompt="请确认报价方案是金额/预算表，还是产品售前方案正文。",
@@ -416,6 +459,8 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
         aliases=(
             "合同法律审查",
             "合同条款法律审查",
+            "合同法律风险",
+            "法律风险审查",
             "法律意见书",
             "法律文书",
             "诉状",
@@ -424,7 +469,7 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
         ),
         plugin_gate_id="professional_disclosure_review_gate",
         route_type="plugin_manual_boundary",
-        context_tokens=("法律", "诉讼", "合规意见", "律师", "legal"),
+        context_tokens=("法律", "法律风险", "诉讼", "合规意见", "律师", "legal"),
         anti_tokens=("签署包", "字段一致性"),
         reason=(
             "Legal documents stay behind professional plugin/manual review and must "
@@ -456,7 +501,7 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
         delivery_preset_id="bilingual_review_copy",
         plugin_gate_id="professional_disclosure_review_gate",
         route_type="professional_boundary",
-        context_tokens=("术语", "一致性", "审阅", "翻译", "对照"),
+        context_tokens=("术语", "翻译", "对照"),
         anti_tokens=("排版", "格式", "套模板"),
         reason="Bilingual review can check layout and term consistency, while translation quality stays outside core.",
         disambiguation_prompt="请确认是双语排版，还是术语一致性/翻译审阅。",
@@ -470,7 +515,8 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
         handoff_family_id="thesis_cn",
         plugin_gate_id="import_ai_conversion_gate",
         route_type="import_boundary",
-        context_tokens=("PDF", "扫描", "OCR", "论文"),
+        context_tokens=("PDF", "扫描", "OCR", "转Word", "导入"),
+        anti_tokens=("LaTeX",),
         reason="PDF thesis requests must pass import confidence/manual confirmation before thesis formatting.",
     ),
     NaturalRequestRoute(
@@ -553,7 +599,7 @@ def route_natural_scene_request(query: str) -> NaturalRequestRouteResult:
             query=str(query or ""),
             normalized_query=normalized,
             status="unmatched",
-            disambiguation_prompt="未找到稳定场景落点，请先判断是否属于模板、资料、输出或插件边界。",
+            disambiguation_prompt="未找到稳定方案落点，请先判断是否属于模板、资料、输出或插件边界。",
         )
 
     top_score = matches[0].score
@@ -709,6 +755,12 @@ def _match_route(
     if matched_aliases:
         score += max(120 + min(len(_normalize_text(alias)), 40) for alias in matched_aliases)
     score += 28 * len(matched_context)
+    if route.route_type == "import_boundary" and any(
+        _normalize_text(token)
+        in {"pdf", "扫描", "ocr", "转word", "导入"}
+        for token in matched_context
+    ):
+        score += 120
     score -= 45 * len(matched_anti)
     if score <= 0:
         return None
@@ -761,7 +813,7 @@ def _combined_disambiguation_prompt(
     if prompts:
         return " / ".join(prompts)
     labels = " / ".join(match.route.label for match in matches[:3])
-    return f"请求同时命中多个场景落点，请在这些方向中选择：{labels}"
+    return f"请求同时命中多个方案落点，请在这些方向中选择：{labels}"
 
 
 def _normalize_text(value: str) -> str:

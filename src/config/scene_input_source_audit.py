@@ -22,10 +22,9 @@ from src.config.scene_coverage_manifest import (
 )
 from src.config.scene_family_application import (
     apply_planned_scene_family_defaults,
-    planned_family_is_application_boundary_only,
+    planned_family_is_plugin_boundary_only,
 )
 from src.config.scene_family_registry import (
-    PLANNED_SCENE_FAMILY_MAP,
     PlannedSceneFamily,
     list_planned_scene_families,
 )
@@ -51,13 +50,18 @@ SCENE_INPUT_SOURCE_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], ...] 
         ("input_source_profile", "structured_formats", "material_schema_id"),
     ),
     (
-        "config_scene_presets",
-        "src/config/scene_presets.py",
-        ("_input_profile", "accepted_formats", "structured_formats"),
+        "canonical_builtin_plan_registry",
+        "src/config/builtin_scenes.py",
+        ("_BUILTIN_SCENE_RESOURCES", "create_builtin_scene", "load_scene"),
+    ),
+    (
+        "canonical_builtin_plan_input_contract",
+        "config_library/plans/custom/builtin/custom.json",
+        ('"input_source_profile"', '"accepted_formats"', '"structured_formats"'),
     ),
     (
         "workbench_input_preflight",
-        "src/ui/panels/workbench/material_artifacts.py",
+        "src/services/production_runtime/material_artifacts.py",
         ("accepted_formats", "structured_formats", "material_schema_id"),
     ),
     (
@@ -611,7 +615,7 @@ def _family_row(family: PlannedSceneFamily) -> SceneInputSourceFamilyRow:
     scene = SceneWorkspace(scene_id=family.family_id, category=family.family_id)
     result = apply_planned_scene_family_defaults(scene, family_id=family.family_id)
     profile = getattr(scene, "input_source_profile", None)
-    plugin_boundary_only = planned_family_is_application_boundary_only(family.family_id)
+    plugin_boundary_only = planned_family_is_plugin_boundary_only(family.family_id)
     actual_formats = () if plugin_boundary_only and not result.applied else _unique_values(
         getattr(profile, "accepted_formats", []) or []
     )

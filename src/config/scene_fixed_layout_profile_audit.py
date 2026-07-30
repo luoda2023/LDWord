@@ -684,7 +684,7 @@ N2_178_FIXED_LAYOUT_PROFILE_SPECS: tuple[SceneFixedLayoutProfileSpec, ...] = (
             ),
             _evidence(
                 "ui.workbench.fixed_layout_repair_route",
-                "src/ui/adapters/workbench_issue_navigation.py",
+                "src/ui/adapters/workbench_product_issue_navigation.py",
                 "ui",
                 "SCENE_TARGET_CARD_MAP",
                 '"row_height": "scn_cleanup"',
@@ -773,8 +773,8 @@ N2_178_FIXED_LAYOUT_PROFILE_SPECS: tuple[SceneFixedLayoutProfileSpec, ...] = (
             ),
             _evidence(
                 "summary.fixed_layout_profile",
-                "src/ui/panels/scene_summary_projection.py",
-                "ui",
+                "scripts/verify_scene_matrix_release_gate.py",
+                "release_gate_summary",
                 "fixed_layout_profile_ready_channel_count",
                 "fixed-layout profile",
             ),

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config.scene import SceneWorkspace
+from src.config.template import TemplateConfig
 
 
 ALLOWED_PARAMETER_OWNER_LAYERS: tuple[str, ...] = (
@@ -116,20 +117,26 @@ def _anchor(
 SCENE_PARAMETER_OWNERSHIP_SPECS: dict[str, ParameterOwnershipSpec] = {
     # Scene identity and binding.
     "name": _spec("name", "scene", "ScenePanel overview", "config library", "Scene display identity."),
+    "display_order": _spec(
+        "display_order",
+        "scene",
+        "scene library selector",
+        "config library",
+        "Library/UI ordering metadata stored with the scene resource; the execution pipeline does not consume it.",
+    ),
     "description": _spec("description", "scene", "ScenePanel overview", "config library", "Scene help text."),
     "category": _spec("category", "scene", "ScenePanel overview", "scene family registry", "Scene family routing."),
     "category_label": _spec("category_label", "scene", "ScenePanel overview", "summary projection", "Human-readable family label."),
     "scene_id": _spec("scene_id", "scene", "ScenePanel overview", "config library", "Stable scene identifier."),
+    "mode_id": _spec("mode_id", "scene", "Title bar / config library", "work mode bridge", "Work mode that owns this plan; it scopes plan, template, master, and material lookups."),
     "template_id": _spec("template_id", "scene", "ScenePanel overview", "resolver", "Scene chooses a template baseline."),
-    "default_template_id": _spec("default_template_id", "scene", "ScenePanel overview", "resolver", "Fallback template baseline."),
+    "master_id": _spec("master_id", "scene", "ScenePanel overview", "execution-session resolver", "Stable master identifier; revisions and paths exist only in the execution snapshot."),
     "compatible_template_ids": _spec("compatible_template_ids", "scene", "ScenePanel overview", "resolver", "Allowed template baselines for this scene."),
+    "default_material_profile_id": _spec("default_material_profile_id", "scene", "ScenePanel content / Workbench", "workbench runner", "Default material/profile contract selected by this plan; per-run material values stay in MaterialExecutionContext."),
     # Scope and behavior.
-    "application_boundary": _spec("application_boundary", "scene", "ScenePanel scope", "pipeline scheduler", "High-level scene task boundary; it filters template/runtime structure without defining sections."),
-    "format_scope": _spec("format_scope", "scene", "ScenePanel scope", "pipeline scheduler", "Legacy compatibility gate for old scene section filters."),
-    "available_sections": _spec("available_sections", "scene", "ScenePanel scope", "ScenePanel scope", "Legacy compatibility list for old scene section filters."),
+    "document_scope": _spec("document_scope", "scene", "ScenePanel scope", "pipeline scheduler", "Plan-owned logical document regions that may be modified after current-document structure review."),
     "module_switches": _spec("module_switches", "scene", "TemplatePanel runtime toggles / Workbench", "pipeline scheduler", "Which modules run for this scene; ScenePanel does not expose duplicate generic switches."),
     "exam_paper": _spec("exam_paper", "scene", "ScenePanel exam paper", "workbench runner", "Exam-paper assembly rules owned by the scene; per-run field values stay in Workbench."),
-    "exam_paper.blank_style_id": _spec("exam_paper.blank_style_id", "scene", "ScenePanel exam paper", "workbench runner", "Blank exam-paper shell selected by the scene."),
     "exam_paper.question_structure_mode": _spec("exam_paper.question_structure_mode", "scene", "ScenePanel exam paper", "workbench runner", "How imported question content is assembled into exam structure."),
     "exam_paper.answer_policy": _spec("exam_paper.answer_policy", "scene", "ScenePanel exam paper", "workbench runner", "Whether the scene produces student-only output or an answer version."),
     "exam_paper.runtime_fields": _spec("exam_paper.runtime_fields", "scene", "ScenePanel exam paper", "workbench runner", "Workbench fields requested per execution; concrete values are not scene data."),
@@ -161,16 +168,18 @@ SCENE_PARAMETER_OWNERSHIP_SPECS: dict[str, ParameterOwnershipSpec] = {
     "delivery_presets.*.output_dir_template": _spec("delivery_presets.*.output_dir_template", "output", "ScenePanel scene rules generated-result", "workbench runner", "Output directory naming."),
     "delivery_presets.*.filename_template": _spec("delivery_presets.*.filename_template", "output", "ScenePanel scene rules generated-result", "workbench runner", "Output filename naming."),
     "delivery_presets.*.artifacts": _spec("delivery_presets.*.artifacts", "output", "ScenePanel scene rules generated-result", "workbench runner", "Artifacts for this output version."),
+    "delivery_presets.*.artifacts.final_docx": _spec("delivery_presets.*.artifacts.final_docx", "output", "ScenePanel scene rules generated-result", "workbench runner", "Generate final DOCX for this delivery."),
+    "delivery_presets.*.artifacts.compare_docx": _spec("delivery_presets.*.artifacts.compare_docx", "output", "ScenePanel scene rules generated-result", "workbench runner", "Generate comparison DOCX for this delivery."),
+    "delivery_presets.*.artifacts.compare_text": _spec("delivery_presets.*.artifacts.compare_text", "output", "ScenePanel scene rules generated-result", "workbench runner", "Include text differences for this delivery."),
+    "delivery_presets.*.artifacts.compare_formatting": _spec("delivery_presets.*.artifacts.compare_formatting", "output", "ScenePanel scene rules generated-result", "workbench runner", "Include formatting differences for this delivery."),
+    "delivery_presets.*.artifacts.report_json": _spec("delivery_presets.*.artifacts.report_json", "output", "ScenePanel scene rules generated-result", "report writer", "Generate a JSON report for this delivery."),
+    "delivery_presets.*.artifacts.report_markdown": _spec("delivery_presets.*.artifacts.report_markdown", "output", "ScenePanel scene rules generated-result", "report writer", "Generate a Markdown report for this delivery."),
+    "delivery_presets.*.artifacts.material_manifest": _spec("delivery_presets.*.artifacts.material_manifest", "output", "ScenePanel scene rules generated-result", "material manifest writer", "Generate a material manifest for this delivery."),
+    "delivery_presets.*.artifacts.material_package": _spec("delivery_presets.*.artifacts.material_package", "output", "ScenePanel scene rules generated-result", "material package writer", "Generate a material package for this delivery."),
+    "delivery_presets.*.artifacts.review_pdf": _spec("delivery_presets.*.artifacts.review_pdf", "output", "ScenePanel scene rules generated-result", "workbench runner", "Generate a review PDF for this delivery."),
     "delivery_presets.*.content_visibility_rules": _spec("delivery_presets.*.content_visibility_rules", "output", "ScenePanel scene rules generated-result / Workbench", "content visibility engine", "Version-specific block visibility."),
     "delivery_presets.*.include_structured_intermediate": _spec("delivery_presets.*.include_structured_intermediate", "output", "ScenePanel scene rules generated-result", "workbench runner", "Whether to emit structured intermediate artifacts."),
     "delivery_presets.*.report_level": _spec("delivery_presets.*.report_level", "output", "ScenePanel scene rules generated-result", "report writer", "Per-delivery report detail level."),
-    "output": _spec("output", "output", "ScenePanel scene rules generated-result / Workbench", "workbench runner", "Current output artifact switches."),
-    "output.final_docx": _spec("output.final_docx", "output", "ScenePanel scene rules generated-result", "workbench runner", "Generate final DOCX."),
-    "output.compare_docx": _spec("output.compare_docx", "output", "workbench runner", "workbench runner", "Generate comparison DOCX."),
-    "output.report_json": _spec("output.report_json", "output", "ScenePanel scene rules generated-result", "report writer", "Generate JSON report."),
-    "output.report_markdown": _spec("output.report_markdown", "output", "ScenePanel scene rules generated-result", "report writer", "Generate Markdown report."),
-    "output.material_manifest": _spec("output.material_manifest", "output", "ScenePanel scene rules generated-result", "material manifest writer", "Generate material manifest."),
-    "output.material_package": _spec("output.material_package", "output", "ScenePanel scene rules generated-result", "material package writer", "Generate material package."),
     "batch_preset": _spec("batch_preset", "output", "AssetsPanel batch", "batch runner", "Multi-record output strategy."),
     # Template baseline and scene-visible overrides.
     "table": _spec("table", "template", "TemplatePanel table", "table module", "Table style baseline; runtime processing is toggled from template/workbench surfaces, not a duplicate ScenePanel capability page.", template_baseline=True),
@@ -196,18 +205,18 @@ SCENE_PARAMETER_OWNERSHIP_SPECS: dict[str, ParameterOwnershipSpec] = {
     "watermark.color": _spec("watermark.color", "scene", "ScenePanel content", "watermark module", "Watermark appearance for status policy."),
     "watermark.rotation": _spec("watermark.rotation", "scene", "ScenePanel content", "watermark module", "Watermark rotation."),
     "watermark.font_size": _spec("watermark.font_size", "scene", "ScenePanel content", "watermark module", "Watermark font size."),
-    "section_styles": _spec("section_styles", "scene", "ScenePanel scope", "resolver", "Scene-owned format exceptions applied over the template baseline."),
     "template_overrides": _spec("template_overrides", "template", "resolver", "resolver", "Legacy template override escape hatch.", template_baseline=True, notes="New keys should receive explicit ownership specs."),
 }
 
 
 PARAMETER_CONSUMER_ANCHORS: dict[str, tuple[ParameterConsumerAnchor, ...]] = {
-    "ScenePanel scope": (
+    "execution-session resolver": (
         _anchor(
-            "ScenePanel scope",
-            "src/ui/panels/scene_panel.py",
-            "format_scope.sections",
-            "scene.format_scope.sections",
+            "execution-session resolver",
+            "src/services/execution_session/__init__.py",
+            "build_execution_session_snapshot",
+            "ResourceRef",
+            rationale="Execution freezes plan, template, and master refs before runtime.",
         ),
     ),
     "batch runner": (
@@ -219,8 +228,13 @@ PARAMETER_CONSUMER_ANCHORS: dict[str, tuple[ParameterConsumerAnchor, ...]] = {
         ),
         _anchor(
             "batch runner",
-            "src/ui/panels/workbench/execution_runtime.py",
+            "src/services/production_runtime/execution_runtime.py",
             "WorkbenchBatchProductionRunner",
+        ),
+        _anchor(
+            "batch runner",
+            "src/services/production_runtime/batch_reporting.py",
+            "def attach_batch_reports",
             "batch_report_paths",
         ),
     ),
@@ -349,17 +363,22 @@ PARAMETER_CONSUMER_ANCHORS: dict[str, tuple[ParameterConsumerAnchor, ...]] = {
     "material manifest writer": (
         _anchor(
             "material manifest writer",
-            "src/ui/panels/workbench/material_artifacts.py",
-            "_write_material_manifest",
+            "src/services/production_runtime/material_artifacts.py",
+            "write_material_manifest",
             "_material_manifest_payload",
         ),
     ),
     "material package writer": (
         _anchor(
             "material package writer",
-            "src/ui/panels/workbench/material_artifacts.py",
-            "_write_material_package_artifacts",
-            "_material_package_status",
+            "src/services/production_runtime/material_artifacts.py",
+            "write_material_package_artifacts",
+            "build_material_delivery_package",
+            "DeliveryPackageBuildRequest",
+            rationale=(
+                "Workbench delegates package publication to the transaction-safe "
+                "material delivery service with an explicit build request."
+            ),
         ),
     ),
     "material preflight": (
@@ -401,9 +420,9 @@ PARAMETER_CONSUMER_ANCHORS: dict[str, tuple[ParameterConsumerAnchor, ...]] = {
     "pipeline scheduler": (
         _anchor(
             "pipeline scheduler",
-            "src/pipeline/scheduler.py",
-            "select_enabled_modules",
-            "requires_config",
+            "src/pipeline/module_selection.py",
+            "build_module_selection_plan",
+            "ModuleSelectionPlan",
         ),
     ),
     "preflight/report": (
@@ -478,10 +497,18 @@ PARAMETER_CONSUMER_ANCHORS: dict[str, tuple[ParameterConsumerAnchor, ...]] = {
             "config.watermark",
         ),
     ),
+    "work mode bridge": (
+        _anchor(
+            "work mode bridge",
+            "src/config/library.py",
+            "_set_scene_mode",
+            "_normalize_mode_id",
+        ),
+    ),
     "workbench runner": (
         _anchor(
             "workbench runner",
-            "src/ui/panels/workbench/execution_runtime.py",
+            "src/services/production_runtime/execution_runtime.py",
             "WorkbenchProductionRunner",
             "output_paths",
         ),
@@ -500,12 +527,13 @@ REQUIRED_SCENE_PARAMETER_PATHS: tuple[str, ...] = (
     "input_source_profile.material_schema_ids",
     "input_source_profile.required_material_fields",
     "input_source_profile.required_image_roles",
+    "default_material_profile_id",
     "compliance_profile.count_profile_id",
     "compliance_profile.object_preflight.scan_targets",
     "compliance_profile.object_preflight.skip_modules_by_finding",
     "formula_convert.output_mode",
     "formula_convert.low_confidence_policy",
-    "exam_paper.blank_style_id",
+    "master_id",
     "exam_paper.question_structure_mode",
     "exam_paper.answer_policy",
     "exam_paper.runtime_fields",
@@ -518,16 +546,19 @@ REQUIRED_SCENE_PARAMETER_PATHS: tuple[str, ...] = (
     "watermark.color",
     "watermark.rotation",
     "watermark.font_size",
-    "output.final_docx",
-    "output.compare_docx",
-    "output.report_json",
-    "output.report_markdown",
-    "output.material_manifest",
-    "output.material_package",
     "delivery_presets.*.target_template_id",
     "delivery_presets.*.output_dir_template",
     "delivery_presets.*.filename_template",
     "delivery_presets.*.artifacts",
+    "delivery_presets.*.artifacts.final_docx",
+    "delivery_presets.*.artifacts.compare_docx",
+    "delivery_presets.*.artifacts.compare_text",
+    "delivery_presets.*.artifacts.compare_formatting",
+    "delivery_presets.*.artifacts.report_json",
+    "delivery_presets.*.artifacts.report_markdown",
+    "delivery_presets.*.artifacts.material_manifest",
+    "delivery_presets.*.artifacts.material_package",
+    "delivery_presets.*.artifacts.review_pdf",
     "delivery_presets.*.content_visibility_rules",
     "delivery_presets.*.include_structured_intermediate",
     "delivery_presets.*.report_level",
@@ -567,9 +598,12 @@ def classify_scene_parameter(path: str) -> ParameterOwnershipSpec | None:
 
 def audit_scene_parameter_ownership(
     scene_type: type = SceneWorkspace,
+    template_type: type = TemplateConfig,
 ) -> ParameterOwnershipAuditResult:
     if not is_dataclass(scene_type):
         raise TypeError("scene_type must be a dataclass type")
+    if not is_dataclass(template_type):
+        raise TypeError("template_type must be a dataclass type")
 
     top_level_fields = {field.name for field in fields(scene_type)}
     spec_paths = set(SCENE_PARAMETER_OWNERSHIP_SPECS)
@@ -593,8 +627,12 @@ def audit_scene_parameter_ownership(
     unknown_spec_paths = tuple(
         sorted(
             path
-            for path in spec_paths
-            if not _path_exists_on_scene(path, scene_type)
+            for path, spec in SCENE_PARAMETER_OWNERSHIP_SPECS.items()
+            if not _path_exists_on_config(path, scene_type)
+            and not (
+                spec.template_baseline
+                and _path_exists_on_config(path, template_type)
+            )
         )
     )
 
@@ -665,18 +703,17 @@ def _looks_like_collection_index(segment: str) -> bool:
     return index >= 0
 
 
-def _path_exists_on_scene(path: str, scene_type: type) -> bool:
+def _path_exists_on_config(path: str, config_type: type) -> bool:
     normalized = _normalize_path(path)
     if not normalized:
         return False
 
-    top_level_fields = {field.name for field in fields(scene_type)}
+    top_level_fields = {field.name for field in fields(config_type)}
     root = normalized.split(".", 1)[0]
     if root not in top_level_fields:
         return False
 
-    scene = scene_type()
-    current: Any = scene
+    current: Any = config_type()
     for segment in normalized.split("."):
         if segment == "*":
             if not isinstance(current, (list, tuple)):

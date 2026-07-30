@@ -95,7 +95,7 @@ SCENE_RELEASE_TRACE_PARTITION_GUARD_SOURCE_MARKERS: tuple[
     ),
     (
         "summary_projection",
-        "src/ui/panels/scene_summary_projection.py",
+        "scripts/verify_scene_matrix_release_gate.py",
         (
             "release_trace_partition_guard_partitioned_trace_count",
             "trace partition",

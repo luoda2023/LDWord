@@ -29,6 +29,7 @@ from src.config.scene_high_frequency_request_samples import (
 from src.config.scene_request_cell_fixture_registry import (
     SceneRequestCellFixtureSpec,
     list_scene_request_cell_fixtures,
+    request_cell_family_ids,
 )
 from src.config.scene_sample_fixture_registry import (
     SceneSampleFixtureSpec,
@@ -624,7 +625,7 @@ def _path_rows_for_cell(
                 ),
                 family_ids=_unique_values(
                     (
-                        *cell.expected_family_ids,
+                        *request_cell_family_ids(cell),
                         *sample.expected_handoff_family_ids,
                     )
                 ),
@@ -708,7 +709,9 @@ def _family_row(
     family = PLANNED_SCENE_FAMILY_MAP[family_id]
     rows = tuple(row for row in path_rows if family_id in row.family_ids)
     family_cells = tuple(
-        cell for cell in request_cells if family_id in cell.expected_family_ids
+        cell
+        for cell in request_cells
+        if family_id in request_cell_family_ids(cell)
     )
     path_types = _ordered_path_types(row.journey_type for row in rows)
     required_types = _family_required_path_types(family_id, family.priority)

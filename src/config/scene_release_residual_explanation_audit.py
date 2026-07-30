@@ -168,7 +168,7 @@ SCENE_RELEASE_RESIDUAL_EXPLANATION_SOURCE_MARKERS: tuple[
     ),
     (
         "summary_projection",
-        "src/ui/panels/scene_summary_projection.py",
+        "scripts/verify_scene_matrix_release_gate.py",
         (
             "residual explanations",
             "release_residual_explanation_covered_count",
@@ -333,7 +333,6 @@ def build_scene_release_residual_explanation_audit_report(
     boundary_maturity_release_envelope_report=None,
     release_residual_ratio_ledger_report=None,
     maturity_upgrade_report=None,
-    matrix_dashboard=None,
     dashboard_warning_count: int | None = None,
 ) -> SceneReleaseResidualExplanationAuditReport:
     root = Path(project_root) if project_root is not None else Path.cwd()
@@ -366,12 +365,9 @@ def build_scene_release_residual_explanation_audit_report(
         or build_scene_product_maturity_upgrade_audit_report(project_root=root)
     )
     if dashboard_warning_count is None:
-        if matrix_dashboard is not None:
-            dashboard_warning_count = int(matrix_dashboard.warning_count)
-        else:
-            from src.config.scene_matrix_dashboard import build_scene_matrix_dashboard
-
-            dashboard_warning_count = int(build_scene_matrix_dashboard().warning_count)
+        dashboard_warning_count = int(
+            residual_report.dashboard_projection_warning_count
+        )
     release_gate_text = _source_text(root, "scripts/verify_scene_matrix_release_gate.py")
     counts = {
         "managed_warnings": (

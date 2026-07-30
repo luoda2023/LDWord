@@ -21,10 +21,9 @@ from src.config.scene_coverage_manifest import (
 )
 from src.config.scene_family_application import (
     apply_planned_scene_family_defaults,
-    planned_family_is_application_boundary_only,
+    planned_family_is_plugin_boundary_only,
 )
 from src.config.scene_family_registry import (
-    PLANNED_SCENE_FAMILY_MAP,
     PlannedSceneFamily,
     list_planned_scene_families,
 )
@@ -56,17 +55,17 @@ SCENE_DELIVERY_PRESET_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], ..
     ),
     (
         "workbench_delivery_runtime",
-        "src/ui/panels/workbench/execution_runtime.py",
+        "src/services/production_runtime/delivery_reporting.py",
         (
-            "_uses_delivery_presets",
+            "should_force_delivery_presets",
             "_write_compare_docx_artifacts",
-            "_write_structured_intermediates",
-            "_delivery_preset_payload",
+            "write_structured_intermediates",
+            "delivery_preset_payload",
         ),
     ),
     (
         "report_writer_delivery_evidence",
-        "src/report_writer.py",
+        "src/product_report_writer.py",
         ("default_delivery_preset_id", "include_structured_intermediate"),
     ),
 )
@@ -524,7 +523,7 @@ def audit_scene_delivery_preset_report(
 def _family_row(family: PlannedSceneFamily) -> SceneDeliveryPresetFamilyRow:
     scene = SceneWorkspace(scene_id=family.family_id, category=family.family_id)
     result = apply_planned_scene_family_defaults(scene, family_id=family.family_id)
-    plugin_boundary_only = planned_family_is_application_boundary_only(family.family_id)
+    plugin_boundary_only = planned_family_is_plugin_boundary_only(family.family_id)
     presets = (
         ()
         if plugin_boundary_only and not result.applied

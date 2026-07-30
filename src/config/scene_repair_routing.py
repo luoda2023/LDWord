@@ -1,8 +1,9 @@
-"""Repair-route registry for scene/workbench issue queues.
+"""Repair-route registry for execution decisions and result diagnostics.
 
-The high-level scene matrix needs one auditable mapping from issue categories
-and repair target types back to the product surface that can fix them.  This
-keeps Workbench issues from becoming a bag of unrelated strings.
+The high-level scene matrix needs one auditable mapping from diagnostic
+categories and repair target types back to the product surface that can fix
+them. This keeps the compact primary action and result-detail actions aligned
+without requiring an inline diagnostic browser.
 """
 
 from __future__ import annotations
@@ -75,17 +76,12 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
         action_contract="Open the template/control contract owner surface for shared formatting controls.",
         evidence=(
             _evidence(
-                "src/ui/adapters/workbench_execution_adapter.py",
-                'category="control_contract"',
-                'repair_target_type="control_contract"',
-            ),
-            _evidence(
                 "src/config/control_contract_registry.py",
                 "CONTROL_CONTRACTS",
                 "template_surface",
             ),
             _evidence(
-                "src/ui/adapters/workbench_issue_navigation.py",
+                "src/ui/adapters/workbench_product_issue_navigation.py",
                 "SCENE_TARGET_CARD_MAP",
                 '"control_contract": "scn_cleanup"',
             ),
@@ -101,13 +97,12 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
             "template_style_field",
             "template_page_field",
             "template_table_field",
-            "template_output_field",
         ),
         issue_categories=("template_field", "template_style", "template_table"),
         primary_surface="TemplatePanel field detail panes",
         action_contract=(
             "Open the template management surface for the exact style, page, "
-            "table, or output field that caused a quick-formatting repair item."
+            "or table field that caused a quick-formatting repair item."
         ),
         evidence=(
             _evidence(
@@ -122,7 +117,7 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
                 "_TableSnapshot.from_template",
             ),
             _evidence(
-                "src/ui/adapters/workbench_issue_navigation.py",
+                "src/ui/adapters/workbench_product_issue_navigation.py",
                 "TEMPLATE_TARGET_CARD_MAP",
                 '"template_field": "tpl_overview"',
             ),
@@ -154,11 +149,6 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
         action_contract="Open scene/profile governance for ownership, count profile, sample coverage, or scene-level policy gaps.",
         evidence=(
             _evidence(
-                "src/ui/adapters/workbench_execution_adapter.py",
-                'category="parameter_ownership"',
-                'repair_target_type="parameter_ownership"',
-            ),
-            _evidence(
                 "src/ui/adapters/workbench_boundary_issues.py",
                 'category="sample_fixture"',
                 'repair_target_type="sample_fixture"',
@@ -185,37 +175,35 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
         route_id="scene_field_repair",
         label="Scene field-level repair",
         owner_layer="scene",
-        repair_target_types=("scene_scope_field", "scene_style_field"),
-        issue_categories=("scene_scope", "scene_style"),
-        primary_surface="ScenePanel processing scope and section-style details",
+        repair_target_types=("scene_document_scope_field",),
+        issue_categories=("scene_document_scope",),
+        primary_surface="ScenePanel document-scope detail",
         action_contract=(
-            "Open the scene scope or section-style detail and focus the exact "
-            "processing-range or style override field that caused the execution issue."
+            "Open the scene scope detail and focus the processing-range field "
+            "that caused the execution issue."
         ),
         evidence=(
             _evidence(
-                "src/ui/adapters/workbench_issue_navigation.py",
+                "src/ui/adapters/workbench_product_issue_navigation.py",
                 "SCENE_TARGET_CARD_MAP",
-                "scene_scope_field",
-                "scene_style_field",
+                "scene_document_scope_field",
                 '"scn_rules"',
             ),
             _evidence(
                 "src/ui/panels/scene_panel.py",
                 "def focus_navigation_field(self, field_id: str) -> bool:",
-                "format_scope.sections.",
-                "scene.section_styles.",
+                "scene.document_scope.mode",
+                "scene.document_scope.selected_roles",
             ),
             _evidence(
                 "src/ui/adapters/workbench_execution_adapter.py",
                 "_infer_scene_field_repair_target",
-                "scene_scope_field",
-                "scene_style_field",
+                "scene_document_scope_field",
             ),
         ),
         notes=(
-            "Scene field repairs keep task-level scope and style overrides in "
-            "ScenePanel while template defaults stay in TemplatePanel."
+            "Scene field repair keeps task-level processing scope in "
+            "ScenePanel while formatting remains in TemplatePanel."
         ),
     ),
     SceneRepairRoute(
@@ -279,13 +267,13 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
                 'repair_target_type="output_target"',
             ),
             _evidence(
-                "src/ui/panels/scene_panel.py",
+                "src/ui/panels/scene_output_detail.py",
                 "_default_delivery",
                 "_delivery_summary",
                 "_visibility_rules",
             ),
             _evidence(
-                "src/ui/adapters/workbench_issue_navigation.py",
+                "src/ui/adapters/workbench_product_issue_navigation.py",
                 "SCENE_TARGET_CARD_MAP",
                 '"output_target": "scn_rules"',
             ),
@@ -299,12 +287,13 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
         repair_target_types=("object", "object_preflight"),
         issue_categories=("object_preflight",),
         primary_surface="Workbench object preflight confirmation / ScenePanel compliance",
-        action_contract="Open object risk details for comments, revisions, fields, OLE, VBA, and skipped modules.",
+        action_contract="Show a compact block-or-confirm decision before execution; keep object details in compliance/report surfaces.",
         evidence=(
             _evidence(
-                "src/ui/adapters/workbench_execution_adapter.py",
-                'category="object_preflight"',
-                'repair_target_type="object_preflight"',
+                "src/ui/panels/workbench/quick_execution_detail.py",
+                "def set_object_preflight_confirmation",
+                "self._set_status(",
+                "_execute_btn.setText",
             ),
             _evidence(
                 "src/shared/engine/object_preflight.py",
@@ -312,12 +301,12 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
                 "scan_targets",
             ),
             _evidence(
-                "tests/test_workbench_execution_center.py",
-                "test_object_preflight_issue_items_expose_risks_for_workbench_queue",
-                "repair_target_type == \"object_preflight\"",
+                "tests/test_workbench_execution_session_architecture.py",
+                "test_start_execution_requires_object_preflight_confirmation_before_worker",
+                "test_start_execution_blocks_on_strict_object_preflight_findings",
             ),
         ),
-        notes="Object-preflight repairs explain or confirm risky Word objects before execution continues.",
+        notes="Object-preflight safety is a gate/confirmation contract, not a filterable issue-list contract.",
     ),
     SceneRepairRoute(
         route_id="fixed_layout",
@@ -360,7 +349,7 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
         owner_layer="plugin",
         repair_target_types=("plugin", "plugin_manual_gate", "coverage_boundary"),
         issue_categories=("plugin_boundary", "import_ai_boundary"),
-        primary_surface="Workbench plugin/manual gate issue",
+        primary_surface="Scene capability boundary / plugin manual-confirmation handoff",
         action_contract="Open manual confirmation or plugin handoff for professional/import risks.",
         evidence=(
             _evidence(

@@ -1,236 +1,132 @@
-"""Built-in template registry for UI-facing template selection.
+"""Cycle-free registry for canonical built-in template resources.
 
-Each built-in template id resolves to a fresh ``TemplateConfig`` instance so
-preview panels can inspect real parameters instead of a name-only shell.
+Built-in template content lives only in the mode-scoped JSON resources under
+``config_library/templates/<mode>/builtin``.  This module deliberately does
+not import ``src.config.library``: the library may seed another root from these
+resources without creating an import cycle or a second content source.
 """
 
 from __future__ import annotations
 
-from copy import deepcopy
-from functools import lru_cache
 from pathlib import Path
-from typing import Callable
 
+from src.config.canonical_resource import assert_non_symbolic_resource_path
 from src.config.loader import load_template
-from src.config.template import PageNumberPhaseConfig, StyleConfig, TemplateConfig
+from src.config.template import TemplateConfig
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULTS_DIR = _PROJECT_ROOT / "defaults"
+_CANONICAL_TEMPLATE_ROOT = _PROJECT_ROOT / "config_library" / "templates"
 
+# Ordered product metadata.  A template id can intentionally appear in more
+# than one mode (currently ``default`` in custom and exam), while its content
+# remains an explicit mode-scoped resource in each slot.
+_BUILTIN_TEMPLATE_RESOURCES: tuple[tuple[str, str], ...] = (
+    ("custom", "default"),
+    ("exam", "default"),
+    ("thesis", "thesis_gbt"),
+    ("thesis", "thesis_custom"),
+    ("bidding", "bid_engineering"),
+    ("bidding", "bid_procurement"),
+    ("bidding", "bid_custom"),
+    ("official", "official_gbt"),
+    ("official", "official_custom"),
+    ("technical", "tech_standard"),
+    ("technical", "tech_custom"),
+    ("report", "report_default"),
+    ("report", "report_custom"),
+)
 
-def _normalize_template(cfg: TemplateConfig) -> TemplateConfig:
-    """Align older assets with current UI expectations without mutating cache."""
-    normalized = deepcopy(cfg)
-    if "body" not in normalized.styles and "normal" in normalized.styles:
-        normalized.styles["body"] = deepcopy(normalized.styles["normal"])
-    return normalized
-
-
-def _set_continuous_decimal_page_plan(cfg: TemplateConfig, *, start: int = 1) -> None:
-    header_footer = cfg.header_footer
-    header_footer.page_number_enabled = True
-    header_footer.page_number_plan.validation_mode = "strict"
-    header_footer.page_number_plan.on_missing_doc_tree = "warn_and_fallback"
-    header_footer.page_number_plan.phases = [
-        PageNumberPhaseConfig(
-            phase_id="main",
-            selectors=["all_numbered_content"],
-            visible=True,
-            number_format="decimal",
-            start_mode="restart",
-            start_value=max(1, int(start)),
-        )
-    ]
-
-
-def _set_thesis_page_plan(cfg: TemplateConfig) -> None:
-    header_footer = cfg.header_footer
-    header_footer.page_number_enabled = True
-    header_footer.page_number_plan.validation_mode = "strict"
-    header_footer.page_number_plan.on_missing_doc_tree = "warn_and_fallback"
-    header_footer.page_number_plan.phases = [
-        PageNumberPhaseConfig(
-            phase_id="front",
-            selectors=["front_matter"],
-            visible=True,
-            number_format="upperRoman",
-            start_mode="restart",
-            start_value=1,
-        ),
-        PageNumberPhaseConfig(
-            phase_id="body",
-            selectors=["body", "back_matter"],
-            visible=True,
-            number_format="decimal",
-            start_mode="restart",
-            start_value=1,
-        ),
-    ]
-
-
-@lru_cache(maxsize=1)
-def _load_thesis_asset() -> TemplateConfig:
-    return load_template(_DEFAULTS_DIR / "thesis.yaml")
-
-
-def _default_template() -> TemplateConfig:
-    cfg = TemplateConfig(
-        name="默认格式",
-        description="通用默认排版模板，适合作为自定义模板的起点。",
-    )
-    cfg.styles["body"] = StyleConfig(
-        font_cn="宋体",
-        font_en="Times New Roman",
-        size_pt=12,
-        size_display="小四",
-        alignment="justify",
-        first_line_indent_chars=2,
-        line_spacing_type="exact",
-        line_spacing_pt=20,
-    )
-    cfg.styles["heading"] = StyleConfig(
-        font_cn="宋体",
-        font_en="Times New Roman",
-        size_pt=12,
-        size_display="小四",
-        bold=True,
-        alignment="left",
-        first_line_indent_chars=0,
-        line_spacing_type="exact",
-        line_spacing_pt=20,
-    )
-    _set_continuous_decimal_page_plan(cfg)
-    return cfg
-
-
-def _thesis_gbt_template() -> TemplateConfig:
-    cfg = _normalize_template(_load_thesis_asset())
-    cfg.name = "GB/T 7713 学位论文"
-    cfg.description = "适用于学位论文与学术论文的内置模板。"
-    _set_thesis_page_plan(cfg)
-    return cfg
-
-
-def _thesis_custom_template() -> TemplateConfig:
-    cfg = _thesis_gbt_template()
-    cfg.name = "自定义论文模板"
-    cfg.description = "基于学位论文模板的可调整版本。"
-    return cfg
-
-
-def _bid_engineering_template() -> TemplateConfig:
-    cfg = _normalize_template(_load_thesis_asset())
-    cfg.name = "工程类投标文件"
-    cfg.description = "适用于工程投标与商务标书的内置模板。"
-    cfg.page_setup.margin.top_cm = 2.8
-    cfg.page_setup.margin.bottom_cm = 2.6
-    cfg.page_setup.margin.left_cm = 2.8
-    cfg.page_setup.margin.right_cm = 2.6
-    _set_continuous_decimal_page_plan(cfg)
-    return cfg
-
-
-def _bid_procurement_template() -> TemplateConfig:
-    cfg = _bid_engineering_template()
-    cfg.name = "政府采购投标"
-    cfg.description = "适用于政府采购投标文件的内置模板。"
-    return cfg
-
-
-def _bid_custom_template() -> TemplateConfig:
-    cfg = _bid_engineering_template()
-    cfg.name = "自定义标书模板"
-    cfg.description = "基于标书模板的可调整版本。"
-    return cfg
-
-
-def _official_gbt_template() -> TemplateConfig:
-    cfg = _default_template()
-    cfg.name = "GB/T 9704 公文格式"
-    cfg.description = "适用于公文、通知和批复的内置模板。"
-    cfg.page_setup.margin.top_cm = 3.7
-    cfg.page_setup.margin.bottom_cm = 3.5
-    cfg.page_setup.margin.left_cm = 2.8
-    cfg.page_setup.margin.right_cm = 2.6
-    cfg.heading_numbering.level_bindings = {}
-    _set_continuous_decimal_page_plan(cfg)
-    return cfg
-
-
-def _official_custom_template() -> TemplateConfig:
-    cfg = _official_gbt_template()
-    cfg.name = "自定义公文模板"
-    cfg.description = "基于公文模板的可调整版本。"
-    return cfg
-
-
-def _tech_standard_template() -> TemplateConfig:
-    cfg = _default_template()
-    cfg.name = "通用技术文档"
-    cfg.description = "适用于技术方案、设计说明和操作手册的内置模板。"
-    cfg.page_setup.margin.top_cm = 2.5
-    cfg.page_setup.margin.bottom_cm = 2.5
-    _set_continuous_decimal_page_plan(cfg)
-    return cfg
-
-
-def _tech_custom_template() -> TemplateConfig:
-    cfg = _tech_standard_template()
-    cfg.name = "自定义技术模板"
-    cfg.description = "基于技术文档模板的可调整版本。"
-    return cfg
-
-
-def _report_default_template() -> TemplateConfig:
-    cfg = _default_template()
-    cfg.name = "通用报告格式"
-    cfg.description = "适用于汇报、总结和调研报告的内置模板。"
-    cfg.page_setup.margin.top_cm = 2.54
-    cfg.page_setup.margin.bottom_cm = 2.54
-    cfg.page_setup.margin.left_cm = 3.0
-    cfg.page_setup.margin.right_cm = 3.0
-    _set_continuous_decimal_page_plan(cfg)
-    return cfg
-
-
-def _report_custom_template() -> TemplateConfig:
-    cfg = _report_default_template()
-    cfg.name = "自定义报告模板"
-    cfg.description = "基于报告模板的可调整版本。"
-    return cfg
-
-
-_BUILTIN_TEMPLATE_FACTORIES: dict[str, Callable[[], TemplateConfig]] = {
-    "default": _default_template,
-    "thesis_gbt": _thesis_gbt_template,
-    "thesis_custom": _thesis_custom_template,
-    "bid_engineering": _bid_engineering_template,
-    "bid_procurement": _bid_procurement_template,
-    "bid_custom": _bid_custom_template,
-    "official_gbt": _official_gbt_template,
-    "official_custom": _official_custom_template,
-    "tech_standard": _tech_standard_template,
-    "tech_custom": _tech_custom_template,
-    "report_default": _report_default_template,
-    "report_custom": _report_custom_template,
+_PRIMARY_TEMPLATE_MODES: dict[str, str] = {
+    "default": "custom",
+    "thesis_gbt": "thesis",
+    "thesis_custom": "thesis",
+    "bid_engineering": "bidding",
+    "bid_procurement": "bidding",
+    "bid_custom": "bidding",
+    "official_gbt": "official",
+    "official_custom": "official",
+    "tech_standard": "technical",
+    "tech_custom": "technical",
+    "report_default": "report",
+    "report_custom": "report",
 }
 
 
-def create_builtin_template(template_id: str) -> TemplateConfig:
-    """Resolve a built-in template id to a fresh ``TemplateConfig`` instance."""
-    factory = _BUILTIN_TEMPLATE_FACTORIES.get(str(template_id or "").strip())
-    if factory is None:
-        raise ValueError(f"unknown built-in template id: {template_id}")
-    return factory()
+def builtin_template_resource_path(
+    template_id: str,
+    *,
+    mode_id: str | None = None,
+) -> Path:
+    """Return the exact canonical JSON path for one built-in identity."""
+
+    normalized_id = str(template_id or "").strip()
+    normalized_mode = str(mode_id or "").strip() or _PRIMARY_TEMPLATE_MODES.get(
+        normalized_id,
+        "",
+    )
+    if (normalized_mode, normalized_id) not in _BUILTIN_TEMPLATE_RESOURCES:
+        qualifier = f"{normalized_mode}/" if normalized_mode else ""
+        raise ValueError(f"unknown built-in template id: {qualifier}{normalized_id}")
+    return (
+        _CANONICAL_TEMPLATE_ROOT
+        / normalized_mode
+        / "builtin"
+        / f"{normalized_id}.json"
+    )
 
 
-def has_builtin_template(template_id: str) -> bool:
-    return str(template_id or "").strip() in _BUILTIN_TEMPLATE_FACTORIES
+def create_builtin_template(
+    template_id: str,
+    *,
+    mode_id: str | None = None,
+) -> TemplateConfig:
+    """Load a fresh config from the canonical mode-scoped JSON resource."""
+
+    path = builtin_template_resource_path(template_id, mode_id=mode_id)
+    assert_non_symbolic_resource_path(
+        path,
+        _CANONICAL_TEMPLATE_ROOT,
+        resource_label="template",
+    )
+    return load_template(path)
+
+
+def has_builtin_template(template_id: str, *, mode_id: str | None = None) -> bool:
+    normalized_id = str(template_id or "").strip()
+    if mode_id is None:
+        return normalized_id in _PRIMARY_TEMPLATE_MODES
+    return (str(mode_id or "").strip(), normalized_id) in _BUILTIN_TEMPLATE_RESOURCES
 
 
 def list_builtin_template_ids() -> list[str]:
-    return list(_BUILTIN_TEMPLATE_FACTORIES.keys())
+    return list(_PRIMARY_TEMPLATE_MODES)
 
 
-__all__ = ["create_builtin_template", "has_builtin_template", "list_builtin_template_ids"]
+def list_builtin_template_resources() -> tuple[tuple[str, str, Path], ...]:
+    """Return every authoritative mode/id/path resource slot."""
+
+    return tuple(
+        (
+            mode_id,
+            template_id,
+            builtin_template_resource_path(template_id, mode_id=mode_id),
+        )
+        for mode_id, template_id in _BUILTIN_TEMPLATE_RESOURCES
+    )
+
+
+def canonical_template_root() -> Path:
+    """Return the authoritative boundary used for bundled template paths."""
+
+    return _CANONICAL_TEMPLATE_ROOT
+
+
+__all__ = [
+    "builtin_template_resource_path",
+    "canonical_template_root",
+    "create_builtin_template",
+    "has_builtin_template",
+    "list_builtin_template_ids",
+    "list_builtin_template_resources",
+]

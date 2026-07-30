@@ -101,7 +101,7 @@ SCENE_BOUNDARY_SUBJECT_RELEASE_CONTINUITY_SOURCE_MARKERS: tuple[
     ),
     (
         "summary_projection",
-        "src/ui/panels/scene_summary_projection.py",
+        "scripts/verify_scene_matrix_release_gate.py",
         (
             "boundary_subject_release_continuity_ready_count",
             "subject continuity",

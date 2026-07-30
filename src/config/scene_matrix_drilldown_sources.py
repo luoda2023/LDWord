@@ -8,6 +8,9 @@ from src.config.scene_release_governance_registry import (
 
 SCENE_MATRIX_DRILLDOWN_SOURCE_ID = "scene_matrix_drilldown"
 SCENE_MATRIX_DRILLDOWN_RUNTIME_SOURCE_PATH = "src/config/scene_matrix_drilldown.py"
+SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILE_SOURCE_PATH = (
+    "src/config/scene_matrix_drilldown_projection_profiles.py"
+)
 SCENE_MATRIX_DRILLDOWN_AUDIT_DOCS_PATH = "docs/audits"
 SCENE_MATRIX_DRILLDOWN_CONFIG_SOURCE_PATH = "src/config"
 SCENE_MATRIX_DRILLDOWN_RELEASE_ITEMS_SOURCE_PATH = (
@@ -248,12 +251,14 @@ SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], .
         "plugin_gate_reference_ids",
         "maturity_gap_reference_ids",
     ),
-    _drilldown_runtime_source_marker_entry(
+    (
         "scene_matrix_drilldown_action_capability_projection_profile_audit",
-        "SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILES",
-        "SceneMatrixDrilldownProjectionProfile",
-        "missing_action_behavior_projection_profile",
-        "missing_capability_projection_profile",
+        SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILE_SOURCE_PATH,
+        (
+            "SceneMatrixDrilldownProjectionProfile",
+            "SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILES",
+            "SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILE_MAP",
+        ),
     ),
     _drilldown_runtime_source_marker_entry(
         "scene_matrix_drilldown_projection_test_reference_audit",
@@ -756,6 +761,7 @@ SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS: tuple[tuple[str, str, tuple[str, ...]], .
 
 __all__ = [
     "REQUIRED_SCENE_MATRIX_DRILLDOWN_IDS",
+    "SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILE_SOURCE_PATH",
     "SCENE_MATRIX_DRILLDOWN_SOURCE_ID",
     "SCENE_MATRIX_DRILLDOWN_SOURCE_MARKERS",
 ]

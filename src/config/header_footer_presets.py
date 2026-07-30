@@ -34,7 +34,7 @@ BUILTIN_SOURCE = "builtin"
 USER_SOURCE = "user"
 
 
-def _split_page_number_phases(*, continue_body: bool) -> list[PageNumberPhaseConfig]:
+def split_page_number_phases(*, continue_body: bool) -> list[PageNumberPhaseConfig]:
     return [
         PageNumberPhaseConfig(
             phase_id="front",
@@ -61,7 +61,7 @@ def _thesis_preset() -> HeaderFooterConfig:
     cfg.header.hide_on_cover = True
     cfg.footer.hide_on_cover = True
     cfg.suppress_header_footer_selectors = ["pre_numbering"]
-    cfg.page_number_plan.phases = _split_page_number_phases(continue_body=False)
+    cfg.page_number_plan.phases = split_page_number_phases(continue_body=False)
     return cfg
 
 
@@ -275,4 +275,5 @@ __all__ = [
     "is_user_preset",
     "preset_label_exists",
     "save_user_preset",
+    "split_page_number_phases",
 ]

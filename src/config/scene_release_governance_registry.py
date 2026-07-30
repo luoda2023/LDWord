@@ -215,7 +215,7 @@ SCENE_RELEASE_GOVERNANCE_EXPORT_REPORT_SPECS: tuple[
             "boundary_maturity_release_envelope_report",
             "release_residual_ratio_ledger_report",
             "maturity_upgrade_report",
-            "matrix_dashboard",
+            "dashboard_warning_count",
         ),
     ),
     SceneReleaseGovernanceReportSpec(

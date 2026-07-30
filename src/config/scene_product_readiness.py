@@ -704,7 +704,7 @@ SCENE_PRODUCT_READINESS_SPECS: tuple[SceneProductReadinessSpec, ...] = (
             "profile browser",
             "answer-sheet reuse path",
             "fixed-layout profile evidence UI",
-            "fixed row-height policy material field",
+            "scene-owned fixed row-height policy",
         ),
         (),
         (

@@ -2,8 +2,8 @@
 
 N2.172 turns Word/OOXML object risk visibility into an auditable action
 contract: each preflight target must have detection, scene-family planning,
-report/workbench exposure, repair routing, and sample behavior evidence where
-that target is part of the current high-frequency surface area.
+pipeline protection, compact confirmation, repair routing, and sample behavior
+evidence where that target is part of the current high-frequency surface area.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from src.config.scene import ObjectPreflightPolicy, SceneWorkspace
 from src.config.scene_coverage_manifest import coverage_packs_for_family
 from src.config.scene_family_application import (
     apply_planned_scene_family_defaults,
-    planned_family_is_application_boundary_only,
+    planned_family_is_plugin_boundary_only,
 )
 from src.config.scene_family_registry import (
     PlannedSceneFamily,
@@ -71,19 +71,28 @@ SCENE_OBJECT_PREFLIGHT_ACTION_SOURCE_MARKERS: tuple[
         ),
     ),
     (
-        "workbench_execution_adapter",
-        "src/ui/adapters/workbench_execution_adapter.py",
+        "workbench_compact_confirmation",
+        "src/ui/panels/workbench/quick_execution_detail.py",
         (
-            "object_preflight_issue_items",
-            'repair_target_type="object_preflight"',
-            "_object_preflight_summary",
+            "def set_object_preflight_confirmation",
+            "self._set_status(status_text",
+            "_execute_btn.setText",
         ),
     ),
     (
-        "workbench_execution_runtime",
-        "src/ui/panels/workbench/execution_runtime.py",
+        "workbench_confirmation_gate",
+        "src/ui/panels/workbench/panel_v2.py",
         (
-            "_object_preflight_payload",
+            "def _ensure_object_preflight_confirmed",
+            "set_object_preflight_confirmation",
+            "_pending_object_preflight_confirmation_key",
+        ),
+    ),
+    (
+        "execution_payload_projection",
+        "src/reporting/execution_payload.py",
+        (
+            "def object_preflight_payload",
             "recommended_scan_targets",
             "module_skips",
         ),
@@ -114,6 +123,14 @@ SCENE_OBJECT_PREFLIGHT_ACTION_SOURCE_MARKERS: tuple[
             "test_pipeline_blocks_strict_object_preflight_findings",
             "test_pipeline_skips_configured_high_risk_modules_after_preflight",
             "test_object_preflight_report_includes_policy_and_planning_evidence",
+        ),
+    ),
+    (
+        "workbench_confirmation_tests",
+        "tests/test_workbench_execution_session_architecture.py",
+        (
+            "test_start_execution_requires_object_preflight_confirmation_before_worker",
+            "test_start_execution_blocks_on_strict_object_preflight_findings",
         ),
     ),
 )
@@ -528,7 +545,7 @@ def audit_scene_object_preflight_action_report(
 def _family_row(family: PlannedSceneFamily) -> SceneObjectPreflightFamilyRow:
     scene = SceneWorkspace(scene_id=family.family_id, category=family.family_id)
     result = apply_planned_scene_family_defaults(scene, family_id=family.family_id)
-    plugin_boundary_only = planned_family_is_application_boundary_only(family.family_id)
+    plugin_boundary_only = planned_family_is_plugin_boundary_only(family.family_id)
     policy = scene.compliance_profile.object_preflight
     recommended_targets = object_preflight_targets_for_touchpoints(family.ooxml_touchpoints)
     actual_targets = _ordered_targets(getattr(policy, "scan_targets", []) or [])

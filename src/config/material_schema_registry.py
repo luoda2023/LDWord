@@ -26,13 +26,48 @@ class MaterialFieldSpec:
 
 @dataclass(frozen=True, slots=True)
 class MaterialAssetRoleSpec:
-    """One image/file role required or recommended by a material schema."""
+    """One explicitly typed image or attachment role.
+
+    ``accepted_types`` describes file formats only; it must never be used to
+    infer whether the file enters the inline-image pipeline or the delivery
+    attachment pipeline.  ``material_domain`` owns that routing decision.
+    """
 
     role: str
     label: str
     required: bool = True
     accepted_types: tuple[str, ...] = ("image",)
     archive_dir: str = ""
+    cardinality: str = "single"
+    source_kind: str = "file"
+    recursive: bool = False
+    min_items: int = 0
+    max_items: int | None = 1
+    order_policy: str = "natural_path"
+    naming_template: str = "{role}_{sequence:03d}"
+    material_domain: str = "image"
+
+    def __post_init__(self) -> None:
+        domain = str(self.material_domain or "").strip().casefold()
+        if domain not in {"image", "attachment"}:
+            raise ValueError("material_domain must be image or attachment")
+        accepted_types = tuple(
+            str(item or "").strip().casefold()
+            for item in tuple(self.accepted_types or ())
+            if str(item or "").strip()
+        )
+        if not accepted_types:
+            raise ValueError("accepted_types must not be empty")
+        if domain == "image" and accepted_types != ("image",):
+            raise ValueError(
+                "image material roles may only declare accepted_types=('image',)"
+            )
+        object.__setattr__(self, "material_domain", domain)
+        object.__setattr__(self, "accepted_types", accepted_types)
+
+    @property
+    def is_attachment(self) -> bool:
+        return self.material_domain == "attachment"
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,7 +148,15 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
         asset_roles=(
             MaterialAssetRoleSpec("logo", "Company logo"),
             MaterialAssetRoleSpec("seal", "Company seal"),
-            MaterialAssetRoleSpec("qualification", "Qualification certificate", required=False),
+            MaterialAssetRoleSpec(
+                "qualification",
+                "Qualification certificate",
+                required=False,
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                max_items=None,
+            ),
         ),
         batch_mode="multi_profile",
         boundaries=(
@@ -128,16 +171,21 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
         family="official",
         description="Administrative fields for official documents and notices.",
         fields=(
+            MaterialFieldSpec("title", "Document title"),
+            MaterialFieldSpec("body", "Document body"),
             MaterialFieldSpec("organization", "Organization"),
             MaterialFieldSpec("document_no", "Document number"),
             MaterialFieldSpec("issue_date", "Issue date"),
             MaterialFieldSpec("issuer", "Issuer", required=False),
             MaterialFieldSpec("recipient", "Recipient", required=False),
+            MaterialFieldSpec("attachment_note", "Attachment note", required=False),
             MaterialFieldSpec("document_type", "Document type", required=False),
             MaterialFieldSpec("security_level", "Security level", required=False),
             MaterialFieldSpec("urgency", "Urgency", required=False),
             MaterialFieldSpec("signer", "Signer", required=False),
             MaterialFieldSpec("copy_scope", "Copy scope", required=False),
+            MaterialFieldSpec("printing_org", "Printing organization", required=False),
+            MaterialFieldSpec("printing_date", "Printing date", required=False),
             MaterialFieldSpec("archive_status", "Archive status", required=False),
             MaterialFieldSpec("archive_no", "Archive number", required=False),
             MaterialFieldSpec("retention_period", "Retention period", required=False),
@@ -165,8 +213,24 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
             MaterialFieldSpec("source_file_manifest", "Source file manifest", required=False),
         ),
         asset_roles=(
-            MaterialAssetRoleSpec("diagram", "Technical diagram"),
-            MaterialAssetRoleSpec("figure", "Figure"),
+            MaterialAssetRoleSpec(
+                "diagram",
+                "Technical diagram",
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                min_items=1,
+                max_items=None,
+            ),
+            MaterialAssetRoleSpec(
+                "figure",
+                "Figure",
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                min_items=1,
+                max_items=None,
+            ),
         ),
         boundaries=(
             "does not verify technical correctness",
@@ -278,7 +342,15 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
             MaterialFieldSpec("total_score", "Total score"),
         ),
         asset_roles=(
-            MaterialAssetRoleSpec("question_figure", "Question figure", required=False),
+            MaterialAssetRoleSpec(
+                "question_figure",
+                "Question figure",
+                required=False,
+                cardinality="multiple",
+                source_kind="files",
+                max_items=None,
+                order_policy="metadata",
+            ),
         ),
         batch_mode="structured_source",
         boundaries=(
@@ -298,7 +370,15 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
         ),
         asset_roles=(
             MaterialAssetRoleSpec("handout_cover", "Handout cover", required=False),
-            MaterialAssetRoleSpec("teaching_diagram", "Teaching diagram", required=False),
+            MaterialAssetRoleSpec(
+                "teaching_diagram",
+                "Teaching diagram",
+                required=False,
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                max_items=None,
+            ),
         ),
         boundaries=(
             "does not make AI content generation a core scene capability",
@@ -337,25 +417,39 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
                 "application_form",
                 "Application form",
                 accepted_types=("pdf", "image", "docx"),
+                material_domain="attachment",
             ),
             MaterialAssetRoleSpec(
                 "budget_sheet",
                 "Budget sheet",
                 accepted_types=("pdf", "image", "xlsx"),
+                material_domain="attachment",
             ),
             MaterialAssetRoleSpec(
                 "team_resume",
                 "Team resume",
                 required=False,
                 accepted_types=("pdf", "image", "docx"),
+                material_domain="attachment",
             ),
             MaterialAssetRoleSpec(
                 "supporting_proof",
                 "Supporting proof",
                 required=False,
                 accepted_types=("pdf", "image"),
+                material_domain="attachment",
             ),
-            MaterialAssetRoleSpec("attachment", "Attachment", required=False, accepted_types=("image", "pdf")),
+            MaterialAssetRoleSpec(
+                "attachment",
+                "Attachment",
+                required=False,
+                accepted_types=("image", "pdf"),
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                max_items=None,
+                material_domain="attachment",
+            ),
         ),
         batch_mode="attachment_package",
         boundaries=(
@@ -483,8 +577,24 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
             MaterialFieldSpec("quote_boundary_signal", "Quote boundary signal", required=False),
         ),
         asset_roles=(
-            MaterialAssetRoleSpec("product_image", "Product image"),
-            MaterialAssetRoleSpec("diagram", "Product diagram", required=False),
+            MaterialAssetRoleSpec(
+                "product_image",
+                "Product image",
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                min_items=1,
+                max_items=None,
+            ),
+            MaterialAssetRoleSpec(
+                "diagram",
+                "Product diagram",
+                required=False,
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                max_items=None,
+            ),
         ),
         boundaries=(
             "does not promise marketing copy quality",
@@ -502,7 +612,15 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
             MaterialFieldSpec("case_approval_status", "Case approval status", required=False),
         ),
         asset_roles=(
-            MaterialAssetRoleSpec("case_image", "Case image", required=False),
+            MaterialAssetRoleSpec(
+                "case_image",
+                "Case image",
+                required=False,
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                max_items=None,
+            ),
         ),
         boundaries=(
             "does not verify customer claim truthfulness",
@@ -554,11 +672,6 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
                 required=False,
             ),
             MaterialFieldSpec(
-                "fixed_row_height_policy_id",
-                "Fixed row-height policy id",
-                required=False,
-            ),
-            MaterialFieldSpec(
                 "placeholder_residue_policy",
                 "Placeholder residue policy",
                 required=False,
@@ -596,12 +709,14 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
                 "Qualification certificate",
                 accepted_types=("image", "pdf"),
                 archive_dir="01_certificates",
+                material_domain="attachment",
             ),
             MaterialAssetRoleSpec(
                 "business_license",
                 "Business license",
                 accepted_types=("image", "pdf"),
                 archive_dir="02_business_license",
+                material_domain="attachment",
             ),
             MaterialAssetRoleSpec(
                 "attachment",
@@ -609,6 +724,11 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
                 required=False,
                 accepted_types=("image", "pdf"),
                 archive_dir="99_supporting_attachments",
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                max_items=None,
+                material_domain="attachment",
             ),
         ),
         batch_mode="attachment_package",
@@ -665,8 +785,19 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
                 "Source workbook",
                 required=False,
                 accepted_types=("xlsx",),
+                material_domain="attachment",
             ),
-            MaterialAssetRoleSpec("attachment", "Attachment", required=False, accepted_types=("image", "pdf")),
+            MaterialAssetRoleSpec(
+                "attachment",
+                "Attachment",
+                required=False,
+                accepted_types=("image", "pdf"),
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                max_items=None,
+                material_domain="attachment",
+            ),
         ),
         batch_mode="attachment_package",
         boundaries=(
@@ -709,7 +840,15 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
             MaterialFieldSpec("review_owner", "Review owner", required=False),
         ),
         asset_roles=(
-            MaterialAssetRoleSpec("figure", "Patent figure", required=False),
+            MaterialAssetRoleSpec(
+                "figure",
+                "Patent figure",
+                required=False,
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                max_items=None,
+            ),
         ),
         boundaries=(
             "does not promise patent legal quality",
@@ -756,7 +895,13 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
             ),
         ),
         asset_roles=(
-            MaterialAssetRoleSpec("term_table", "Terminology table", required=False, accepted_types=("image", "pdf", "xlsx")),
+            MaterialAssetRoleSpec(
+                "term_table",
+                "Terminology table",
+                required=False,
+                accepted_types=("image", "pdf", "xlsx"),
+                material_domain="attachment",
+            ),
         ),
         boundaries=(
             "does not guarantee translation quality",
@@ -804,8 +949,24 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
             MaterialFieldSpec("review_owner", "Review owner", required=False),
         ),
         asset_roles=(
-            MaterialAssetRoleSpec("table_source", "Table source", required=False, accepted_types=("xlsx", "pdf", "image")),
-            MaterialAssetRoleSpec("disclosure_attachment", "Disclosure attachment", required=False, accepted_types=("pdf", "image")),
+            MaterialAssetRoleSpec(
+                "table_source",
+                "Table source",
+                required=False,
+                accepted_types=("xlsx", "pdf", "image"),
+                material_domain="attachment",
+            ),
+            MaterialAssetRoleSpec(
+                "disclosure_attachment",
+                "Disclosure attachment",
+                required=False,
+                accepted_types=("pdf", "image"),
+                cardinality="multiple",
+                source_kind="directory",
+                recursive=True,
+                max_items=None,
+                material_domain="attachment",
+            ),
         ),
         batch_mode="attachment_package",
         boundaries=(

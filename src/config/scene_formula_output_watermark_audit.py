@@ -17,7 +17,7 @@ from src.config.control_contract_registry import (
     get_control_contract,
 )
 from src.config.plugin_manual_gate import list_plugin_manual_gates
-from src.config.scene_family_application import planned_family_is_application_boundary_only
+from src.config.scene_family_application import planned_family_is_plugin_boundary_only
 from src.config.scene_family_registry import (
     PlannedSceneFamily,
     list_planned_scene_families,
@@ -42,7 +42,11 @@ SCENE_FORMULA_OUTPUT_WATERMARK_SOURCE_MARKERS: tuple[
     (
         "scene_parameter_ownership",
         "src/config/scene_parameter_ownership.py",
-        ("formula_convert.output_mode", "watermark.enabled", "output.final_docx"),
+        (
+            "formula_convert.output_mode",
+            "watermark.enabled",
+            "delivery_presets.*.artifacts.final_docx",
+        ),
     ),
     (
         "control_contract_registry",
@@ -75,8 +79,8 @@ SCENE_FORMULA_OUTPUT_WATERMARK_SOURCE_MARKERS: tuple[
     ),
     (
         "output_execution",
-        "src/ui/panels/workbench/execution_runtime.py",
-        ("_uses_delivery_presets", "_delivery_preset_payload", "output_paths"),
+        "src/services/production_runtime/delivery_reporting.py",
+        ("should_force_delivery_presets", "delivery_preset_payload", "output_paths"),
     ),
     (
         "plugin_manual_gate",
@@ -521,12 +525,12 @@ _CAPABILITY_SPECS: tuple[FormulaOutputWatermarkCapabilitySpec, ...] = (
             "delivery_presets.*.content_visibility_rules",
             "delivery_presets.*.include_structured_intermediate",
             "delivery_presets.*.report_level",
-            "output.final_docx",
-            "output.compare_docx",
-            "output.report_json",
-            "output.report_markdown",
-            "output.material_manifest",
-            "output.material_package",
+            "delivery_presets.*.artifacts.final_docx",
+            "delivery_presets.*.artifacts.compare_docx",
+            "delivery_presets.*.artifacts.report_json",
+            "delivery_presets.*.artifacts.report_markdown",
+            "delivery_presets.*.artifacts.material_manifest",
+            "delivery_presets.*.artifacts.material_package",
         ),
         template_baseline_paths=(),
         control_contract_ids=(
@@ -651,7 +655,7 @@ def _family_row(family: PlannedSceneFamily) -> SceneFormulaOutputWatermarkFamily
     if not capability_ids:
         issue_ids.append("family_without_formula_output_watermark_route")
     status = "ready" if not issue_ids else "blocked"
-    if planned_family_is_application_boundary_only(family.family_id):
+    if planned_family_is_plugin_boundary_only(family.family_id):
         status = "boundary" if not issue_ids else "blocked"
     return SceneFormulaOutputWatermarkFamilyRow(
         family_id=family.family_id,
@@ -663,7 +667,7 @@ def _family_row(family: PlannedSceneFamily) -> SceneFormulaOutputWatermarkFamily
         formula_relevant="formula_policy" in capability_ids,
         output_relevant="output_delivery" in capability_ids,
         watermark_relevant="watermark_status" in capability_ids,
-        plugin_boundary_only=planned_family_is_application_boundary_only(family.family_id),
+        plugin_boundary_only=planned_family_is_plugin_boundary_only(family.family_id),
         delivery_preset_ids=family.delivery_presets,
         issue_ids=tuple(issue_ids),
         warning_ids=(),

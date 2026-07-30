@@ -711,6 +711,18 @@ class SceneMatrixDashboardReport:
         return "passed" if not self.issues else "failed"
 
     @property
+    def assurance_level(self) -> str:
+        """Describe what a green structural report can actually prove.
+
+        The dashboard combines registries, fixture declarations and source
+        marker scans.  Those are useful static traceability signals, but they
+        do not execute an end-to-end document workflow and therefore cannot
+        certify runtime behavior on their own.
+        """
+
+        return "static_traceability"
+
+    @property
     def pack_count(self) -> int:
         return len(self.rows)
 
@@ -755,6 +767,12 @@ class SceneMatrixDashboardReport:
     def to_payload(self) -> dict[str, object]:
         return {
             "status": self.status,
+            "assurance": {
+                "level": self.assurance_level,
+                "runtime_behavior_verified": False,
+                "release_readiness_verified": False,
+                "requires_behavioral_tests": True,
+            },
             "pack_filter": self.pack_filter,
             "family_filter": self.family_filter,
             "readiness_filter": self.readiness_filter,

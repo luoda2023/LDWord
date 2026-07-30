@@ -73,7 +73,7 @@ SCENE_RELEASE_PROJECTION_SURFACE_PARITY_SOURCE_MARKERS: tuple[
     ),
     (
         "summary_projection",
-        "src/ui/panels/scene_summary_projection.py",
+        "scripts/verify_scene_matrix_release_gate.py",
         (
             "release_projection_surface_parity_ready_count",
             "Release projection parity",
@@ -627,7 +627,7 @@ def _source_texts(root: Path) -> dict[str, str]:
             )
         ),
         "summary_projection": _read_text(
-            root / "src/ui/panels/scene_summary_projection.py"
+            root / "scripts/verify_scene_matrix_release_gate.py"
         ),
         "release_gate": _read_text(root / "scripts/verify_scene_matrix_release_gate.py"),
         "workflow": _read_text(

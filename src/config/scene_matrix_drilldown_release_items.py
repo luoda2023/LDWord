@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
 
 from src.config.scene_matrix_drilldown_models import (
@@ -849,7 +850,48 @@ def _release_acceptance_certificate_item() -> SceneMatrixDrilldownItem:
     )
 
 
+RELEASE_GOVERNANCE_ITEM_FACTORIES: dict[
+    str,
+    Callable[[], SceneMatrixDrilldownItem],
+] = {
+    "scene_boundary_guarded_completion_audit": _boundary_guarded_completion_item,
+    "scene_residual_warning_governance_audit": _residual_warning_governance_item,
+    "scene_boundary_readiness_reconciliation_audit": (
+        _boundary_readiness_reconciliation_item
+    ),
+    "scene_terminal_release_exception_audit": _terminal_release_exception_item,
+    "scene_boundary_subject_release_dossier_audit": (
+        _boundary_subject_release_dossier_item
+    ),
+    "scene_non_subject_release_trace_attribution_audit": (
+        _non_subject_release_trace_attribution_item
+    ),
+    "scene_release_trace_partition_guard_audit": _release_trace_partition_guard_item,
+    "scene_release_projection_surface_parity_audit": (
+        _release_projection_surface_parity_item
+    ),
+    "scene_boundary_subject_release_continuity_audit": (
+        _boundary_subject_release_continuity_item
+    ),
+    "scene_release_closure_ledger_audit": _release_closure_ledger_item,
+    "scene_boundary_maturity_release_envelope_audit": (
+        _boundary_maturity_release_envelope_item
+    ),
+    "scene_retained_gap_exit_criteria_audit": _retained_gap_exit_criteria_item,
+    "scene_release_residual_ratio_ledger_audit": (
+        _release_residual_ratio_ledger_item
+    ),
+    "scene_release_residual_explanation_audit": (
+        _release_residual_explanation_item
+    ),
+    "scene_release_acceptance_certificate_audit": (
+        _release_acceptance_certificate_item
+    ),
+}
+
+
 __all__ = [
+    "RELEASE_GOVERNANCE_ITEM_FACTORIES",
     "_boundary_guarded_completion_item",
     "_boundary_maturity_release_envelope_item",
     "_boundary_readiness_reconciliation_item",

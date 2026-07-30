@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.config.style_variant_semantics import STYLE_VARIANTS
-
 
 @dataclass(frozen=True, slots=True)
 class StyleFieldDescriptor:
@@ -22,7 +20,6 @@ class StyleFieldDescriptor:
     visible_in_standard_mode: bool
     visible_in_diagnostic_mode: bool
     template_path: str
-    scene_editor_path: str
     control_contract_key: str = ""
 
 
@@ -211,19 +208,6 @@ def canonical_paragraph_style_field_id(field_id: str) -> str:
             target = target[len(prefix):]
             break
 
-    for prefix in (
-        "scene.section_styles.",
-        "section_styles.",
-    ):
-        if target.startswith(prefix):
-            parts = target.split(".")
-            if len(parts) >= 3:
-                target = parts[-1]
-            break
-
-    if target.startswith("section_style."):
-        target = target[len("section_style."):]
-
     if target in STYLE_FIELD_ALIASES:
         return STYLE_FIELD_ALIASES[target]
 
@@ -255,7 +239,6 @@ def style_field_descriptor(field_id: str) -> StyleFieldDescriptor | None:
         visible_in_standard_mode=True,
         visible_in_diagnostic_mode=True,
         template_path=f"template.styles.body.{canonical}",
-        scene_editor_path=f"section_style.{canonical}",
         control_contract_key=STYLE_FIELD_CONTROL_CONTRACT_IDS.get(canonical, ""),
     )
 
@@ -374,55 +357,6 @@ def template_style_field_path(field_id: str, *, style_id: str = "body") -> str:
     return f"template.styles.{style_id}.{canonical}" if canonical else ""
 
 
-def scene_style_field_path(variant_key: str, field_id: str) -> str:
-    """Return the normalized scene section-style path for a field."""
-
-    canonical = canonical_paragraph_style_field_id(field_id)
-    variant = str(variant_key or "").strip()
-    return f"scene.section_styles.{variant}.{canonical}" if variant and canonical else ""
-
-
-def scene_style_navigation_target_from_field_id(field_id: str) -> tuple[str, str]:
-    """Return ``(variant_key, editor_field)`` for a scene section-style path."""
-
-    target = str(field_id or "").strip()
-    if not target:
-        return "", ""
-
-    for prefix in ("scene.section_styles.", "section_styles."):
-        if target.startswith(prefix):
-            tail = target[len(prefix):].strip()
-            variant, _separator, editor_field = tail.partition(".")
-            variant_key = _scene_style_variant_key(variant)
-            return (variant_key, editor_field) if variant_key else ("", "")
-
-    for variant in STYLE_VARIANTS:
-        if target == variant.key:
-            return variant.key, ""
-        prefix = f"{variant.key}."
-        if target.startswith(prefix):
-            return variant.key, target[len(prefix):]
-
-    return "", ""
-
-
-def scene_style_policy_key_from_field_id(field_id: str) -> str:
-    """Return the scene section-style policy key for a navigation field path."""
-
-    variant_key, _editor_field = scene_style_navigation_target_from_field_id(field_id)
-    return variant_key
-
-
-def _scene_style_variant_key(value: str) -> str:
-    target = str(value or "").strip()
-    if not target:
-        return ""
-    for variant in STYLE_VARIANTS:
-        if variant.key == target:
-            return target
-    return ""
-
-
 def _group_from_layout_slot(slot: str) -> str:
     group, _row, _column = _split_layout_slot(slot)
     return group
@@ -460,9 +394,6 @@ __all__ = [
     "StyleFieldGroupDescriptor",
     "StyleFieldLayoutItem",
     "canonical_paragraph_style_field_id",
-    "scene_style_field_path",
-    "scene_style_navigation_target_from_field_id",
-    "scene_style_policy_key_from_field_id",
     "style_field_control_label",
     "style_field_descriptor",
     "style_field_group_descriptor",

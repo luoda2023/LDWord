@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import fields, is_dataclass
+from functools import lru_cache
 from typing import Any, Mapping, MutableMapping, TypeVar, get_args, get_origin, get_type_hints
 
 T = TypeVar("T")
@@ -22,10 +23,11 @@ def dict_to_dataclass(cls: type[T], data: Mapping[str, Any] | None) -> T:
     kwargs: dict[str, Any] = {}
     cls_fields = {f.name: f for f in fields(cls)}
 
-    try:
-        hints = get_type_hints(cls)
-    except Exception:
-        hints = {}
+    # Forward-reference resolution is part of the materialization contract.
+    # Falling back to ``Field.type`` under ``from __future__ import annotations``
+    # would leave nested mappings as raw dictionaries and create a delayed,
+    # much harder-to-diagnose runtime break.
+    hints = _resolved_type_hints(cls)
 
     for name, field_def in cls_fields.items():
         if name not in data:
@@ -36,6 +38,21 @@ def dict_to_dataclass(cls: type[T], data: Mapping[str, Any] | None) -> T:
         kwargs[name] = _materialize_value(field_type, value)
 
     return cls(**kwargs)
+
+
+@lru_cache(maxsize=None)
+def _resolved_type_hints(dataclass_type: type) -> dict[str, Any]:
+    """Resolve immutable class annotations once per process.
+
+    Template and plan loading materializes the same nested dataclass types many
+    times while a mode switch refreshes selectors.  ``get_type_hints``
+    recompiles forward references on every call, so leaving it uncached turns a
+    mode switch into tens of thousands of redundant annotation evaluations.
+    Exceptions intentionally propagate and are not cached, preserving the
+    fail-closed materialization contract.
+    """
+
+    return get_type_hints(dataclass_type)
 
 
 def deep_merge_dict(

@@ -52,25 +52,10 @@ from src.config.scene_matrix_drilldown_models import (
     SceneMatrixDrilldownRow,
 )
 from src.config.scene_matrix_drilldown_release_items import (
-    _boundary_guarded_completion_item,
-    _boundary_maturity_release_envelope_item,
-    _boundary_readiness_reconciliation_item,
-    _boundary_subject_release_continuity_item,
-    _boundary_subject_release_dossier_item,
-    _non_subject_release_trace_attribution_item,
-    _release_acceptance_certificate_item,
-    _release_closure_ledger_item,
-    _release_projection_surface_parity_item,
-    _release_residual_explanation_item,
-    _release_residual_ratio_ledger_item,
-    _release_trace_partition_guard_item,
-    _residual_warning_governance_item,
-    _retained_gap_exit_criteria_item,
-    _terminal_release_exception_item,
+    RELEASE_GOVERNANCE_ITEM_FACTORIES,
 )
 from src.config.scene_release_governance_registry import (
     SCENE_RELEASE_GOVERNANCE_DASHBOARD_SOURCE_IDS,
-    scene_release_governance_report_spec,
 )
 from src.config.scene_object_preflight_action_audit import (
     build_scene_object_preflight_action_audit_report,
@@ -101,11 +86,9 @@ SceneMatrixDrilldownItemFactory = Callable[[], SceneMatrixDrilldownItem]
 def _release_governance_item_factory(
     report_id: str,
 ) -> SceneMatrixDrilldownItemFactory:
-    spec = scene_release_governance_report_spec(report_id)
-    factory_name = f"_{spec.report_attribute.removesuffix('_report')}_item"
-    factory = globals().get(factory_name)
-    if not callable(factory):
-        raise KeyError(f"Missing release governance drilldown item: {factory_name}")
+    factory = RELEASE_GOVERNANCE_ITEM_FACTORIES.get(report_id)
+    if factory is None:
+        raise KeyError(f"Missing release governance drilldown item: {report_id}")
     return factory
 
 

@@ -32,6 +32,7 @@ N2_161_REQUIRED_TASK_IDS: tuple[str, ...] = (
     "chinese_academic_thesis",
     "english_journal_submission",
     "exam_teaching_versions",
+    "bidding_document_authoring",
     "bidding_qualification_archive",
     "official_policy_documents",
     "technical_long_document",
@@ -212,15 +213,28 @@ HIGH_FREQUENCY_TASK_LEXICON: tuple[HighFrequencyTaskLexiconEntry, ...] = (
         non_core_boundary="AI quality and complex diagrams stay outside core.",
     ),
     _task(
+        "bidding_document_authoring",
+        "Bidding document authoring",
+        "executable_scene",
+        "matched",
+        "标书正本副本盖章",
+        route_ids=("bidding_document_authoring",),
+        pack_ids=("bidding_materials",),
+        sample_ids=("bidding_original_copy",),
+    ),
+    _task(
         "bidding_qualification_archive",
         "Bidding qualification archive",
         "planned_family",
         "matched",
-        "标书正本副本盖章",
+        "投标资质证书材料",
         route_ids=("bidding_qualification_archive",),
         pack_ids=("bidding_materials",),
         family_ids=("qualification_archive_packages",),
-        sample_ids=("bidding_original_copy", "bidding_consortium_seal_archive"),
+        sample_ids=(
+            "bidding_qualification_certificate",
+            "bidding_consortium_seal_archive",
+        ),
     ),
     _task(
         "official_policy_documents",
@@ -840,7 +854,6 @@ def _phrase_audit(
     phrase: str,
     result: NaturalRequestRouteResult,
 ) -> HighFrequencyTaskPhraseAudit:
-    selected = result.selected_route
     return HighFrequencyTaskPhraseAudit(
         task_id=task_id,
         phrase=phrase,

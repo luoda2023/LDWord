@@ -18,7 +18,7 @@ from src.config.scene_coverage_manifest import (
 )
 from src.config.scene_family_application import (
     apply_planned_scene_family_defaults,
-    planned_family_is_application_boundary_only,
+    planned_family_is_plugin_boundary_only,
 )
 from src.config.scene_family_registry import (
     PlannedSceneFamily,
@@ -673,7 +673,7 @@ def _family_row(family: PlannedSceneFamily) -> SceneCountProfileFamilyRow:
         issue_ids.append("executable_default_not_declared")
     if not family.count_profiles:
         warning_ids.append("no_count_profile_declared")
-    plugin_boundary_only = planned_family_is_application_boundary_only(family.family_id)
+    plugin_boundary_only = planned_family_is_plugin_boundary_only(family.family_id)
     if plugin_boundary_only:
         status = "boundary"
     elif issue_ids:

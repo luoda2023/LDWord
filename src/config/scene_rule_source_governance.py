@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.config.journal_rule_source_registry import get_journal_rule_source
+from src.config.journal_rule_source_catalog import get_journal_rule_source
 from src.config.material_schema_registry import MATERIAL_SCHEMA_MAP
 from src.config.plugin_manual_gate import plugin_manual_gate_for_pack
 from src.config.scene_coverage_manifest import SCENE_COVERAGE_PACK_MAP
@@ -152,7 +152,7 @@ SCENE_RULE_SOURCE_SPECS: tuple[SceneRuleSourceSpec, ...] = (
         report_surfaces=(
             "count report",
             "compliance report",
-            "Workbench issue queue",
+            "input-source validation summary",
             "scene overview school rule evidence",
             "section classifier confirmation report",
         ),
@@ -173,7 +173,7 @@ SCENE_RULE_SOURCE_SPECS: tuple[SceneRuleSourceSpec, ...] = (
         count_profile_ids=("journal_words", "journal_display_items"),
         material_schema_ids=("journal_submission_materials_v1",),
         source_references=(
-            "src/config/journal_rule_source_registry.py",
+            "src/config/journal_rule_source_catalog.py",
             "count_profiles/builtin.json",
         ),
         upstream_source_ids=("journal_en_default_rules",),

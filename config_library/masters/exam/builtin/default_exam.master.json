@@ -1,0 +1,86 @@
+{
+  "master_id": "default_exam",
+  "mode_id": "exam",
+  "label": "A4 标准卷面",
+  "family": "exam",
+  "source_type": "builtin",
+  "docx_path": "config_library/masters/exam/builtin/default_exam_v20.docx",
+  "summary": "A4 标准卷面，含标题区、考试信息栏、注意事项、题目区和页脚。",
+  "status": "内置，可直接使用",
+  "template_config_id": "default",
+  "compatible_template_config_ids": [
+    "default"
+  ],
+  "master_version": "exam-master-v20-free-answer-area-2026-07-06",
+  "placeholder_contract": {
+    "required": [
+      "af_title",
+      "af_questions"
+    ],
+    "optional": [
+      "af_version",
+      "af_subject",
+      "af_grade",
+      "af_duration",
+      "af_total_score",
+      "af_answer_area"
+    ],
+    "runtime_fields": [
+      "title",
+      "subject",
+      "grade",
+      "duration",
+      "total_score"
+    ],
+    "generated_fields": [
+      "version"
+    ],
+    "runtime_inserted_placeholders": [],
+    "legacy_aliases": [
+      "legacy_exam_title",
+      "legacy_exam_version",
+      "legacy_exam_metadata",
+      "legacy_exam_questions_marker",
+      "legacy_exam_answer_area_marker"
+    ]
+  },
+  "placeholder_index": {
+    "sha256": "8dfeeea204a2338c29c9eaabf742af7092ff39ee30af05bf61f3b7e0030c69d9",
+    "scanner_version": "master-placeholder-index-v1",
+    "placeholder_ids": [
+      "af_title",
+      "af_version",
+      "af_subject",
+      "af_grade",
+      "af_duration",
+      "af_total_score",
+      "af_questions",
+      "af_answer_area"
+    ],
+    "raw_occurrence_counts": {
+      "af_title": 1,
+      "af_version": 1,
+      "af_subject": 1,
+      "af_grade": 1,
+      "af_duration": 1,
+      "af_total_score": 1,
+      "af_questions": 1,
+      "af_answer_area": 1
+    },
+    "replaceable_occurrence_counts": {
+      "af_title": 1,
+      "af_version": 1,
+      "af_subject": 1,
+      "af_grade": 1,
+      "af_duration": 1,
+      "af_total_score": 1,
+      "af_questions": 1,
+      "af_answer_area": 1
+    },
+    "reference_page_excluded": false
+  },
+  "boundaries": [
+    "does not judge exam content quality",
+    "does not replace manual review of scoring rules"
+  ]
+}

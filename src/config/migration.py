@@ -14,6 +14,7 @@ from typing import Any, Mapping
 
 from src.config.heading_normalize import normalize_heading_numbering_payload
 from src.config.style_semantics import normalize_font_size_display_text, normalize_spacing_unit
+from src.modules.default_switches import default_module_switches
 from src.shared.engine.font_resolver import canonicalize_font_name
 from src.shared.engine.units import cn_size_to_pt
 
@@ -37,13 +38,12 @@ LEGACY_MODULE_NAME_ALIASES: dict[str, str] = {
 }
 
 def _build_default_module_switches() -> dict[str, bool]:
-    """Derive default switches from ModuleMeta.enabled_by_default (single source of truth)."""
-    try:
-        from src.modules.registry import ALL_MODULES
-        return {cls.meta.name: cls.meta.enabled_by_default for cls in ALL_MODULES}
-    except ImportError:
-        # 回退: 仅在极早期加载 / 测试隔离场景触发
-        return {}
+    """Read the cycle-free canonical module-default catalog."""
+
+    switches = default_module_switches()
+    if not switches:
+        raise RuntimeError("module registry contains no default switch metadata")
+    return switches
 
 
 # 延迟计算的缓存
@@ -55,7 +55,7 @@ def get_default_module_switches() -> dict[str, bool]:
     global _default_switches_cache
     if _default_switches_cache is None:
         _default_switches_cache = _build_default_module_switches()
-    return _default_switches_cache
+    return dict(_default_switches_cache)
 
 
 def normalize_module_name(module_name: str) -> str:
@@ -75,15 +75,27 @@ def normalize_module_switches(
 
     规则：
     1. 历史别名转换为当前注册名
-    2. 未实现 / 未注册的遗留 key 直接丢弃
+    2. 未实现 / 未注册的 key 明确拒绝
     3. 缺失的已注册模块补默认值
     """
     normalized = dict(defaults if defaults is not None else get_default_module_switches())
+    canonical_items: list[tuple[str, bool]] = []
+    unknown_names: list[str] = []
 
     for raw_name, enabled in (module_switches or {}).items():
-        canonical_name = normalize_module_name(str(raw_name))
-        if canonical_name in normalized:
-            normalized[canonical_name] = bool(enabled)
+        raw_name_text = str(raw_name)
+        canonical_name = normalize_module_name(raw_name_text)
+        if canonical_name not in normalized:
+            unknown_names.append(raw_name_text)
+            continue
+        canonical_items.append((canonical_name, bool(enabled)))
+
+    if unknown_names:
+        names = ", ".join(sorted(dict.fromkeys(unknown_names)))
+        raise ValueError(f"unknown module switch key(s): {names}")
+
+    for canonical_name, enabled in canonical_items:
+        normalized[canonical_name] = enabled
 
     return normalized
 
@@ -295,7 +307,6 @@ _CANONICAL_TEMPLATE_SECTION_KEYS = (
     "formula_table",
     "formula_style",
     "equation_numbering",
-    "output",
 )
 
 _LEGACY_FLAT_TABLE_KEYS = {
@@ -817,9 +828,12 @@ _SCENE_META_KEYS = (
     "category",
     "category_label",
     "scene_id",
+    "mode_id",
+    "display_order",
     "template_id",
-    "default_template_id",
     "compatible_template_ids",
+    "master_id",
+    "default_material_profile_id",
 )
 
 _LEGACY_SCENE_OPTION_BLOCKS: tuple[tuple[str, str | None, str | None], ...] = (
@@ -832,7 +846,7 @@ _LEGACY_SCENE_OPTION_BLOCKS: tuple[tuple[str, str | None, str | None], ...] = (
     ("equation_table_format", None, "equation_table_format"),
 )
 
-_SCENE_DIRECT_FEATURE_ROOTS = ("header_footer", "toc", "reference_style")
+_SCENE_DIRECT_FEATURE_ROOTS = ("reference_style",)
 
 _SCENE_LIFTED_TEMPLATE_KEYS = {
     "page_setup",
@@ -841,30 +855,11 @@ _SCENE_LIFTED_TEMPLATE_KEYS = {
     "heading_numbering_v2",
     "heading_model",
     "heading",
-    "toc",
-    "caption",
-    "table",
     "section",
-    "header_footer",
     "watermark",
     "reference_style",
-    "formula_table",
     "formula_style",
     "equation_numbering",
-    "output",
-    "normal_table_layout_mode",
-    "normal_table_smart_levels",
-    "normal_table_border_mode",
-    "table_border_width_pt",
-    "color_table_accent",
-    "color_table_variant",
-    "three_line_header_width_pt",
-    "three_line_bottom_width_pt",
-    "normal_table_line_spacing_mode",
-    "normal_table_repeat_header",
-    "update_header",
-    "update_page_number",
-    "update_header_line",
 }
 
 
@@ -877,19 +872,24 @@ def normalize_scene_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]
         if key in raw:
             normalized[key] = copy.deepcopy(raw[key])
 
-    if isinstance(raw.get("format_scope"), Mapping):
-        normalized["format_scope"] = copy.deepcopy(dict(raw["format_scope"]))
-    if isinstance(raw.get("available_sections"), list):
-        normalized["available_sections"] = copy.deepcopy(list(raw["available_sections"]))
-    if isinstance(raw.get("application_boundary"), Mapping):
-        normalized["application_boundary"] = _copy_mapping(raw["application_boundary"])
-    elif isinstance(raw.get("format_scope"), Mapping):
-        normalized["application_boundary"] = _infer_application_boundary_from_format_scope(
-            raw["format_scope"]
-        )
+    if isinstance(raw.get("document_scope"), Mapping):
+        normalized["document_scope"] = {
+            key: copy.deepcopy(value)
+            for key, value in raw["document_scope"].items()
+            if key in {"mode", "selected_roles"}
+        }
     if isinstance(raw.get("exam_paper"), Mapping):
-        normalized["exam_paper"] = _copy_mapping(raw["exam_paper"])
-
+        normalized["exam_paper"] = {
+            key: copy.deepcopy(value)
+            for key, value in raw["exam_paper"].items()
+            if key
+            in {
+                "question_structure_mode",
+                "answer_policy",
+                "custom_blank_styles",
+                "runtime_fields",
+            }
+        }
     input_source_profile = raw.get("input_source_profile")
     if not isinstance(input_source_profile, Mapping):
         input_source_profile = raw.get("input_sources")
@@ -975,13 +975,12 @@ def normalize_scene_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]
     direct_feature_payloads, remaining_overrides = _lift_scene_direct_feature_overrides(
         merged_overrides
     )
+    remaining_overrides = {
+        key: value
+        for key, value in remaining_overrides.items()
+        if key != "output" and not str(key).startswith("output.")
+    }
 
-    if "header_footer" in direct_feature_payloads:
-        normalized["header_footer"] = _normalize_header_footer_payload(
-            direct_feature_payloads["header_footer"]
-        )
-    if "toc" in direct_feature_payloads:
-        normalized["toc"] = direct_feature_payloads["toc"]
     if "reference_style" in direct_feature_payloads:
         normalized["reference_style"] = _normalize_reference_style_payload(
             direct_feature_payloads["reference_style"]
@@ -992,62 +991,15 @@ def normalize_scene_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]
 
     compatible_template_ids = normalized.get("compatible_template_ids")
     if isinstance(compatible_template_ids, list):
-        normalized["compatible_template_ids"] = [
-            str(item).strip()
-            for item in compatible_template_ids
-            if str(item or "").strip()
-        ]
-
-    default_template_id = str(normalized.get("default_template_id", "") or "").strip()
-    template_id = str(normalized.get("template_id", "") or "").strip()
-    if not default_template_id and template_id:
-        normalized["default_template_id"] = template_id
-    if not template_id and default_template_id:
-        normalized["template_id"] = default_template_id
-    if not normalized.get("compatible_template_ids"):
-        seed = str(
-            normalized.get("template_id")
-            or normalized.get("default_template_id")
-            or ""
-        ).strip()
-        if seed:
-            normalized["compatible_template_ids"] = [seed]
+        normalized["compatible_template_ids"] = list(
+            dict.fromkeys(
+                str(item).strip()
+                for item in compatible_template_ids
+                if str(item or "").strip()
+            )
+        )
 
     return normalized
-
-
-def _infer_application_boundary_from_format_scope(
-    format_scope: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Infer the new high-level boundary from legacy section gates."""
-
-    raw_mode = str(format_scope.get("mode") or "").strip()
-    if raw_mode in {
-        "follow_template",
-        "body_only",
-        "full_document",
-        "confirm_before_apply",
-    }:
-        return {
-            "mode": raw_mode,
-            "confirm_before_apply": raw_mode == "confirm_before_apply",
-        }
-    if raw_mode in {"manual", "manual_review", "confirm"}:
-        return {"mode": "confirm_before_apply", "confirm_before_apply": True}
-
-    sections = format_scope.get("sections")
-    if not isinstance(sections, Mapping) or not sections:
-        return {"mode": "follow_template", "confirm_before_apply": False}
-
-    enabled = {str(key) for key, value in sections.items() if bool(value)}
-    total = len(sections)
-    if enabled == {"body"}:
-        return {"mode": "body_only", "confirm_before_apply": False}
-    if len(enabled) == total:
-        return {"mode": "full_document", "confirm_before_apply": False}
-    if len(enabled) >= max(3, total // 2):
-        return {"mode": "follow_template", "confirm_before_apply": False}
-    return {"mode": "confirm_before_apply", "confirm_before_apply": True}
 
 
 def _extract_switches_from_capabilities(
@@ -1058,20 +1010,13 @@ def _extract_switches_from_capabilities(
     return {
         normalize_module_name(str(name)): bool(enabled)
         for name, enabled in capabilities.items()
-        if normalize_module_name(str(name)) in get_default_module_switches()
     }
 
 
 def _extract_switches_from_pipeline(pipeline: Any) -> dict[str, bool]:
     if not isinstance(pipeline, list):
         return {}
-
-    normalized: dict[str, bool] = {}
-    for name in pipeline:
-        canonical = normalize_module_name(str(name))
-        if canonical in get_default_module_switches():
-            normalized[canonical] = True
-    return normalized
+    return {normalize_module_name(str(name)): True for name in pipeline}
 
 
 def _extract_template_overrides_from_payload(

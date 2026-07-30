@@ -53,7 +53,7 @@ SCENE_PRODUCT_MATURITY_UPGRADE_SOURCE_MARKERS: tuple[
     ),
     (
         "scene_summary_projection",
-        "src/ui/panels/scene_summary_projection.py",
+        "scripts/verify_scene_matrix_release_gate.py",
         (
             "scene_matrix_readiness",
             "maturity_upgrade_l5_blocked_subject_count",

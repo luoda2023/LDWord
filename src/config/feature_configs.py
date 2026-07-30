@@ -485,7 +485,6 @@ class HeaderFooterConfig:
 @dataclass
 class TocConfig:
     mode: str = "word_native"   # "word_native" | "plain"
-    enabled: bool = True
     max_level: int = 3
     insert_position: str = "auto"   # "auto" | "after_cover" | paragraph index
 
@@ -610,3 +609,20 @@ class OutputConfig:
     report_markdown: bool = True
     material_manifest: bool = False
     material_package: bool = False
+    review_pdf: bool = False
+
+
+def disabled_output_config() -> OutputConfig:
+    """Return an execution projection that authorizes no artifact writes."""
+
+    return OutputConfig(
+        final_docx=False,
+        compare_docx=False,
+        compare_text=False,
+        compare_formatting=False,
+        report_json=False,
+        report_markdown=False,
+        material_manifest=False,
+        material_package=False,
+        review_pdf=False,
+    )
