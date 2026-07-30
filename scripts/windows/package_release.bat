@@ -64,6 +64,13 @@ echo [4/6] Build release package from main.py
     --hidden-import src.ui.panels.theme_panel ^
     --hidden-import src.ui.panels.workbench.batch_generation_detail ^
     --hidden-import src.ui.panels.workbench.batch_generation_source_area ^
+    --hidden-import src.ui.panels.workbench.material_suite_generation_detail ^
+    --hidden-import src.ui.panels.workbench.material_suite_workbench_controller ^
+    --hidden-import src.material_suite.plan ^
+    --hidden-import src.material_suite.runner ^
+    --hidden-import src.config.material_package_v6 ^
+    --hidden-import src.config.material_scope ^
+    --hidden-import src.config.material_import_draft ^
     --hidden-import src.shared.ui.button_style ^
     --hidden-import src.shared.ui.dashed_separator ^
     --hidden-import src.shared.ui.detail_pane_controller ^

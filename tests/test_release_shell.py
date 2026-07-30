@@ -204,6 +204,19 @@ def test_windows_package_script_builds_pyside6_release_and_copies_notices():
     assert '--hidden-import src.ui.panels.theme_panel' in script
     assert '--hidden-import src.ui.panels.workbench.batch_generation_detail' in script
     assert '--hidden-import src.ui.panels.workbench.batch_generation_source_area' in script
+    assert (
+        '--hidden-import src.ui.panels.workbench.material_suite_generation_detail'
+        in script
+    )
+    assert (
+        '--hidden-import src.ui.panels.workbench.material_suite_workbench_controller'
+        in script
+    )
+    assert "--hidden-import src.material_suite.plan" in script
+    assert "--hidden-import src.material_suite.runner" in script
+    assert "--hidden-import src.config.material_package_v6" in script
+    assert "--hidden-import src.config.material_scope" in script
+    assert "--hidden-import src.config.material_import_draft" in script
     assert '--exclude-module PySide6.QtGraphs' in script
     assert '--exclude-module PySide6.QtGraphsWidgets' in script
     assert '--exclude-module PySide6.QtHttpServer' in script

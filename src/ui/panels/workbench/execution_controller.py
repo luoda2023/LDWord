@@ -13,6 +13,7 @@ class WorkbenchExecutionController:
         execution_adapter,
         quick_execution_detail,
         batch_generation_detail=None,
+        suite_generation_detail=None,
         *,
         refresh_navigation: Callable[[], None] | None = None,
         refresh_quick_execute_card: Callable[[], None] | None = None,
@@ -22,6 +23,7 @@ class WorkbenchExecutionController:
         self._execution_adapter = execution_adapter
         self._quick_execution_detail = quick_execution_detail
         self._batch_generation_detail = batch_generation_detail
+        self._suite_generation_detail = suite_generation_detail
         self._refresh_navigation = (
             refresh_navigation
             or refresh_quick_execute_card
@@ -33,11 +35,13 @@ class WorkbenchExecutionController:
         self._feedback_target = "single"
 
     def set_feedback_target(self, target: str) -> None:
-        if target not in {"single", "batch"}:
+        if target not in {"single", "batch", "suite"}:
             raise ValueError(f"Unsupported execution feedback target: {target}")
         self._feedback_target = target
 
     def _feedback_surface(self):
+        if self._feedback_target == "suite" and self._suite_generation_detail is not None:
+            return self._suite_generation_detail
         if self._feedback_target == "batch" and self._batch_generation_detail is not None:
             return self._batch_generation_detail
         return self._quick_execution_detail
@@ -61,6 +65,8 @@ class WorkbenchExecutionController:
         self._quick_execution_detail.set_execute_enabled(False)
         if self._batch_generation_detail is not None:
             self._batch_generation_detail.set_execute_enabled(False)
+        if self._suite_generation_detail is not None:
+            self._suite_generation_detail.set_execute_enabled(False)
         target.set_execution_progress(
             self._execution_adapter.build_progress_state(
                 stage_text="Starting",
@@ -133,4 +139,6 @@ class WorkbenchExecutionController:
         self._quick_execution_detail.set_execute_enabled(self._has_ready_document())
         if self._batch_generation_detail is not None:
             self._batch_generation_detail.set_execute_enabled(True)
+        if self._suite_generation_detail is not None:
+            self._suite_generation_detail.set_execute_enabled(True)
         self._refresh_navigation()

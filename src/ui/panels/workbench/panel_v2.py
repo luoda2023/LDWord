@@ -64,6 +64,8 @@ from .feature_detail_panes import (
 from .navigation_controller import WorkbenchNavigationController
 
 from .quick_execution_detail import QuickExecutionDetail
+from .material_suite_generation_detail import MaterialSuiteGenerationDetail
+from .material_suite_workbench_controller import MaterialSuiteWorkbenchController
 
 from src.config.scene_presets import (
     CAPABILITY_FEATURE_CARD_DEFINITIONS,
@@ -159,6 +161,7 @@ class WorkbenchPanel(BasePanel):
 
         "quick_execute": ("\u5feb\u901f\u6267\u884c", "zap"),
         "batch_generate": ("批量生成", "layers"),
+        "material_suite_generate": ("成套生成", "package"),
 
     }
     CARD_DEFINITIONS.update(CAPABILITY_FEATURE_CARD_DEFINITIONS)
@@ -264,6 +267,7 @@ class WorkbenchPanel(BasePanel):
         self._batch_generation_detail.set_work_mode(
             self.bridge.current_work_mode_id()
         )
+        self._suite_generation_detail = MaterialSuiteGenerationDetail(self)
 
         # Feature detail panes mapped to new capability group IDs
         self._table_chart_detail = TableChartDetailPane(self)
@@ -301,6 +305,7 @@ class WorkbenchPanel(BasePanel):
         }
         if self._batch_generation_detail is not None:
             detail_map["batch_generate"] = self._batch_generation_detail
+        detail_map["material_suite_generate"] = self._suite_generation_detail
 
         self._details = DetailPaneController(
 
@@ -346,6 +351,7 @@ class WorkbenchPanel(BasePanel):
 
             self._quick_execution_detail,
             self._batch_generation_detail,
+            self._suite_generation_detail,
 
             card_definitions=self.CARD_DEFINITIONS,
 
@@ -363,6 +369,7 @@ class WorkbenchPanel(BasePanel):
 
             self._quick_execution_detail,
             self._batch_generation_detail,
+            self._suite_generation_detail,
 
             refresh_navigation=self._refresh_fixed_cards,
 
@@ -370,6 +377,19 @@ class WorkbenchPanel(BasePanel):
 
             has_ready_document=self._document_paths.has_selected_document,
 
+        )
+        self._suite_generation_flow = MaterialSuiteWorkbenchController(
+            self._suite_generation_detail,
+            self._execution,
+            start_worker=self._start_worker_from_build,
+            active_worker=lambda: self._execution_worker,
+            cancel_execution=self._cancel_execution,
+            refresh_navigation=self._refresh_fixed_cards,
+            publish_material_selection=(
+                self.bridge.set_current_material_batch_selection
+            ),
+            open_material_workspace=lambda: self._emit_panel_navigation("assets"),
+            worker_parent=self,
         )
 
     def _create_navigation_cards(self) -> None:
@@ -478,6 +498,9 @@ class WorkbenchPanel(BasePanel):
             self._batch_generation_detail.set_material_batch_selection(
                 self.bridge.current_material_batch_selection()
             )
+        self._suite_generation_flow.apply_material_selection(
+            self.bridge.current_material_batch_selection()
+        )
 
     def _connect_signals(self) -> None:
 
@@ -1091,6 +1114,7 @@ class WorkbenchPanel(BasePanel):
         if self._batch_generation_detail is not None:
             self._batch_generation_detail.set_material_batch_selection(selection)
             self._refresh_batch_generate_card()
+        self._suite_generation_flow.apply_material_selection(selection)
 
     def _sync_material_context_from_detail(self, context) -> None:
 

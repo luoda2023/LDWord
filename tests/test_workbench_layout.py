@@ -42,13 +42,14 @@ def test_workbench_panel_uses_v2_master_detail_shell():
         panel.close()
 
 
-def test_workbench_panel_starts_with_single_and_batch_fixed_cards():
+def test_workbench_panel_starts_with_all_fixed_workbench_functions():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
         assert list(panel._navigation_cards) == [
             "quick_execute",
             "batch_generate",
+            "material_suite_generate",
         ]
         assert not hasattr(panel, "_config_management_detail")
     finally:

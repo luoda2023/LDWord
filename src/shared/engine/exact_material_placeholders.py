@@ -7,8 +7,8 @@ this scanner so neither side can silently reintroduce legacy bare tokens.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Mapping, Sequence
 
 from docx.oxml.ns import qn
 
@@ -20,7 +20,6 @@ from src.shared.engine.material_token_contract import (
     material_token,
     parse_material_token,
 )
-
 
 EXACT_PLACEHOLDER_PATTERN = MATERIAL_TOKEN_PATTERN
 
@@ -87,7 +86,9 @@ def replace_document_exact_placeholders(
     """
 
     timeline_ids = {
-        str(item or "").strip() for item in timeline_field_keys if str(item or "").strip()
+        str(item or "").strip()
+        for item in timeline_field_keys
+        if str(item or "").strip()
     }
     replacements: dict[str, str] = {}
     token_identifiers: dict[str, str] = {}
@@ -121,14 +122,37 @@ def replace_document_exact_placeholders(
         for token, count in paragraph_counts.items():
             counts[token] += count
     replaced_keys = [
-        token_identifiers[token]
-        for token, count in counts.items()
-        if count
+        token_identifiers[token] for token, count in counts.items() if count
     ]
     return ExactMaterialReplacementResult(
         total_replacements=sum(counts.values()),
         replaced_keys=tuple(replaced_keys),
     )
+
+
+def replace_document_literal_placeholders(
+    document,
+    replacements: Mapping[str, object],
+) -> int:
+    """Replace caller-owned literal tokens across every Word story paragraph.
+
+    This compatibility boundary exists for imported legacy templates whose
+    placeholders are still bare ``{{字段}}`` values.  It performs only exact
+    literal replacement; field lookup and namespace policy remain the caller's
+    responsibility.
+    """
+
+    normalized = {
+        str(token): str(value or "")
+        for token, value in dict(replacements or {}).items()
+        if str(token or "")
+    }
+    if not normalized:
+        return 0
+    total = 0
+    for text_items in _iter_ooxml_paragraph_text_items(document):
+        total += sum(_replace_tokens_across_text_items(text_items, normalized).values())
+    return total
 
 
 def _iter_replaceable_text(document):
@@ -178,7 +202,10 @@ def _replace_tokens_across_text_items(
             if index < 0:
                 break
             end = index + len(token)
-            if not any(index < used_end and end > used_start for used_start, used_end in occupied):
+            if not any(
+                index < used_end and end > used_start
+                for used_start, used_end in occupied
+            ):
                 matches.append((index, end, token, str(replacement or "")))
                 occupied.append((index, end))
                 counts[token] = counts.get(token, 0) + 1
@@ -229,5 +256,6 @@ __all__ = [
     "ExactMaterialPlaceholder",
     "ExactMaterialReplacementResult",
     "replace_document_exact_placeholders",
+    "replace_document_literal_placeholders",
     "scan_document_exact_placeholders",
 ]

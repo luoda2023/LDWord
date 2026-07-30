@@ -18,6 +18,8 @@ from src.config.asset_resolution import (
 )
 from src.config.entity import EntityArchive, EntityProfile
 from src.config.material_context import MaterialExecutionContext
+from src.config.material_package_v6 import MaterialValueScope
+from src.config.material_scope import merge_material_value_layers
 from src.config.materials import normalize_asset_role
 from src.config.material_schema_registry import get_material_schema
 
@@ -52,6 +54,9 @@ class MaterialBatchSelection:
     source_kind: str = ""
     source_path: str = ""
     item_metadata: dict[str, dict[str, object]] = field(default_factory=dict)
+    # Package-driven features keep the v6 hierarchy here while ``archive``
+    # remains the compatibility projection used by the document batch flow.
+    material_package: object | None = None
 
     def clone(self) -> "MaterialBatchSelection":
         return MaterialBatchSelection(
@@ -65,6 +70,7 @@ class MaterialBatchSelection:
             source_kind=str(self.source_kind or ""),
             source_path=str(self.source_path or ""),
             item_metadata=copy.deepcopy(self.item_metadata),
+            material_package=copy.deepcopy(self.material_package),
         )
 
     def resolved_mode_id(self) -> str:
@@ -164,6 +170,46 @@ def build_material_batch_items(
             shared_context.image_material_rules,
             profile.image_material_rules,
         )
+        (
+            merged_fields,
+            merged_aliases,
+            merged_functions,
+            merged_timelines,
+            _value_provenance,
+            value_scope_issues,
+        ) = merge_material_value_layers(
+            (
+                (
+                    "batch_base",
+                    archive.archive_id or "batch",
+                    MaterialValueScope(
+                        fields=dict(shared_context.entity_data),
+                        field_aliases=dict(shared_context.field_aliases),
+                        field_functions=copy.deepcopy(
+                            shared_context.field_functions
+                        ),
+                        timeline_plans=copy.deepcopy(
+                            shared_context.timeline_plans
+                        ),
+                    ),
+                ),
+                (
+                    "record",
+                    profile.profile_id,
+                    MaterialValueScope(
+                        fields=dict(profile.fields),
+                        field_aliases=dict(profile.field_aliases),
+                        field_functions=copy.deepcopy(
+                            profile.field_functions
+                        ),
+                        timeline_plans=copy.deepcopy(
+                            profile.timeline_plans
+                        ),
+                        field_sources=dict(profile.field_sources),
+                    ),
+                ),
+            )
+        )
         context = MaterialExecutionContext(
             mode_id=shared_context.mode_id,
             scene_id=shared_context.scene_id,
@@ -177,23 +223,14 @@ def build_material_batch_items(
             archive_name=archive.archive_name,
             profile_id=profile.profile_id,
             profile_name=profile.profile_name,
-            entity_data={**shared_context.entity_data, **dict(profile.fields)},
+            entity_data=merged_fields,
             field_scopes={
                 **shared_context.field_scopes,
                 **dict(profile.field_scopes),
             },
-            field_functions={
-                **copy.deepcopy(shared_context.field_functions),
-                **copy.deepcopy(profile.field_functions),
-            },
-            timeline_plans={
-                **copy.deepcopy(shared_context.timeline_plans),
-                **copy.deepcopy(profile.timeline_plans),
-            },
-            field_aliases={
-                **shared_context.field_aliases,
-                **dict(profile.field_aliases),
-            },
+            field_functions=merged_functions,
+            timeline_plans=merged_timelines,
+            field_aliases=merged_aliases,
             exact_material_placeholders=shared_context.exact_material_placeholders,
             entity_assets_dir=assets_dir,
             images=copy.deepcopy(shared_context.images),
@@ -206,6 +243,16 @@ def build_material_batch_items(
                         *profile_resolution.diagnostics,
                         *source_conflict_diagnostics,
                     )
+                ],
+                *[
+                    {
+                        "code": issue.code,
+                        "role": "",
+                        "message": issue.message,
+                        "severity": issue.severity,
+                        "field_key": issue.key,
+                    }
+                    for issue in value_scope_issues
                 ],
             ],
             image_rules=copy.deepcopy(shared_context.image_rules),

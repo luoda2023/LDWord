@@ -21,6 +21,7 @@ class WorkbenchNavigationController:
         nav_rail: "DynamicNavigationRail",
         quick_execution_detail: "QuickExecutionDetail",
         batch_generation_detail: object | None,
+        suite_generation_detail: object | None = None,
         *,
         card_definitions: dict[str, tuple[str, str]],
         feature_card_order: tuple[str, ...],
@@ -28,6 +29,7 @@ class WorkbenchNavigationController:
         self._nav_rail = nav_rail
         self._quick_execution_detail = quick_execution_detail
         self._batch_generation_detail = batch_generation_detail
+        self._suite_generation_detail = suite_generation_detail
         self._card_definitions = dict(card_definitions)
         self._feature_card_order = tuple(feature_card_order)
         self.navigation_cards: dict[str, NavigationCard] = {}
@@ -38,6 +40,8 @@ class WorkbenchNavigationController:
         self.add_navigation_card("quick_execute")
         if self._batch_generation_detail is not None:
             self.add_navigation_card("batch_generate")
+        if self._suite_generation_detail is not None:
+            self.add_navigation_card("material_suite_generate")
 
     def add_navigation_card(self, card_id: str) -> NavigationCard:
         title, icon_name = self._card_definitions.get(card_id, (card_id, ""))
@@ -94,6 +98,14 @@ class WorkbenchNavigationController:
             self._batch_generation_detail.navigation_snapshot(),
         )
 
+    def refresh_suite_generate_card(self) -> None:
+        if self._suite_generation_detail is None:
+            return
+        self.update_navigation_card(
+            "material_suite_generate",
+            self._suite_generation_detail.navigation_snapshot(),
+        )
+
     def refresh_fixed_cards(self, *, cached_document_path: str, strategy_state: "StrategySummaryState", execution_worker) -> None:
         self.refresh_quick_execute_card(
             cached_document_path=cached_document_path,
@@ -101,6 +113,7 @@ class WorkbenchNavigationController:
             execution_worker=execution_worker,
         )
         self.refresh_batch_generate_card()
+        self.refresh_suite_generate_card()
 
     def sync_dynamic_cards(self) -> None:
         enabled = self._quick_execution_detail.enabled_features()
