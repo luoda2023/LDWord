@@ -1,4 +1,4 @@
-# Alavette Form AI 文档助手：Design UI 与 Flow 底层能力迁移深度分析
+﻿# Alavette Form AI 文档助手：Design UI 与 Flow 底层能力迁移深度分析
 
 > 文档状态：方案已实施；2026-07-16 第三次纠偏为“Form 全局一级功能 + 独立 AssistantPanel，面板内部不迁移 Alavette 会话/上下文侧栏”；第 27 节覆盖第 7 节早期建议及第 25、26 节已废弃宿主。最终实现与验收证据见 `assistant_migration_implementation_2026-07-16.md`  
 > 分析日期：2026-07-16  
@@ -1534,8 +1534,8 @@ Windows 原生完整主窗口验证结果：
 
 ### 本地参考项目
 
-- `C:\Users\70768\Desktop\Alavette Design`
-- `C:\Users\70768\Desktop\Alavette Flow`
+- `<LOCAL_PATH>`
+- `<LOCAL_PATH>`
 - Flow Design Rebase、Active Interaction Reconstruction、Session Navigation Audit、Runtime Integrity Audit 等设计审计文档
 - Flow Assistant Shell、Session Rail、Conversation Stream、Preview Panel、Assistant Kernel、Model Gateway、Provider Routing 与 Secret Store 实现
 
@@ -1636,7 +1636,7 @@ flowchart TD
 
 ### 28.6 不引入新问题的约束
 
-1. 不在运行时导入 `C:\Users\70768\Desktop\Alavette Design` 或 `Alavette Flow`。
+1. 不在运行时导入 `<LOCAL_PATH>` 或 `Alavette Flow`。
 2. 不复制 Flow 的 ProjectOps、Memory、Skill 或 Delegate 状态合同。
 3. 不让项目/计划入口点击无响应；有真实 Form 投影时展示投影，无后端时显示明确能力边界。
 4. 不恢复旧的右侧 Context Rail，以免侧栏和 Bridge 双向修改相同上下文。

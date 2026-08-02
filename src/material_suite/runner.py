@@ -17,7 +17,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from openpyxl import load_workbook
 
-from src.config.asset_resolution import file_content_revision
+from src.shared.files.content_hash import file_content_revision
 from src.material_suite.plan import (
     MaterialSuiteRunPlan,
     SuiteArtifactPlan,
@@ -50,8 +50,7 @@ class MaterialSuiteGenerationRunner:
         total_steps = max(1, self.plan.artifact_count)
         completed_steps = 0
         item_results: list[dict[str, object]] = []
-        cancelled = False
-        output_root = Path(self.plan.output_root)
+        output_root = Path(self.plan.output_root).resolve()
         output_root.mkdir(parents=True, exist_ok=True)
 
         source_issue = _revision_issue(self.plan)
@@ -64,239 +63,263 @@ class MaterialSuiteGenerationRunner:
             )
 
         execution_units = self.plan.execution_units
+        targets: list[Path] = []
+        target_keys: set[str] = set()
         for record in execution_units:
-            if cancel_check():
-                cancelled = True
-                break
-            progress_cb(
-                completed_steps,
-                total_steps,
-                f"准备 {record.profile_name}",
-            )
-            result, generated_steps = self._generate_record(
-                record,
-                progress_cb=progress_cb,
-                cancel_check=cancel_check,
-                completed_steps=completed_steps,
-                total_steps=total_steps,
-                run_id=run_id,
-            )
-            completed_steps += generated_steps
-            item_results.append(result)
-            if result.get("status") == "cancelled":
-                cancelled = True
-                break
+            target = Path(record.output_dir).resolve()
+            try:
+                target.relative_to(output_root)
+            except ValueError:
+                return _failed_payload(
+                    f"输出目录越界：{target}",
+                    run_id=run_id,
+                    output_root=output_root,
+                    records=execution_units,
+                )
+            key = str(target).casefold()
+            if key in target_keys:
+                return _failed_payload(
+                    f"输出目录大小写无关碰撞：{target}",
+                    run_id=run_id,
+                    output_root=output_root,
+                    records=execution_units,
+                )
+            target_keys.add(key)
+            if target.exists():
+                return _failed_payload(
+                    f"输出目录已存在，未覆盖：{target}",
+                    run_id=run_id,
+                    output_root=output_root,
+                    records=execution_units,
+                )
+            targets.append(target)
 
-        pending_ids = [
-            record.profile_id for record in execution_units[len(item_results) :]
-        ]
-        failed_ids = [
-            str(item.get("profile_id") or "")
-            for item in item_results
-            if item.get("status") == "failed"
-        ]
-        interrupted_ids = [
-            str(item.get("profile_id") or "")
-            for item in item_results
-            if item.get("status") == "cancelled"
-        ]
-        retry_ids = list(dict.fromkeys([*failed_ids, *interrupted_ids, *pending_ids]))
-        succeeded = [item for item in item_results if item.get("status") == "success"]
+        staging_root = Path(
+            tempfile.mkdtemp(
+                prefix=f".alavette-{run_id}-",
+                dir=str(output_root),
+            )
+        )
+        staged: list[tuple[Path, Path]] = []
+        committed: list[Path] = []
+        try:
+            for index, (record, target) in enumerate(zip(execution_units, targets)):
+                if cancel_check():
+                    raise InterruptedError("成套生成已取消")
+                progress_cb(
+                    completed_steps,
+                    total_steps,
+                    f"暂存 {record.record_name}",
+                )
+                stage = staging_root / f"{index:04d}"
+                result, generated_steps = self._stage_record(
+                    record,
+                    stage=stage,
+                    final_target=target,
+                    progress_cb=progress_cb,
+                    cancel_check=cancel_check,
+                    completed_steps=completed_steps,
+                    total_steps=total_steps,
+                    run_id=run_id,
+                )
+                completed_steps += generated_steps
+                item_results.append(result)
+                staged.append((stage, target))
+            # Every artifact has been generated, reopened/scanned and hashed.
+            # Only now may any member of the declared delivery set become final.
+            for stage, target in staged:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.exists():
+                    raise FileExistsError(f"输出目录在提交前出现：{target}")
+                os.replace(stage, target)
+                committed.append(target)
+        except Exception as exc:  # noqa: BLE001 - transaction boundary
+            for target in reversed(committed):
+                try:
+                    shutil.rmtree(target)
+                except OSError:
+                    pass
+            status = "cancelled" if isinstance(exc, InterruptedError) else "failed"
+            return {
+                "status": status,
+                "summary": "成套生成未发布，已回滚整组交付",
+                "output_path": str(output_root),
+                "output_paths": {},
+                "report_paths": [],
+                "failed_count": len(execution_units),
+                "error_text": f"{type(exc).__name__}: {exc}",
+                "items": [],
+                "rolled_back_paths": [str(item) for item in committed],
+                "material_suite_receipt": {
+                    "run_id": run_id,
+                    "execution_snapshot_id": self.plan.execution_snapshot_id,
+                    "committed": False,
+                },
+            }
+        finally:
+            shutil.rmtree(staging_root, ignore_errors=True)
+
         reports = _write_run_reports(
             output_root,
             run_id=run_id,
             plan=self.plan,
             items=item_results,
-            pending_profile_ids=pending_ids,
-            cancelled=cancelled,
-        )
-        if cancelled:
-            status = "cancelled"
-        elif failed_ids and succeeded:
-            status = "partial_success"
-        elif failed_ids:
-            status = "failed"
-        else:
-            status = "success"
-        error_text = ""
-        if failed_ids:
-            error_text = f"{len(failed_ids)} 条资料生成失败，可按失败记录重试"
-        elif cancelled:
-            error_text = "已取消；已完整发布的记录保留，当前半成品已清理"
-        summary = (
-            f"成套生成完成：成功 {len(succeeded)} 条，"
-            f"失败 {len(failed_ids)} 条，待执行 {len(pending_ids)} 条"
+            pending_record_ids=[],
+            preflight_blocked_record_ids=[],
+            cancelled=False,
         )
         return {
-            "status": status,
-            "summary": summary,
+            "status": "success",
+            "summary": f"成套生成完成：原子发布 {len(item_results)} 个交付单元",
             "output_path": str(output_root),
             "output_paths": {"suite_root": str(output_root)},
             "report_paths": reports,
-            "failed_count": len(retry_ids),
-            "error_text": error_text,
+            "failed_count": 0,
+            "error_text": "",
             "items": item_results,
-            "pending_profile_ids": pending_ids,
-            "failed_items": [
-                item for item in item_results if item.get("status") == "failed"
-            ],
-            "batch_isolation": {
+            "pending_record_ids": [],
+            "preflight_blocked_record_ids": [],
+            "failed_items": [],
+            "delivery_transaction": {
                 "history_run_id": run_id,
-                "attempt_number": 1,
-                "profile_count": len(self.plan.records),
                 "execution_unit_count": len(execution_units),
-                "succeeded_count": len(succeeded),
-                "failed_count": len(failed_ids),
-                "interrupted_count": len(interrupted_ids),
-                "pending_count": len(pending_ids),
-                "retry_eligible_profile_ids": retry_ids,
-                "details": [
-                    (
-                        f"{item.get('profile_name')}: "
-                        f"{item.get('status')} "
-                        f"{item.get('error_text') or ''}"
-                    ).strip()
-                    for item in item_results
-                ],
+                "artifact_count": self.plan.artifact_count,
+                "committed": True,
+                "rollback_count": 0,
             },
             "material_suite_receipt": {
+                "run_id": run_id,
                 "package_id": self.plan.package_id,
                 "package_revision": self.plan.package_revision,
                 "template_bundle_revision": self.plan.template_bundle.revision,
                 "record_count": len(self.plan.records),
+                "selected_record_count": self.plan.inspection.selected_count,
+                "preflight_blocked_count": 0,
                 "shared_unit_count": len(self.plan.shared_units),
                 "artifact_count": self.plan.artifact_count,
                 "recipe_id": self.plan.recipe.recipe_id,
                 "selected_record_ids": list(
-                    self.plan.request.selected_record_ids
+                    item.record_id for item in self.plan.records
                 ),
+                "execution_snapshot_id": self.plan.execution_snapshot_id,
             },
         }
 
-    def _generate_record(
+    def _stage_record(
         self,
         record: SuiteRecordPlan,
         *,
+        stage: Path,
+        final_target: Path,
         progress_cb: ProgressCallback,
         cancel_check: CancelCheck,
         completed_steps: int,
         total_steps: int,
         run_id: str,
     ) -> tuple[dict[str, object], int]:
-        target = Path(record.output_dir)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        staging = Path(
-            tempfile.mkdtemp(
-                prefix=f".alavette-{run_id}-",
-                dir=str(target.parent),
-            )
-        )
+        stage.mkdir(parents=True, exist_ok=False)
         generated: list[dict[str, str]] = []
-        steps = 0
-        try:
-            if target.exists():
-                raise FileExistsError("目标记录目录已存在，未覆盖")
-            for artifact in record.artifacts:
-                if cancel_check():
-                    return (
-                        _record_result(
-                            record,
-                            status="cancelled",
-                            error_text="生成期间取消，暂存结果已清理",
-                        ),
-                        steps,
-                    )
-                current = completed_steps + steps
-                progress_cb(
-                    current,
-                    total_steps,
-                    f"{record.profile_name} · {artifact.label}",
-                )
-                source = Path(artifact.source_path)
-                if file_content_revision(source) != artifact.source_revision:
-                    raise RuntimeError(f"模板已变化：{artifact.label}")
-                staged_target = staging / artifact.target_relative_path
-                staged_target.parent.mkdir(parents=True, exist_ok=True)
-                _generate_artifact(artifact, staged_target)
-                unresolved = scan_suite_template_placeholders(
-                    staged_target,
-                    artifact.kind,
-                )
-                if unresolved:
-                    raise RuntimeError(
-                        f"{artifact.label} 仍有未替换字段：" + "、".join(unresolved)
-                    )
-                generated.append(
-                    {
-                        "artifact_id": artifact.artifact_id,
-                        "label": artifact.label,
-                        "kind": artifact.kind,
-                        "path": str(target / artifact.target_relative_path),
-                        "source_revision": artifact.source_revision,
-                        "output_revision": file_content_revision(staged_target),
-                    }
-                )
-                steps += 1
-                progress_cb(
-                    completed_steps + steps,
-                    total_steps,
-                    f"{record.profile_name} · 已完成 {artifact.label}",
-                )
-
-            manifest = {
-                "kind": "alavette.material_suite_record_receipt",
-                "version": 1,
-                "run_id": run_id,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "package_id": self.plan.package_id,
-                "package_name": self.plan.package_name,
-                "package_revision": self.plan.package_revision,
-                "template_bundle_revision": self.plan.template_bundle.revision,
-                "profile_id": record.profile_id,
-                "profile_name": record.profile_name,
-                "group_id": record.group_id,
-                "emit_scope": record.emit_scope,
-                "route_key": record.route_key,
-                "timeline_field_keys": list(record.timeline_field_keys),
-                "frozen_values": dict(record.frozen_values),
-                "value_provenance": [
-                    {
-                        "field": key,
-                        "scope": scope,
-                        "owner_id": owner_id,
-                        "source": source,
-                    }
-                    for key, scope, owner_id, source in record.provenance
-                ],
-                "source_locator": dict(record.source_locator),
-                "artifacts": generated,
+        skipped = [
+            {
+                "artifact_id": artifact.artifact_id,
+                "label": artifact.label,
+                "kind": artifact.kind,
+                "status": artifact.status,
+                "reason": "；".join(artifact.issues)
+                or (
+                    "缺少可选字段："
+                    + "、".join(artifact.missing_placeholders)
+                    if artifact.missing_placeholders
+                    else "未满足生成条件"
+                ),
             }
-            (staging / "生成清单.json").write_text(
-                json.dumps(manifest, ensure_ascii=False, indent=2),
-                encoding="utf-8",
+            for artifact in record.artifacts
+            if not artifact.executable
+        ]
+        steps = 0
+        for artifact in record.ready_artifacts:
+            if cancel_check():
+                raise InterruptedError("成套生成已取消")
+            current = completed_steps + steps
+            progress_cb(
+                current,
+                total_steps,
+                f"{record.record_name} · {artifact.label}",
             )
-            os.replace(staging, target)
-            return (
-                _record_result(
-                    record,
-                    status="success",
-                    output_path=str(target),
-                    artifacts=generated,
-                ),
-                steps,
+            source = Path(artifact.source_path)
+            if file_content_revision(source) != artifact.source_revision:
+                raise RuntimeError(f"模板已变化：{artifact.label}")
+            staged_target = stage / artifact.target_relative_path
+            staged_target.parent.mkdir(parents=True, exist_ok=True)
+            _generate_artifact(artifact, staged_target)
+            unresolved = scan_suite_template_placeholders(
+                staged_target,
+                artifact.kind,
             )
-        except Exception as exc:  # noqa: BLE001 - isolate one record failure
-            return (
-                _record_result(
-                    record,
-                    status="failed",
-                    error_text=f"{type(exc).__name__}: {exc}",
-                ),
-                steps,
+            if unresolved:
+                raise RuntimeError(
+                    f"{artifact.label} 仍有未替换字段：" + "、".join(unresolved)
+                )
+            generated.append(
+                {
+                    "artifact_id": artifact.artifact_id,
+                    "label": artifact.label,
+                    "kind": artifact.kind,
+                    "path": str(final_target / artifact.target_relative_path),
+                    "source_revision": artifact.source_revision,
+                    "output_revision": file_content_revision(staged_target),
+                }
             )
-        finally:
-            if staging.exists():
-                shutil.rmtree(staging)
+            steps += 1
+            progress_cb(
+                completed_steps + steps,
+                total_steps,
+                f"{record.record_name} · 已完成 {artifact.label}",
+            )
+
+        manifest = {
+            "kind": "alavette.material_suite_record_receipt",
+            "version": 1,
+            "run_id": run_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "package_id": self.plan.package_id,
+            "package_name": self.plan.package_name,
+            "package_revision": self.plan.package_revision,
+            "template_bundle_revision": self.plan.template_bundle.revision,
+            "record_id": record.record_id,
+            "record_name": record.record_name,
+            "group_id": record.group_id,
+            "emit_scope": record.emit_scope,
+            "route_key": record.route_key,
+            "timeline_field_keys": list(record.timeline_field_keys),
+            "frozen_values": dict(record.frozen_values),
+            "value_provenance": [
+                {
+                    "field": key,
+                    "scope": scope,
+                    "owner_id": owner_id,
+                    "source": source,
+                }
+                for key, scope, owner_id, source in record.provenance
+            ],
+            "source_locator": dict(record.source_locator),
+            "artifacts": generated,
+            "skipped_artifacts": skipped,
+        }
+        (stage / "生成清单.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return (
+            _record_result(
+                record,
+                status="success",
+                output_path=str(final_target),
+                artifacts=generated,
+                skipped_artifacts=skipped,
+            ),
+            steps,
+        )
 
 
 def _generate_artifact(
@@ -391,14 +414,6 @@ def _materialize_manual_breaks(document) -> None:
 
 
 def _revision_issue(plan: MaterialSuiteRunPlan) -> str:
-    source = Path(plan.package_source_path)
-    if (
-        str(source)
-        and source.is_file()
-        and file_content_revision(source) != plan.package_revision
-    ):
-        # The package may be JSON, CSV, or XLSX; all are file-revision based.
-        return "资料包在预检后已发生变化，请重新预检"
     for artifact in plan.template_bundle.artifacts:
         source = Path(artifact.source_path)
         if not source.is_file():
@@ -415,10 +430,11 @@ def _record_result(
     output_path: str = "",
     error_text: str = "",
     artifacts: list[dict[str, str]] | None = None,
+    skipped_artifacts: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     return {
-        "profile_id": record.profile_id,
-        "profile_name": record.profile_name,
+        "record_id": record.record_id,
+        "record_name": record.record_name,
         "route_key": record.route_key,
         "group_id": record.group_id,
         "emit_scope": record.emit_scope,
@@ -426,42 +442,47 @@ def _record_result(
         "output_path": output_path,
         "error_text": error_text,
         "artifacts": list(artifacts or []),
+        "skipped_artifacts": list(skipped_artifacts or []),
     }
 
 
 def _preflight_failure(plan: MaterialSuiteRunPlan) -> dict[str, object]:
     record_issues = [
-        f"{record.profile_name}：{'；'.join(record.issues)}"
-        for record in plan.execution_units
+        f"{record.record_name}：{'；'.join(record.issues)}"
+        for record in plan.planned_units
         if record.issues
     ]
-    issues = [*plan.issues, *record_issues]
+    inspection_issues = [
+        f"{record.record_name}：{'；'.join(record.issues)}"
+        for record in plan.inspection.records
+        if record.selected and record.issues
+    ]
+    issues = list(dict.fromkeys([*plan.issues, *record_issues, *inspection_issues]))
+    blocked_ids = _preflight_blocked_ids(plan)
     return {
         "status": "failed",
         "summary": "成套生成预检未通过",
         "output_path": "",
         "report_paths": [],
-        "failed_count": len(plan.execution_units),
+        "failed_count": len(blocked_ids),
         "error_text": "；".join(issues),
         "diagnostics_count": len(issues),
         "diagnostics_summary": f"成套生成预检发现 {len(issues)} 项阻断",
         "failed_items": [
             {
-                "profile_id": record.profile_id,
-                "profile_name": record.profile_name,
+                "record_id": record.record_id,
+                "record_name": record.record_name,
                 "status": "failed",
                 "error_text": "；".join(record.issues),
             }
-            for record in plan.execution_units
+            for record in plan.planned_units
             if record.issues
         ],
         "batch_isolation": {
-            "profile_count": len(plan.records),
+            "record_count": len(plan.records),
             "execution_unit_count": len(plan.execution_units),
-            "failed_count": len(plan.execution_units),
-            "retry_eligible_profile_ids": [
-                record.profile_id for record in plan.execution_units
-            ],
+            "failed_count": len(blocked_ids),
+            "retry_eligible_record_ids": blocked_ids,
         },
     }
 
@@ -482,9 +503,9 @@ def _failed_payload(
         "error_text": error_text,
         "batch_isolation": {
             "history_run_id": run_id,
-            "profile_count": len(records),
+            "record_count": len(records),
             "failed_count": len(records),
-            "retry_eligible_profile_ids": [item.profile_id for item in records],
+            "retry_eligible_record_ids": [item.record_id for item in records],
         },
     }
 
@@ -495,7 +516,8 @@ def _write_run_reports(
     run_id: str,
     plan: MaterialSuiteRunPlan,
     items: list[dict[str, object]],
-    pending_profile_ids: list[str],
+    pending_record_ids: list[str],
+    preflight_blocked_record_ids: list[str],
     cancelled: bool,
 ) -> list[str]:
     payload = {
@@ -513,7 +535,8 @@ def _write_run_reports(
         "package_inspection": asdict(plan.inspection),
         "output_root": str(output_root),
         "items": items,
-        "pending_profile_ids": pending_profile_ids,
+        "pending_record_ids": pending_record_ids,
+        "preflight_blocked_record_ids": preflight_blocked_record_ids,
     }
     report_dir = output_root / "_生成报告"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -536,13 +559,35 @@ def _write_run_reports(
     ]
     for item in items:
         lines.append(
-            f"- {item.get('profile_name')}：{item.get('status')}"
+            f"- {item.get('record_name')}：{item.get('status')}"
             + (f"（{item.get('error_text')}）" if item.get("error_text") else "")
         )
-    if pending_profile_ids:
-        lines.extend(["", f"待执行：{', '.join(pending_profile_ids)}"])
+    if pending_record_ids:
+        lines.extend(["", f"待执行：{', '.join(pending_record_ids)}"])
+    if preflight_blocked_record_ids:
+        lines.extend(
+            [
+                "",
+                "预检跳过：" + ", ".join(preflight_blocked_record_ids),
+            ]
+        )
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return [str(json_path), str(md_path)]
+
+
+def _preflight_blocked_ids(plan: MaterialSuiteRunPlan) -> list[str]:
+    return list(
+        dict.fromkeys(
+            [
+                *[
+                    item.record_id
+                    for item in plan.inspection.records
+                    if item.selected and item.readiness != "ready"
+                ],
+                *[item.record_id for item in plan.blocked_units],
+            ]
+        )
+    )
 
 
 __all__ = ["MaterialSuiteGenerationRunner"]

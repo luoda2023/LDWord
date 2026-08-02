@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 from src.config.style_field_descriptors import (
     style_field_descriptor,
@@ -25,7 +25,17 @@ SECTION_LABELS: dict[str, str] = {
 
 PAGE_FIELD_LABELS: dict[str, str] = {
     "paper_size": "纸张",
+    "paper_size_mode": "纸张策略",
+    "paper_size_by_section": "分节纸张映射",
     "orientation": "方向",
+    "orientation_mode": "方向策略",
+    "orientation_by_section": "分节方向映射",
+    "margin_mode": "边距策略",
+    "margin_by_section": "分节边距映射",
+    "boundary_mode": "分节策略",
+    "empty_break_policy": "空分节清理",
+    "caption_table_break_policy": "题注-表格清理",
+    "header_footer_link_mode": "页眉页脚链接策略",
     "section_break_type": "分节方式",
     "top_cm": "上页边距",
     "bottom_cm": "下页边距",
@@ -237,7 +247,7 @@ def _scene_document_scope_label(key: str) -> str:
     if key == "scene.document_scope.mode":
         return "处理范围"
     if key == "scene.document_scope.selected_roles":
-        return "指定区域"
+        return "自选区域"
     return ""
 
 

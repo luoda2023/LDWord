@@ -1,8 +1,8 @@
-# AI 对话窗口 Design 与 Flow 样式迁移差异深度审计
+﻿# AI 对话窗口 Design 与 Flow 样式迁移差异深度审计
 
 > 审计日期：2026-07-28  
 > 审计对象：Alavette Form 一级功能「AI 文档助手」的活动对话窗口  
-> 用户截图：`C:\Users\70768\OneDrive\codex-clipboard-93a094df-3029-4d12-b2ac-428aea006cb8.png`  
+> 用户截图：`<LOCAL_PATH>`
 > 本轮范围：只分析、定义迁移边界和验收标准，不修改对话 UI 代码
 
 ---
@@ -86,7 +86,7 @@
 
 ### 3.1 Design 视觉和交互基线
 
-根目录：`C:\Users\70768\Desktop\Alavette Design`
+根目录：`<LOCAL_PATH>`
 
 | 文件 | 主要证据 |
 |---|---|
@@ -100,7 +100,7 @@
 
 ### 3.2 Flow 状态和交互语义基线
 
-根目录：`C:\Users\70768\Desktop\Alavette Flow`
+根目录：`<LOCAL_PATH>`
 
 | 文件 | 主要证据 |
 |---|---|

@@ -18,6 +18,7 @@ from src.shared.engine.official_word_preview import (
     real_word_preview_enabled,
     render_official_word_preview,
 )
+import src.shared.engine.pdf_page_renderer as pdf_renderer
 from src.shared.engine.pdf_page_renderer import render_pdf_pages_png
 from src.shared.ui.document_page_preview import (
     DocumentPagePreview,
@@ -146,6 +147,39 @@ def test_pdf_page_renderer_prefers_embedded_pdfium(monkeypatch, tmp_path):
         "preview_page-002.png",
     ]
     assert all(path.is_file() for path in pages)
+
+
+def test_pdf_page_renderer_invokes_windows_cmd_wrappers_via_comspec(
+    monkeypatch,
+    tmp_path,
+):
+    source = tmp_path / "preview.pdf"
+    source.write_bytes(b"%PDF-1.4 test fixture")
+    captured = []
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+    monkeypatch.setattr(
+        pdf_renderer.shutil,
+        "which",
+        lambda _name: r"C:\bundle\pdftoppm.cmd",
+    )
+
+    def fake_run(command, **_kwargs):
+        captured.append(command)
+        (tmp_path / "preview_page-1.png").write_bytes(b"png")
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr(pdf_renderer.subprocess, "run", fake_run)
+
+    pages, issue = pdf_renderer._render_with_pdftoppm(source, tmp_path)
+
+    assert issue == ""
+    assert len(pages) == 1
+    assert captured[0][:4] == [
+        r"C:\Windows\System32\cmd.exe",
+        "/d",
+        "/c",
+        r"C:\bundle\pdftoppm.cmd",
+    ]
 
 
 def test_document_page_preview_supports_paging_and_error_fallback(tmp_path):

@@ -11,6 +11,9 @@ from typing import Callable, Mapping
 from uuid import uuid4
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.oxml.ns import qn
+from docx.shared import Cm, Pt, RGBColor
 
 from src.config.master_library import (
     MasterSpec,
@@ -28,7 +31,11 @@ from src.shared.io.artifact_publication import (
     publish_staged_artifacts,
 )
 from src.shared.engine.fixed_layout_text import replace_fixed_layout_placeholders
-from src.shared.engine.run_ops import get_full_text, replace_run_text
+from src.shared.engine.run_ops import (
+    get_full_text,
+    replace_run_text,
+    set_run_fonts,
+)
 from src.shared.engine.material_token_contract import (
     MATERIAL_TOKEN_PATTERN,
     MaterialTokenNamespace,
@@ -38,6 +45,20 @@ from src.shared.engine.material_token_contract import (
 
 
 _REFERENCE_PAGE_HEADINGS = ("版式占位符说明", "母版占位符说明")
+_OFFICIAL_BODY_TOKEN = material_token(
+    MaterialTokenNamespace.TEXT,
+    "official_body",
+)
+_OFFICIAL_DISPLAY_TOKENS = (
+    material_token(MaterialTokenNamespace.TEXT, "official_organization"),
+    material_token(MaterialTokenNamespace.TEXT, "official_title"),
+)
+_BODY_LEVEL_PATTERNS = (
+    (1, re.compile(r"^[一二三四五六七八九十百]+、")),
+    (2, re.compile(r"^（[一二三四五六七八九十百]+）")),
+    (3, re.compile(r"^\d+[.．]")),
+    (4, re.compile(r"^（\d+）")),
+)
 
 DocxPdfRenderer = Callable[[Path, Path], str | None]
 DocxPdfRendererEntry = tuple[str, DocxPdfRenderer]
@@ -138,6 +159,7 @@ def assemble_official_document_docx(
     remove_reference_page: bool = True,
     generate_review_pdf: bool = False,
     review_pdf_renderer_resolver: DocxPdfRendererResolver | None = None,
+    delivery_versions: tuple[str, ...] | None = None,
 ) -> OfficialDocumentAssemblyResult:
     """Assemble one official-document DOCX from the registered master contract."""
 
@@ -147,6 +169,33 @@ def assemble_official_document_docx(
         return OfficialDocumentAssemblyResult(
             status="unknown_profile",
             profile_id=normalized_profile_id,
+            review_pdf_status=_blocked_review_pdf_status(generate_review_pdf),
+        )
+
+    requested_versions = tuple(
+        dict.fromkeys(
+            str(item or "").strip()
+            for item in (
+                contract.delivery_versions
+                if delivery_versions is None
+                else delivery_versions
+            )
+            if str(item or "").strip()
+        )
+    )
+    supported_versions = {
+        "official_docx",
+        "internal_review_docx",
+        "archive_manifest",
+        "review_pdf",
+    }
+    if not requested_versions or any(
+        item not in supported_versions for item in requested_versions
+    ):
+        return OfficialDocumentAssemblyResult(
+            status="delivery_versions_invalid",
+            profile_id=contract.profile_id,
+            material_schema_ids=contract.material_schema_ids,
             review_pdf_status=_blocked_review_pdf_status(generate_review_pdf),
         )
 
@@ -213,19 +262,28 @@ def assemble_official_document_docx(
         stage_archive_markdown = stage_root / archive_markdown_target.name
         stage_review_pdf = stage_root / review_pdf_target.name
 
+        assembly_values = _effective_official_entity_data(contract, entity_data)
+        if master_spec.source_type != "builtin":
+            assembly_values["title"] = str(entity_data.get("title", "") or "")
         document = Document(str(master_spec.docx_path))
+        _repair_official_display_line_heights(document)
         if remove_reference_page:
             _remove_placeholder_reference_page(document)
-        _remove_empty_optional_paragraphs(document, contract, entity_data)
-        _remove_empty_optional_table_rows(document, contract, entity_data)
-        _insert_profile_specific_paragraphs(document, contract, entity_data)
+        _remove_empty_optional_paragraphs(document, contract, assembly_values)
+        _remove_empty_optional_table_rows(document, contract, assembly_values)
+        _insert_profile_specific_paragraphs(document, contract, assembly_values)
         _compact_profile_specific_layout(document, contract)
         replacements = _placeholder_replacements(
             contract,
-            entity_data,
+            assembly_values,
             field_aliases=field_aliases,
         )
         replaced = _replace_placeholders(document, replacements)
+        _normalize_terminal_table_separators(document)
+        if master_spec.source_type == "builtin":
+            _fit_official_redhead_marks(document)
+        _stabilize_heading_blocks(document)
+        _stabilize_trailing_closing_block(document)
         unresolved = _unresolved_official_placeholders(document)
         if unresolved:
             return OfficialDocumentAssemblyResult(
@@ -239,8 +297,14 @@ def assemble_official_document_docx(
             )
 
         document.save(str(stage_target))
-        _insert_internal_review_notice(document)
-        document.save(str(stage_internal_review))
+        needs_internal_stage = bool(
+            "internal_review_docx" in requested_versions
+            or "archive_manifest" in requested_versions
+            or generate_review_pdf
+        )
+        if needs_internal_stage:
+            _insert_internal_review_notice(document)
+            document.save(str(stage_internal_review))
         review_pdf_outcome = _ReviewPdfOutcome(status="not_requested")
         if generate_review_pdf:
             review_pdf_outcome = _render_optional_review_pdf(
@@ -254,40 +318,52 @@ def assemble_official_document_docx(
             and review_pdf_outcome.path is not None
             else None
         )
-        _write_archive_manifests(
-            stage_archive_manifest,
-            stage_archive_markdown,
-            contract,
-            master_spec,
-            entity_data,
-            formal_docx_path=target,
-            internal_review_docx_path=internal_review_target,
-            published_archive_manifest_path=archive_manifest_target,
-            published_archive_manifest_markdown_path=archive_markdown_target,
-            review_pdf_path=published_review_pdf,
-            review_pdf_status=review_pdf_outcome.status,
-            review_pdf_renderer=review_pdf_outcome.renderer,
-            review_pdf_issue=review_pdf_outcome.issue,
-            replaced_placeholders=replaced,
-        )
-        staged_artifacts = [
-            StagedArtifact("official_docx", stage_target, target),
-            StagedArtifact(
-                "internal_review_docx",
-                stage_internal_review,
-                internal_review_target,
-            ),
-            StagedArtifact(
-                "archive_manifest",
+        if "archive_manifest" in requested_versions:
+            _write_archive_manifests(
                 stage_archive_manifest,
-                archive_manifest_target,
-            ),
-            StagedArtifact(
-                "archive_manifest_md",
                 stage_archive_markdown,
-                archive_markdown_target,
-            ),
-        ]
+                contract,
+                master_spec,
+                entity_data,
+                formal_docx_path=target,
+                internal_review_docx_path=internal_review_target,
+                published_archive_manifest_path=archive_manifest_target,
+                published_archive_manifest_markdown_path=archive_markdown_target,
+                review_pdf_path=published_review_pdf,
+                review_pdf_status=review_pdf_outcome.status,
+                review_pdf_renderer=review_pdf_outcome.renderer,
+                review_pdf_issue=review_pdf_outcome.issue,
+                replaced_placeholders=replaced,
+                delivery_versions=requested_versions,
+            )
+        staged_artifacts: list[StagedArtifact] = []
+        if "official_docx" in requested_versions:
+            staged_artifacts.append(
+                StagedArtifact("official_docx", stage_target, target)
+            )
+        if "internal_review_docx" in requested_versions:
+            staged_artifacts.append(
+                StagedArtifact(
+                    "internal_review_docx",
+                    stage_internal_review,
+                    internal_review_target,
+                )
+            )
+        if "archive_manifest" in requested_versions:
+            staged_artifacts.extend(
+                (
+                    StagedArtifact(
+                        "archive_manifest",
+                        stage_archive_manifest,
+                        archive_manifest_target,
+                    ),
+                    StagedArtifact(
+                        "archive_manifest_md",
+                        stage_archive_markdown,
+                        archive_markdown_target,
+                    ),
+                )
+            )
         if published_review_pdf is not None:
             staged_artifacts.append(
                 StagedArtifact("review_pdf", stage_review_pdf, review_pdf_target)
@@ -302,10 +378,22 @@ def assemble_official_document_docx(
         profile_id=contract.profile_id,
         master_id=master_spec.master_id,
         material_schema_ids=contract.material_schema_ids,
-        docx_path=target,
-        internal_review_docx_path=internal_review_target,
-        archive_manifest_path=archive_manifest_target,
-        archive_manifest_markdown_path=archive_markdown_target,
+        docx_path=(target if "official_docx" in requested_versions else None),
+        internal_review_docx_path=(
+            internal_review_target
+            if "internal_review_docx" in requested_versions
+            else None
+        ),
+        archive_manifest_path=(
+            archive_manifest_target
+            if "archive_manifest" in requested_versions
+            else None
+        ),
+        archive_manifest_markdown_path=(
+            archive_markdown_target
+            if "archive_manifest" in requested_versions
+            else None
+        ),
         review_pdf_path=published_review_pdf,
         review_pdf_status=review_pdf_outcome.status,
         review_pdf_renderer=review_pdf_outcome.renderer,
@@ -349,6 +437,16 @@ def _placeholder_replacements(
             if binding.applicable
             else ""
         )
+        if binding.field_key == "body":
+            value = _strip_duplicate_recipient_line(
+                value,
+                str(values.get("recipient", "") or ""),
+            )
+        elif binding.field_key == "recipient":
+            # The built-in master owns the full-width colon. Accept pasted or
+            # model-produced recipient values with punctuation without
+            # producing a visible ``：：`` suffix in the formal document.
+            value = re.sub(r"[:：]+\s*$", "", value).strip()
         replacements[token] = value
         label = official_material_field_label(binding.field_key)
         if label:
@@ -371,6 +469,102 @@ def _placeholder_replacements(
     return replacements
 
 
+def _effective_official_entity_data(
+    contract: OfficialDocumentAssemblyContract,
+    entity_data: Mapping[str, object],
+) -> dict[str, object]:
+    """Derive safe display values without inventing administrative facts.
+
+    The form should ask once for facts that cannot be inferred.  Presentation
+    details owned by a master (文种后缀、标点、印发尾注) are normalized here,
+    and an omitted落款机关 safely reuses the already supplied发文机关 instead
+    of producing a date-only closing block.
+    """
+
+    values = dict(entity_data or {})
+    profile_id = contract.profile_id
+    organization = str(values.get("organization", "") or "").strip()
+    if profile_id == "order":
+        organization = re.sub(r"(?:命令（令）|命令|令)\s*$", "", organization).strip()
+    elif profile_id == "minutes":
+        organization = re.sub(r"纪要\s*$", "", organization).strip()
+    values["organization"] = organization
+
+    issuer = str(values.get("issuer", "") or "").strip()
+    if not issuer and organization and profile_id != "order":
+        values["issuer"] = organization
+
+    values["title"] = _balance_official_title(
+        str(values.get("title", "") or "")
+    )
+    values["copy_scope"] = re.sub(
+        r"[。；;：:、，,]+\s*$",
+        "",
+        str(values.get("copy_scope", "") or "").strip(),
+    )
+    printing_date = re.sub(
+        r"\s*印发\s*$",
+        "",
+        str(values.get("printing_date", "") or "").strip(),
+    )
+    values["printing_date"] = f"{printing_date}印发" if printing_date else ""
+    return values
+
+
+def _balance_official_title(value: str) -> str:
+    """Insert stable, balanced breaks only for titles that must wrap."""
+
+    title = re.sub(r"[\t\u3000 ]+", "", str(value or "").strip())
+    if not title or "\n" in title or len(title) <= 22:
+        return title
+    line_count = 2 if len(title) <= 38 else 3
+    remaining = title
+    lines: list[str] = []
+    forbidden_endings = frozenset("和与及、的并暨")
+    for lines_left in range(line_count, 1, -1):
+        target = round(len(remaining) / lines_left)
+        lower = max(2, target - 3)
+        upper = min(len(remaining) - (lines_left - 1) * 2, target + 3)
+        candidates = range(lower, upper + 1)
+        split_at = min(
+            candidates,
+            key=lambda index: (
+                remaining[index - 1] in forbidden_endings,
+                abs(index - target),
+            ),
+        )
+        lines.append(remaining[:split_at])
+        remaining = remaining[split_at:]
+    lines.append(remaining)
+    return "\n".join(lines)
+
+
+def _strip_duplicate_recipient_line(body: str, recipient: str) -> str:
+    """Remove a model-repeated recipient already owned by the master field."""
+
+    normalized_recipient = _recipient_comparison_key(recipient)
+    if not normalized_recipient:
+        return str(body or "")
+    lines = re.split(r"\r\n?|\n", str(body or ""))
+    first_index = next(
+        (index for index, line in enumerate(lines) if line.strip()),
+        None,
+    )
+    if first_index is None:
+        return str(body or "")
+    first = lines[first_index].strip()
+    if not first.endswith(("：", ":")):
+        return str(body or "")
+    if _recipient_comparison_key(first) != normalized_recipient:
+        return str(body or "")
+    del lines[first_index]
+    return "\n".join(lines).strip()
+
+
+def _recipient_comparison_key(value: str) -> str:
+    return re.sub(r"[\s\u3000，,、；;：:]+", "", str(value or ""))
+
+
 def _remove_empty_optional_paragraphs(
     document,
     contract: OfficialDocumentAssemblyContract,
@@ -381,6 +575,10 @@ def _remove_empty_optional_paragraphs(
         "{{@text:official_security_level}}",
         "{{@text:official_urgency}}",
     }
+    if contract.profile_id in {"bulletin", "announcement", "notice_public"}:
+        # These public-facing types may legitimately omit a document number,
+        # but its grid line still reserves the standard mark-to-rule geometry.
+        preserve_blank_layout_tokens.add("{{@text:official_document_no}}")
     empty_tokens = {
         material_token(MaterialTokenNamespace.TEXT, binding.placeholder_id)
         for binding in contract.field_bindings
@@ -438,6 +636,25 @@ def _remove_empty_optional_table_rows(
             parent = row._tr.getparent()
             if parent is not None:
                 parent.remove(row._tr)
+        if table.rows:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in list(cell.paragraphs):
+                        paragraph_tokens = set(
+                            _official_placeholder_ids(get_full_text(paragraph))
+                        )
+                        if not paragraph_tokens or len(cell.paragraphs) <= 1:
+                            continue
+                        if all(
+                            material_token(MaterialTokenNamespace.TEXT, token)
+                            in empty_tokens
+                            for token in paragraph_tokens
+                        ):
+                            paragraph._p.getparent().remove(paragraph._p)
+            continue
+        parent = table._tbl.getparent()
+        if parent is not None:
+            parent.remove(table._tbl)
 
 
 def _insert_profile_specific_paragraphs(
@@ -542,6 +759,8 @@ def _replace_placeholders(document, replacements: Mapping[str, str]) -> tuple[st
     replaced: set[str] = set()
     for token, value in replacements.items():
         count = 0
+        if token == _OFFICIAL_BODY_TOKEN:
+            count += _replace_official_body_paragraphs(document, token, value)
         for paragraph in _iter_all_paragraphs(document):
             if token not in get_full_text(paragraph):
                 continue
@@ -551,6 +770,270 @@ def _replace_placeholders(document, replacements: Mapping[str, str]) -> tuple[st
         if count:
             replaced.add(_placeholder_id(token))
     return tuple(sorted(replaced))
+
+
+def _replace_official_body_paragraphs(document, token: str, value: str) -> int:
+    """Expand AI body lines into real semantic Word paragraphs.
+
+    A newline stored inside one run becomes ``w:br`` and makes every line
+    inherit the ordinary-body font.  Splitting at assembly time preserves
+    GB/T heading roles: level 1 Heiti, level 2 Kaiti, levels 3/4 Fangsong.
+    """
+
+    candidates = [
+        paragraph
+        for paragraph in list(document.paragraphs)
+        if get_full_text(paragraph).strip() == token
+    ]
+    if not candidates:
+        return 0
+
+    raw_lines = re.split(r"\r\n?|\n", str(value or ""))
+    lines = [line.strip() for line in raw_lines if line.strip()]
+    if not lines:
+        lines = [""]
+
+    for placeholder_paragraph in candidates:
+        for line in lines:
+            level = _official_body_level(line)
+            style_name = "Normal" if level == 0 else f"Heading {level}"
+            paragraph = placeholder_paragraph.insert_paragraph_before(
+                line,
+                style=style_name,
+            )
+            _format_official_body_paragraph(paragraph, level=level)
+        placeholder_paragraph._element.getparent().remove(
+            placeholder_paragraph._element
+        )
+    return len(candidates)
+
+
+def _stabilize_trailing_closing_block(document) -> None:
+    """Keep an issuing block from becoming a page by itself.
+
+    Word paginates the issuer and issue date independently from the final body
+    paragraph by default.  On a nearly full page that leaves an otherwise
+    empty trailing page containing only the two closing lines.  Bind the final
+    semantic body unit, the optional spacer, issuer, and date as one short
+    pagination group.  Unlike the old Heading-style default, this does not
+    chain every numbered heading together or move the whole body block.
+    """
+
+    paragraphs = list(document.paragraphs)
+    closing_pair: tuple[int, int] | None = None
+    for index in range(len(paragraphs) - 1):
+        issuer = paragraphs[index]
+        issue_date = paragraphs[index + 1]
+        if (
+            issuer.alignment == WD_ALIGN_PARAGRAPH.RIGHT
+            and issue_date.alignment == WD_ALIGN_PARAGRAPH.RIGHT
+            and get_full_text(issuer).strip()
+            and get_full_text(issue_date).strip()
+        ):
+            closing_pair = (index, index + 1)
+    if closing_pair is None:
+        return
+
+    issuer_index, date_index = closing_pair
+    chain_indices = [issuer_index]
+    body_index = issuer_index - 1
+    if body_index >= 0 and not get_full_text(paragraphs[body_index]).strip():
+        chain_indices.insert(0, body_index)
+        body_index -= 1
+    if body_index >= 0 and get_full_text(paragraphs[body_index]).strip():
+        chain_indices.insert(0, body_index)
+        previous_index = body_index - 1
+        if previous_index >= 0:
+            previous_style = str(
+                getattr(paragraphs[previous_index].style, "name", "") or ""
+            )
+            if previous_style.startswith("Heading "):
+                chain_indices.insert(0, previous_index)
+
+    for index in chain_indices:
+        paragraphs[index].paragraph_format.keep_with_next = True
+    paragraphs[issuer_index].paragraph_format.keep_together = True
+    paragraphs[date_index].paragraph_format.keep_together = True
+
+
+def _stabilize_heading_blocks(document) -> None:
+    """Keep every numbered heading with at least its following paragraph."""
+
+    for paragraph in document.paragraphs:
+        style_name = str(getattr(paragraph.style, "name", "") or "")
+        if not style_name.startswith("Heading "):
+            continue
+        paragraph.paragraph_format.keep_with_next = True
+        paragraph.paragraph_format.keep_together = True
+        paragraph.paragraph_format.page_break_before = False
+
+
+def _fit_official_redhead_marks(document) -> None:
+    """Fit long red issuing-agency marks to at most two balanced lines."""
+
+    for paragraph in document.paragraphs:
+        colored_runs = [
+            run
+            for run in paragraph.runs
+            if run.font.color.rgb is not None
+            and str(run.font.color.rgb).upper() == "C00000"
+            and (run.font.size is None or run.font.size.pt >= 30)
+        ]
+        if not colored_runs:
+            continue
+        text = "".join(run.text for run in colored_runs).strip()
+        if not text:
+            continue
+        weighted_length = sum(
+            0.55 if ord(character) < 128 else 1.0
+            for character in text
+            if not character.isspace()
+        )
+        if weighted_length <= 0:
+            continue
+        base_size = max(
+            (float(run.font.size.pt) for run in colored_runs if run.font.size),
+            default=50.0,
+        )
+        available_width_pt = 482.0 if base_size <= 40 else 442.0
+        minimum_size = 28.0 if base_size <= 40 else 32.0
+        target_lines = 1.0 if weighted_length <= 12.0 else 2.0
+        fitted_size = max(
+            minimum_size,
+            min(
+                base_size,
+                available_width_pt * target_lines / weighted_length,
+            ),
+        )
+        if fitted_size >= base_size - 0.1:
+            continue
+        for run in colored_runs:
+            run.font.size = Pt(fitted_size)
+        paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+        paragraph.paragraph_format.line_spacing = Pt(fitted_size * 1.2)
+
+
+def _normalize_terminal_table_separators(document) -> None:
+    """Remove an internal imprint rule when only one imprint line remains."""
+
+    for table in document.tables:
+        if len(table.rows) != 1 or len(table.columns) != 1:
+            continue
+        if table._tbl.tblPr.find(qn("w:tblpPr")) is None:
+            continue
+        cell = table.rows[0].cells[0]
+        content_paragraphs = [
+            paragraph
+            for paragraph in cell.paragraphs
+            if get_full_text(paragraph).strip()
+        ]
+        if len(content_paragraphs) > 1:
+            continue
+        for paragraph in list(cell.paragraphs):
+            if get_full_text(paragraph).strip():
+                continue
+            p_pr = paragraph._p.get_or_add_pPr()
+            borders = p_pr.find(qn("w:pBdr"))
+            if borders is None or len(cell.paragraphs) <= 1:
+                continue
+            paragraph._p.getparent().remove(paragraph._p)
+
+
+def _repair_official_display_line_heights(document) -> None:
+    """Repair clipping without replacing a user template's selected font.
+
+    User masters remain the typography authority. The only automatic change
+    here is replacing an undersized exact line box on the organization mark or
+    document title with an ``AT_LEAST`` line box. This preserves an explicit
+    小标宋 family while allowing Word/WPS to honor that family's real metrics.
+    """
+
+    for paragraph in _iter_all_paragraphs(document):
+        text = get_full_text(paragraph)
+        if not any(token in text for token in _OFFICIAL_DISPLAY_TOKENS):
+            continue
+        font_size_pt = _effective_paragraph_font_size_pt(paragraph)
+        if font_size_pt < 20:
+            continue
+        line_rule, line_height_pt = _effective_paragraph_line_height(paragraph)
+        minimum_pt = font_size_pt * 1.2
+        if (
+            line_rule != WD_LINE_SPACING.EXACTLY
+            or line_height_pt is None
+            or line_height_pt >= minimum_pt
+        ):
+            continue
+        paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+        paragraph.paragraph_format.line_spacing = Pt(minimum_pt)
+
+
+def _effective_paragraph_font_size_pt(paragraph) -> float:
+    sizes = [
+        float(run.font.size.pt)
+        for run in paragraph.runs
+        if run.font.size is not None
+    ]
+    style = getattr(paragraph, "style", None)
+    while style is not None:
+        if getattr(style.font, "size", None) is not None:
+            sizes.append(float(style.font.size.pt))
+            break
+        style = getattr(style, "base_style", None)
+    return max(sizes, default=0.0)
+
+
+def _effective_paragraph_line_height(paragraph):
+    containers = [paragraph]
+    style = getattr(paragraph, "style", None)
+    while style is not None:
+        containers.append(style)
+        style = getattr(style, "base_style", None)
+    for container in containers:
+        paragraph_format = container.paragraph_format
+        rule = paragraph_format.line_spacing_rule
+        spacing = paragraph_format.line_spacing
+        if rule is None and spacing is None:
+            continue
+        height = getattr(spacing, "pt", None)
+        return rule, float(height) if height is not None else None
+    return None, None
+
+
+def _official_body_level(text: str) -> int:
+    normalized = str(text or "").strip()
+    for level, pattern in _BODY_LEVEL_PATTERNS:
+        if pattern.match(normalized):
+            return level
+    return 0
+
+
+def _format_official_body_paragraph(paragraph, *, level: int) -> None:
+    role = {
+        1: "黑体",
+        2: "楷体",
+        3: "仿宋",
+        4: "仿宋",
+    }.get(level, "仿宋")
+    paragraph.paragraph_format.first_line_indent = Cm(1.1)
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    paragraph.paragraph_format.line_spacing = Pt(28)
+    # Heading 1/2 are semantic font roles here, not navigation headings.
+    # Explicitly cancel Word template pagination controls so a run of numbered
+    # body levels can split naturally across pages.
+    paragraph.paragraph_format.keep_with_next = False
+    paragraph.paragraph_format.keep_together = False
+    paragraph.paragraph_format.page_break_before = False
+    for run in paragraph.runs:
+        set_run_fonts(
+            run,
+            font_cn=role,
+            font_en=role,
+            size_pt=16,
+            bold=False,
+        )
+        run.font.color.rgb = RGBColor(0, 0, 0)
 
 
 def _placeholder_id(token: str) -> str:
@@ -590,8 +1073,15 @@ def _iter_all_paragraphs(container):
                 yield from _iter_all_paragraphs(cell)
     if hasattr(container, "sections"):
         for section in list(getattr(container, "sections", []) or []):
-            yield from _iter_all_paragraphs(section.header)
-            yield from _iter_all_paragraphs(section.footer)
+            for part in (
+                section.header,
+                section.first_page_header,
+                section.even_page_header,
+                section.footer,
+                section.first_page_footer,
+                section.even_page_footer,
+            ):
+                yield from _iter_all_paragraphs(part)
 
 
 def _target_docx_path(
@@ -734,17 +1224,22 @@ def _write_archive_manifests(
     review_pdf_renderer: str,
     review_pdf_issue: str,
     replaced_placeholders: tuple[str, ...],
+    delivery_versions: tuple[str, ...],
 ) -> None:
     profile = get_official_document_profile(contract.profile_id)
     values = entity_data if isinstance(entity_data, Mapping) else {}
-    output_paths = {
-        "official_docx": str(formal_docx_path),
-        "internal_review_docx": str(internal_review_docx_path),
-        "archive_manifest": str(published_archive_manifest_path or json_path),
-        "archive_manifest_md": str(
+    output_paths: dict[str, str] = {}
+    if "official_docx" in delivery_versions:
+        output_paths["official_docx"] = str(formal_docx_path)
+    if "internal_review_docx" in delivery_versions:
+        output_paths["internal_review_docx"] = str(internal_review_docx_path)
+    if "archive_manifest" in delivery_versions:
+        output_paths["archive_manifest"] = str(
+            published_archive_manifest_path or json_path
+        )
+        output_paths["archive_manifest_md"] = str(
             published_archive_manifest_markdown_path or markdown_path
-        ),
-    }
+        )
     if review_pdf_path is not None and review_pdf_status == "generated":
         output_paths["review_pdf"] = str(review_pdf_path)
     archive_fields = {
@@ -772,7 +1267,7 @@ def _write_archive_manifests(
         "profile_label": getattr(profile, "label", "") if profile is not None else "",
         "master_id": master.master_id,
         "material_schema_ids": list(contract.material_schema_ids),
-        "delivery_versions": list(contract.delivery_versions),
+        "delivery_versions": list(delivery_versions),
         "output_paths": output_paths,
         "review_pdf": {
             "status": review_pdf_status,

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
 import json
 import time
+from pathlib import Path
 
+import pytest
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Cm, Pt
-import pytest
 
 from src.assistant.application.capability_registry import (
     classify_task_operation,
@@ -29,9 +29,9 @@ from src.assistant.contracts.messages import (
 from src.assistant.contracts.runtime import (
     MAX_ASSISTANT_HISTORY_CHARACTERS,
     MAX_ASSISTANT_USER_MESSAGE_CHARACTERS,
-    AssistantTurnRequest,
     TURN_FAILED,
     TURN_WAITING_USER_QUESTION,
+    AssistantTurnRequest,
 )
 from src.assistant.contracts.task_plan import TASK_OPERATION_REVIEW
 from src.assistant.domain.docx_format_evidence import (
@@ -56,10 +56,10 @@ from src.assistant.runtime.turn_runner import (
 )
 from src.assistant.storage.session_store import AssistantSessionStore
 from src.assistant.ui.assistant_panel import AssistantPanel
-from src.assistant.ui.creative_home import (
-    AssistantCreativeHome,
-    AssistantHeroComposer,
+from src.assistant.ui.conversation_presentation import (
+    build_interaction_action_scope,
 )
+from src.assistant.ui.creative_home import AssistantHeroComposer
 from src.assistant.ui.interaction_card import AssistantInteractionCard
 from src.config.scene_natural_request_router import (
     route_natural_scene_request,
@@ -120,6 +120,144 @@ def test_missing_selected_attachment_blocks_submit_and_preserves_draft(
         assert composer.get_text() == "请深入分析这份文档"
         assert "附件已失效" in composer._submission_gate
         assert "selected.docx" in composer._submission_gate
+    finally:
+        panel.close()
+
+
+def test_composer_material_set_stays_bound_to_one_session(qapp, tmp_path):
+    docx_path = tmp_path / "primary.docx"
+    Document().save(docx_path)
+    markdown_path = tmp_path / "notes.md"
+    markdown_path.write_text("# Notes", encoding="utf-8")
+    panel = _panel(tmp_path, _CaptureGateway())
+    try:
+        panel._empty_input._add_document_paths(
+            (str(docx_path), str(markdown_path))
+        )
+        qapp.processEvents()
+
+        assert panel._active_session is not None
+        assert tuple(
+            Path(str(item["path"])).name
+            for item in panel._active_session.context_refs
+        ) == (docx_path.name, markdown_path.name)
+        assert panel._empty_input.document_paths() == (
+            str(docx_path.resolve()),
+            str(markdown_path.resolve()),
+        )
+        assert panel._composer.document_paths() == (
+            str(docx_path.resolve()),
+            str(markdown_path.resolve()),
+        )
+
+        panel._empty_input._clear_attachment(str(docx_path.resolve()))
+        qapp.processEvents()
+
+        assert tuple(
+            Path(str(item["path"])).name
+            for item in panel._active_session.context_refs
+        ) == (markdown_path.name,)
+        assert panel._empty_input.document_paths() == (
+            str(markdown_path.resolve()),
+        )
+    finally:
+        panel.close()
+
+
+def test_successful_send_consumes_composer_materials_exactly_once(
+    qapp,
+    tmp_path,
+):
+    source = tmp_path / "analysis.docx"
+    Document().save(source)
+    panel = _panel(tmp_path, _CaptureGateway())
+    try:
+        panel._on_composer_document_selected(str(source))
+        composer = panel._empty_input
+        composer.set_text("请分析这份文档")
+
+        composer._on_send()
+        qapp.processEvents()
+
+        session = panel._active_session
+        assert session is not None
+        assert session.context_refs == ()
+        assert panel._empty_input.document_paths() == ()
+        assert panel._composer.document_paths() == ()
+        assert panel._context_refs_for_submission() == ()
+        submitted = next(
+            message
+            for message in reversed(session.messages)
+            if message.role == ROLE_USER
+        )
+        assert tuple(
+            str(item.get("path") or "") for item in submitted.source_refs
+        ) == (str(source.resolve()),)
+        assert tuple(
+            str(item.get("path") or "")
+            for item in session.pending_continuation.get(
+                "context_refs",
+                (),
+            )
+        ) == (str(source.resolve()),)
+    finally:
+        panel.close()
+
+
+def test_retry_action_recovers_attachments_from_the_failed_user_message(
+    qapp,
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "retry.docx"
+    Document().save(source)
+    panel = _panel(tmp_path, _CaptureGateway())
+    try:
+        session = panel._coordinator.create_session()
+        source_refs = (
+            {
+                "type": "file",
+                "name": source.name,
+                "path": str(source.resolve()),
+            },
+        )
+        session = panel._coordinator.append_message(
+            session,
+            AssistantMessage.text(
+                role=ROLE_USER,
+                text="请分析附件",
+                source_refs=source_refs,
+            ),
+        )
+        session = panel._coordinator.update_state(
+            session,
+            document_job={"status": "failed"},
+            turn_status=TURN_FAILED,
+        )
+        panel._active_session = session
+        captured: dict[str, object] = {}
+
+        def _capture_retry(text: str, **kwargs) -> bool:
+            captured["text"] = text
+            captured.update(kwargs)
+            return True
+
+        monkeypatch.setattr(panel, "_send_message", _capture_retry)
+        panel._handle_card_action(
+            "retry_provider_request",
+            {
+                "retry_text": "请分析附件",
+                "action_scope": build_interaction_action_scope(
+                    pending_continuation=session.pending_continuation,
+                    active_plan=session.active_plan,
+                    document_job=session.document_job,
+                    turn_status=session.turn_status,
+                ),
+            },
+        )
+
+        assert captured["text"] == "请分析附件"
+        assert captured["context_refs_override"] == source_refs
     finally:
         panel.close()
 
@@ -294,11 +432,20 @@ def test_failed_confirmation_retry_reuses_cursor_without_duplicate_user_message(
     try:
         assert panel._send_message("start") is True
         _wait_for_turn(qapp, panel)
+        session = panel._active_session
+        assert session is not None
         panel._handle_card_action(
             "submit_question_answer",
             {
                 "response": "Student",
                 "selected_choice_ids": ["student"],
+                "continuation_ref": dict(session.pending_continuation),
+                "action_scope": build_interaction_action_scope(
+                    pending_continuation=session.pending_continuation,
+                    active_plan=session.active_plan,
+                    document_job=session.document_job,
+                    turn_status=session.turn_status,
+                ),
             },
         )
         _wait_for_turn(qapp, panel)
@@ -307,9 +454,18 @@ def test_failed_confirmation_retry_reuses_cursor_without_duplicate_user_message(
             "last_attempt_failed"
         ] is True
 
+        session = panel._active_session
         panel._handle_card_action(
             "retry_provider_request",
-            {"retry_text": "Student"},
+            {
+                "retry_text": "Student",
+                "action_scope": build_interaction_action_scope(
+                    pending_continuation=session.pending_continuation,
+                    active_plan=session.active_plan,
+                    document_job=session.document_job,
+                    turn_status=session.turn_status,
+                ),
+            },
         )
         _wait_for_turn(qapp, panel)
 
@@ -325,6 +481,35 @@ def test_failed_confirmation_retry_reuses_cursor_without_duplicate_user_message(
                 if message.role == ROLE_USER
             ]
         ) == 2
+    finally:
+        panel.shutdown_active_execution(1000)
+        panel.close()
+
+
+def test_new_local_document_request_supersedes_provider_question_cursor(
+    qapp,
+    tmp_path,
+):
+    gateway = _RetryContinuationGateway()
+    panel = _panel(tmp_path, gateway)
+    try:
+        assert panel._send_message("start") is True
+        _wait_for_turn(qapp, panel)
+        session = panel._active_session
+        assert session is not None
+        assert session.pending_continuation["continuation_id"] == "cursor-1"
+        assert len(gateway.requests) == 1
+
+        assert panel._send_message("我要发个通知") is True
+        qapp.processEvents()
+
+        session = panel._active_session
+        assert session is not None
+        assert len(gateway.requests) == 1
+        assert session.document_job["status"] == "plan_ready"
+        assert session.pending_continuation == {}
+        assert session.active_plan["operation"] == "author"
+        assert session.active_plan["work_mode_id"] == "official"
     finally:
         panel.shutdown_active_execution(1000)
         panel.close()
@@ -363,6 +548,162 @@ def test_startup_recovery_closes_stale_provider_job_and_allows_local_plan(
         assert panel._send_message("统一这份 Word 文档格式") is True
         assert panel._active_session is not None
         assert panel._active_session.document_job["status"] == "plan_ready"
+    finally:
+        panel.close()
+
+
+def test_exam_make_request_clarifies_stage_then_renders_plan_without_provider(
+    qapp,
+    tmp_path,
+):
+    gateway = _CaptureGateway()
+    panel = _panel(tmp_path, gateway)
+    try:
+        assert panel._send_message(
+            "我需要制作一份初中六年级语文期中考试试卷"
+        ) is True
+        qapp.processEvents()
+
+        session = panel._active_session
+        assert session is not None
+        assert gateway.requests == []
+        assert session.document_job["status"] == "needs_route_clarification"
+        assert session.pending_continuation["kind"] == (
+            "local_exam_clarification"
+        )
+        question = session.messages[-1].blocks[0]
+        assert question.data["interaction_type"] == "question"
+
+        panel._handle_card_action(
+            "submit_question_answer",
+            {
+                "clarification_id": session.pending_continuation[
+                    "clarification_id"
+                ],
+                "selected_choice_ids": ["middle_preparatory"],
+            },
+        )
+        qapp.processEvents()
+
+        session = panel._active_session
+        assert session is not None
+        assert session.document_job["status"] == "plan_ready"
+        assert session.active_plan["operation"] == "author"
+        assert session.active_plan["scene_ref"]["id"] == "exam_term"
+        assert session.active_plan["scene_ref"]["generation_mode"] == (
+            "from_prompt"
+        )
+        block = session.messages[-1].blocks[0]
+        assert block.type == "interaction"
+        assert block.data["interaction_type"] == "plan"
+        assert any(
+            fact == {
+                "label": "年级",
+                "value": "初中预备班（六年级）",
+            }
+            for fact in block.data["facts"]
+        )
+        assert any(
+            action["id"] == "generate_content_draft"
+            for action in block.data["actions"]
+        )
+    finally:
+        panel.close()
+
+
+@pytest.mark.parametrize(
+    "query",
+    (
+        "我需要写一个公文",
+        "我要发一个公文",
+        "我有写一篇公文",
+    ),
+)
+def test_generic_official_request_uses_one_local_structured_intake(
+    qapp,
+    tmp_path,
+    query,
+):
+    gateway = _CaptureGateway()
+    panel = _panel(tmp_path, gateway)
+    try:
+        assert panel._send_message(query) is True
+        qapp.processEvents()
+
+        session = panel._active_session
+        assert session is not None
+        assert gateway.requests == []
+        assert session.document_job["status"] == "needs_route_clarification"
+        assert session.pending_continuation["kind"] == (
+            "local_official_clarification"
+        )
+        question = session.messages[-1].blocks[0]
+        assert question.data["interaction_type"] == "question"
+        request = question.data["confirmation_request"]
+        assert request["requires_choice"] is True
+        assert request["choice_columns"] == 2
+        assert request["initial_choice_count"] == 7
+        assert request["expand_choices_label"] == "更多文种（8）"
+        assert [item["id"] for item in request["options"][:7]] == [
+            "notice",
+            "notice_public",
+            "circular",
+            "report",
+            "request",
+            "letter",
+            "minutes",
+        ]
+        assert len(request["options"]) == 15
+        assert request["input_columns"] == 2
+        assert request["compact_heading"] is True
+        assert request["submit_label"] == "生成计划"
+        assert not question.data.get("body")
+        assert [item["id"] for item in request["inputs"]] == [
+            "organization",
+            "recipient",
+            "purpose",
+        ]
+
+        panel._handle_card_action(
+            "submit_question_answer",
+            {
+                "clarification_id": session.pending_continuation[
+                    "clarification_id"
+                ],
+                "selected_choice_ids": ["report"],
+                "field_values": {
+                    "organization": "示例市教育局",
+                    "recipient": "各区教育局",
+                    "purpose": "部署秋季校园安全检查工作",
+                },
+            },
+        )
+        qapp.processEvents()
+
+        session = panel._active_session
+        assert session is not None
+        assert session.document_job["status"] == "plan_ready"
+        assert session.pending_continuation == {}
+        assert session.active_plan["operation"] == "author"
+        assert session.active_plan["work_mode_id"] == "official"
+        assert session.active_plan["production_contract"][
+            "document_type_id"
+        ] == "report"
+        assert session.active_plan["scene_ref"]["official_field_values"] == {
+            "document_type": "report",
+            "organization": "示例市教育局",
+            "recipient": "各区教育局",
+        }
+        assert session.active_plan["scene_ref"][
+            "official_content_requirements"
+        ] == "部署秋季校园安全检查工作"
+        assert session.active_plan["blocking_issues"] == []
+        plan_card = session.messages[-1].blocks[0]
+        assert any(
+            action["id"] == "generate_content_draft"
+            for action in plan_card.data["actions"]
+        )
+        assert gateway.requests == []
     finally:
         panel.close()
 
@@ -438,10 +779,12 @@ def test_reference_analysis_plus_apply_keeps_sample_role_and_blocks_production(
         assert session is not None
         assert session.document_job["status"] == "needs_data_disclosure"
         assert session.active_plan == {}
-        assert session.context_refs[0]["semantic_role"] == (
+        assert session.context_refs == ()
+        disclosed_ref = session.pending_continuation["context_refs"][0]
+        assert disclosed_ref["semantic_role"] == (
             STANDARD_FORMAT_REFERENCE_ROLE
         )
-        assert session.context_refs[0]["target_attachment_required"] is True
+        assert disclosed_ref["target_attachment_required"] is True
         assert "目标文档尚未提供" in session.messages[-1].blocks[0].text
         assert gateway.requests == []
         decision = evaluate_request_policy(
@@ -747,20 +1090,22 @@ def test_draft_persistence_failure_is_caught_and_shown(
     panel = _panel(tmp_path, _CaptureGateway())
     try:
         panel.new_session()
-        monkeypatch.setattr(
-            panel._coordinator,
-            "update_draft",
-            lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                OSError("disk full")
-            ),
-        )
+        with monkeypatch.context() as scoped:
+            scoped.setattr(
+                panel._coordinator,
+                "persist",
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    OSError("disk full")
+                ),
+            )
 
-        panel._empty_input.set_text("draft survives")
-        qapp.processEvents()
+            panel._empty_input.set_text("draft survives")
+            qapp.processEvents()
+            assert not panel._flush_active_draft()
 
-        assert panel._empty_input.get_text() == "draft survives"
-        assert "草稿暂未保存" in panel._empty_input._submission_error
-        assert "OSError" in panel._empty_input._submission_error
+            assert panel._empty_input.get_text() == "draft survives"
+            assert "草稿暂未保存" in panel._empty_input._submission_error
+            assert "OSError" in panel._empty_input._submission_error
     finally:
         panel.close()
 
@@ -792,55 +1137,34 @@ def test_question_card_renders_every_provider_option(qapp):
         card.close()
 
 
-def test_custom_task_store_migrates_legacy_shape_and_rejects_invalid_rows(
+@pytest.mark.parametrize(
+    "interaction_type",
+    [
+        "question",
+        "disclosure",
+        "permission",
+        "plan_candidate",
+        "plan",
+        "approval",
+        "progress",
+    ],
+)
+def test_historical_interaction_cards_do_not_render_redundant_status_receipts(
     qapp,
-    monkeypatch,
+    interaction_type,
 ):
-    from src.assistant.ui import creative_home as creative_home_module
-
-    class FakeSettings:
-        class Status:
-            NoError = 0
-
-        raw = json.dumps(
-            [
-                {"label": "Valid", "prompt": "keep"},
-                {"label": "valid", "prompt": "duplicate"},
-                {"label": "Huge", "prompt": "x" * 200_000},
-            ],
-            ensure_ascii=False,
-        )
-
-        def __init__(self, *_args):
-            self._status = self.Status.NoError
-
-        def value(self, _key, default=""):
-            return self.raw if self.raw is not None else default
-
-        def setValue(self, _key, value):
-            type(self).raw = value
-
-        def sync(self):
-            return None
-
-        def status(self):
-            return self._status
-
-    monkeypatch.setattr(creative_home_module, "QSettings", FakeSettings)
-    home = AssistantCreativeHome(PanelBridge())
+    card = AssistantInteractionCard(
+        interaction_type=interaction_type,
+        title="历史卡片",
+        body="",
+        payload={"active": False},
+    )
     try:
-        assert [row[:2] for row in home._custom_tasks] == [
-            ("Valid", "keep")
-        ]
-        assert len(home._custom_task_load_warnings) == 2
-        assert "已忽略 2 个" in home._manage_button.toolTip()
-
-        assert home._save_custom_tasks() is True
-        saved = json.loads(FakeSettings.raw)
-        assert saved["schema_version"] == "assistant-custom-tasks-v1"
-        assert saved["tasks"] == [{"label": "Valid", "prompt": "keep"}]
+        qapp.processEvents()
+        assert not hasattr(card, "_receipt")
+        assert card.findChild(type(card._type_icon), "assistant_card_receipt") is None
     finally:
-        home.close()
+        card.close()
 
 
 def test_corrupt_session_is_visible_as_recovery_entry_and_original_is_kept(

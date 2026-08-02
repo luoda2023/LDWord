@@ -19,25 +19,11 @@ PANEL_SPECS: tuple[PanelSpec, ...] = (
     PanelSpec(id="workbench", title="工作台", icon="layout-dashboard"),
     PanelSpec(id="scene", title="方案配置", icon="mountain-snow"),
     PanelSpec(id="template", title="模板管理", icon="scroll-text"),
+    PanelSpec(id="assets", title="资料包", icon="package"),
     PanelSpec(id="assistant", title="AI 文档助手", icon="sparkles"),
     PanelSpec(id="theme", title="主题编辑器", icon="palette", group="bottom"),
     PanelSpec(id="preferences", title="偏好设置", icon="settings", group="bottom"),
 )
-
-OPTIONAL_PANEL_SPECS: tuple[PanelSpec, ...] = (
-    PanelSpec(id="assets", title="完整资料包工作台", icon="package"),
-)
-
-
-def application_panel_specs(
-    *, include_optional: bool = False
-) -> tuple[PanelSpec, ...]:
-    """Return core product surfaces plus optional specialist workbenches."""
-
-    if include_optional:
-        return PANEL_SPECS + OPTIONAL_PANEL_SPECS
-    return PANEL_SPECS
-
 
 MAIN_SPECS = tuple(spec for spec in PANEL_SPECS if spec.group == "main")
 BOTTOM_SPECS = tuple(spec for spec in PANEL_SPECS if spec.group == "bottom")
@@ -54,9 +40,7 @@ def panel_index(panel_id: str, *, fallback: int = 0) -> int:
 __all__ = [
     "BOTTOM_SPECS",
     "MAIN_SPECS",
-    "OPTIONAL_PANEL_SPECS",
     "PANEL_SPECS",
     "PanelSpec",
-    "application_panel_specs",
     "panel_index",
 ]

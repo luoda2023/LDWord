@@ -24,6 +24,7 @@ class DocSection:
     confidence: float = 0.0
     title_confident: bool = True
     excluded: bool = False
+    boundary_confident: bool = False
 
 
 @dataclass
@@ -32,6 +33,8 @@ class DocTree:
     heading_map: dict[int, int] = field(default_factory=dict)
     section_ranges: dict[str, tuple[int, int]] = field(default_factory=dict)
     sections: list[DocSection] = field(default_factory=list)
+    special_title_matches: dict[int, str] = field(default_factory=dict)
+    special_title_ranges: list[DocSection] = field(default_factory=list)
     detection_log: list[str] = field(default_factory=list)
     scope_mode: str = "all"
     writable_roles: frozenset[str] = field(default_factory=frozenset)
@@ -59,6 +62,21 @@ class DocTree:
             if start <= para_index < end:
                 return canonicalize_section_type(section_name)
         return "body"
+
+    def get_special_title_match(self, para_index: int) -> str | None:
+        return self.special_title_matches.get(para_index)
+
+    def get_special_title_selectors_for_paragraph(
+        self,
+        para_index: int,
+    ) -> tuple[str, ...]:
+        selectors: list[str] = []
+        for section in self.special_title_ranges:
+            if section.start_index <= para_index < section.end_index:
+                selector = str(section.section_type or "").strip()
+                if selector and selector not in selectors:
+                    selectors.append(selector)
+        return tuple(selectors)
 
     def is_role_writable(self, section_type: str) -> bool:
         canonical = canonicalize_section_type(section_type)

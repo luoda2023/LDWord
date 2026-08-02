@@ -35,7 +35,7 @@ def test_navigation_highlighter_moves_single_highlight_between_widgets():
         highlighter.highlight(
             second,
             "scene.document_scope.selected_roles",
-            display_label="指定区域",
+            display_label="自选区域",
         )
 
         assert highlighter.current_widget is second
@@ -45,7 +45,7 @@ def test_navigation_highlighter_moves_single_highlight_between_widgets():
         assert first.toolTip() == ""
         assert second.property("navigation_field_highlight") is True
         assert second.property("navigation_field_display_label") == (
-            "指定区域"
+            "自选区域"
         )
         assert second.property("navigation_field_raw_label") == (
             "scene.document_scope.selected_roles"
@@ -53,7 +53,7 @@ def test_navigation_highlighter_moves_single_highlight_between_widgets():
         assert second.property("navigation_field_diagnostic_label") == (
             "scene.document_scope.selected_roles"
         )
-        assert second.toolTip() == "当前执行问题定位：指定区域"
+        assert second.toolTip() == "当前执行问题定位：自选区域"
 
         highlighter.clear()
 

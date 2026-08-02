@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.config.execution_feature_state import execution_plan_is_enabled
 from src.config.work_mode import resolve_work_mode_id
 
 
@@ -45,6 +46,8 @@ def scene_surface_for_scene(
     *,
     mode_id: object = "",
 ) -> SceneSurfaceSpec:
+    if not execution_plan_is_enabled(scene):
+        return GENERAL_SCENE_SURFACE
     has_declared_mode = bool(
         _clean_scene_key(mode_id)
         or _clean_scene_key(getattr(scene, "mode_id", ""))

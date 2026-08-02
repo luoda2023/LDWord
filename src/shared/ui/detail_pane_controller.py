@@ -48,6 +48,27 @@ class DetailPaneController(QObject):
             detail.setParent(self._detail_container)
             self.detail_map[card_id] = detail
 
+    def replace_detail(self, card_id: str, detail: "QWidget") -> "QWidget | None":
+        """Replace one registered pane without disturbing the active destination."""
+
+        old = self.detail_map.get(card_id)
+        was_current = old is not None and old is self._current_detail
+        if was_current:
+            self._geometry.set_active_widget(None)
+            self._detail_layout.removeWidget(old)
+            old.hide()
+            self._current_detail = None
+        detail.hide()
+        detail.setParent(self._detail_container)
+        self.detail_map[card_id] = detail
+        if old is not None:
+            old.hide()
+            old.setParent(None)
+            old.deleteLater()
+        if was_current:
+            return self.show_detail(card_id)
+        return detail
+
     def hide_all(self) -> None:
         """Hide every registered pane without discarding registrations."""
         if self._current_detail is not None:

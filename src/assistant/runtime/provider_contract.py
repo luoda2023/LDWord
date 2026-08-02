@@ -13,7 +13,6 @@ PROVIDER_START = "start"
 PROVIDER_TEXT_DELTA = "text_delta"
 PROVIDER_DONE = "done"
 PROVIDER_ERROR = "error"
-MAX_PROVIDER_OUTPUT_CHARACTERS = 100_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +66,6 @@ def provider_messages(values: Sequence[Mapping[str, object]]) -> tuple[dict[str,
 
 
 __all__ = [name for name in globals() if name.startswith("PROVIDER_")] + [
-    "MAX_PROVIDER_OUTPUT_CHARACTERS",
     "ModelGateway",
     "ProviderRequest",
     "ProviderStreamEvent",

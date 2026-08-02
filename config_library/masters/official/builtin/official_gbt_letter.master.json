@@ -13,7 +13,7 @@
     "official_gbt",
     "official_custom"
   ],
-  "master_version": "official-master-family-gbt-2026-07-11",
+  "master_version": "official-master-family-gbt-2026-08-02-r5",
   "placeholder_contract": {
     "required": [
       "official_title",
@@ -55,12 +55,12 @@
     "legacy_aliases": []
   },
   "placeholder_index": {
-    "sha256": "12a097dc418f97b29d80cefd493aa9a31e54e1b3399ca75ab9866c1ca7e59bad",
+    "sha256": "1fa00733c48865a2b3ef1cf8c346f1993055b6b00150dde8cc3706589c9752ed",
     "scanner_version": "master-placeholder-index-v1",
     "placeholder_ids": [
+      "@text:official_organization",
       "@text:official_security_level",
       "@text:official_urgency",
-      "@text:official_organization",
       "@text:official_document_no",
       "@text:official_title",
       "@text:official_recipient",
@@ -71,9 +71,9 @@
       "@text:official_copy_scope"
     ],
     "raw_occurrence_counts": {
+      "@text:official_organization": 1,
       "@text:official_security_level": 1,
       "@text:official_urgency": 1,
-      "@text:official_organization": 1,
       "@text:official_document_no": 1,
       "@text:official_title": 1,
       "@text:official_recipient": 1,
@@ -84,9 +84,9 @@
       "@text:official_copy_scope": 1
     },
     "replaceable_occurrence_counts": {
+      "@text:official_organization": 1,
       "@text:official_security_level": 1,
       "@text:official_urgency": 1,
-      "@text:official_organization": 1,
       "@text:official_document_no": 1,
       "@text:official_title": 1,
       "@text:official_recipient": 1,
@@ -97,38 +97,38 @@
       "@text:official_copy_scope": 1
     },
     "placeholder_surfaces": {
-      "@text:official_security_level": [
+      "@text:official_organization": [
         "word/document.xml:/w:document/w:body/w:p[1]"
       ],
-      "@text:official_urgency": [
-        "word/document.xml:/w:document/w:body/w:p[2]"
+      "@text:official_security_level": [
+        "word/document.xml:/w:document/w:body/w:tbl[1]/w:tr/w:tc[1]/w:p[1]"
       ],
-      "@text:official_organization": [
-        "word/document.xml:/w:document/w:body/w:p[3]"
+      "@text:official_urgency": [
+        "word/document.xml:/w:document/w:body/w:tbl[1]/w:tr/w:tc[1]/w:p[2]"
       ],
       "@text:official_document_no": [
-        "word/document.xml:/w:document/w:body/w:p[4]"
+        "word/document.xml:/w:document/w:body/w:tbl[1]/w:tr/w:tc[2]/w:p"
       ],
       "@text:official_title": [
-        "word/document.xml:/w:document/w:body/w:p[5]"
+        "word/document.xml:/w:document/w:body/w:p[2]"
       ],
       "@text:official_recipient": [
-        "word/document.xml:/w:document/w:body/w:p[6]"
+        "word/document.xml:/w:document/w:body/w:p[3]"
       ],
       "@text:official_body": [
-        "word/document.xml:/w:document/w:body/w:p[7]"
+        "word/document.xml:/w:document/w:body/w:p[4]"
       ],
       "@text:official_attachment_note": [
-        "word/document.xml:/w:document/w:body/w:p[8]"
+        "word/document.xml:/w:document/w:body/w:p[5]"
       ],
       "@text:official_issuer": [
-        "word/document.xml:/w:document/w:body/w:p[10]"
+        "word/document.xml:/w:document/w:body/w:p[7]"
       ],
       "@text:official_issue_date": [
-        "word/document.xml:/w:document/w:body/w:p[11]"
+        "word/document.xml:/w:document/w:body/w:p[8]"
       ],
       "@text:official_copy_scope": [
-        "word/document.xml:/w:document/w:body/w:p[12]"
+        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr/w:tc/w:p"
       ]
     },
     "reference_page_excluded": false

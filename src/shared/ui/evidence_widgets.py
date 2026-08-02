@@ -153,6 +153,7 @@ class EvidenceActionBar(QWidget):
     def _dispose_button(self, widget: QWidget) -> None:
         if isinstance(widget, QPushButton):
             self._button_items.pop(widget, None)
+        widget.hide()
         widget.setParent(None)
         widget.deleteLater()
 

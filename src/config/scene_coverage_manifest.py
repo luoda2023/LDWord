@@ -136,7 +136,7 @@ CAPABILITY_AXES: tuple[CapabilityAxis, ...] = (
         axis_id="material_schema",
         label="Material schema",
         question="Which fields, assets, signatures, and attachments are required?",
-        typical_landings=("MaterialSchema", "MaterialExecutionContext", "AssetsPanel"),
+        typical_landings=("MaterialContract", "ExecutionMaterialSnapshot", "AssetsPanel"),
     ),
     CapabilityAxis(
         axis_id="structure_scope",
@@ -172,7 +172,7 @@ CAPABILITY_AXES: tuple[CapabilityAxis, ...] = (
         axis_id="batch_preset",
         label="Batch preset",
         question="How are multi-record inputs isolated and reported?",
-        typical_landings=("BatchPreset", "MaterialBatchSelection", "batch_report"),
+        typical_landings=("BatchPreset", "MaterialRunSelection", "batch_report"),
     ),
     CapabilityAxis(
         axis_id="plugin_boundary",

@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 from src.config.plugin_manual_gate import plugin_manual_gate_for_pack
+from src.config.scene_family_registry import get_planned_scene_family
 from src.config.scene_product_coverage_manifest import (
     SCENE_COVERAGE_PACK_MAP,
     coverage_packs_for_family,
     list_scene_coverage_packs,
 )
-from src.config.scene_family_registry import get_planned_scene_family
-
 
 _AMBIGUITY_SCORE_DELTA = 14
 
@@ -130,8 +129,10 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
             "proposal",
             "毕业论文",
             "课程论文",
+            "论文",
             "开题报告",
             "文献综述",
+            "综述",
             "学校字数",
             "论文排版",
         ),
@@ -181,6 +182,15 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
             "answer key",
             "handout",
             "试卷",
+            "卷子",
+            "考卷",
+            "考试卷",
+            "数学卷",
+            "语文卷",
+            "英语卷",
+            "期中卷",
+            "期末卷",
+            "套题",
             "题库",
             "学生版",
             "教师版",
@@ -188,6 +198,9 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
             "解析版",
             "答题卡",
             "讲义",
+            "教案",
+            "练习册",
+            "作业",
         ),
         family_id="exam_teaching",
         profile_id="exam_teaching_default",
@@ -253,11 +266,25 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
             "letter",
             "minutes",
             "policy collection",
+            "公文",
+            "决议",
+            "决定",
+            "命令",
+            "公报",
+            "公告",
+            "通告",
+            "意见",
             "通知",
+            "通报",
+            "公文报告",
+            "向上级报告",
+            "向上级报送的报告",
             "函",
             "请示",
             "批复",
+            "议案",
             "会议纪要",
+            "纪要",
             "制度汇编",
             "内部传阅",
         ),
@@ -741,13 +768,19 @@ def _match_route(
     normalized_query: str,
 ) -> NaturalRequestRouteMatch | None:
     matched_aliases = tuple(
-        alias for alias in route.aliases if _normalize_text(alias) in normalized_query
+        alias
+        for alias in route.aliases
+        if _contains_positive_route_token(normalized_query, _normalize_text(alias))
     )
     matched_context = tuple(
-        token for token in route.context_tokens if _normalize_text(token) in normalized_query
+        token
+        for token in route.context_tokens
+        if _contains_positive_route_token(normalized_query, _normalize_text(token))
     )
     matched_anti = tuple(
-        token for token in route.anti_tokens if _normalize_text(token) in normalized_query
+        token
+        for token in route.anti_tokens
+        if _contains_positive_route_token(normalized_query, _normalize_text(token))
     )
     if not matched_aliases and not matched_context:
         return None
@@ -771,6 +804,32 @@ def _match_route(
         matched_context_tokens=matched_context,
         matched_anti_tokens=matched_anti,
     )
+
+
+_ROUTE_NEGATION_PREFIX_RE = re.compile(
+    r"(?:不是|并非|不要|不用|无需|不需要|不想|不打算|不考虑|排除|"
+    r"(?:^|[\s,，。；;！!？?]|请)别|不写|不做|"
+    r"别写|别做|别生成|别制作|别创建|别起草|别修改|别处理|别发|别发布)"
+    r"(?:再|继续|帮我|给我|替我|进行|写|做|生成|制作|创建|起草|修改|处理|发|发布|下发|印发)*$"
+)
+
+
+def _contains_positive_route_token(query: str, token: str) -> bool:
+    """Match a route token only when at least one occurrence is not negated."""
+
+    if not token:
+        return False
+    start = query.find(token)
+    while start >= 0:
+        prefix = query[max(0, start - 14) : start]
+        suffix = query[start + len(token) : start + len(token) + 8]
+        suffix_negated = bool(
+            re.match(r"(?:不要|不用|不考虑|排除|先不|暂不)", suffix)
+        )
+        if not _ROUTE_NEGATION_PREFIX_RE.search(prefix) and not suffix_negated:
+            return True
+        start = query.find(token, start + 1)
+    return False
 
 
 def _route_evidence_lines(
@@ -831,8 +890,8 @@ def _unique_texts(values) -> tuple[str, ...]:
 
 
 __all__ = [
-    "NATURAL_REQUEST_ROUTE_MAP",
     "NATURAL_REQUEST_ROUTES",
+    "NATURAL_REQUEST_ROUTE_MAP",
     "NaturalRequestRoute",
     "NaturalRequestRouteMatch",
     "NaturalRequestRouteResult",

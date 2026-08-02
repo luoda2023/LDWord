@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -52,6 +52,7 @@ def render_docx_pages(
     output_dir: Path | str,
     *,
     attempt_render: bool = True,
+    preferred_renderers: Sequence[str] = (),
 ) -> DocxPageRenderResult:
     source = Path(docx_path)
     target_dir = Path(output_dir)
@@ -65,7 +66,9 @@ def render_docx_pages(
     if not attempt_render:
         return DocxPageRenderResult(status="docx_only", docx_path=source)
 
-    renderer_entry = available_docx_pdf_renderer()
+    renderer_entry = available_docx_pdf_renderer(
+        preferred_renderers=preferred_renderers,
+    )
     if renderer_entry is None:
         return DocxPageRenderResult(
             status="renderer_unavailable",
@@ -128,9 +131,16 @@ def png_has_content(path: Path | str) -> bool:
     return any(low != high for low, high in extrema)
 
 
-def available_docx_pdf_renderer() -> tuple[str, DocxPdfRenderer] | None:
+def available_docx_pdf_renderer(
+    *,
+    preferred_renderers: Sequence[str] = (),
+) -> tuple[str, DocxPdfRenderer] | None:
     if sys.platform == "win32":
         com_renderers = _registered_windows_com_renderers()
+        com_renderers = _prioritize_com_renderers(
+            com_renderers,
+            preferred_renderers,
+        )
         if _win32com_available() and com_renderers:
             return "office_com", lambda docx, pdf: _render_docx_to_pdf_windows_com(
                 com_renderers, docx, pdf
@@ -141,6 +151,33 @@ def available_docx_pdf_renderer() -> tuple[str, DocxPdfRenderer] | None:
             Path(soffice), docx, pdf
         )
     return None
+
+
+def _prioritize_com_renderers(
+    renderers: tuple[ComRendererSpec, ...],
+    preferred_renderers: Sequence[str],
+) -> tuple[ComRendererSpec, ...]:
+    priorities = {
+        str(renderer_name or "").strip(): index
+        for index, renderer_name in enumerate(preferred_renderers)
+        if str(renderer_name or "").strip()
+    }
+    if not priorities:
+        return renderers
+    original_positions = {
+        renderer_name: index
+        for index, (renderer_name, _prog_id) in enumerate(renderers)
+    }
+    fallback_priority = len(priorities)
+    return tuple(
+        sorted(
+            renderers,
+            key=lambda item: (
+                priorities.get(item[0], fallback_priority),
+                original_positions[item[0]],
+            ),
+        )
+    )
 
 
 def _win32com_available() -> bool:

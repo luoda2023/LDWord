@@ -30,21 +30,21 @@ def test_formula_output_watermark_audit_locks_capability_ownership():
     assert report.ready_family_count == 14
     assert report.boundary_family_count == 1
     assert report.accounted_family_count == 15
-    assert report.formula_family_count == 3
+    assert report.formula_family_count == 1
     assert report.output_family_count == 15
     assert report.watermark_family_count == 1
     assert report.plugin_gate_count == 2
     assert report.control_contract_count == 4
-    assert report.parameter_path_count == 26
-    assert report.template_baseline_path_count == 1
+    assert report.parameter_path_count == 36
+    assert report.template_baseline_path_count == 0
     assert report.issue_count == 0
     assert report.warning_count == 0
     assert report.missing_source_evidence_count == 0
 
     formula = rows["formula_policy"]
     assert formula.expected_owner_layer == "scene"
-    assert formula.family_ids == ("thesis_cn", "journal_en", "exam_teaching")
-    assert formula.template_baseline_paths == ("formula_table.formula_font_name",)
+    assert formula.family_ids == ("thesis_cn",)
+    assert formula.template_baseline_paths == ()
     assert formula.plugin_gate_ids == (
         "exam_ai_complex_diagram_gate",
         "import_ai_conversion_gate",
@@ -98,11 +98,7 @@ def test_formula_output_watermark_audit_filters_capability_family_and_pack():
     assert [row.capability_id for row in formula_report.capability_rows] == [
         "formula_policy"
     ]
-    assert [row.family_id for row in formula_report.family_rows] == [
-        "thesis_cn",
-        "journal_en",
-        "exam_teaching",
-    ]
+    assert [row.family_id for row in formula_report.family_rows] == ["thesis_cn"]
     assert [row.family_id for row in family_report.family_rows] == [
         "meeting_policy_documents"
     ]
@@ -187,7 +183,7 @@ def test_release_gate_includes_formula_output_watermark_audit(tmp_path):
         payload["counts"]["scene_formula_output_watermark_accounted_family_count"]
         == 15
     )
-    assert payload["counts"]["scene_formula_output_watermark_formula_family_count"] == 3
+    assert payload["counts"]["scene_formula_output_watermark_formula_family_count"] == 1
     assert payload["counts"]["scene_formula_output_watermark_output_family_count"] == 15
     assert (
         payload["counts"]["scene_formula_output_watermark_watermark_family_count"]

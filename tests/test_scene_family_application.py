@@ -55,7 +55,11 @@ def test_thesis_cn_family_application_keeps_existing_thesis_scene_profile_explic
     assert get_count_profile("school_thesis").label == "School thesis count"
     assert scene.module_switches["citation_link"] is True
     assert scene.module_switches["reference_format"] is True
-    assert scene.module_switches["equation_table_format"] is True
+    assert scene.is_module_enabled("formula_convert") is True
+    assert scene.is_module_enabled("equation_table_format") is True
+    assert scene.is_module_enabled("chem_typography") is False
+    assert scene.thesis_formula_rules is not None
+    assert not any(scene.thesis_formula_rules.chem_typography.scopes.values())
 
     preflight = compliance.object_preflight
     assert preflight.preservation_mode == "warn"
@@ -356,7 +360,8 @@ def test_exam_teaching_family_application_builds_multi_version_delivery_defaults
     assert get_count_profile("exam_items").label == "Exam item count"
     assert scene.module_switches["placeholder_replace"] is True
     assert scene.module_switches["image_insertion"] is True
-    assert scene.module_switches["equation_table_format"] is True
+    assert scene.is_module_enabled("equation_table_format") is False
+    assert scene.thesis_formula_rules is None
 
     preflight = compliance.object_preflight
     assert preflight.preservation_mode == "warn"

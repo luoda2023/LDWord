@@ -39,9 +39,15 @@ def test_control_contract_registry_covers_n2_130_scene_output_material_plugin_co
     assert contracts["scene.formula_conversion_strategy"].canonical_control == (
         "scene policy + workbench/runtime gate"
     )
-    assert "scene.formula_convert.output_mode" in contracts[
+    assert "scene.thesis_formula_rules.formula_convert.output_mode" in contracts[
         "scene.formula_conversion_strategy"
     ].parameter_paths
+    assert "do not persist or preview" in contracts[
+        "scene.formula_conversion_strategy"
+    ].template_surface
+    assert "thesis plan formula rules" in contracts[
+        "scene.formula_conversion_strategy"
+    ].scene_surface
     assert "full LaTeX" in contracts[
         "scene.formula_conversion_strategy"
     ].disabled_state_rule
@@ -54,8 +60,8 @@ def test_control_contract_registry_covers_n2_130_scene_output_material_plugin_co
 
     material = contracts["material.schema_selection"]
     assert material.owner_layer == "material"
-    assert "material_schema_registry.*" in material.parameter_paths
-    assert "unknown schema" in material.disabled_state_rule
+    assert "material_package.material_contract_id" in material.parameter_paths
+    assert "fail closed" in material.disabled_state_rule
 
     delivery = contracts["output.delivery_preset"]
     assert delivery.owner_layer == "output"
@@ -124,7 +130,7 @@ def test_control_contract_summary_exposes_control_and_owner_layer():
     assert "scene.formula_conversion_strategy [scene]" in summary
     assert "scene policy + workbench/runtime gate" in summary
     assert "公式策略" in summary
-    assert "word_native/image_fallback/keep_source/manual_review" in summary
+    assert "word_native/latex/keep_source/skip_and_mark/manual_review" in summary
 
 
 def test_control_contract_evidence_locations_resolve_source_lines():

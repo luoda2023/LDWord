@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import IntEnum
 from typing import Any
 
@@ -33,8 +34,13 @@ class ToolPermissionRequest:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "risk_level", ToolRiskLevel(self.risk_level))
-        object.__setattr__(self, "arguments_preview", dict(plain_data(self.arguments_preview)))
-        if not all(str(getattr(self, name) or "").strip() for name in ("request_id", "session_id", "turn_id", "tool_name")):
+        object.__setattr__(
+            self, "arguments_preview", dict(plain_data(self.arguments_preview))
+        )
+        if not all(
+            str(getattr(self, name) or "").strip()
+            for name in ("request_id", "session_id", "turn_id", "tool_name")
+        ):
             raise ValueError("Permission request identity fields are required")
 
     def to_dict(self) -> dict[str, Any]:
@@ -72,7 +78,7 @@ class PermissionDecision:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "PermissionDecision":
+    def from_dict(cls, value: Mapping[str, Any]) -> PermissionDecision:
         return cls(
             request_id=str(value.get("request_id") or ""),
             allowed=bool(value.get("allowed", False)),
@@ -101,8 +107,12 @@ class DisclosureGrant:
             raise ValueError("Disclosure scope must be 'once' or 'session'")
         if self.text_character_count < 0 or self.image_count < 0:
             raise ValueError("Disclosure counts cannot be negative")
-        object.__setattr__(self, "allowed_refs", tuple(str(item) for item in self.allowed_refs))
-        object.__setattr__(self, "allowed_fields", tuple(str(item) for item in self.allowed_fields))
+        object.__setattr__(
+            self, "allowed_refs", tuple(str(item) for item in self.allowed_refs)
+        )
+        object.__setattr__(
+            self, "allowed_fields", tuple(str(item) for item in self.allowed_fields)
+        )
         normalized = plain_data(self.content_fingerprints)
         object.__setattr__(self, "content_fingerprints", dict(normalized))
 
@@ -115,7 +125,20 @@ class DisclosureGrant:
         refs: tuple[str, ...],
         fields: tuple[str, ...],
         fingerprints: Mapping[str, str] | None = None,
+        now: datetime | None = None,
     ) -> bool:
+        if self.expires_at:
+            try:
+                expires = datetime.fromisoformat(self.expires_at.replace("Z", "+00:00"))
+                if expires.tzinfo is None:
+                    expires = expires.replace(tzinfo=timezone.utc)
+                current = now or datetime.now(timezone.utc)
+                if current.tzinfo is None:
+                    current = current.replace(tzinfo=timezone.utc)
+                if current >= expires:
+                    return False
+            except ValueError:
+                return False
         if (session_id, provider_id, model_id) != (
             self.session_id,
             self.provider_id,
@@ -150,7 +173,7 @@ class DisclosureGrant:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "DisclosureGrant":
+    def from_dict(cls, value: Mapping[str, Any]) -> DisclosureGrant:
         if str(value.get("contract_kind") or "") != "disclosure_grant":
             raise ValueError("Not a disclosure_grant payload")
         raw_refs = value.get("allowed_refs", ())
@@ -174,9 +197,7 @@ class DisclosureGrant:
             expires_at=str(value.get("expires_at") or ""),
             scope=str(value.get("scope") or "once"),
             content_fingerprints=(
-                dict(fingerprints)
-                if isinstance(fingerprints, Mapping)
-                else {}
+                dict(fingerprints) if isinstance(fingerprints, Mapping) else {}
             ),
         )
 

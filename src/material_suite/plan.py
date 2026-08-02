@@ -2,35 +2,25 @@
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from docx import Document
 from openpyxl import load_workbook
 
-from src.config.asset_resolution import file_content_revision
-from src.config.entity import EntityArchive
-from src.config.material_batch import MaterialBatchSelection
-from src.config.material_context import MaterialExecutionContext
-from src.config.material_package_v6 import (
-    MaterialPackageV6,
-    MaterialRecord,
-    MaterialValueScope,
-    material_package_v6_from_archive,
+from src.application.materials import (
+    ExecutionMaterialFinalizeRequest,
+    ExecutionMaterialSnapshot,
+    finalize_execution_material_snapshot,
 )
-from src.config.material_scope import (
-    MaterialScopeResolver,
-    MaterialValueProvenance,
-)
+from src.shared.files.content_hash import file_content_revision
 from src.shared.engine.docx_material_tokens import (
     extract_docx_material_token_blocks,
 )
-from src.shared.engine.material_timeline import timeline_owned_field_keys
 from src.shared.engine.material_token_contract import parse_material_token
 
 SUITE_TOKEN_PATTERN = re.compile(r"\{\{([^{}\r\n]+)\}\}")
@@ -49,6 +39,13 @@ _ROUTE_FIELD_KEYS = (
     "路线",
     "route",
 )
+_ROUTE_IDENTITY_FIELD_KEYS = (
+    "产品编码",
+    "产品编号",
+    "product_code",
+    "product_id",
+    "route_id",
+)
 _PROJECT_FIELD_KEYS = (
     "项目名称",
     "project_name",
@@ -64,6 +61,7 @@ _COMMON_FIELD_ALIASES = {
     "项目结束日期": ("project_end_date", "end_date"),
     "目标成本": ("target_cost",),
     "产品名称": ("product_name", "product"),
+    "产品编码": ("产品编号", "product_code", "product_id", "route_id"),
 }
 
 
@@ -83,7 +81,6 @@ class GenerationRecipe:
 
 @dataclass(frozen=True, slots=True)
 class MaterialSuiteRunRequest:
-    selected_record_ids: tuple[str, ...] = ()
     output_root: str = ""
     requested_by: str = "workbench"
 
@@ -98,6 +95,11 @@ class PackageRecordInspection:
     readiness: str
     issues: tuple[str, ...] = ()
     source_locator: tuple[tuple[str, str], ...] = ()
+    route_key: str = ""
+    output_dir: str = ""
+    artifact_count: int = 0
+    skipped_artifact_count: int = 0
+    timeline_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +123,7 @@ class SuiteArtifactSpec:
     kind: str
     group_name: str
     route_key: str = ""
+    route_aliases: tuple[str, ...] = ()
     required: bool = True
     source_revision: str = ""
     emit_scope: str = "record_once"
@@ -160,15 +163,21 @@ class SuiteArtifactPlan:
     placeholders: tuple[str, ...] = ()
     replacements: tuple[tuple[str, str], ...] = ()
     missing_placeholders: tuple[str, ...] = ()
+    status: str = "ready"
+    issues: tuple[str, ...] = ()
 
     def replacement_map(self) -> dict[str, str]:
         return dict(self.replacements)
 
+    @property
+    def executable(self) -> bool:
+        return self.status == "ready"
+
 
 @dataclass(frozen=True, slots=True)
 class SuiteRecordPlan:
-    profile_id: str
-    profile_name: str
+    record_id: str
+    record_name: str
     route_key: str
     output_dir: str
     frozen_values: tuple[tuple[str, str], ...]
@@ -182,14 +191,26 @@ class SuiteRecordPlan:
 
     @property
     def unit_id(self) -> str:
-        return self.profile_id
+        return self.record_id
 
     @property
     def unit_name(self) -> str:
-        return self.profile_name
+        return self.record_name
 
     def value_map(self) -> dict[str, str]:
         return dict(self.frozen_values)
+
+    @property
+    def ready_artifacts(self) -> tuple[SuiteArtifactPlan, ...]:
+        return tuple(item for item in self.artifacts if item.executable)
+
+    @property
+    def artifact_count(self) -> int:
+        return len(self.ready_artifacts)
+
+    @property
+    def skipped_artifact_count(self) -> int:
+        return sum(item.status == "skipped" for item in self.artifacts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,7 +218,8 @@ class MaterialSuiteRunPlan:
     package_id: str
     package_name: str
     package_revision: str
-    package_source_path: str
+    execution_snapshot_id: str
+    execution_snapshot: ExecutionMaterialSnapshot
     template_bundle: SuiteTemplateBundle
     output_root: str
     records: tuple[SuiteRecordPlan, ...] = ()
@@ -211,17 +233,38 @@ class MaterialSuiteRunPlan:
     def ok(self) -> bool:
         return (
             not self.issues
-            and bool(self.records or self.shared_units)
-            and all(not item.issues for item in self.execution_units)
+            and bool(self.execution_units)
+            and not self.blocked_units
+            and self.execution_snapshot.execution_ready
         )
 
     @property
-    def execution_units(self) -> tuple[SuiteRecordPlan, ...]:
+    def planned_units(self) -> tuple[SuiteRecordPlan, ...]:
         return (*self.shared_units, *self.records)
 
     @property
+    def execution_units(self) -> tuple[SuiteRecordPlan, ...]:
+        return tuple(
+            item
+            for item in self.planned_units
+            if not item.issues and item.ready_artifacts
+        )
+
+    @property
+    def blocked_units(self) -> tuple[SuiteRecordPlan, ...]:
+        return tuple(
+            item
+            for item in self.planned_units
+            if item.issues or (item.artifacts and not item.ready_artifacts)
+        )
+
+    @property
     def artifact_count(self) -> int:
-        return sum(len(item.artifacts) for item in self.execution_units)
+        return sum(item.artifact_count for item in self.execution_units)
+
+    @property
+    def output_directory_count(self) -> int:
+        return len(self.execution_units)
 
 
 def discover_material_suite_bundle(root_path: str | Path) -> SuiteTemplateBundle:
@@ -241,128 +284,72 @@ def discover_material_suite_bundle(root_path: str | Path) -> SuiteTemplateBundle
 
 
 def compile_material_suite_plan(
-    archive: EntityArchive | MaterialPackageV6,
+    snapshot: ExecutionMaterialSnapshot,
     template_bundle: SuiteTemplateBundle,
     *,
     output_root: str | Path,
-    profile_ids: Sequence[str] | None = None,
-    base_selection: MaterialBatchSelection | None = None,
     recipe: GenerationRecipe | None = None,
     request: MaterialSuiteRunRequest | None = None,
 ) -> MaterialSuiteRunPlan:
-    """Compile only selected, active, preflighted records into a frozen plan."""
+    """Compile one already-bound execution snapshot into a suite plan."""
 
     generation_recipe = recipe or GenerationRecipe()
-    package = _effective_package(archive, base_selection)
     output = Path(output_root).expanduser()
-    selected_ids = _selected_record_ids(
-        package,
-        profile_ids=profile_ids,
-        request=request,
-        recipe=generation_recipe,
-    )
     run_request = request or MaterialSuiteRunRequest(
-        selected_record_ids=selected_ids,
         output_root=str(output),
     )
     global_issues = list(template_bundle.issues)
-    if not package.records:
-        global_issues.append("资料包中没有候选记录")
+    if not isinstance(snapshot, ExecutionMaterialSnapshot):
+        raise TypeError("material_suite_execution_snapshot_required")
+    if snapshot.recipe_id != "material_suite":
+        global_issues.append(
+            f"执行快照配方不匹配：{snapshot.recipe_id}"
+        )
+    if not snapshot.records:
+        global_issues.append("执行快照中没有资料记录")
     if not str(output_root or "").strip():
         global_issues.append("尚未选择输出目录")
     elif output.exists() and not output.is_dir():
         global_issues.append("输出位置不是目录")
-    unknown_ids = sorted(
-        set(selected_ids) - {item.record_id for item in package.records}
-    )
-    if unknown_ids:
-        global_issues.append("本次选择包含未知记录：" + "、".join(unknown_ids))
 
     scans, scan_issues = _scan_template_bundle_once(template_bundle)
     global_issues.extend(scan_issues)
-    resolver = MaterialScopeResolver(package)
+    has_record_artifacts = any(
+        item.emit_scope == "record_once" for item in template_bundle.artifacts
+    )
     inspection_rows: list[PackageRecordInspection] = []
     records: list[SuiteRecordPlan] = []
-    resolved_by_record: dict[str, tuple[MaterialRecord, object]] = {}
     seen_outputs: set[str] = set()
-    explicit_selection = set(selected_ids)
-    for record in package.records:
-        selected = record.record_id in explicit_selection
-        lifecycle_eligible = record.lifecycle_state in generation_recipe.active_states
+    groups_by_id = {item.group_id: item for item in snapshot.groups}
+    for record in snapshot.records:
         readiness_issues: list[str] = []
-        resolved = None
-        if selected and lifecycle_eligible:
-            try:
-                resolved = resolver.resolve_record(
-                    record.record_id,
-                    runtime_context=(
-                        base_selection.base_context
-                        if base_selection is not None
-                        else None
-                    ),
-                )
-            except Exception as exc:  # noqa: BLE001 - record isolation boundary
-                readiness_issues.append(
-                    f"资料作用域解析失败：{type(exc).__name__}: {exc}"
-                )
-            if resolved is not None:
-                readiness_issues.extend(
-                    item.message for item in resolved.blocking_issues
-                )
-                aliases = _build_alias_values(
-                    resolved.values,
-                    resolved.aliases,
-                )
-                readiness_issues.extend(
-                    f"缺少必需字段：{key}"
-                    for key in generation_recipe.required_record_fields
-                    if not str(_lookup_value(key, aliases) or "").strip()
-                )
-        if not selected:
-            readiness = "not_selected"
-        elif not lifecycle_eligible:
-            readiness = f"lifecycle_{record.lifecycle_state}"
-        elif readiness_issues:
-            readiness = "blocked"
-        else:
-            readiness = "ready"
-        if selected and lifecycle_eligible and resolved is not None:
-            resolved_by_record[record.record_id] = (record, resolved)
-        inspection_rows.append(
-            PackageRecordInspection(
-                record_id=record.record_id,
-                record_name=record.record_name,
-                group_id=record.group_id,
-                lifecycle_state=record.lifecycle_state,
-                selected=selected,
-                readiness=readiness,
-                issues=tuple(readiness_issues),
-                source_locator=_locator_pairs(record.source_locator),
-            )
+        aliases = _build_alias_values(record.field_values, {})
+        readiness_issues.extend(
+            f"缺少必需字段：{key}"
+            for key in generation_recipe.required_record_fields
+            if not str(_lookup_value(key, aliases) or "").strip()
         )
-
-    for row in inspection_rows:
-        if row.readiness != "ready":
-            continue
-        record, resolved = resolved_by_record[row.record_id]
-        values = dict(resolved.values)
+        values = dict(record.field_values)
         values.setdefault("record_id", record.record_id)
-        values.setdefault("profile_id", record.record_id)
-        values.setdefault("record_name", record.record_name)
-        values.setdefault("profile_name", record.record_name)
-        values.setdefault("package_id", package.package_id)
-        values.setdefault("archive_id", package.package_id)
-        values.setdefault("archive_name", package.package_name)
-        aliases = _build_alias_values(values, resolved.aliases)
-        group = package.get_group(record.group_id) if record.group_id else None
+        values.setdefault("record_name", record.display_name)
+        values.setdefault("package_id", snapshot.package_ref.package_id)
+        values.setdefault("package_name", snapshot.package_display_name)
+        aliases = _build_alias_values(values, {})
+        group = groups_by_id.get(record.group_id)
         route_key = (
-            str(group.route_id or "").strip()
+            _first_value(group.field_values, generation_recipe.route_field_keys)
             if group is not None
             else _first_value(aliases, generation_recipe.route_field_keys)
         )
+        route_candidates = _route_candidates(
+            route_key,
+            group_name=(group.display_name if group is not None else ""),
+            aliases=aliases,
+            recipe=generation_recipe,
+        )
         project_name = (
             _first_value(aliases, generation_recipe.record_name_field_keys)
-            or record.record_name
+            or record.display_name
             or record.record_id
         )
         target_dir = _record_output_dir(
@@ -371,9 +358,9 @@ def compile_material_suite_plan(
             route_key=route_key,
             record_name=project_name,
             record_id=record.record_id,
-            group_id=record.group_id,
+            group_id=(group.group_id if group is not None else ""),
         )
-        record_issues = list(row.issues)
+        record_issues = list(readiness_issues)
         normalized_output = str(target_dir.resolve(strict=False)).casefold()
         if normalized_output in seen_outputs:
             record_issues.append("输出目录与另一条资料重复")
@@ -383,104 +370,210 @@ def compile_material_suite_plan(
         matched = _matched_artifacts(
             template_bundle.artifacts,
             emit_scope="record_once",
-            route_key=route_key,
+            route_candidates=route_candidates,
         )
-        _append_route_issues(
-            record_issues,
-            template_bundle,
-            route_key=route_key,
-            matched=matched,
-            emit_scope="record_once",
-        )
+        if has_record_artifacts:
+            _append_route_issues(
+                record_issues,
+                template_bundle,
+                route_key=route_key,
+                route_candidates=route_candidates,
+                matched=matched,
+                emit_scope="record_once",
+            )
         artifact_plans = _compile_artifact_plans(
             matched,
             scans=scans,
             aliases=aliases,
             issues=record_issues,
         )
+        if artifact_plans and not any(item.executable for item in artifact_plans):
+            record_issues.append("该资料没有可执行的成套产物")
         records.append(
             SuiteRecordPlan(
-                profile_id=record.record_id,
-                profile_name=record.record_name or project_name,
+                record_id=record.record_id,
+                record_name=record.display_name or project_name,
                 route_key=route_key,
                 output_dir=str(target_dir),
                 frozen_values=tuple(sorted(values.items())),
-                timeline_field_keys=tuple(
-                    sorted(timeline_owned_field_keys(resolved.timeline_plans))
-                ),
+                timeline_field_keys=record.timeline_field_keys,
                 artifacts=artifact_plans,
                 issues=tuple(dict.fromkeys(record_issues)),
-                group_id=record.group_id,
-                provenance=_provenance_pairs(resolved.provenance),
-                source_locator=_locator_pairs(record.source_locator),
+                group_id=(group.group_id if group is not None else ""),
+                provenance=tuple(
+                    (key, owner, "", "")
+                    for key, owner in sorted(record.field_owners.items())
+                ),
+                source_locator=(),
+            )
+        )
+        inspection_rows.append(
+            PackageRecordInspection(
+                record_id=record.record_id,
+                record_name=record.display_name,
+                group_id=(group.group_id if group is not None else ""),
+                lifecycle_state="active",
+                selected=True,
+                readiness=("blocked" if record_issues else "ready"),
+                issues=tuple(dict.fromkeys(record_issues)),
+                route_key=route_key,
+                output_dir=str(target_dir),
+                artifact_count=sum(
+                    item.executable for item in artifact_plans
+                ),
+                skipped_artifact_count=sum(
+                    item.status == "skipped" for item in artifact_plans
+                ),
             )
         )
 
     shared_units = _compile_shared_units(
-        package,
+        snapshot,
         template_bundle=template_bundle,
         scans=scans,
         output=output,
-        selected_record_ids={item.profile_id for item in records},
-        runtime_context=(
-            base_selection.base_context if base_selection is not None else None
-        ),
     )
-    record_plans_by_id = {item.profile_id: item for item in records}
+    all_units = (*shared_units, *records)
+    output_owners: dict[str, list[str]] = {}
+    for unit in all_units:
+        output_key = str(
+            Path(unit.output_dir).resolve(strict=False)
+        ).casefold()
+        output_owners.setdefault(output_key, []).append(unit.unit_id)
+    duplicate_outputs = {
+        output_key
+        for output_key, owner_ids in output_owners.items()
+        if len(owner_ids) > 1
+    }
+
+    def mark_output_collision(unit: SuiteRecordPlan) -> SuiteRecordPlan:
+        output_key = str(
+            Path(unit.output_dir).resolve(strict=False)
+        ).casefold()
+        if output_key not in duplicate_outputs:
+            return unit
+        return replace(
+            unit,
+            issues=tuple(
+                dict.fromkeys(
+                    (*unit.issues, "输出目录与另一交付单元重复")
+                )
+            ),
+        )
+
+    records = [mark_output_collision(item) for item in records]
+    shared_units = tuple(
+        mark_output_collision(item) for item in shared_units
+    )
+    record_plans_by_id = {item.record_id: item for item in records}
     inspection_rows = [
         replace(
             item,
             readiness="blocked",
             issues=record_plans_by_id[item.record_id].issues,
+            route_key=record_plans_by_id[item.record_id].route_key,
+            output_dir=record_plans_by_id[item.record_id].output_dir,
+            artifact_count=record_plans_by_id[item.record_id].artifact_count,
+            skipped_artifact_count=(
+                record_plans_by_id[item.record_id].skipped_artifact_count
+            ),
+            timeline_count=len(
+                record_plans_by_id[item.record_id].timeline_field_keys
+            ),
         )
         if item.record_id in record_plans_by_id
         and record_plans_by_id[item.record_id].issues
+        else replace(
+            item,
+            route_key=record_plans_by_id[item.record_id].route_key,
+            output_dir=record_plans_by_id[item.record_id].output_dir,
+            artifact_count=record_plans_by_id[item.record_id].artifact_count,
+            skipped_artifact_count=(
+                record_plans_by_id[item.record_id].skipped_artifact_count
+            ),
+            timeline_count=len(
+                record_plans_by_id[item.record_id].timeline_field_keys
+            ),
+        )
+        if item.record_id in record_plans_by_id
         else item
         for item in inspection_rows
     ]
-    selected_count = sum(item.selected for item in inspection_rows)
+    selected_count = len(inspection_rows)
     blocked_count = sum(
         item.selected and item.readiness != "ready" for item in inspection_rows
     )
-    executable_count = sum(not item.issues for item in records)
+    executable_count = sum(
+        not item.issues and bool(item.ready_artifacts) for item in records
+    )
+    executable_shared_count = sum(
+        not item.issues and bool(item.ready_artifacts) for item in shared_units
+    )
     if selected_count == 0:
         global_issues.append("本次运行没有选中的活动记录")
-    elif executable_count == 0:
+    elif executable_count + executable_shared_count == 0:
         global_issues.append("本次选择中没有通过预检的活动记录")
-    if any(item.issues for item in records):
-        global_issues.append("部分选中记录未通过成套映射预检")
-    if any(item.issues for item in shared_units):
-        global_issues.append("资料包/分组公共产物未通过预检")
     inspection = PackageInspection(
-        candidate_count=len(package.records),
-        active_count=sum(item.lifecycle_state == "active" for item in package.records),
-        draft_count=sum(item.lifecycle_state == "draft" for item in package.records),
-        disabled_count=sum(
-            item.lifecycle_state == "disabled" for item in package.records
-        ),
-        archived_count=sum(
-            item.lifecycle_state == "archived" for item in package.records
-        ),
+        candidate_count=len(snapshot.records),
+        active_count=len(snapshot.records),
         selected_count=selected_count,
         executable_count=executable_count,
         blocked_count=blocked_count,
         records=tuple(inspection_rows),
     )
-    package_source_path = str(
-        package.source_path
-        or (base_selection.source_path if base_selection is not None else "")
-    )
-    package_source = Path(package_source_path)
-    package_revision = (
-        file_content_revision(package_source)
-        if package_source_path and package_source.is_file()
-        else material_package_revision(package)
-    )
+    finalized_snapshot = snapshot
+    if not global_issues and not any(item.issues for item in all_units):
+        output_paths = tuple(
+            str((Path(unit.output_dir) / artifact.target_relative_path).resolve())
+            for unit in all_units
+            for artifact in unit.ready_artifacts
+        )
+        bundle_revision = template_bundle.revision
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", bundle_revision):
+            bundle_revision = "sha256:" + hashlib.sha256(
+                json.dumps(
+                    [
+                        item.source_revision
+                        for item in template_bundle.artifacts
+                    ],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+        finalized = finalize_execution_material_snapshot(
+            ExecutionMaterialFinalizeRequest(
+                snapshot=snapshot,
+                template_id=template_bundle.bundle_id or "material_suite_bundle",
+                template_revision=bundle_revision,
+                master_id="material_suite_master",
+                master_revision="sha256:"
+                + hashlib.sha256(
+                    b"alavette.material_suite.master.v1"
+                ).hexdigest(),
+                recipe_version=1,
+                output_root=str(output.resolve()),
+                output_paths=output_paths,
+                supported_field_keys=tuple(
+                    sorted(
+                        {
+                            key
+                            for record in snapshot.records
+                            for key in record.field_values
+                        }
+                    )
+                ),
+            )
+        )
+        if finalized.ok and finalized.snapshot is not None:
+            finalized_snapshot = finalized.snapshot
+        else:
+            global_issues.extend(item.code for item in finalized.issues)
     return MaterialSuiteRunPlan(
-        package_id=package.package_id,
-        package_name=package.package_name,
-        package_revision=package_revision,
-        package_source_path=package_source_path,
+        package_id=snapshot.package_ref.package_id,
+        package_name=snapshot.package_display_name,
+        package_revision=snapshot.package_ref.revision,
+        execution_snapshot_id=finalized_snapshot.snapshot_id,
+        execution_snapshot=finalized_snapshot,
         template_bundle=template_bundle,
         output_root=str(output),
         records=tuple(records),
@@ -489,7 +582,6 @@ def compile_material_suite_plan(
         inspection=inspection,
         recipe=generation_recipe,
         request=MaterialSuiteRunRequest(
-            selected_record_ids=selected_ids,
             output_root=str(output),
             requested_by=run_request.requested_by,
         ),
@@ -538,56 +630,6 @@ def scan_suite_template_placeholders(
     return tuple(found)
 
 
-def material_package_revision(
-    package: EntityArchive | MaterialPackageV6,
-) -> str:
-    source = Path(str(package.source_path or ""))
-    if str(source) and source.is_file():
-        return file_content_revision(source)
-    payload = asdict(package)
-    payload.pop("source_path", None)
-    canonical = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _effective_package(
-    archive: EntityArchive | MaterialPackageV6,
-    selection: MaterialBatchSelection | None,
-) -> MaterialPackageV6:
-    selected_package = (
-        getattr(selection, "material_package", None) if selection is not None else None
-    )
-    if isinstance(selected_package, MaterialPackageV6):
-        return copy.deepcopy(selected_package)
-    if isinstance(archive, MaterialPackageV6):
-        return copy.deepcopy(archive)
-    return material_package_v6_from_archive(archive)
-
-
-def _selected_record_ids(
-    package: MaterialPackageV6,
-    *,
-    profile_ids: Sequence[str] | None,
-    request: MaterialSuiteRunRequest | None,
-    recipe: GenerationRecipe,
-) -> tuple[str, ...]:
-    if request is not None and request.selected_record_ids:
-        return tuple(dict.fromkeys(request.selected_record_ids))
-    if profile_ids is not None:
-        return tuple(dict.fromkeys(str(item) for item in profile_ids))
-    return tuple(
-        item.record_id
-        for item in package.records
-        if item.lifecycle_state in recipe.active_states
-    )
-
-
 def _scan_template_bundle_once(
     bundle: SuiteTemplateBundle,
 ) -> tuple[dict[str, tuple[str, ...]], list[str]]:
@@ -605,121 +647,105 @@ def _scan_template_bundle_once(
 
 
 def _compile_shared_units(
-    package: MaterialPackageV6,
+    snapshot: ExecutionMaterialSnapshot,
     *,
     template_bundle: SuiteTemplateBundle,
     scans: Mapping[str, tuple[str, ...]],
     output: Path,
-    selected_record_ids: set[str],
-    runtime_context: MaterialExecutionContext | None,
 ) -> tuple[SuiteRecordPlan, ...]:
     units: list[SuiteRecordPlan] = []
     package_specs = [
         item for item in template_bundle.artifacts if item.emit_scope == "package_once"
     ]
-    if package_specs and selected_record_ids:
-        context = _scope_context(
-            package.shared_scope,
-            package=package,
-            owner_id=package.package_id,
-            runtime_context=runtime_context,
-        )
-        resolution = context.resolve_material_fields()
+    if package_specs and snapshot.records:
         values = {
-            **{str(key): str(value) for key, value in resolution.values.items()},
-            "package_id": package.package_id,
-            "package_name": package.package_name,
+            **dict(snapshot.package_field_values),
+            "package_id": snapshot.package_ref.package_id,
+            "package_name": snapshot.package_display_name,
         }
-        issues = [
-            f"字段函数 {key}：{message}"
-            for key, message in resolution.function_errors.items()
-        ]
-        aliases = _build_alias_values(values, context.field_aliases)
+        issues: list[str] = []
+        aliases = _build_alias_values(values, {})
         artifacts = _compile_artifact_plans(
             package_specs,
             scans=scans,
             aliases=aliases,
             issues=issues,
         )
+        if artifacts and not any(item.executable for item in artifacts):
+            issues.append("资料包公共产物均不满足生成条件")
         target = output / "_资料包公共"
         if target.exists():
             issues.append("资料包公共产物目录已存在；为防止覆盖，请更换输出目录")
         units.append(
             SuiteRecordPlan(
-                profile_id=f"package:{package.package_id}",
-                profile_name=package.package_name,
+                record_id=f"package:{snapshot.package_ref.package_id}",
+                record_name=snapshot.package_display_name,
                 route_key="",
                 output_dir=str(target),
                 frozen_values=tuple(sorted(values.items())),
-                timeline_field_keys=tuple(
-                    sorted(timeline_owned_field_keys(context.timeline_plans))
-                ),
+                timeline_field_keys=(),
                 artifacts=artifacts,
                 issues=tuple(dict.fromkeys(issues)),
                 emit_scope="package_once",
             )
         )
 
-    selected_groups = {
-        item.group_id
-        for item in package.records
-        if item.record_id in selected_record_ids and item.group_id
-    }
     group_specs = [
         item for item in template_bundle.artifacts if item.emit_scope == "group_once"
     ]
-    for group_id in sorted(selected_groups):
-        group = package.get_group(group_id)
-        if group is None:
-            continue
-        scope = _combined_scope(package.shared_scope, group.values)
-        context = _scope_context(
-            scope,
-            package=package,
-            owner_id=group_id,
-            runtime_context=runtime_context,
-        )
-        resolution = context.resolve_material_fields()
+    if not group_specs:
+        return tuple(units)
+    for group in snapshot.groups:
         values = {
-            **{str(key): str(value) for key, value in resolution.values.items()},
-            "package_id": package.package_id,
-            "package_name": package.package_name,
+            **dict(group.field_values),
+            "package_id": snapshot.package_ref.package_id,
+            "package_name": snapshot.package_display_name,
             "group_id": group.group_id,
-            "group_name": group.group_name,
-            "产品名称": group.route_id or group.group_name,
+            "group_name": group.display_name,
         }
-        aliases = _build_alias_values(values, context.field_aliases)
-        issues = [
-            f"字段函数 {key}：{message}"
-            for key, message in resolution.function_errors.items()
-        ]
-        matched = [
-            item
-            for item in group_specs
-            if not item.route_key
-            or item.route_key.casefold() == group.route_id.casefold()
-        ]
+        aliases = _build_alias_values(values, {})
+        issues: list[str] = []
+        route_key = _first_value(aliases, _ROUTE_FIELD_KEYS)
+        route_candidates = _route_candidates(
+            route_key,
+            group_name=group.display_name,
+            aliases=aliases,
+            recipe=GenerationRecipe(),
+        )
+        matched = _matched_artifacts(
+            group_specs,
+            emit_scope="group_once",
+            route_candidates=route_candidates,
+        )
+        _append_route_issues(
+            issues,
+            template_bundle,
+            route_key=route_key,
+            route_candidates=route_candidates,
+            matched=matched,
+            emit_scope="group_once",
+        )
         artifacts = _compile_artifact_plans(
             matched,
             scans=scans,
             aliases=aliases,
             issues=issues,
         )
+        if artifacts and not any(item.executable for item in artifacts):
+            issues.append("该分组没有可执行的公共产物")
         target = (
-            output / _safe_component(group.route_id or group.group_name) / "_分组公共"
+            output / _safe_component(route_key or group.display_name) / "_分组公共"
         )
         if target.exists():
             issues.append("分组公共产物目录已存在；为防止覆盖，请更换输出目录")
         units.append(
             SuiteRecordPlan(
-                profile_id=f"group:{group.group_id}",
-                profile_name=group.group_name,
-                route_key=group.route_id,
+                record_id=f"group:{group.group_id}",
+                record_name=group.display_name,
+                route_key=route_key,
                 output_dir=str(target),
                 frozen_values=tuple(sorted(values.items())),
-                timeline_field_keys=tuple(
-                    sorted(timeline_owned_field_keys(context.timeline_plans))
-                ),
+                timeline_field_keys=(),
                 artifacts=artifacts,
                 issues=tuple(dict.fromkeys(issues)),
                 group_id=group.group_id,
@@ -727,64 +753,6 @@ def _compile_shared_units(
             )
         )
     return tuple(units)
-
-
-def _scope_context(
-    scope: MaterialValueScope,
-    *,
-    package: MaterialPackageV6,
-    owner_id: str,
-    runtime_context: MaterialExecutionContext | None,
-) -> MaterialExecutionContext:
-    runtime = (
-        runtime_context.clone()
-        if isinstance(runtime_context, MaterialExecutionContext)
-        else MaterialExecutionContext()
-    )
-    return MaterialExecutionContext(
-        mode_id=runtime.mode_id or package.mode_id,
-        scene_id=runtime.scene_id,
-        package_id=package.package_id,
-        material_schema_ids=(
-            tuple(runtime.material_schema_ids) or tuple(package.material_schema_ids)
-        ),
-        archive_id=package.package_id,
-        archive_name=package.package_name,
-        profile_id=owner_id,
-        profile_name=owner_id,
-        entity_data={**scope.fields, **runtime.entity_data},
-        field_functions={
-            **copy.deepcopy(scope.field_functions),
-            **copy.deepcopy(runtime.field_functions),
-        },
-        timeline_plans={
-            **copy.deepcopy(scope.timeline_plans),
-            **copy.deepcopy(runtime.timeline_plans),
-        },
-        field_aliases={**scope.field_aliases, **runtime.field_aliases},
-    )
-
-
-def _combined_scope(
-    lower: MaterialValueScope,
-    upper: MaterialValueScope,
-) -> MaterialValueScope:
-    return MaterialValueScope(
-        fields={**lower.fields, **upper.fields},
-        field_aliases={**lower.field_aliases, **upper.field_aliases},
-        field_functions={
-            **copy.deepcopy(lower.field_functions),
-            **copy.deepcopy(upper.field_functions),
-        },
-        timeline_plans={
-            **copy.deepcopy(lower.timeline_plans),
-            **copy.deepcopy(upper.timeline_plans),
-        },
-        field_sources={**lower.field_sources, **upper.field_sources},
-        override_fields=list(
-            dict.fromkeys((*lower.override_fields, *upper.override_fields))
-        ),
-    )
 
 
 def _compile_artifact_plans(
@@ -809,10 +777,15 @@ def _compile_artifact_plans(
                 missing.append(token)
             else:
                 replacements.append((token, value))
+        artifact_issues: list[str] = []
         if missing and spec.required:
-            issues.append(
+            missing_message = (
                 f"模板“{spec.label}”缺少字段："
                 + "、".join(_token_key(token) for token in missing)
+            )
+            artifact_issues.append(missing_message)
+            issues.append(
+                missing_message
             )
         target_relative_path = _artifact_target_path(spec)
         target_key = target_relative_path.casefold()
@@ -833,6 +806,14 @@ def _compile_artifact_plans(
                 placeholders=placeholders,
                 replacements=tuple(replacements),
                 missing_placeholders=tuple(missing),
+                status=(
+                    "blocked"
+                    if missing and spec.required
+                    else "skipped"
+                    if missing
+                    else "ready"
+                ),
+                issues=tuple(artifact_issues),
             )
         )
     return tuple(plans)
@@ -842,15 +823,27 @@ def _matched_artifacts(
     artifacts: Sequence[SuiteArtifactSpec],
     *,
     emit_scope: str,
-    route_key: str,
+    route_candidates: Sequence[str],
 ) -> list[SuiteArtifactSpec]:
+    candidate_keys = {
+        _normalized_route_key(value)
+        for value in route_candidates
+        if _normalized_route_key(value)
+    }
     return [
         spec
         for spec in artifacts
         if spec.emit_scope == emit_scope
         and (
             not spec.route_key
-            or (route_key and spec.route_key.casefold() == route_key.casefold())
+            or bool(
+                candidate_keys
+                & {
+                    _normalized_route_key(value)
+                    for value in (spec.route_key, *spec.route_aliases)
+                    if _normalized_route_key(value)
+                }
+            )
         )
     ]
 
@@ -860,26 +853,66 @@ def _append_route_issues(
     bundle: SuiteTemplateBundle,
     *,
     route_key: str,
+    route_candidates: Sequence[str],
     matched: Sequence[SuiteArtifactSpec],
     emit_scope: str,
 ) -> None:
     scoped_route_keys = tuple(
         dict.fromkeys(
-            item.route_key
+            route_value
             for item in bundle.artifacts
-            if item.emit_scope == emit_scope and item.route_key
+            if item.emit_scope == emit_scope and item.route_key and item.required
+            for route_value in (item.route_key, *item.route_aliases)
         )
     )
-    if scoped_route_keys and not route_key:
+    candidate_keys = {
+        _normalized_route_key(value)
+        for value in route_candidates
+        if _normalized_route_key(value)
+    }
+    scoped_keys = {
+        _normalized_route_key(value)
+        for value in scoped_route_keys
+        if _normalized_route_key(value)
+    }
+    if scoped_route_keys and not candidate_keys:
         issues.append("资料缺少产品名称/路线字段，无法映射对应的测试表")
     elif (
-        route_key
+        candidate_keys
         and scoped_route_keys
-        and not any(key.casefold() == route_key.casefold() for key in scoped_route_keys)
+        and not candidate_keys & scoped_keys
     ):
-        issues.append(f"产品路线“{route_key}”没有对应的成套模板")
+        issues.append(
+            f"产品路线“{route_key or route_candidates[0]}”没有对应的成套模板"
+        )
     if not matched:
         issues.append("该资料没有可映射的成套模板")
+
+
+def _route_candidates(
+    route_key: str,
+    *,
+    group_name: str,
+    aliases: Mapping[str, str],
+    recipe: GenerationRecipe,
+) -> tuple[str, ...]:
+    values = [
+        _first_value(aliases, _ROUTE_IDENTITY_FIELD_KEYS),
+        route_key,
+        group_name,
+        _first_value(aliases, recipe.route_field_keys),
+    ]
+    return tuple(
+        dict.fromkeys(
+            value
+            for item in values
+            if (value := str(item or "").strip())
+        )
+    )
+
+
+def _normalized_route_key(value: object) -> str:
+    return re.sub(r"[\s_-]+", "", str(value or "")).casefold()
 
 
 def _record_output_dir(
@@ -993,6 +1026,17 @@ def _load_manifest_bundle(
         if emit_scope not in EMIT_SCOPES:
             issues.append(f"模板“{source_text}”生成作用域无效：{emit_scope}")
             continue
+        raw_route_aliases = raw.get("route_aliases", [])
+        if not isinstance(raw_route_aliases, list):
+            issues.append(f"模板“{source_text}”的 route_aliases 必须是列表")
+            continue
+        route_aliases = tuple(
+            dict.fromkeys(
+                alias
+                for item in raw_route_aliases
+                if (alias := str(item or "").strip())
+            )
+        )
         artifacts.append(
             SuiteArtifactSpec(
                 artifact_id=artifact_id,
@@ -1004,6 +1048,7 @@ def _load_manifest_bundle(
                     or ("Word文档" if kind == "docx" else "Excel测试表")
                 ),
                 route_key=str(raw.get("route_key", "") or "").strip(),
+                route_aliases=route_aliases,
                 required=bool(raw.get("required", True)),
                 source_revision=file_content_revision(source),
                 emit_scope=emit_scope,
@@ -1215,28 +1260,6 @@ def _first_value(values: Mapping[str, str], keys: Sequence[str]) -> str:
     return ""
 
 
-def _provenance_pairs(
-    provenance: Mapping[str, MaterialValueProvenance],
-) -> tuple[tuple[str, str, str, str], ...]:
-    return tuple(
-        sorted(
-            (
-                str(key),
-                item.scope,
-                item.owner_id,
-                item.source,
-            )
-            for key, item in provenance.items()
-        )
-    )
-
-
-def _locator_pairs(
-    locator: Mapping[str, object],
-) -> tuple[tuple[str, str], ...]:
-    return tuple(sorted((str(key), str(value)) for key, value in locator.items()))
-
-
 def _safe_component(value: object) -> str:
     text = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(value or "").strip())
     text = text.rstrip(". ")
@@ -1256,6 +1279,5 @@ __all__ = [
     "SuiteTemplateBundle",
     "compile_material_suite_plan",
     "discover_material_suite_bundle",
-    "material_package_revision",
     "scan_suite_template_placeholders",
 ]

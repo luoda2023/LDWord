@@ -54,6 +54,7 @@ class SceneProjectionCallbacks:
 @dataclass(slots=True)
 class SceneSessionState:
     scene: SceneWorkspace | None = None
+    persisted_scene: SceneWorkspace | None = None
     scene_path: str = ""
     scene_source: str = ""
     scene_source_type: str = ""
@@ -69,6 +70,7 @@ class SceneSessionState:
 @dataclass(frozen=True, slots=True)
 class SceneActivationSnapshot:
     bridge_state: object
+    persisted_scene: SceneWorkspace | None
     scene_id: str
     scene_path: str
     scene_source: str
@@ -160,6 +162,12 @@ class SceneSessionCoordinator:
         self._projection = projection
         self._state = SceneSessionState(
             scene=bridge.current_scene(),
+            persisted_scene=(
+                copy.deepcopy(bridge.current_scene())
+                if bridge.current_scene() is not None
+                and not bool(bridge.is_scene_dirty())
+                else None
+            ),
             scene_path=str(bridge.current_scene_path() or ""),
             scene_source=str(bridge.current_scene_source() or ""),
             scene_source_type=str(bridge.current_scene_source_type() or ""),
@@ -189,6 +197,29 @@ class SceneSessionCoordinator:
             or getattr(self._state.scene, "scene_id", "")
             or ""
         ).strip()
+
+    def capture_persisted_scene(
+        self,
+        scene: SceneWorkspace | None = None,
+    ) -> None:
+        """Freeze the canonical scene used for whole-draft dirty comparison."""
+
+        target = self._state.scene if scene is None else scene
+        self._state.persisted_scene = copy.deepcopy(target)
+
+    def is_dirty_against_persisted(
+        self,
+        scene: SceneWorkspace | None = None,
+    ) -> bool:
+        """Return whether the active draft differs from its persisted baseline."""
+
+        target = self._state.scene if scene is None else scene
+        if target is None:
+            return False
+        baseline = self._state.persisted_scene
+        if baseline is None:
+            return True
+        return target != baseline
 
     def authoritative_user_conflict(self) -> bool:
         return bool(
@@ -331,6 +362,11 @@ class SceneSessionCoordinator:
             source_type=str(self._bridge.current_scene_source_type() or ""),
             template=self._state.template,
         )
+
+    def accept_bridge_runtime_scene_update(self, scene: SceneWorkspace) -> None:
+        """Adopt an in-memory value change without re-reading library state."""
+
+        self._state.scene = scene
 
     def _has_authoritative_user_context(self) -> bool:
         return (
@@ -567,6 +603,8 @@ class SceneSessionCoordinator:
                 raise SceneSaveRevisionChanged(
                     "active user Scene changed before reload activation completed"
                 )
+            if not dirty:
+                self.capture_persisted_scene(scene)
         except Exception as exc:
             self._state.ignore_own_scene_changed = False
             try:
@@ -1483,12 +1521,14 @@ class SceneSessionCoordinator:
             )
             self._projection.apply_scene(scene, binding.template)
             self._projection.refresh_navigation_cards()
+            self.capture_persisted_scene(scene)
         finally:
             self._state.ignore_own_scene_changed = False
 
     def _capture_activation_snapshot(self) -> SceneActivationSnapshot:
         return SceneActivationSnapshot(
             bridge_state=self._bridge.capture_state_snapshot(),
+            persisted_scene=copy.deepcopy(self._state.persisted_scene),
             scene_id=str(self._bridge.current_scene_id() or "").strip(),
             scene_path=self._state.scene_path,
             scene_source=self._state.scene_source,
@@ -1532,6 +1572,7 @@ class SceneSessionCoordinator:
                 ),
                 template=self._bridge.current_template(),
             )
+            self._state.persisted_scene = copy.deepcopy(snapshot.persisted_scene)
             if restore_bridge:
                 self._state.authoritative_user_revision = (
                     snapshot.authoritative_user_revision

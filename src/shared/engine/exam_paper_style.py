@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable as IterableABC, Mapping
+import re
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import copy2
-from typing import Iterable
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 from docx import Document
-from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
 from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.table import (
+    WD_CELL_VERTICAL_ALIGNMENT,
+    WD_ROW_HEIGHT_RULE,
+    WD_TABLE_ALIGNMENT,
+)
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -21,7 +25,29 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 from lxml import etree
 
+from src.config.content_materials import (
+    HeadingBlock,
+    ImageBlock,
+    InlineContent,
+    InlineKind,
+    ListBlock,
+    PageBreakBlock,
+    ParagraphBlock,
+    TableBlock,
+)
 from src.config.scene import ExamBlankStyleConfig, ExamPaperConfig
+from src.shared.engine.docx_renderer import (
+    _add_numbering_definition,
+    _apply_num_pr,
+    _paragraph_element,
+    _table_element,
+)
+from src.shared.engine.exam_markdown_content import (
+    MARKDOWN_HORIZONTAL_RULE_TEXT,
+    ExamMarkdownContentError,
+    assert_no_exam_markdown_residue,
+    compile_exam_markdown,
+)
 from src.shared.engine.ooxml_ops import set_inline_shape_alt_text
 
 
@@ -64,10 +90,12 @@ ANSWER_AREA_KIND_KEYS = (
     "response_area_kind",
     "答题区类型",
 )
-ANSWER_SPACE_MAX_LINES = 10
+ANSWER_SPACE_MAX_LINES = 30
 ANSWER_SPACE_DEFAULT_LINES = 2
 ANSWER_FREE_AREA_MIN_LINES = 4
 ANSWER_FREE_AREA_DEFAULT_LINES = 5
+ANSWER_FREE_AREA_MAX_LINES = 8
+ANSWER_FREE_AREA_LINE_HEIGHT_CM = 0.60
 ANSWER_AREA_LEFT_INDENT_CM = 0.72
 SEALED_HEADER_REQUIRED_NAMESPACE_DECLARATIONS = (
     ("xmlns:w15", "http://schemas.microsoft.com/office/word/2012/wordml"),
@@ -100,7 +128,7 @@ EXAM_MARKDOWN_AUTHORING_PROMPT = """你是一名严谨的中小学命题老师�
 其他要求：{{其他要求}}
 
 【输出规则】
-1. 只输出 Markdown 正文，不要代码围栏，不要解释。
+1. 只输出 Markdown 正文，不要 JSON、代码围栏或对话性解释。
 2. 不要编写页眉、页脚、页码、密封线、字体、页边距、装订线等版式信息，这些由试卷卷面决定。
 3. 使用清晰的大题结构，例如：
    # 试卷标题
@@ -114,18 +142,23 @@ EXAM_MARKDOWN_AUTHORING_PROMPT = """你是一名严谨的中小学命题老师�
       D. 选项
 
    ## 二、阅读与表达
-4. 每个大题内小题从 1 重新编号，答案速查与学生卷保持一致。
-5. 每道题都要标明分值。
+4. 全卷小题统一连续编号（1、2、3……），答案速查使用相同的全卷题号。
+5. 每道题都要标明分值；满分为整数且不少于题量时，题目使用正整数分值。不能平均整除时用相邻整数分配，禁止用 2.4 这类小数均分。
 6. 选择题选项使用 A. B. C. D. 格式。
-7. 答案、解析不要混入题干正文。
-8. 文末单独输出：
+7. 每道题在题干/选项后另起行输出 difficulty 和 knowledge_points，例如：
+   difficulty: 中等
+   knowledge_points: 条件分支、数据类型转换
+8. 每道题所需的阅读材料、程序片段、图表说明和代码块都必须放在该题题号之后；不得先写材料或代码、后写题号。
+9. 答案、解析不要混入题干正文。
+10. 文末单独输出：
    ## 答案速查
    1. A
    2. 示例答案……
-9. 如需要解析，在答案后追加简短解析：
+11. 如需要解析，在答案后追加简短解析：
    1. A。解析：……
-10. 需要预留答题区时，在题目结构中加入 answer_area_kind 和 answer_lines：语文简答/阅读用 answer_area_kind: lines、answer_lines: 3；数学计算/解答/证明用 answer_area_kind: free、answer_lines: 5；选择题不要设置答题区。
-11. 内容应适合直接导入，不要加入“以下是试卷”等对话性文字。"""
+12. 需要预留答题区时，在题目结构中加入 answer_area_kind 和 answer_lines：简答/阅读题用 answer_area_kind: lines；数学计算/解答/证明及程序设计题用 answer_area_kind: free；选择题不要设置答题区。
+13. 答案区使用纯文本，不要使用 **加粗标记**、分隔线或重复的大题标题。
+14. 内容应适合直接导入，不要加入“以下是试卷”等对话性文字。"""
 
 EXAM_MASTER_CONVERSION_PROMPT = """你是一名 Word 试卷卷面工程师。请把我提供的常规试卷改造成 Alavette Form 可用的“试卷卷面”。
 
@@ -701,6 +734,7 @@ def write_exam_paper_docx(
     if include_answer_version:
         document.add_page_break()
         _add_answer_version(document, spec, exam_payload)
+    assert_no_exam_markdown_residue(document)
     document.save(str(target))
     _patch_saved_first_header_from_source(target, master_path)
     return target
@@ -738,7 +772,7 @@ def write_exam_paper_docx_files(
             output_dir,
             payload=exam_payload,
             config=config,
-            filename=f"{base_stem}_答案速查.docx",
+            filename=f"{base_stem}_答案卷.docx",
         )
         if include_answer_key
         else None
@@ -761,7 +795,7 @@ def write_exam_answer_key_docx(
     target_dir = Path(output_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     exam_payload = payload or EXAM_SAMPLE_PAYLOAD
-    target_name = filename or f"{_safe_stem(_exam_payload_title(exam_payload))}_答案速查.docx"
+    target_name = filename or f"{_safe_stem(_exam_payload_title(exam_payload))}_答案卷.docx"
     if not target_name.lower().endswith(".docx"):
         target_name = f"{target_name}.docx"
     target = target_dir / Path(target_name).name
@@ -772,6 +806,7 @@ def write_exam_answer_key_docx(
     _add_answer_version(document, spec, exam_payload)
     for section in document.sections:
         _set_page_number_footer(section.footer)
+    assert_no_exam_markdown_residue(document)
     document.save(str(target))
     return target
 
@@ -1403,8 +1438,22 @@ def _append_vml_textbox_paragraph(
 
 
 def _add_score_summary_table(container) -> None:
-    labels = ("题号", "一", "二", "三", "四", "五", "六", "总分")
-    widths = (1.6, 2.05, 2.05, 2.05, 2.05, 2.05, 2.05, 1.9)
+    _create_score_summary_table(
+        container,
+        ("一", "二", "三", "四", "五", "六"),
+    )
+    spacer = container.add_paragraph()
+    spacer.paragraph_format.space_after = Pt(2)
+    spacer.paragraph_format.line_spacing = 1.0
+
+
+def _create_score_summary_table(
+    container,
+    section_labels: tuple[str, ...],
+) -> Table:
+    labels = ("题号", *section_labels, "总分")
+    middle_width = 12.3 / max(1, len(section_labels))
+    widths = (1.6, *(middle_width for _ in section_labels), 1.9)
     table = container.add_table(rows=2, cols=len(labels))
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = False
@@ -1418,9 +1467,60 @@ def _add_score_summary_table(container) -> None:
             widths[column_index],
             bold=column_index == 0,
         )
-    spacer = container.add_paragraph()
-    spacer.paragraph_format.space_after = Pt(2)
-    spacer.paragraph_format.line_spacing = 1.0
+    return table
+
+
+def _replace_score_summary_table(
+    document: Document,
+    payload: Mapping[str, object],
+) -> None:
+    score_table = next(
+        (
+            table
+            for table in document.tables
+            if len(table.rows) >= 2
+            and len(table.columns) >= 2
+            and table.cell(0, 0).text.strip() == "题号"
+            and table.cell(1, 0).text.strip() in {"分数", "评分", "得分"}
+        ),
+        None,
+    )
+    if score_table is None:
+        return
+    sections = _exam_payload_sections(payload)
+    section_labels = tuple(
+        _score_summary_section_label(
+            _section_title(section, index),
+            index,
+        )
+        for index, section in enumerate(sections, start=1)
+    )
+    if not section_labels:
+        return
+    replacement = _create_score_summary_table(document, section_labels)
+    score_table._tbl.addprevious(replacement._tbl)
+    _remove_table(score_table)
+
+
+def _score_summary_section_label(title: str, index: int) -> str:
+    match = re.match(r"\s*([一二三四五六七八九十百]+)\s*[、.．]", str(title or ""))
+    if match:
+        return match.group(1)
+    numerals = (
+        "一",
+        "二",
+        "三",
+        "四",
+        "五",
+        "六",
+        "七",
+        "八",
+        "九",
+        "十",
+        "十一",
+        "十二",
+    )
+    return numerals[index - 1] if 1 <= index <= len(numerals) else str(index)
 
 
 def _add_section_header_row(container, title: str) -> Table:
@@ -1512,6 +1612,23 @@ def _set_table_borders(
         element.set(qn("w:color"), color)
 
 
+def _set_table_inside_horizontal_border(
+    table: Table,
+    *,
+    val: str,
+) -> None:
+    tbl_pr = table._tbl.tblPr
+    borders = tbl_pr.first_child_found_in("w:tblBorders")
+    if borders is None:
+        borders = OxmlElement("w:tblBorders")
+        tbl_pr.append(borders)
+    element = borders.find(qn("w:insideH"))
+    if element is None:
+        element = OxmlElement("w:insideH")
+        borders.append(element)
+    element.set(qn("w:val"), val)
+
+
 def _clear_table_borders(table) -> None:
     tbl_pr = table._tbl.tblPr
     borders = tbl_pr.first_child_found_in("w:tblBorders")
@@ -1591,6 +1708,18 @@ def _set_paragraph_bottom_border(
     bottom.set(qn("w:sz"), "4")
     bottom.set(qn("w:space"), "1")
     bottom.set(qn("w:color"), color)
+    between = borders.find(qn("w:between"))
+    if between is None:
+        between = OxmlElement("w:between")
+        borders.append(between)
+    between.set(qn("w:val"), "single")
+    between.set(qn("w:sz"), "4")
+    between.set(qn("w:space"), "1")
+    between.set(qn("w:color"), color)
+
+
+def _set_keep_with_next(paragraph: Paragraph) -> None:
+    paragraph.paragraph_format.keep_with_next = True
 
 
 def _set_table_indent(table: Table, indent_cm: float) -> None:
@@ -1671,6 +1800,7 @@ def _write_exam_payload_into_master(
     payload: Mapping[str, object],
 ) -> None:
     _remove_master_control_guides(document)
+    _replace_score_summary_table(document, payload)
     _replace_any_text(
         document,
         (MASTER_TITLE_PLACEHOLDER, *LEGACY_MASTER_TITLE_PLACEHOLDERS),
@@ -1736,6 +1866,7 @@ def _insert_exam_payload_questions_after(
 ) -> Paragraph:
     current_block: Paragraph | Table = paragraph
     current_paragraph = paragraph
+    global_question_number = 0
     for section_index, section in enumerate(_exam_payload_sections(payload), start=1):
         section_row = _insert_section_header_row_after(
             current_block,
@@ -1743,16 +1874,59 @@ def _insert_exam_payload_questions_after(
             _section_title(section, section_index),
         )
         current_block = section_row
-        for question_number, question in enumerate(_section_questions(section), start=1):
-            current_paragraph = _insert_paragraph_after_block(
-                current_block,
-                _student_question_line(question_number, question),
-                "Exam Question Stem",
+        for question_index, question in enumerate(
+            _section_questions(section),
+            start=1,
+        ):
+            global_question_number += 1
+            answer_area_kind, answer_area_lines = _question_answer_area(
+                question,
+                section,
+                payload,
             )
-            current_block = current_paragraph
-            for option in _question_options(question):
-                current_paragraph = _insert_paragraph_after_block(current_block, option, "Exam Option")
-                current_block = current_paragraph
+            question_paragraphs: list[Paragraph] = []
+            lead_in = _question_lead_in(question)
+            if lead_in:
+                current_block, inserted = _insert_exam_markdown_after_block(
+                    current_block,
+                    lead_in,
+                    "Exam Question",
+                    field_path=(
+                        f"sections.{section_index - 1}.questions."
+                        f"{question_index - 1}.lead_in"
+                    ),
+                )
+                question_paragraphs.extend(inserted)
+                if inserted:
+                    current_paragraph = inserted[-1]
+            score = _question_score(question)
+            current_block, inserted = _insert_exam_markdown_after_block(
+                current_block,
+                _question_stem(question),
+                "Exam Question Stem",
+                field_path=(
+                    f"sections.{section_index - 1}.questions."
+                    f"{question_index - 1}.stem"
+                ),
+                prefix=f"{global_question_number}. ",
+                suffix=f"（{score} 分）" if score else "",
+            )
+            question_paragraphs.extend(inserted)
+            if inserted:
+                current_paragraph = inserted[-1]
+            for option_index, option in enumerate(_question_options(question)):
+                current_block, inserted = _insert_exam_markdown_after_block(
+                    current_block,
+                    option,
+                    "Exam Option",
+                    field_path=(
+                        f"sections.{section_index - 1}.questions."
+                        f"{question_index - 1}.options.{option_index}"
+                    ),
+                )
+                question_paragraphs.extend(inserted)
+                if inserted:
+                    current_paragraph = inserted[-1]
             figure_block, figure_paragraph = _insert_question_figures_after_block(
                 current_block,
                 question,
@@ -1760,11 +1934,10 @@ def _insert_exam_payload_questions_after(
             current_block = figure_block
             if figure_paragraph is not None:
                 current_paragraph = figure_paragraph
-            answer_area_kind, answer_area_lines = _question_answer_area(
-                question,
-                section,
-                payload,
-            )
+                question_paragraphs.append(figure_paragraph)
+            if answer_area_kind in {"lines", "free"}:
+                for item in question_paragraphs:
+                    _set_keep_with_next(item)
             if answer_area_kind == "lines":
                 for _ in range(answer_area_lines):
                     current_paragraph = _insert_paragraph_after_block(
@@ -1783,6 +1956,262 @@ def _insert_exam_payload_questions_after(
     return current_paragraph
 
 
+def _insert_exam_markdown_after_block(
+    anchor: Paragraph | Table,
+    markdown: object,
+    paragraph_style: str,
+    *,
+    field_path: str,
+    prefix: str = "",
+    suffix: str = "",
+) -> tuple[Paragraph | Table, list[Paragraph]]:
+    """Insert semantic Markdown blocks without relinquishing exam layout ownership."""
+
+    fragment = compile_exam_markdown(markdown, field_path=field_path)
+    document = anchor.part.document
+    current: Paragraph | Table = anchor
+    paragraphs: list[Paragraph] = []
+    affixes_consumed = False
+
+    def consume_affixes_before_non_text() -> None:
+        nonlocal current, affixes_consumed
+        if affixes_consumed or not (prefix or suffix):
+            return
+        paragraph = _insert_exam_inline_paragraph_after_block(
+            current,
+            document,
+            paragraph_style,
+            tuple(
+                item
+                for item in (
+                    InlineContent(text=prefix),
+                    InlineContent(text=suffix),
+                )
+                if item.text
+            ),
+        )
+        current = paragraph
+        paragraphs.append(paragraph)
+        affixes_consumed = True
+
+    for content_block in fragment.blocks:
+        if isinstance(content_block, (ParagraphBlock, HeadingBlock)):
+            if _is_markdown_horizontal_rule_block(content_block):
+                consume_affixes_before_non_text()
+                paragraph = _insert_exam_inline_paragraph_after_block(
+                    current,
+                    document,
+                    paragraph_style,
+                    (),
+                )
+                _set_paragraph_bottom_border(paragraph, color="7F7F7F")
+                paragraph.paragraph_format.space_before = Pt(2)
+                paragraph.paragraph_format.space_after = Pt(4)
+                current = paragraph
+                paragraphs.append(paragraph)
+                continue
+
+            inlines = list(_exam_render_inlines(content_block.inlines))
+            if not affixes_consumed:
+                inlines = list(
+                    _exam_inlines_with_affixes(
+                        inlines,
+                        prefix=prefix,
+                        suffix=suffix,
+                    )
+                )
+                affixes_consumed = True
+            paragraph = _insert_exam_inline_paragraph_after_block(
+                current,
+                document,
+                paragraph_style,
+                tuple(inlines),
+            )
+            current = paragraph
+            paragraphs.append(paragraph)
+            continue
+
+        consume_affixes_before_non_text()
+        if isinstance(content_block, ListBlock):
+            num_id = _add_numbering_definition(
+                document,
+                content_block.number_format,
+                start=content_block.start,
+                level=content_block.nesting,
+                marker_template=content_block.marker_template,
+            )
+            for item in content_block.items:
+                paragraph = _insert_exam_inline_paragraph_after_block(
+                    current,
+                    document,
+                    paragraph_style,
+                    _exam_render_inlines(item.inlines),
+                )
+                _apply_num_pr(paragraph._p, num_id, content_block.nesting)
+                current = paragraph
+                paragraphs.append(paragraph)
+            continue
+
+        if isinstance(content_block, TableBlock):
+            table = _insert_exam_markdown_table_after_block(
+                current,
+                document,
+                content_block,
+            )
+            current = table
+            continue
+
+        if isinstance(content_block, (ImageBlock, PageBreakBlock)):
+            raise ExamMarkdownContentError(
+                f"exam_markdown_unsupported:{field_path}:"
+                f"{type(content_block).__name__}"
+            )
+        raise ExamMarkdownContentError(
+            f"exam_markdown_unsupported:{field_path}:"
+            f"{type(content_block).__name__}"
+        )
+
+    if not fragment.blocks:
+        consume_affixes_before_non_text()
+    return current, paragraphs
+
+
+def _insert_exam_inline_paragraph_after_block(
+    anchor: Paragraph | Table,
+    document: Document,
+    paragraph_style: str,
+    inlines: tuple[InlineContent, ...],
+) -> Paragraph:
+    try:
+        style_id = document.styles[paragraph_style].style_id
+    except KeyError:
+        style_id = None
+    element = _paragraph_element(document, style_id, inlines)
+    anchor_element = anchor._p if isinstance(anchor, Paragraph) else anchor._tbl
+    anchor_element.addnext(element)
+    return Paragraph(element, anchor._parent)
+
+
+def _insert_exam_markdown_table_after_block(
+    anchor: Paragraph | Table,
+    document: Document,
+    block: TableBlock,
+) -> Table:
+    try:
+        normal_style_id = document.styles["Exam Question"].style_id
+    except KeyError:
+        normal_style_id = document.styles["Normal"].style_id
+    try:
+        table_style_id = document.styles["Table Grid"].style_id
+    except KeyError:
+        table_style_id = None
+    section = document.sections[0]
+    total_width_twips = max(
+        720,
+        int(
+            (
+                section.page_width
+                - section.left_margin
+                - section.right_margin
+            )
+            / 635
+        ),
+    )
+
+    def unsupported_image(*_args, **_kwargs):
+        raise ExamMarkdownContentError("exam_markdown_table_image_unsupported")
+
+    element = _table_element(
+        document,
+        block,
+        normal_style_id,
+        table_style_id,
+        total_width_twips,
+        image_factory=unsupported_image,
+    )
+    anchor_element = anchor._p if isinstance(anchor, Paragraph) else anchor._tbl
+    anchor_element.addnext(element)
+    table = Table(element, anchor._parent)
+    _format_exam_markdown_table(table)
+    return table
+
+
+def _format_exam_markdown_table(table: Table) -> None:
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+    _set_table_borders(table, size="4", color="7F7F7F")
+    for row_index, row in enumerate(table.rows):
+        tr_pr = row._tr.get_or_add_trPr()
+        if tr_pr.find(qn("w:cantSplit")) is None:
+            tr_pr.append(OxmlElement("w:cantSplit"))
+        if row_index == 0 and tr_pr.find(qn("w:tblHeader")) is None:
+            header = OxmlElement("w:tblHeader")
+            header.set(qn("w:val"), "true")
+            tr_pr.append(header)
+        for cell in row.cells:
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            _set_cell_margins(cell, top=80, bottom=80, start=120, end=120)
+            if row_index == 0:
+                tc_pr = cell._tc.get_or_add_tcPr()
+                shading = tc_pr.find(qn("w:shd"))
+                if shading is None:
+                    shading = OxmlElement("w:shd")
+                    tc_pr.append(shading)
+                shading.set(qn("w:val"), "clear")
+                shading.set(qn("w:fill"), "E7E6E6")
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.left_indent = None
+                paragraph.paragraph_format.first_line_indent = None
+                paragraph.paragraph_format.space_before = Pt(0)
+                paragraph.paragraph_format.space_after = Pt(0)
+                if row_index == 0:
+                    for run in paragraph.runs:
+                        run.bold = True
+
+
+def _is_markdown_horizontal_rule_block(
+    block: ParagraphBlock | HeadingBlock,
+) -> bool:
+    return "".join(
+        inline.text or inline.field_key for inline in block.inlines
+    ).strip() == MARKDOWN_HORIZONTAL_RULE_TEXT
+
+
+def _exam_render_inlines(
+    inlines: Iterable[InlineContent],
+) -> tuple[InlineContent, ...]:
+    """Preserve authored exam line boundaries inside one Word paragraph."""
+
+    return tuple(
+        InlineContent(kind=InlineKind.HARD_BREAK)
+        if inline.kind is InlineKind.SOFT_BREAK
+        else inline
+        for inline in inlines
+    )
+
+
+def _exam_inlines_with_affixes(
+    inlines: Iterable[InlineContent],
+    *,
+    prefix: str,
+    suffix: str,
+) -> tuple[InlineContent, ...]:
+    output = list(inlines)
+    if prefix:
+        output.insert(0, InlineContent(text=prefix))
+    if suffix:
+        first_break = next(
+            (
+                index
+                for index, inline in enumerate(output)
+                if inline.kind is InlineKind.HARD_BREAK
+            ),
+            len(output),
+        )
+        output.insert(first_break, InlineContent(text=suffix))
+    return tuple(output)
+
+
 def _add_answer_version(
     document: Document,
     spec: ExamBlankStyleSpec,
@@ -1790,13 +2219,51 @@ def _add_answer_version(
 ) -> None:
     exam_payload = payload or EXAM_SAMPLE_PAYLOAD
     _add_exam_header(document, "答案速查", spec, exam_payload, include_notice=False)
+    global_question_number = 0
     for section_index, section in enumerate(_exam_payload_sections(exam_payload), start=1):
-        document.add_paragraph(_section_title(section, section_index), style="Exam Section Heading")
-        for question_number, question in enumerate(_section_questions(section), start=1):
-            document.add_paragraph(_answer_key_line(question_number, question), style="Exam Question")
+        section_heading = document.add_paragraph(
+            _section_title(section, section_index),
+            style="Exam Section Heading",
+        )
+        _set_keep_with_next(section_heading)
+        current_block: Paragraph | Table = section_heading
+        for question_index, question in enumerate(
+            _section_questions(section),
+            start=1,
+        ):
+            global_question_number += 1
+            current_block, answer_paragraphs = _insert_exam_markdown_after_block(
+                current_block,
+                _question_answer(question) or "待补充",
+                "Exam Question",
+                field_path=(
+                    f"answers.sections.{section_index - 1}.questions."
+                    f"{question_index - 1}.answer"
+                ),
+                prefix=f"{global_question_number}. ",
+            )
+            for answer_paragraph in answer_paragraphs:
+                _compact_answer_key_paragraph(answer_paragraph)
             analysis = _question_analysis(question)
             if analysis:
-                document.add_paragraph(f"解析：{analysis}", style="Exam Question")
+                current_block, analysis_paragraphs = _insert_exam_markdown_after_block(
+                    current_block,
+                    analysis,
+                    "Exam Question",
+                    field_path=(
+                        f"answers.sections.{section_index - 1}.questions."
+                        f"{question_index - 1}.analysis"
+                    ),
+                    prefix="解析：",
+                )
+                for analysis_paragraph in analysis_paragraphs:
+                    _compact_answer_key_paragraph(analysis_paragraph)
+
+
+def _compact_answer_key_paragraph(paragraph: Paragraph) -> None:
+    paragraph.paragraph_format.line_spacing = 1.25
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
 
 
 def _add_exam_header(
@@ -1860,7 +2327,12 @@ def _insert_free_answer_area_after_block(
         6.0,
         SECTION_SCORE_CELL_WIDTH_CM + SECTION_TITLE_CELL_WIDTH_CM - ANSWER_AREA_LEFT_INDENT_CM,
     )
-    table = _add_table_for_container(container, rows=1, cols=1, width_cm=width_cm)
+    table = _add_table_for_container(
+        container,
+        rows=1,
+        cols=1,
+        width_cm=width_cm,
+    )
     anchor_element = anchor._p if isinstance(anchor, Paragraph) else anchor._tbl
     anchor_element.addnext(table._tbl)
     table.alignment = WD_TABLE_ALIGNMENT.LEFT
@@ -1868,17 +2340,22 @@ def _insert_free_answer_area_after_block(
     _set_table_grid(table, (width_cm,))
     _set_table_indent(table, ANSWER_AREA_LEFT_INDENT_CM)
     _set_table_borders(table, size="4", color="BFBFBF")
-    row = table.rows[0]
-    row.height = Cm(_free_answer_area_height_cm(line_count))
-    row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-    cell = table.cell(0, 0)
-    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
-    _set_cell_width(cell, width_cm)
-    _set_cell_margins(cell, top=100, bottom=100, start=120, end=120)
-    _clear_cell(cell)
-    paragraph = cell.add_paragraph("", style="Exam Free Answer Area")
-    paragraph.paragraph_format.line_spacing = 1.0
-    paragraph.paragraph_format.space_after = Pt(0)
+    _set_table_inside_horizontal_border(table, val="nil")
+    row_height_cm = _free_answer_area_height_cm(line_count)
+    for row in table.rows:
+        row.height = Cm(row_height_cm)
+        row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+        tr_pr = row._tr.get_or_add_trPr()
+        if tr_pr.find(qn("w:cantSplit")) is None:
+            tr_pr.append(OxmlElement("w:cantSplit"))
+        cell = row.cells[0]
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+        _set_cell_width(cell, width_cm)
+        _set_cell_margins(cell, top=40, bottom=40, start=120, end=120)
+        _clear_cell(cell)
+        paragraph = cell.add_paragraph("", style="Exam Free Answer Area")
+        paragraph.paragraph_format.line_spacing = 1.0
+        paragraph.paragraph_format.space_after = Pt(0)
     return table
 
 
@@ -1899,6 +2376,13 @@ def _question_answer_area(
     section: Mapping[str, object],
     payload: Mapping[str, object],
 ) -> tuple[str, int]:
+    if _question_options(question):
+        return "none", 0
+
+    question_type = _question_type_text(question, section)
+    if _looks_like_choice_type(question_type):
+        return "none", 0
+
     explicit_kind = _explicit_answer_area_kind(question)
     explicit_lines = _explicit_answer_space_lines(question)
     if explicit_kind == "none":
@@ -1908,13 +2392,6 @@ def _question_answer_area(
     if explicit_kind == "lines":
         lines = explicit_lines if explicit_lines is not None else _question_answer_space_lines(question, section)
         return ("lines", lines) if lines else ("none", 0)
-
-    if _question_options(question):
-        return "none", 0
-
-    question_type = _question_type_text(question, section)
-    if _looks_like_choice_type(question_type):
-        return "none", 0
 
     stem = _question_stem(question)
     if _stem_has_inline_answer_blank(stem):
@@ -2122,15 +2599,23 @@ def _free_answer_area_lines(
     explicit_lines: int | None,
 ) -> int:
     if explicit_lines is not None:
-        return _clamp_answer_space_lines(max(ANSWER_FREE_AREA_MIN_LINES, explicit_lines))
+        return _clamp_free_answer_space_lines(
+            max(ANSWER_FREE_AREA_MIN_LINES, explicit_lines)
+        )
     score = _question_score_number(question)
     if score is None:
         return ANSWER_FREE_AREA_DEFAULT_LINES
-    return _clamp_answer_space_lines(max(ANSWER_FREE_AREA_MIN_LINES, int((score + 1) // 2) or 1))
+    return _clamp_free_answer_space_lines(
+        max(ANSWER_FREE_AREA_MIN_LINES, int((score + 1) // 2) or 1)
+    )
 
 
 def _free_answer_area_height_cm(line_count: int) -> float:
-    return max(2.4, _clamp_answer_space_lines(line_count) * 0.72)
+    return max(
+        2.4,
+        _clamp_free_answer_space_lines(line_count)
+        * ANSWER_FREE_AREA_LINE_HEIGHT_CM,
+    )
 
 
 def _question_score_number(question: Mapping[str, object]) -> float | None:
@@ -2148,6 +2633,10 @@ def _question_score_number(question: Mapping[str, object]) -> float | None:
 
 def _clamp_answer_space_lines(value: int) -> int:
     return max(0, min(ANSWER_SPACE_MAX_LINES, value))
+
+
+def _clamp_free_answer_space_lines(value: int) -> int:
+    return max(0, min(ANSWER_FREE_AREA_MAX_LINES, value))
 
 
 def _sample_sections() -> Iterable[dict[str, object]]:
@@ -2194,6 +2683,13 @@ def _section_questions(section: Mapping[str, object]) -> list[Mapping[str, objec
 
 def _question_stem(question: Mapping[str, object]) -> str:
     return _payload_text(question, ("stem", "question", "content", "text"), fallback="题目内容待填写")
+
+
+def _question_lead_in(question: Mapping[str, object]) -> str:
+    return _payload_text(
+        question,
+        ("lead_in", "leadIn", "context", "material"),
+    )
 
 
 def _question_options(question: Mapping[str, object]) -> list[str]:
@@ -2322,7 +2818,7 @@ def _mapping_items(value: object, *, text_key: str = "title") -> list[Mapping[st
 def _iterable_items(value: object) -> list[object]:
     if value is None or isinstance(value, (str, bytes)):
         return []
-    if isinstance(value, IterableABC):
+    if isinstance(value, Iterable):
         return list(value)
     return []
 

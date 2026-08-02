@@ -15,8 +15,14 @@ from src.assistant.application.capability_registry import (
     resolve_assistant_capability,
 )
 from src.assistant.application.plan_builder import requests_form_document_action
+from src.assistant.application.request_semantics import (
+    is_semantic_revision_request,
+)
 from src.assistant.contracts.task_plan import CAPABILITY_EXECUTABLE
-from src.assistant.domain.docx_format_evidence import is_format_requirements_request
+from src.assistant.domain.docx_format_evidence import (
+    is_format_requirements_request,
+    is_template_authoring_request,
+)
 from src.config.scene_natural_request_router import (
     NaturalRequestRoute,
     NaturalRequestRouteResult,
@@ -24,23 +30,11 @@ from src.config.scene_natural_request_router import (
     route_natural_scene_request,
 )
 
-
 POLICY_GENERAL_CHAT = "general_chat"
 POLICY_DOCUMENT_ADVISORY = "document_advisory"
 POLICY_DOCUMENT_ACTION = "document_action"
 POLICY_NEEDS_ROUTE_CLARIFICATION = "needs_route_clarification"
 POLICY_RESPONSE_CLOSED = "response_closed"
-
-_REVIEW_ACTION_HINTS = (
-    "检查",
-    "审阅",
-    "审校",
-    "核对",
-    "诊断",
-    "分析",
-    "评估",
-    "分析问题",
-)
 
 _ROUTE_DISPLAY_LABELS = {
     "quick_formatting_general": "通用快速排版",
@@ -140,14 +134,31 @@ def evaluate_request_policy(
         route=selected_route,
         workspace_mode_id=workspace_mode_id,
         operation=operation,
+        query=normalized_query,
     )
+
+    if is_template_authoring_request(normalized_query):
+        # Template authoring is a provider-backed configuration workflow, not
+        # document production.  It must win before route clarification and the
+        # generic document-action branch so its source DOCX can never become a
+        # content-generation or Word-production input.
+        return RequestPolicyDecision(
+            kind=POLICY_DOCUMENT_ADVISORY,
+            query=normalized_query,
+            operation=operation,
+            route=selected_route,
+            route_status=(
+                "matched"
+                if override or deterministic_route is not None
+                else routed.status
+            ),
+            capability=capability,
+        )
 
     if not override and routed.status == "ambiguous" and deterministic_route is None:
         top_score = routed.matches[0].score if routed.matches else 0
         candidates = tuple(
-            match
-            for match in routed.matches
-            if top_score - match.score <= 14
+            match for match in routed.matches if top_score - match.score <= 14
         )[:4]
         choices = tuple(
             RequestPolicyChoice(
@@ -165,16 +176,13 @@ def evaluate_request_policy(
             route_status=routed.status,
             capability=capability,
             clarification_prompt=(
-                routed.disambiguation_prompt
-                or "请选择更符合本次目标的文档任务。"
+                routed.disambiguation_prompt or "请选择更符合本次目标的文档任务。"
             ),
             choices=choices,
         )
 
     route_status = (
-        "matched"
-        if override or deterministic_route is not None
-        else routed.status
+        "matched" if override or deterministic_route is not None else routed.status
     )
     if is_format_requirements_request(normalized_query):
         return RequestPolicyDecision(
@@ -186,10 +194,7 @@ def evaluate_request_policy(
             capability=capability,
         )
 
-    if (
-        selected_route is not None
-        and capability.ref.status != CAPABILITY_EXECUTABLE
-    ):
+    if selected_route is not None and capability.ref.status != CAPABILITY_EXECUTABLE:
         return RequestPolicyDecision(
             kind=POLICY_RESPONSE_CLOSED,
             query=normalized_query,
@@ -209,13 +214,20 @@ def evaluate_request_policy(
             capability=capability,
         )
 
-    normalized = " ".join(normalized_query.casefold().split())
-    review_action = bool(
-        selected_route is not None
-        and has_attachment
-        and any(token in normalized for token in _REVIEW_ACTION_HINTS)
-    )
-    if requests_form_document_action(normalized_query) or review_action:
+    if (
+        has_attachment
+        and operation == "review"
+        and not is_semantic_revision_request(normalized_query)
+    ):
+        return RequestPolicyDecision(
+            kind=POLICY_DOCUMENT_ADVISORY,
+            query=normalized_query,
+            operation=operation,
+            route=selected_route,
+            route_status=route_status,
+            capability=capability,
+        )
+    if requests_form_document_action(normalized_query):
         return RequestPolicyDecision(
             kind=POLICY_DOCUMENT_ACTION,
             query=normalized_query,

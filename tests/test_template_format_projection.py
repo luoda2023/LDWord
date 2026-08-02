@@ -9,6 +9,7 @@ from src.ui.panels.template_feature_specs import (
     TEMPLATE_CARD_DEFINITIONS,
     TEMPLATE_DETAIL_CARD_IDS,
     TEMPLATE_FEATURE_SPECS,
+    feature_module_names,
 )
 from src.ui.panels.template_navigation_context import (
     build_template_navigation_context,
@@ -52,7 +53,13 @@ def test_feature_registry_covers_template_preview_identity_once():
     }
     assert tuple(spec.card_id for spec in TEMPLATE_FEATURE_SPECS) == TEMPLATE_DETAIL_CARD_IDS
     assert len({spec.feature_id for spec in TEMPLATE_FEATURE_SPECS}) == len(TEMPLATE_FEATURE_SPECS)
-    assert len({control.module_name for spec in TEMPLATE_FEATURE_SPECS for control in spec.module_controls}) == 8
+    assert len(
+        {
+            module_name
+            for spec in TEMPLATE_FEATURE_SPECS
+            for module_name in feature_module_names(spec)
+        }
+    ) == 8
 
 
 def test_overview_projection_exposes_registry_order_and_real_summaries():

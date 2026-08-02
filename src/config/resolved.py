@@ -22,19 +22,25 @@ from src.config.template import (
     HeaderFooterConfig,
     WatermarkConfig,
     ReferenceStyleConfig,
-    FormulaTableConfig,
-    FormulaStyleConfig,
-    EquationNumberingConfig,
 )
-from src.config.feature_configs import OutputConfig, disabled_output_config
+from src.config.feature_configs import (
+    EquationNumberingConfig,
+    FormulaStyleConfig,
+    FormulaTableConfig,
+    OutputConfig,
+    disabled_output_config,
+)
+from src.config.formula_policy import (
+    ChemTypographyOptions,
+    FormulaConvertOptions,
+    FormulaToTableOptions,
+)
 from src.config.document_scope import DocumentScopePolicy
 from src.config.scene import (
     ExamPaperConfig,
     MdCleanupOptions,
     WhitespaceOptions,
     CitationLinkOptions,
-    FormulaConvertOptions,
-    ChemTypographyOptions,
     InputSourceProfile,
     ComplianceProfile,
     DeliveryPreset,
@@ -112,6 +118,7 @@ class ResolvedConfig:
     whitespace: WhitespaceOptions = field(default_factory=WhitespaceOptions)
     citation_link: CitationLinkOptions = field(default_factory=CitationLinkOptions)
     formula_convert: FormulaConvertOptions = field(default_factory=FormulaConvertOptions)
+    formula_to_table: FormulaToTableOptions = field(default_factory=FormulaToTableOptions)
     chem_typography: ChemTypographyOptions = field(default_factory=ChemTypographyOptions)
     input_source_profile: InputSourceProfile = field(default_factory=InputSourceProfile)
     compliance_profile: ComplianceProfile = field(default_factory=ComplianceProfile)

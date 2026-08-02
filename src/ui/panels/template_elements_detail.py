@@ -215,7 +215,10 @@ class ElementsDetail(QWidget):
         self._is_syncing = True
         try:
             if self._header_footer_detail is not None:
-                self._header_footer_detail.set_header_footer(template.header_footer)
+                self._header_footer_detail.set_header_footer(
+                    template.header_footer,
+                    template.heading_model,
+                )
             if self._toc_detail is not None:
                 self._toc_detail.set_template(template)
         finally:

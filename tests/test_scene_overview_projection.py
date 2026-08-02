@@ -13,6 +13,7 @@ from src.ui.panels.scene_overview_projection import (
     first_screen_texts,
     build_scene_overview_spec,
 )
+from src.ui.panels.scene_navigation_projection import overview_navigation_snapshot
 from src.ui.panels.scene_summary_projection import build_scene_overview_summary_items
 from src.ui.panels.style_source_projection import build_style_source_projection
 from src.ui.panels.workbench.execution_flow_projection import standard_execution_flow_steps
@@ -66,7 +67,7 @@ def test_scene_overview_projection_shapes_user_first_screen():
     assert "/" not in scope_row.summary
     assert "文档区域" not in scope_row.summary
     assert {row.target_card_id for row in spec.key_settings} >= {
-        "scn_content",
+        "assets",
         "scn_rules",
     }
     assert "scn_output" not in {row.target_card_id for row in spec.key_settings}
@@ -84,6 +85,24 @@ def test_scene_overview_projection_shapes_user_first_screen():
     )
     assert spec.risk_notices
     assert not first_screen_forbidden_terms(spec)
+
+
+def test_scene_overview_save_badge_reports_autosave_lifecycle():
+    expected = {
+        "pending": "待自动保存",
+        "saving": "保存中",
+        "failed": "保存失败",
+        "saved": "已保存",
+    }
+
+    for state, label in expected.items():
+        snapshot = overview_navigation_snapshot(
+            scene_label="测试方案",
+            template_label="默认格式",
+            scene_dirty=state != "saved",
+            scene_save_state=state,
+        )
+        assert snapshot["badge_text"] == label
 
 
 def test_scene_overview_icons_are_registered_and_semantically_aligned():

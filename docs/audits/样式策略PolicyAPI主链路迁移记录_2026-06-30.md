@@ -1,4 +1,4 @@
-# 样式策略 Policy API 主链路迁移记录
+﻿# 样式策略 Policy API 主链路迁移记录
 
 日期：2026-06-30
 
@@ -295,7 +295,7 @@ python -X utf8 -m pytest tests\test_scene_panel_architecture.py -q
 59 passed in 59.71s
 ```
 
-备注：当前 `.git` worktree 元数据仍指向旧的 `C:\Users\Administrator\...` 路径，`git status` 会被该陈旧指针拦截；本轮验证以源码检查和 pytest 输出为准。
+备注：当前 `.git` worktree 元数据仍指向旧的 `<LOCAL_PATH>` 路径，`git status` 会被该陈旧指针拦截；本轮验证以源码检查和 pytest 输出为准。
 
 ## 8. 下一步建议
 

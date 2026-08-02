@@ -43,7 +43,7 @@ BASELINE_COMMANDS: tuple[tuple[tuple[str, ...], bool], ...] = (
             "tests/test_app_meta.py",
             "tests/test_template_panel_architecture.py::test_template_panel_overview_exposes_only_template_library_actions",
             "tests/test_template_panel_architecture.py::test_template_panel_connects_template_management_handlers",
-            "tests/test_quick_execution_detail_architecture.py::test_quick_execution_detail_does_not_expose_advanced_scene_controls",
+            "tests/test_workbench_panel.py::test_workbench_quick_execution_hides_advanced_scene_controls",
             "tests/test_workbench_navigation_architecture.py::test_navigation_controller_owns_snapshot_and_dynamic_card_logic",
             "tests/test_heading_style_semantics.py",
             "tests/test_architecture_boundaries.py",

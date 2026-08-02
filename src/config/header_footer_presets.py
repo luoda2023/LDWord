@@ -19,6 +19,10 @@ from src.config.feature_configs import (
     PageNumberPhaseConfig,
     default_continuous_page_number_phases,
 )
+from src.config.migration import (
+    normalize_header_footer_payload,
+    normalize_page_scope_selectors,
+)
 
 
 class HeaderFooterPresetEntry(TypedDict):
@@ -37,8 +41,16 @@ USER_SOURCE = "user"
 def split_page_number_phases(*, continue_body: bool) -> list[PageNumberPhaseConfig]:
     return [
         PageNumberPhaseConfig(
+            phase_id="pre_numbering",
+            selectors=["cover"],
+            visible=False,
+            number_format="decimal",
+            start_mode="restart",
+            start_value=1,
+        ),
+        PageNumberPhaseConfig(
             phase_id="front",
-            selectors=["front_matter"],
+            selectors=["abstract_cn", "abstract_en", "toc"],
             visible=True,
             number_format="upperRoman",
             start_mode="restart",
@@ -46,7 +58,14 @@ def split_page_number_phases(*, continue_body: bool) -> list[PageNumberPhaseConf
         ),
         PageNumberPhaseConfig(
             phase_id="body",
-            selectors=["body", "back_matter"],
+            selectors=[
+                "body",
+                "references",
+                "errata",
+                "appendix",
+                "acknowledgment",
+                "resume",
+            ],
             visible=True,
             number_format="decimal",
             start_mode="continue" if continue_body else "restart",
@@ -55,22 +74,66 @@ def split_page_number_phases(*, continue_body: bool) -> list[PageNumberPhaseConf
     ]
 
 
+def toc_roman_body_decimal_phases() -> list[PageNumberPhaseConfig]:
+    """Hide abstract numbers; restart the TOC at Roman I and body at decimal 1."""
+
+    return [
+        PageNumberPhaseConfig(
+            phase_id="pre_numbering",
+            selectors=["cover"],
+            visible=False,
+            number_format="decimal",
+            start_mode="restart",
+            start_value=1,
+        ),
+        PageNumberPhaseConfig(
+            phase_id="front_hidden",
+            selectors=["abstract_cn", "abstract_en"],
+            visible=False,
+            number_format="upperRoman",
+            start_mode="restart",
+            start_value=1,
+        ),
+        PageNumberPhaseConfig(
+            phase_id="toc",
+            selectors=["toc"],
+            visible=True,
+            number_format="upperRoman",
+            start_mode="restart",
+            start_value=1,
+        ),
+        PageNumberPhaseConfig(
+            phase_id="body",
+            selectors=[
+                "body",
+                "references",
+                "errata",
+                "appendix",
+                "acknowledgment",
+                "resume",
+            ],
+            visible=True,
+            number_format="decimal",
+            start_mode="restart",
+            start_value=1,
+        ),
+    ]
+
+
 def _thesis_preset() -> HeaderFooterConfig:
     cfg = HeaderFooterConfig()
-    cfg.footer.content_mode = "page_number"
-    cfg.header.hide_on_cover = True
-    cfg.footer.hide_on_cover = True
-    cfg.suppress_header_footer_selectors = ["pre_numbering"]
+    cfg.footer.content_mode = "none"
+    cfg.header.hidden_selectors = ["cover"]
+    cfg.footer.hidden_selectors = ["cover"]
     cfg.page_number_plan.phases = split_page_number_phases(continue_body=False)
     return cfg
 
 
 def _continuous_preset() -> HeaderFooterConfig:
     cfg = HeaderFooterConfig()
-    cfg.footer.content_mode = "page_number"
-    cfg.header.hide_on_cover = False
-    cfg.footer.hide_on_cover = False
-    cfg.suppress_header_footer_selectors = []
+    cfg.footer.content_mode = "none"
+    cfg.header.hidden_selectors = []
+    cfg.footer.hidden_selectors = []
     cfg.page_number_plan.phases = default_continuous_page_number_phases()
     return cfg
 
@@ -78,9 +141,9 @@ def _continuous_preset() -> HeaderFooterConfig:
 def _no_page_number_preset() -> HeaderFooterConfig:
     cfg = HeaderFooterConfig()
     cfg.footer.content_mode = "none"
-    cfg.header.hide_on_cover = False
-    cfg.footer.hide_on_cover = False
-    cfg.suppress_header_footer_selectors = []
+    cfg.page_number_plan.enabled = False
+    cfg.header.hidden_selectors = []
+    cfg.footer.hidden_selectors = []
     cfg.page_number_plan.phases = default_continuous_page_number_phases()
     return cfg
 
@@ -90,7 +153,7 @@ BUILTIN_PRESET_CATALOG: dict[str, HeaderFooterPresetEntry] = {
         "label": "论文默认",
         "header_footer": _thesis_preset(),
         "source": BUILTIN_SOURCE,
-        "description": "封面及声明页不显示，前置罗马，正文阿拉伯。",
+        "description": "封面隐藏三类输出；前置罗马，正文阿拉伯。",
     },
     "continuous": {
         "label": "可编号内容连续页码",
@@ -102,7 +165,7 @@ BUILTIN_PRESET_CATALOG: dict[str, HeaderFooterPresetEntry] = {
         "label": "不显示页码",
         "header_footer": _no_page_number_preset(),
         "source": BUILTIN_SOURCE,
-        "description": "页脚不输出页码，仍保留页码规则配置。",
+        "description": "仅关闭页码，页眉和页脚文字保持独立配置。",
     },
 }
 
@@ -165,6 +228,29 @@ def _load_user_presets() -> dict[str, HeaderFooterPresetEntry]:
         config_payload = payload.get("header_footer")
         if not isinstance(config_payload, dict):
             continue
+        config_payload = deepcopy(config_payload)
+        page_number_plan = config_payload.get("page_number_plan")
+        has_current_variant_schema = (
+            isinstance(page_number_plan, dict)
+            and isinstance(page_number_plan.get("first"), dict)
+            and isinstance(page_number_plan.get("even"), dict)
+        )
+        if has_current_variant_schema:
+            for channel_name in ("header", "footer"):
+                channel = config_payload.get(channel_name)
+                if isinstance(channel, dict):
+                    channel["hidden_selectors"] = normalize_page_scope_selectors(
+                        channel.get("hidden_selectors")
+                    )
+            phases = page_number_plan.get("phases")
+            if isinstance(phases, list):
+                for phase in phases:
+                    if isinstance(phase, dict):
+                        phase["selectors"] = normalize_page_scope_selectors(
+                            phase.get("selectors")
+                        )
+        else:
+            config_payload = normalize_header_footer_payload(config_payload)
 
         used_labels.add(normalized_label)
         presets[preset_id] = {

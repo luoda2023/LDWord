@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from lxml import etree
 from docx.enum.text import WD_LINE_SPACING
 from docx.shared import Pt
 
@@ -14,21 +13,39 @@ from src.config.style_semantics import (
     spacing_value_to_line_hundredths,
     spacing_value_to_twips,
 )
-from src.shared.engine.ooxml_ops import qn
+from src.shared.engine.ooxml_ops import (
+    find_or_create_before,
+    get_or_add_paragraph_properties_first,
+    qn,
+)
 
 
 def _ensure_ppr(container_element):
-    ppr = container_element.find(qn("w:pPr"))
-    if ppr is None:
-        ppr = etree.SubElement(container_element, qn("w:pPr"))
-    return ppr
+    return get_or_add_paragraph_properties_first(container_element)
 
 
 def _ensure_spacing(container_element):
     ppr = _ensure_ppr(container_element)
-    spacing = ppr.find(qn("w:spacing"))
-    if spacing is None:
-        spacing = etree.SubElement(ppr, qn("w:spacing"))
+    spacing = find_or_create_before(
+        ppr,
+        "w:spacing",
+        (
+            "w:ind",
+            "w:contextualSpacing",
+            "w:mirrorIndents",
+            "w:suppressOverlap",
+            "w:jc",
+            "w:textDirection",
+            "w:textAlignment",
+            "w:textboxTightWrap",
+            "w:outlineLvl",
+            "w:divId",
+            "w:cnfStyle",
+            "w:rPr",
+            "w:sectPr",
+            "w:pPrChange",
+        ),
+    )
     return ppr, spacing
 
 

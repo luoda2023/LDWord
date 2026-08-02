@@ -19,9 +19,6 @@ DOCUMENT_SCOPE_MODES: tuple[str, ...] = ("all", "body", "selected")
 
 _ROLE_LABELS: dict[str, str] = {
     "cover": "封面",
-    "statement": "声明页",
-    "authorization": "授权书",
-    "front_note": "说明页",
     "abstract_cn": "中文摘要",
     "abstract_en": "英文摘要",
     "toc": "目录",
@@ -36,6 +33,9 @@ _ROLE_LABELS: dict[str, str] = {
 ALL_DOCUMENT_REGION_ROLES: tuple[str, ...] = tuple(_ROLE_LABELS)
 _COMMON_ROLES = ("toc", "body", "references", "appendix")
 
+# Reusable plans declare which region types they can target.  This is a
+# capability list, not a claim that every input document contains every role;
+# the execution workbench intersects it with current-document scan evidence.
 _SELECTABLE_ROLES_BY_MODE: dict[str, tuple[str, ...]] = {
     "custom": _COMMON_ROLES,
     "thesis": (

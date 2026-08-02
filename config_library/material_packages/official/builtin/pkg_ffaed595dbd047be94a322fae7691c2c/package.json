@@ -1,0 +1,46 @@
+{
+  "kind": "alavette.material_package",
+  "schema_version": 1,
+  "package_id": "pkg_ffaed595dbd047be94a322fae7691c2c",
+  "display_name": "报告资料包样例",
+  "work_mode_id": "official",
+  "material_contract_id": "official_document_v1",
+  "shared_scope": {
+    "fields": {},
+    "resources": {},
+    "derivations": {},
+    "timelines": {},
+    "provenance": {}
+  },
+  "groups": [],
+  "records": [
+    {
+      "record_id": "rec_3114d6bfcdf54e0e9ee01ecb8304c029",
+      "display_name": "报告",
+      "group_id": "",
+      "lifecycle": "active",
+      "scope": {
+        "fields": {
+          "document_type": "report",
+          "title": "关于年度资料归档工作情况的报告",
+          "body": "现将年度资料归档工作开展情况、存在问题和下一步安排报告如下。",
+          "organization": "示例市档案局",
+          "document_no": "示档报〔2026〕8号",
+          "recipient": "示例市人民政府",
+          "signer": "张明",
+          "issuer": "示例市档案局",
+          "issue_date": "2026年7月10日",
+          "copy_scope": "局内各处室",
+          "printing_org": "示例市档案局办公室",
+          "printing_date": "2026年7月10日"
+        },
+        "resources": {},
+        "derivations": {},
+        "timelines": {},
+        "provenance": {}
+      },
+      "origin": {}
+    }
+  ],
+  "metadata": {}
+}

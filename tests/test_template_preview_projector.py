@@ -71,14 +71,15 @@ def test_baseline_projection_ignores_plan_mask_and_shows_template_facts():
     assert _blocks(projection, PreviewBlockKind.TABLE_CAPTION)
     assert _blocks(projection, PreviewBlockKind.TOC) == ()
     assert _blocks(projection, PreviewBlockKind.FIGURE_CAPTION) == ()
-    assert _blocks(projection, PreviewBlockKind.FORMULA) == ()
+    formula = _blocks(projection, PreviewBlockKind.FORMULA)
+    assert formula == ()
     assert _blocks(projection, PreviewBlockKind.REFERENCE) == ()
     assert _blocks(projection, PreviewBlockKind.WATERMARK) == ()
 
 
-def test_page_setup_off_uses_neutral_page_and_hides_every_page_guide():
+def test_page_setup_master_off_uses_neutral_page_and_hides_every_page_guide():
     *_unused, projection = _current_projection(
-        switches={"page_setup": False}
+        switches={"page_setup": False, "section_format": False}
     )
 
     assert projection.page_geometry.neutral is True
@@ -86,7 +87,7 @@ def test_page_setup_off_uses_neutral_page_and_hides_every_page_guide():
     assert projection.show_page_guides is False
     assert projection.show_header_distance_guide is False
     assert projection.show_footer_distance_guide is False
-    assert "纸张与页边距" in projection.hidden_feature_labels
+    assert "页面设置" in projection.hidden_feature_labels
 
 
 def test_page_and_section_modules_have_independent_feature_state():
@@ -97,6 +98,7 @@ def test_page_and_section_modules_have_independent_feature_state():
     assert selection.is_effectively_enabled("page_setup") is False
     assert selection.is_effectively_enabled("section_format") is True
     assert _blocks(projection, PreviewBlockKind.PAGE_GUIDES) == ()
+    assert "页面设置" not in projection.hidden_feature_labels
     # A section break is document structure, not a fabricated style sample.
     assert _blocks(projection, PreviewBlockKind.SECTION_MARKER) == ()
 
@@ -213,7 +215,31 @@ def test_header_footer_projection_preserves_first_even_and_default_variants():
     assert set(headers) == {"default", "first", "even"}
     assert headers["first"].text == ""
     assert headers["even"].text == "偶数页页眉"
-    assert footers["first"].text == "首页页脚"
+    assert "首页页脚" in footers["first"].text
+    assert "1" in footers["first"].text
+
+
+def test_header_footer_projection_applies_independent_first_even_page_number_strategy():
+    template = create_builtin_template("default")
+    hf = template.header_footer
+    hf.behavior.different_first_page = True
+    hf.behavior.different_odd_even_pages = True
+    hf.variants.first.footer.mode = "fixed"
+    hf.variants.first.footer.fixed_text = "首页文字"
+    hf.page_number_plan.first.visibility = "hide"
+    hf.page_number_plan.even.visibility = "show"
+    hf.page_number_plan.even.template = "第 {page} 页 / 共 {pages} 页"
+    hf.page_number_plan.even.alignment = "right"
+
+    projection = build_template_preview_projection(
+        resolve_template_baseline(template),
+        mode=TemplatePreviewMode.TEMPLATE_BASELINE,
+    )
+
+    footers = {block.page_variant: block for block in _blocks(projection, PreviewBlockKind.FOOTER)}
+    assert footers["first"].text == "首页文字"
+    assert "第 1 页 / 共 10 页" in footers["even"].text
+    assert footers["even"].alignment == "right"
 
 
 def test_header_footer_off_hides_content_and_distance_guides():
@@ -268,9 +294,10 @@ def test_caption_auto_insert_false_keeps_the_table_title_style_sample_only():
 
 def test_all_preview_modules_off_produces_neutral_inline_empty_state():
     switches = {
-        control.module_name: False
+        module_name: False
         for feature in TEMPLATE_FEATURE_SPECS
         for control in feature.module_controls
+        for module_name in control.module_names
     }
     *_unused, projection = _current_projection(switches=switches)
 
@@ -301,7 +328,7 @@ def test_projection_does_not_mutate_template_scene_or_official_bindings():
     assert asdict(scene) == before_scene
 
 
-def test_feature_registry_has_one_identity_and_two_explicit_page_controls():
+def test_feature_registry_has_one_page_control_for_two_backend_modules():
     assert len(TEMPLATE_FEATURE_SPECS) == len(
         {spec.feature_id for spec in TEMPLATE_FEATURE_SPECS}
     )
@@ -309,7 +336,9 @@ def test_feature_registry_has_one_identity_and_two_explicit_page_controls():
         {spec.card_id for spec in TEMPLATE_FEATURE_SPECS}
     )
     page = TEMPLATE_FEATURE_BY_ID["page"]
-    assert tuple(control.module_name for control in page.module_controls) == (
+    assert len(page.module_controls) == 1
+    assert page.module_controls[0].label == "应用页面设置"
+    assert page.module_controls[0].module_names == (
         "page_setup",
         "section_format",
     )

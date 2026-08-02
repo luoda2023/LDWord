@@ -6,11 +6,11 @@ report_writer — 排版报告生成
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import is_dataclass
 from importlib import import_module
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -21,7 +21,10 @@ from src.config.scene_coverage_manifest import (
     coverage_candidate_keys_for_config,
     coverage_packs_for_config,
 )
-from src.execution_diagnostics import build_execution_diagnostics, describe_execution_diagnostic
+from src.execution_diagnostics import (
+    build_execution_diagnostics,
+    describe_execution_diagnostic,
+)
 from src.reporting.academic_confidence import (
     _extract_academic_confidence,
     _extract_count_result,
@@ -48,9 +51,10 @@ from src.reporting.exam_sections import (
     _extract_exam_markdown_import,
     _extract_exam_question_schema,
     _format_exam_delivery_runtime_markdown,
-    format_exam_markdown_import_markdown,
     _format_exam_question_schema_markdown,
+    format_exam_markdown_import_markdown,
 )
+from src.reporting.execution_payload import document_scope_payload
 from src.reporting.front_matter import (
     _format_delivery_preset_markdown,
     _format_style_source_markdown,
@@ -65,6 +69,10 @@ from src.reporting.journal_rule_source import (
     _extract_journal_rule_source_governance,
     _format_journal_rule_source_governance_markdown,
 )
+from src.reporting.material_assembly import (
+    extract_material_assembly,
+    format_material_assembly_markdown,
+)
 from src.reporting.material_sections import (
     _extract_coverage_boundaries,
     _extract_material_field_consistency,
@@ -73,11 +81,11 @@ from src.reporting.material_sections import (
     _format_material_field_consistency_markdown,
     _format_object_preflight_markdown,
 )
-from src.reporting.material_assembly import (
-    extract_material_assembly,
-    format_material_assembly_markdown,
+from src.reporting.section_layout import (
+    extract_section_layout_evidence,
+    format_section_layout_evidence_markdown,
 )
-from src.reporting.execution_payload import document_scope_payload
+
 if TYPE_CHECKING:
     from src.pipeline.result import PipelineResult
 
@@ -153,6 +161,7 @@ def write_json_report(
     field_consistency = _extract_material_field_consistency(result)
     material_assembly = extract_material_assembly(result)
     object_preflight = _extract_object_preflight(result)
+    section_layout = extract_section_layout_evidence(result)
     coverage_boundaries = _extract_coverage_boundaries(result)
     document_scope = document_scope_payload(result)
     scene_journey_runtime = _extract_scene_journey_runtime(result)
@@ -195,6 +204,7 @@ def write_json_report(
         "material_field_consistency": field_consistency,
         "material_assembly": material_assembly,
         "object_preflight": object_preflight,
+        "section_layout": section_layout,
         "coverage_boundaries": coverage_boundaries,
         "document_scope": document_scope,
         "scene_journey_runtime": scene_journey_runtime,
@@ -249,6 +259,7 @@ def write_markdown_report(
     field_consistency = _extract_material_field_consistency(result)
     material_assembly = extract_material_assembly(result)
     object_preflight = _extract_object_preflight(result)
+    section_layout = extract_section_layout_evidence(result)
     coverage_boundaries = _extract_coverage_boundaries(result)
     scene_journey_runtime = _extract_scene_journey_runtime(result)
     scene_product_readiness = None
@@ -383,6 +394,9 @@ def write_markdown_report(
 
     if object_preflight:
         lines.extend(_format_object_preflight_markdown(object_preflight))
+
+    if section_layout:
+        lines.extend(format_section_layout_evidence_markdown(section_layout))
 
     if coverage_boundaries:
         lines.extend(_format_coverage_boundaries_markdown(coverage_boundaries))

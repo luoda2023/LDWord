@@ -113,6 +113,13 @@ _XML_SCAN_PATTERNS: tuple[tuple[str, tuple[bytes, ...], str], ...] = (
     ),
 )
 
+_VISIO_XML_MARKERS: tuple[bytes, ...] = (
+    b"vnd.ms-visio",
+    b"schemas.microsoft.com/visio",
+    b"/visio/drawing",
+    b"/visio/relationships",
+)
+
 _REQUIRED_DOCX_PARTS: frozenset[str] = frozenset(
     {
         "[content_types].xml",
@@ -284,6 +291,43 @@ def object_preflight_module_skips(
     return skips
 
 
+def refine_section_format_module_skips(
+    skips: dict[str, dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    """Remove section skips for embedded-part findings outside ``w:sectPr``.
+
+    The section planner only writes direct section properties and proves any
+    cleanup boundary free of protected/non-paragraph content.  Relationship-
+    level OLE/workbook/package/Visio findings therefore remain warnings but do
+    not disable the entire module.  Macro/revision/content-control risks remain
+    degradation triggers.
+    """
+
+    refined = {name: dict(entry) for name, entry in skips.items()}
+    entry = refined.get("section_format")
+    if entry is None:
+        return refined
+    safe_findings = {
+        "ole_objects",
+        "embedded_workbooks",
+        "embedded_packages",
+        "visio_drawings",
+    }
+    remaining = [
+        str(kind)
+        for kind in list(entry.get("finding_kinds", []) or [])
+        if str(kind) not in safe_findings
+    ]
+    if not remaining:
+        refined.pop("section_format", None)
+        return refined
+    entry["finding_kinds"] = sorted(remaining)
+    entry["reason"] = (
+        "Skipped because object preflight found " + ", ".join(sorted(remaining)) + "."
+    )
+    return refined
+
+
 def _severity_for(kind: str, policy: ObjectPreflightPolicy) -> str:
     block_on = {str(item) for item in getattr(policy, "block_on", []) or []}
     if str(getattr(policy, "preservation_mode", "") or "") == "strict" and kind in block_on:
@@ -351,7 +395,7 @@ def _inspect_xml_part(
     _validate_required_xml(name, data)
 
     lower = data.lower()
-    if b"visio" in lower:
+    if any(marker in lower for marker in _VISIO_XML_MARKERS):
         add("visio_drawings", name, "Visio content type or markup is present.")
     if b"macroenabled" in lower or b"vnd.ms-word.document.macroenabled" in lower:
         add("macros", name, "Macro-enabled document content type is present.")

@@ -1,11 +1,10 @@
-import sys
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from docx import Document
 import pytest
-
+from docx import Document
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -64,6 +63,7 @@ def test_thesis_template_uses_real_config_payload_instead_of_name_only_shell():
     assert template.styles["toc_level3"].left_indent_chars == 2
     assert template.styles["toc_level6"].left_indent_chars == 5
     assert [phase.phase_id for phase in template.header_footer.page_number_plan.phases] == [
+        "pre_numbering",
         "front",
         "body",
     ]
@@ -144,6 +144,47 @@ def test_every_mode_scoped_builtin_resource_is_complete_and_loadable():
         }
 
 
+def test_every_builtin_json_owns_complete_output_channel_contract():
+    for _mode_id, template_id, path in list_builtin_template_resources():
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        header_footer = payload["header_footer"]
+        page_plan = header_footer["page_number_plan"]
+
+        assert "suppress_header_footer_selectors" not in header_footer, template_id
+        assert "hide_on_cover" not in header_footer["header"], template_id
+        assert "hide_on_cover" not in header_footer["footer"], template_id
+        assert "page_number_template" not in header_footer["footer"], template_id
+        assert header_footer["footer"]["content_mode"] in {"none", "fixed"}
+        assert isinstance(header_footer["header"]["hidden_selectors"], list)
+        assert isinstance(header_footer["footer"]["hidden_selectors"], list)
+        assert {"enabled", "template", "alignment", "phases"} <= set(page_plan)
+        assert payload["heading_model"]["non_numbered_title_texts"] == [
+            "摘要",
+            "目录",
+            "参考文献",
+            "缩略语表",
+        ]
+        assert payload["heading_model"]["non_numbered_prefixes"] == [
+            "附录",
+            "附件",
+        ]
+        assert set(payload["section"]) == {
+            "boundary_mode",
+            "section_break_type",
+            "empty_break_policy",
+            "caption_table_break_policy",
+            "header_footer_link_mode",
+        }
+        assert set(payload["page_setup"]) >= {
+            "paper_size_mode",
+            "orientation_mode",
+            "margin_mode",
+            "paper_size_by_section",
+            "orientation_by_section",
+            "margin_by_section",
+        }
+
+
 def test_cli_default_matches_gui_custom_default_not_legacy_thesis_yaml(tmp_path):
     from src.cli_runner import _resolve_cli_resources
 
@@ -186,11 +227,22 @@ def test_report_builtin_template_exposes_explicit_continuous_page_number_plan():
     template = create_builtin_template("report_default")
 
     phases = template.header_footer.page_number_plan.phases
-    assert [phase.phase_id for phase in phases] == ["main"]
-    assert phases[0].selectors == ["all_numbered_content"]
-    assert phases[0].number_format == "decimal"
-    assert phases[0].start_mode == "restart"
-    assert phases[0].start_value == 1
+    assert [phase.phase_id for phase in phases] == ["pre_numbering", "main"]
+    assert phases[0].visible is False
+    assert phases[1].selectors == [
+        "abstract_cn",
+        "abstract_en",
+        "toc",
+        "body",
+        "references",
+        "errata",
+        "appendix",
+        "acknowledgment",
+        "resume",
+    ]
+    assert phases[1].number_format == "decimal"
+    assert phases[1].start_mode == "restart"
+    assert phases[1].start_value == 1
 
 
 def test_thesis_builtin_toc_style_syncs_into_word_toc_styles():

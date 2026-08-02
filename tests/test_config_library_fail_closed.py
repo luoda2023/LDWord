@@ -297,68 +297,16 @@ def test_missing_declared_defaults_do_not_select_arbitrary_library_entries(
     assert library.default_scene_descriptor("exam") is None
 
 
-def test_official_contract_import_error_is_not_silently_ignored(
-    monkeypatch: pytest.MonkeyPatch,
+def test_scene_workspace_has_no_legacy_material_profile_identity() -> None:
+    scene = SceneWorkspace(mode_id="official")
+
+    assert not hasattr(scene, "default_material_profile_id")
+    assert not hasattr(library, "_validate_scene_material_contract")
+
+
+def test_official_plan_load_preserves_source_bytes_without_legacy_schema_mutation(
+    tmp_path: Path,
 ) -> None:
-    scene = SceneWorkspace(
-        mode_id="official",
-        default_material_profile_id="official:notice",
-    )
-    original_import = builtins.__import__
-
-    def _import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "src.config.official_document_profiles":
-            raise RuntimeError("official contract import programming error")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", _import)
-
-    with pytest.raises(RuntimeError, match="official contract import programming error"):
-        library._validate_scene_material_contract(scene, mode_id="official")
-
-
-@pytest.mark.parametrize(
-    ("profile_id", "error_code"),
-    [
-        ("", "plan_official_profile_ref_missing"),
-        ("notice", "plan_official_profile_ref_invalid"),
-        ("official:missing", "plan_official_profile_ref_unresolved"),
-    ],
-)
-def test_official_plan_identity_is_explicit_and_fail_closed(
-    profile_id: str,
-    error_code: str,
-) -> None:
-    scene = SceneWorkspace(
-        mode_id="official",
-        default_material_profile_id=profile_id,
-    )
-
-    with pytest.raises(library.ConfigReferenceResolutionError, match=error_code):
-        library._validate_scene_material_contract(scene, mode_id="official")
-
-    assert scene.default_material_profile_id == profile_id
-
-
-def test_official_plan_contract_is_validated_without_schema_autofill() -> None:
-    scene = SceneWorkspace(
-        mode_id="official",
-        default_material_profile_id="official:notice",
-    )
-    source_profile = scene.input_source_profile
-
-    with pytest.raises(
-        library.ConfigReferenceResolutionError,
-        match="plan_official_material_schema_mismatch",
-    ):
-        library._validate_scene_material_contract(scene, mode_id="official")
-
-    assert source_profile.material_schema_id == ""
-    assert source_profile.material_schema_ids == []
-    assert source_profile.required_material_fields == []
-
-
-def test_invalid_official_plan_load_preserves_source_bytes(tmp_path: Path) -> None:
     builtin_path = (
         Path(__file__).resolve().parents[1]
         / "config_library"
@@ -378,18 +326,15 @@ def test_invalid_official_plan_load_preserves_source_bytes(tmp_path: Path) -> No
     entry = library.ConfigLibraryEntry(
         kind="plan",
         config_id="official",
-        name="Broken official plan",
+        name="Official plan without legacy material binding",
         path=source_path,
         mode_id="official",
         source_type="user",
     )
 
-    with pytest.raises(
-        library.ConfigReferenceResolutionError,
-        match="plan_official_material_schema_mismatch",
-    ):
-        library._load_scene_entry(entry)
+    loaded = library._load_scene_entry(entry)
 
+    assert loaded.input_source_profile.material_schema_ids == []
     assert source_path.read_bytes() == source_bytes
 
 
@@ -621,7 +566,7 @@ def test_default_module_switches_do_not_import_implementation_registry(
 
     switches = migration.get_default_module_switches()
 
-    assert len(switches) == 22
+    assert len(switches) == 23
     assert switches["page_setup"] is True
     assert switches["entity_fill"] is False
 

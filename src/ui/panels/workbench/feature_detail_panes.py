@@ -1,21 +1,24 @@
 from __future__ import annotations
 
-from src.config.material_context import MaterialExecutionContext
-from src.qt_api import QLabel, QLineEdit, QVBoxLayout, QWidget, Signal
+from src.application.materials import MaterialPreviewSnapshot
+from src.domain.materials import MaterialRunSelection
+from src.qt_api import QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from src.shared.ui.card import Card
+from src.shared.ui.execution_progress_widget import ExecutionProgressWidget
 from src.shared.ui.file_drop_zone import FileDropZone
 from src.shared.ui.folder_picker import FolderPicker
 from src.shared.ui.input_style import build_text_input_stylesheet
+from src.shared.ui.module_status_list import ModuleStatusList
 from src.shared.ui.path_drop import PathAcceptancePolicy
 from src.shared.ui.search_input import SearchInput
 from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.template_form_layout import TemplateFormStack, template_form_row
 from src.shared.ui.text_area import TextArea
+from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.themed_slider import ThemedSlider
 from src.shared.ui.toggle_switch import ToggleSwitch
-from src.shared.ui.theme import bind_theme, get_theme
 
 
 class _FeatureDetailPaneBase(QWidget):
@@ -138,70 +141,6 @@ class TableChartDetailPane(_FeatureDetailPaneBase):
         )
 
 
-class FormulaDetailPane(_FeatureDetailPaneBase):
-    """公式处理能力组详情页。"""
-
-    def __init__(self, parent=None):
-        super().__init__(
-            "公式处理",
-            "设置公式转换、低置信度处理和化学式修正；公式外观基线来自模板。",
-            parent=parent,
-        )
-
-        formula_card = self._build_card("公式处理")
-        self._formula_style_combo = StyledComboBox(formula_card)
-        self._formula_style_combo.addItems(["学位论文公式", "期刊简洁样式", "技术文档样式"])
-        self._formula_style_combo.currentTextChanged.connect(lambda *_: self._refresh_summary())
-
-        self._formula_align_combo = StyledComboBox(formula_card)
-        self._formula_align_combo.addItems(["整体居中", "编号右对齐", "文本流内显示"])
-        self._formula_align_combo.currentTextChanged.connect(lambda *_: self._refresh_summary())
-        self._add_form_rows(
-            formula_card,
-            [
-                template_form_row("处理方案", self._formula_style_combo, parent=formula_card),
-                template_form_row("显示方式", self._formula_align_combo, parent=formula_card),
-            ],
-        )
-        self._layout.addWidget(formula_card)
-
-        chemistry_card = self._build_card("化学式与间距")
-        self._chem_toggle = ToggleSwitch(chemistry_card, checked=True)
-        self._chem_toggle.toggled_signal.connect(lambda *_: self._refresh_summary())
-
-        self._formula_gap_slider = ThemedSlider(parent=chemistry_card)
-        self._formula_gap_slider.setRange(4, 18)
-        self._formula_gap_slider.setValue(8)
-        self._formula_gap_slider.valueChanged.connect(self._update_gap_label)
-        self._formula_gap_value = QLabel("8 磅", chemistry_card)
-        self._add_form_rows(
-            chemistry_card,
-            [
-                template_form_row("启用化学式修正", self._chem_toggle, parent=chemistry_card),
-                template_form_row(
-                    "上下留白",
-                    self._formula_gap_slider,
-                    suffix_widget=self._formula_gap_value,
-                    parent=chemistry_card,
-                ),
-            ],
-        )
-        self._layout.addWidget(chemistry_card)
-
-        self._refresh_summary()
-        self.finish_setup()
-
-    def _update_gap_label(self, value: int) -> None:
-        self._formula_gap_value.setText(f"{value} 磅")
-        self._refresh_summary()
-
-    def _refresh_summary(self) -> None:
-        chem_text = "化学式修正开启" if self._chem_toggle.isChecked() else "仅保留公式基础格式"
-        self.set_summary(
-            f"当前策略：{self._formula_style_combo.currentText()} · {self._formula_align_combo.currentText()} · {chem_text} · 留白 {self._formula_gap_slider.value()} 磅"
-        )
-
-
 class CitationDetailPane(_FeatureDetailPaneBase):
     """引用处理能力组详情页。"""
 
@@ -266,90 +205,17 @@ class CitationDetailPane(_FeatureDetailPaneBase):
         )
 
 
-class CleanupDetailPane(_FeatureDetailPaneBase):
-    """风险检查能力域详情页。"""
-
-    def __init__(self, parent=None):
-        super().__init__(
-            "风险检查",
-            "用于统一清洗 Markdown 残留、空白噪声和结构异常，适合作为最终执行前的合规闸门。",
-            parent=parent,
-        )
-
-        rule_card = self._build_card("清理规则")
-        self._rule_search = SearchInput("搜索清理规则", self)
-        self._rule_search.search_changed.connect(lambda *_: self._refresh_summary())
-        rule_card.add_widget(self._rule_search)
-
-        self._markdown_toggle = ToggleSwitch(rule_card, checked=True)
-        self._markdown_toggle.toggled_signal.connect(lambda *_: self._refresh_summary())
-
-        self._whitespace_toggle = ToggleSwitch(rule_card, checked=True)
-        self._whitespace_toggle.toggled_signal.connect(lambda *_: self._refresh_summary())
-        self._add_form_rows(
-            rule_card,
-            [
-                template_form_row("Markdown / LaTeX 残留清理", self._markdown_toggle, parent=rule_card),
-                template_form_row("空白与换行规范化", self._whitespace_toggle, parent=rule_card),
-            ],
-        )
-        self._layout.addWidget(rule_card)
-
-        audit_card = self._build_card("质量闸门")
-        self._audit_toggle = ToggleSwitch(audit_card, checked=True)
-        self._audit_toggle.toggled_signal.connect(lambda *_: self._refresh_summary())
-
-        self._strictness_slider = ThemedSlider(parent=audit_card)
-        self._strictness_slider.setRange(1, 5)
-        self._strictness_slider.setValue(3)
-        self._strictness_slider.valueChanged.connect(self._update_strictness_label)
-        self._strictness_value = QLabel("3 级", audit_card)
-        self._add_form_rows(
-            audit_card,
-            [
-                template_form_row("执行前结构校验", self._audit_toggle, parent=audit_card),
-                template_form_row(
-                    "校验强度",
-                    self._strictness_slider,
-                    suffix_widget=self._strictness_value,
-                    parent=audit_card,
-                ),
-            ],
-        )
-        self._layout.addWidget(audit_card)
-
-        self._refresh_summary()
-        self.finish_setup()
-
-    def _update_strictness_label(self, value: int) -> None:
-        self._strictness_value.setText(f"{value} 级")
-        self._refresh_summary()
-
-    def _refresh_summary(self) -> None:
-        search_text = self._rule_search.text.strip()
-        search_hint = f" · 规则过滤：{search_text}" if search_text else ""
-        markdown_text = "残留清理开启" if self._markdown_toggle.isChecked() else "保留原始标记"
-        whitespace_text = "空白规范化" if self._whitespace_toggle.isChecked() else "保留原始空白"
-        audit_text = "执行前强校验" if self._audit_toggle.isChecked() else "仅记录异常"
-        self.set_summary(
-            f"当前策略：{markdown_text} · {whitespace_text} · {audit_text} · 强度 {self._strictness_slider.value()} 级{search_hint}"
-        )
-
-
 class ContentDataDetailPane(_FeatureDetailPaneBase):
-    """资料包填充能力域详情页。"""
-
-    material_context_changed = Signal(object)
+    """资料包与填充能力域详情页。"""
 
     def __init__(self, parent=None):
         super().__init__(
-            "资料包填充",
-            "资料字段与文档中的 {{字段}} 严格同名时写入，并在执行前提供确定性预览。",
+            "资料包与填充",
+            "从资料源选择模板，再决定映射强度与预览策略，后续可以分拆为更细的填充和插入能力。",
             parent=parent,
         )
-        self._material_context = MaterialExecutionContext()
 
-        template_card = self._build_card("方案与占位规则")
+        template_card = self._build_card("场景与占位规则")
         self._template_combo = StyledComboBox(template_card)
         self._template_combo.addItems(
             [
@@ -390,6 +256,7 @@ class ContentDataDetailPane(_FeatureDetailPaneBase):
         self._source_hint.setWordWrap(True)
         source_card.add_widget(self._source_hint)
         self._layout.addWidget(source_card)
+        source_card.setVisible(False)
 
         entity_card = self._build_card("当前资料")
         self._profile_name_edit = QLineEdit(entity_card)
@@ -411,12 +278,17 @@ class ContentDataDetailPane(_FeatureDetailPaneBase):
             [
                 template_form_row("当前资料", self._profile_name_edit, parent=entity_card),
                 template_form_row("图片目录", self._assets_picker, parent=entity_card),
-                template_form_row("字段资料", self._entity_fields_edit, parent=entity_card),
+                template_form_row("填资料", self._entity_fields_edit, parent=entity_card),
             ],
         )
         self._layout.addWidget(entity_card)
+        self._profile_name_edit.setReadOnly(True)
+        self._assets_picker.setEnabled(False)
+        self._entity_fields_edit.setEnabled(False)
+        self._material_selection: MaterialRunSelection | None = None
+        self._material_preview: MaterialPreviewSnapshot | None = None
 
-        behavior_card = self._build_card("预览与匹配规则")
+        behavior_card = self._build_card("预览与映射强度")
         self._confidence_slider = ThemedSlider(parent=behavior_card)
         self._confidence_slider.setRange(50, 100)
         self._confidence_slider.setValue(78)
@@ -425,16 +297,15 @@ class ContentDataDetailPane(_FeatureDetailPaneBase):
 
         self._preview_toggle = ToggleSwitch(behavior_card, checked=True)
         self._preview_toggle.toggled_signal.connect(lambda *_: self._refresh_summary())
-        self._confidence_row = template_form_row(
-            "映射信心度",
-            self._confidence_slider,
-            suffix_widget=self._confidence_value,
-            parent=behavior_card,
-        )
         self._add_form_rows(
             behavior_card,
             [
-                self._confidence_row,
+                template_form_row(
+                    "映射信心度",
+                    self._confidence_slider,
+                    suffix_widget=self._confidence_value,
+                    parent=behavior_card,
+                ),
                 template_form_row("自动预览", self._preview_toggle, parent=behavior_card),
             ],
         )
@@ -447,44 +318,28 @@ class ContentDataDetailPane(_FeatureDetailPaneBase):
         self._confidence_value.setText(f"{value}%")
         self._refresh_summary()
 
-    def material_context(self) -> MaterialExecutionContext:
-        context = self._material_context.clone()
-        context.profile_name = self._profile_name_edit.text().strip()
-        context.entity_data = _parse_entity_fields_text(
-            self._entity_fields_edit.get_text()
-        )
-        context.entity_assets_dir = self._assets_picker.path().strip()
-        return context
-
-    def set_material_context(
+    def set_material_selection(
         self,
-        context: MaterialExecutionContext | None,
-        *,
-        emit_signal: bool = True,
+        selection: MaterialRunSelection | None,
+        preview: MaterialPreviewSnapshot | None = None,
     ) -> None:
-        context = context.clone() if isinstance(context, MaterialExecutionContext) else MaterialExecutionContext()
-        self._material_context = context.clone()
-        self._confidence_row.setVisible(not context.exact_material_placeholders)
-
-        self._profile_name_edit.blockSignals(True)
-        self._entity_fields_edit.blockSignals(True)
-        self._assets_picker.blockSignals(True)
-        try:
-            self._profile_name_edit.setText(context.profile_name)
-            self._entity_fields_edit.set_text(_format_entity_fields_text(context.entity_data))
-            self._assets_picker.set_path(context.entity_assets_dir)
-        finally:
-            self._assets_picker.blockSignals(False)
-            self._entity_fields_edit.blockSignals(False)
-            self._profile_name_edit.blockSignals(False)
-
+        self._material_selection = (
+            selection if isinstance(selection, MaterialRunSelection) else None
+        )
+        self._material_preview = (
+            preview if isinstance(preview, MaterialPreviewSnapshot) else None
+        )
+        self._profile_name_edit.setText(
+            self._material_preview.current_record_name
+            if self._material_preview is not None
+            else ""
+        )
+        self._entity_fields_edit.set_text("")
+        self._assets_picker.set_path("")
         self._refresh_summary()
-        if emit_signal:
-            self.material_context_changed.emit(self.material_context())
 
     def _on_material_context_edited(self) -> None:
         self._refresh_summary()
-        self.material_context_changed.emit(self.material_context())
 
     def _refresh_summary(self) -> None:
         template_name = self._template_combo.currentText() or "未选择模板"
@@ -492,17 +347,24 @@ class ContentDataDetailPane(_FeatureDetailPaneBase):
         source_label = source_name.split("\\")[-1] if source_name else "未挂载数据源"
         placeholder_text = "保留未匹配占位符" if self._placeholder_toggle.isChecked() else "直接落地替换"
         preview_text = "开启自动预览" if self._preview_toggle.isChecked() else "仅保存结果"
-        material = self.material_context()
-        entity_text = material.profile_name or "未选择资料"
-        field_text = f"资料已填 {len(material.entity_data)} 项" if material.entity_data else "资料未填写"
-        assets_text = "图片目录已选择" if material.entity_assets_dir else "图片目录未选择"
-        matching_text = (
-            "精确 {{@text:字段}} 匹配"
-            if material.exact_material_placeholders
-            else f"信心度 {self._confidence_slider.value()}%"
+        preview = self._material_preview
+        entity_text = (
+            preview.current_record_name
+            if preview is not None and preview.current_record_name
+            else "未选择资料"
+        )
+        field_text = (
+            f"资料字段 {preview.field_count} 项"
+            if preview is not None
+            else "资料未绑定"
+        )
+        assets_text = (
+            f"资源 {preview.resource_count} 项"
+            if preview is not None
+            else "资源未绑定"
         )
         self.set_summary(
-            f"当前流程：{template_name} · 数据源 {source_label} · 当前资料 {entity_text} · {field_text} · {assets_text} · {matching_text} · {placeholder_text} · {preview_text}"
+            f"当前流程：{template_name} · 数据源 {source_label} · 当前资料 {entity_text} · {field_text} · {assets_text} · 信心度 {self._confidence_slider.value()}% · {placeholder_text} · {preview_text}"
         )
 
     def _apply_theme(self) -> None:
@@ -535,10 +397,66 @@ def _format_entity_fields_text(entity_data: dict[str, str]) -> str:
     return "\n".join(f"{key}={value}" for key, value in entity_data.items())
 
 
+class ExecutionHistoryDetailPane(_FeatureDetailPaneBase):
+    """执行历史详情页，供执行控制器写入实时状态。"""
+
+    def __init__(self, parent=None):
+        super().__init__(
+            "执行历史",
+            "查看最近一次运行的进度、模块状态与查看模式，后续可继续接入真实日志流。",
+            parent=parent,
+        )
+
+        self._search = SearchInput("搜索历史记录", self)
+        self._search.search_changed.connect(lambda *_: self._refresh_summary())
+        self._layout.addWidget(self._search)
+
+        latest_card = self._build_card("最新运行概览")
+        self._progress_widget = ExecutionProgressWidget(latest_card)
+        self._progress_widget.set_progress(3, 5, "模块执行")
+        self._progress_widget.update_module_status("模块执行", "running", 42)
+        self._progress_widget.update_module_status("报告生成", "queued", 0)
+        self._progress_widget.append_log("info", "最近一次运行已进入模块执行阶段。")
+        latest_card.add_widget(self._progress_widget)
+
+        self._module_list = ModuleStatusList(latest_card)
+        self._module_list.add_module("heading", "标题编号")
+        self._module_list.add_module("fill", "内容填充")
+        self._module_list.add_module("export", "输出封装")
+        self._module_list.update_status("heading", "completed", 100)
+        self._module_list.update_status("fill", "running", 42)
+        self._module_list.update_status("export", "queued", 0)
+        latest_card.add_widget(self._module_list)
+        self._layout.addWidget(latest_card)
+
+        filter_card = self._build_card("查看模式")
+        self._view_mode_combo = StyledComboBox(filter_card)
+        self._view_mode_combo.addItems(["完整日志", "仅看警告", "错误与摘要"])
+        self._view_mode_combo.currentTextChanged.connect(lambda *_: self._refresh_summary())
+        self._add_form_rows(
+            filter_card,
+            [template_form_row("日志视图", self._view_mode_combo, parent=filter_card)],
+        )
+        self._layout.addWidget(filter_card)
+
+        self._refresh_summary()
+        self.finish_setup()
+
+    def _refresh_summary(self) -> None:
+        filter_text = self._search.text.strip()
+        filter_hint = f"，关键字：{filter_text}" if filter_text else ""
+        self.set_summary(
+            f"当前查看：{self._view_mode_combo.currentText()} · 最新一次运行仍在进行{filter_hint}"
+        )
+
+
+QuickFillDetailPane = ContentDataDetailPane
+
+
 __all__ = [
     "CitationDetailPane",
-    "CleanupDetailPane",
     "ContentDataDetailPane",
-    "FormulaDetailPane",
+    "ExecutionHistoryDetailPane",
+    "QuickFillDetailPane",
     "TableChartDetailPane",
 ]

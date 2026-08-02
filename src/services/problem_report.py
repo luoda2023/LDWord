@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import os
-from pathlib import Path
 import platform
 import re
 import sys
+from datetime import datetime
+from pathlib import Path
 
 from src.app_meta import APP_DISPLAY_NAME, APP_LOG_FILE, APP_VERSION
-
+from src.app_paths import log_data_root
 
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LOG_TAIL_BYTES = 64 * 1024
@@ -55,9 +55,9 @@ def resolve_application_file(filename: str) -> Path:
 
 
 def resolve_log_path() -> Path:
-    """Locate the GUI log in both source and packaged executions."""
+    """Locate the writable GUI log outside source and install directories."""
 
-    return resolve_application_file(APP_LOG_FILE)
+    return log_data_root() / APP_LOG_FILE
 
 
 def read_log_tail(

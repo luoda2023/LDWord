@@ -16,7 +16,6 @@ from src.config.library import (
     validate_scene_resource_ids,
 )
 from src.config.loader import load_scene, load_template
-from src.config.material_context import MaterialExecutionContext
 from src.config.scene import SceneWorkspace
 from src.config.template import TemplateConfig
 from src.config.work_mode import (
@@ -116,7 +115,7 @@ def run(
         template_path=resources.template_path,
         template_source_type=resources.template_source_type,
         document_type_id=explicit_document_type_id,
-        material_context=MaterialExecutionContext(),
+        material_snapshot=None,
     )
     payload = execute_production_request(
         request,

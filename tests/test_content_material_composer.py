@@ -19,11 +19,11 @@ from src.config.content_materials import (
     FileAssetRef,
     content_anchor_token,
 )
-from src.config.material_snapshot import MaterialSnapshot
 from src.services.material_content.artifact_repository import ContentArtifactRepository
 from src.services.material_content.composer import (
     ContentComposeCancelledError,
     ContentComposeError,
+    ContentComposeInputs,
     ContentComposeRequest,
     ContentMaterialComposer,
 )
@@ -35,14 +35,11 @@ def _rule(content_id: str) -> ContentInsertionRule:
     )
 
 
-def _snapshot(bindings, rules, attachment_bindings=()) -> MaterialSnapshot:
-    return MaterialSnapshot(
+def _inputs(bindings, rules, attachment_bindings=()) -> ContentComposeInputs:
+    return ContentComposeInputs(
         content_bindings=tuple(bindings),
         content_rules=tuple(rules),
         attachment_bindings=tuple(attachment_bindings),
-        material_schema_id="test-schema",
-        material_schema_version="1",
-        rule_versions={"content": "content-ir-v2"},
     )
 
 
@@ -90,7 +87,7 @@ def test_docx_artifact_is_a_normal_composer_input(tmp_path: Path) -> None:
     output = tmp_path / "output.docx"
     _target(target, rule.anchor_token)
     receipt = ContentMaterialComposer(repository=repository).compose(
-        ContentComposeRequest(str(target), str(output), _snapshot((binding,), (rule,)))
+        ContentComposeRequest(str(target), str(output), _inputs((binding,), (rule,)))
     )
     assert receipt.content_artifacts[0].artifact_id == binding.artifact_ref.artifact_id
     assert [item.text for item in Document(output).paragraphs[:2]] == ["技术路线", "正文"]
@@ -115,14 +112,14 @@ def test_same_resource_id_is_namespaced_by_content_id(tmp_path: Path) -> None:
     output = tmp_path / "output.docx"
     _target(target, *(rule.anchor_token for rule in rules))
     receipt = ContentMaterialComposer(repository=repository).compose(
-        ContentComposeRequest(str(target), str(output), _snapshot(bindings, rules))
+        ContentComposeRequest(str(target), str(output), _inputs(bindings, rules))
     )
     keys = [item.key for item in receipt.resource_materialization.entries]
     assert {item.content_id for item in keys} == {"part1", "part2"}
     assert len(keys) == 2
 
 
-def test_multiple_rules_follow_snapshot_order_and_receipt_is_deterministic(tmp_path: Path) -> None:
+def test_multiple_rules_follow_input_order_and_receipt_is_deterministic(tmp_path: Path) -> None:
     repository = ContentArtifactRepository(tmp_path / "artifacts")
     bindings = []
     rules = []
@@ -131,12 +128,12 @@ def test_multiple_rules_follow_snapshot_order_and_receipt_is_deterministic(tmp_p
         source.write_text(content_id, encoding="utf-8")
         bindings.append(compile_content_binding(source, repository, content_id=content_id))
         rules.append(_rule(content_id))
-    snapshot = _snapshot(bindings, rules)
+    inputs = _inputs(bindings, rules)
     target = tmp_path / "target.docx"
     _target(target, rules[0].anchor_token, rules[1].anchor_token)
     composer = ContentMaterialComposer(repository=repository)
-    first = composer.compose(ContentComposeRequest(str(target), str(tmp_path / "a.docx"), snapshot))
-    second = composer.compose(ContentComposeRequest(str(target), str(tmp_path / "b.docx"), snapshot))
+    first = composer.compose(ContentComposeRequest(str(target), str(tmp_path / "a.docx"), inputs))
+    second = composer.compose(ContentComposeRequest(str(target), str(tmp_path / "b.docx"), inputs))
     assert [item.content_id for item in first.content_artifacts] == ["first", "second"]
     assert first.output_sha256 == second.output_sha256
 
@@ -153,7 +150,7 @@ def test_anchor_failure_preserves_existing_output(tmp_path: Path) -> None:
     output.write_bytes(b"existing")
     with pytest.raises(ContentComposeError):
         ContentMaterialComposer(repository=repository).compose(
-            ContentComposeRequest(str(target), str(output), _snapshot((binding,), (rule,)))
+            ContentComposeRequest(str(target), str(output), _inputs((binding,), (rule,)))
         )
     assert output.read_bytes() == b"existing"
 
@@ -172,7 +169,7 @@ def test_every_anchor_is_preflighted_before_rendering(tmp_path: Path) -> None:
     output = tmp_path / "output.docx"
     with pytest.raises(ContentComposeError):
         ContentMaterialComposer(repository=repository).compose(
-            ContentComposeRequest(str(target), str(output), _snapshot(bindings, rules))
+            ContentComposeRequest(str(target), str(output), _inputs(bindings, rules))
         )
     assert not output.exists()
     assert Document(target).paragraphs[0].text == rules[0].anchor_token
@@ -221,7 +218,7 @@ def test_attachment_anchor_preflight_preserves_source_and_creates_no_output(
             ContentComposeRequest(
                 str(target),
                 str(output),
-                _snapshot((), (), (valid, invalid)),
+                _inputs((), (), (valid, invalid)),
             )
         )
 
@@ -243,7 +240,7 @@ def test_output_equal_to_source_is_blocked(tmp_path: Path) -> None:
     _target(target, rule.anchor_token)
     with pytest.raises(ContentComposeError):
         ContentMaterialComposer(repository=repository).compose(
-            ContentComposeRequest(str(target), str(target), _snapshot((binding,), (rule,)))
+            ContentComposeRequest(str(target), str(target), _inputs((binding,), (rule,)))
         )
 
 
@@ -264,7 +261,7 @@ def test_cancellation_before_publish_is_atomic(tmp_path: Path) -> None:
         return calls >= 5
     with pytest.raises(ContentComposeCancelledError):
         ContentMaterialComposer(repository=repository).compose(
-            ContentComposeRequest(str(target), str(output), _snapshot((binding,), (rule,))),
+            ContentComposeRequest(str(target), str(output), _inputs((binding,), (rule,))),
             cancel_check=cancel,
         )
     assert output.read_bytes() == b"existing"
@@ -287,7 +284,7 @@ def test_composer_rejects_compression_bomb_before_python_docx_open(
             ContentComposeRequest(
                 str(target),
                 str(output),
-                _snapshot((), ()),
+                _inputs((), ()),
             )
         )
 

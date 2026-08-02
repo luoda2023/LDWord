@@ -28,6 +28,7 @@ MODULE_PHASES: Mapping[str, Phase] = MappingProxyType(
         "entity_fill": Phase.FILL,
         "source_fill": Phase.FILL,
         "placeholder_replace": Phase.FILL,
+        "formula_convert": Phase.FILL,
         "md_cleanup": Phase.FILL,
         # Semantics
         "heading_recognition": Phase.SEMANTICS,
@@ -71,6 +72,7 @@ MODULE_SCOPE_BEHAVIORS: Mapping[str, ModuleScopeBehavior] = MappingProxyType(
         "entity_fill": ModuleScopeBehavior.DOCUMENT_LEVEL,
         "source_fill": ModuleScopeBehavior.DOCUMENT_LEVEL,
         "placeholder_replace": ModuleScopeBehavior.DOCUMENT_LEVEL,
+        "formula_convert": ModuleScopeBehavior.REGION_FILTERED,
         "md_cleanup": ModuleScopeBehavior.DOCUMENT_LEVEL,
         "heading_recognition": ModuleScopeBehavior.STRUCTURE_DISCOVERY,
         "whitespace_normalize": ModuleScopeBehavior.REGION_FILTERED,
@@ -122,6 +124,11 @@ MODULE_MUTATION_OVERRIDES: Mapping[str, ModuleMutationContract] = MappingProxyTy
         "entity_fill": ModuleMutationContract(changes_pagination=True),
         "source_fill": ModuleMutationContract(changes_pagination=True),
         "placeholder_replace": ModuleMutationContract(changes_pagination=True),
+        "formula_convert": ModuleMutationContract(
+            changes_document_structure=True,
+            invalidates_document_index=True,
+            changes_pagination=True,
+        ),
         "md_cleanup": ModuleMutationContract(changes_pagination=True),
         "whitespace_normalize": ModuleMutationContract(changes_pagination=True),
         "heading_numbering": ModuleMutationContract(changes_pagination=True),
@@ -140,7 +147,11 @@ MODULE_MUTATION_OVERRIDES: Mapping[str, ModuleMutationContract] = MappingProxyTy
         "paragraph_style": ModuleMutationContract(changes_pagination=True),
         "table_format": ModuleMutationContract(changes_pagination=True),
         "chem_typography": ModuleMutationContract(changes_pagination=True),
-        "equation_table_format": ModuleMutationContract(changes_pagination=True),
+        "equation_table_format": ModuleMutationContract(
+            changes_document_structure=True,
+            invalidates_document_index=True,
+            changes_pagination=True,
+        ),
         "toc": ModuleMutationContract(
             changes_document_structure=True,
             invalidates_document_index=True,

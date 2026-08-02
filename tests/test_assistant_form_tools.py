@@ -119,9 +119,22 @@ def test_form_tool_catalog_contains_read_and_draft_boundaries():
         "list_material_candidates",
         "list_output_presets",
         "inspect_input_document",
+        "create_exam_user_plan_from_docx",
         "select_work_mode_draft",
         "bind_scene_draft",
         "bind_template_draft",
         "set_output_policy_draft",
         "generate_document_fragments",
     }.issubset(names)
+
+
+def test_exam_user_plan_creation_requires_durable_write_permission(tmp_path):
+    registry = build_form_tool_registry(_snapshot())
+    result = FormToolGateway(registry).invoke(
+        _call(
+            "create_exam_user_plan_from_docx",
+            {"source_path": str(tmp_path / "current-exam.docx")},
+        )
+    )
+
+    assert result.status == "needs_permission"

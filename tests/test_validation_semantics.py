@@ -13,7 +13,9 @@ from src.config.resolved import ResolvedConfig
 from src.modules.basic.section_format import SectionFormatModule
 from src.modules.structure.heading_recognition import HeadingRecognitionModule
 from src.modules.validate.validation import ValidationModule
+from src.pipeline.context import PipelineContext
 from src.pipeline.runner import Pipeline
+from src.shared.engine.document_structure_model import DocSection, DocTree
 
 
 def test_validation_module_warns_on_heading_style_mismatch():
@@ -37,6 +39,73 @@ def test_validation_module_reports_broken_toc_bookmark_placeholder():
     issues = ValidationModule().validate(doc, ResolvedConfig(), SimpleNamespace(heading_map={}))
 
     assert any(issue.level == "error" for issue in issues)
+
+
+def test_validation_reports_preserved_formula_source_and_missing_equation_number():
+    from lxml import etree
+
+    from src.shared.engine.ooxml_ops import qn
+
+    doc = Document()
+    doc.add_paragraph(r"需要复核 $\unsupported{x}$")
+    table = doc.add_table(rows=1, cols=2)
+    math = etree.SubElement(table.cell(0, 0).paragraphs[0]._element, qn("m:oMath"))
+    math_run = etree.SubElement(math, qn("m:r"))
+    etree.SubElement(math_run, qn("m:t")).text = "x"
+
+    config = ResolvedConfig()
+    config.module_switches["formula_convert"] = True
+    config.module_switches["equation_table_format"] = True
+
+    issues = ValidationModule().validate(
+        doc,
+        config,
+        SimpleNamespace(heading_map={}),
+    )
+
+    messages = [issue.message for issue in issues]
+    assert any("公式源码未安全转换" in message for message in messages)
+    assert any("公式行缺少编号" in message for message in messages)
+
+
+def test_formula_validation_ignores_sources_and_tables_outside_reviewed_scope():
+    from lxml import etree
+
+    from src.shared.engine.ooxml_ops import qn
+
+    doc = Document()
+    doc.add_paragraph(r"cover $\unsupported{x}$")
+    table = doc.add_table(rows=1, cols=2)
+    math = etree.SubElement(
+        table.cell(0, 0).paragraphs[0]._element,
+        qn("m:oMath"),
+    )
+    math_run = etree.SubElement(math, qn("m:r"))
+    etree.SubElement(math_run, qn("m:t")).text = "x"
+    doc.add_paragraph("body")
+
+    config = ResolvedConfig()
+    config.module_switches["formula_convert"] = True
+    config.module_switches["equation_table_format"] = True
+    context = PipelineContext(
+        document_scope_gate_active=True,
+        doc_tree=DocTree(
+            sections=[
+                DocSection("cover", 0, 1),
+                DocSection("body", 1, 2),
+            ],
+            writable_roles=frozenset({"body"}),
+        ),
+    )
+
+    issues = ValidationModule().validate(doc, config, context)
+    formula_messages = [
+        issue.message
+        for issue in issues
+        if "公式" in issue.message or "OLE" in issue.message
+    ]
+
+    assert formula_messages == []
 
 
 def test_section_format_validate_rejects_unknown_break_type():

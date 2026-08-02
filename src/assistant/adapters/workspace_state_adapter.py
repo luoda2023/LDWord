@@ -16,7 +16,8 @@ class WorkspaceStatePort(Protocol):
     def current_template_id(self) -> str: ...
     def current_template_source_type(self) -> str: ...
     def current_document_path(self) -> str: ...
-    def current_material_context(self) -> object: ...
+    def current_material_run_selection(self) -> object: ...
+    def current_material_preview_snapshot(self) -> object: ...
     def current_official_document_type_id(self) -> str: ...
 
 
@@ -79,7 +80,8 @@ def snapshot_workspace(port: WorkspaceStatePort) -> WorkspaceSnapshot:
     path_text = str(port.current_document_path() or "").strip()
     path = Path(path_text) if path_text else None
     mode = port.current_work_mode()
-    material = port.current_material_context()
+    selection = port.current_material_run_selection()
+    preview = port.current_material_preview_snapshot()
     document_type_getter = getattr(port, "current_official_document_type_id", None)
     document_type_id = (
         str(document_type_getter() or "").strip()
@@ -87,17 +89,12 @@ def snapshot_workspace(port: WorkspaceStatePort) -> WorkspaceSnapshot:
         else ""
     )
     summary = {
-        "package_id": str(getattr(material, "package_id", "") or ""),
-        "profile_id": str(getattr(material, "profile_id", "") or ""),
-        "material_schema_ids": [
-            str(value).strip()
-            for value in tuple(getattr(material, "material_schema_ids", ()) or ())
-            if str(value).strip()
-        ],
-        "field_count": len(getattr(material, "entity_data", {}) or {}),
-        "image_count": len(getattr(material, "images", ()) or ()),
-        "asset_count": len(getattr(material, "asset_items", ()) or ()),
-        "content_count": len(getattr(material, "content_bindings", {}) or {}),
+        "package_id": str(getattr(selection, "package_id", "") or ""),
+        "revision": str(getattr(selection, "revision", "") or ""),
+        "record_ids": list(getattr(selection, "record_ids", ()) or ()),
+        "record_count": int(getattr(preview, "record_count", 0) or 0),
+        "field_count": int(getattr(preview, "field_count", 0) or 0),
+        "resource_count": int(getattr(preview, "resource_count", 0) or 0),
     }
     return WorkspaceSnapshot(
         mode_id=str(port.current_work_mode_id() or ""),

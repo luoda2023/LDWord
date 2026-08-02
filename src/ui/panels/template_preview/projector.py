@@ -270,7 +270,7 @@ def _append_paragraph_blocks(
                 TemplatePreviewBlock(
                     kind=PreviewBlockKind.BODY,
                     text=sample.non_numbered_body,
-                    compact_text="非编号标题样式示例。",
+                    compact_text="特殊标题样式示例。",
                     style=body_style,
                 ),
             )
@@ -459,12 +459,18 @@ def _header_footer_blocks(
                 text_color="#667085" if unknown_header else "",
                 page_variant=variant_name,
             ))
-        if hf.footer.enabled:
+        if footer_text or unknown_footer:
+            footer_alignment = (
+                str(footer_content.get("page_number_alignment", "center"))
+                if bool(footer_content.get("page_number_visible", False))
+                and not str(footer_content.get("fixed_text", ""))
+                else str(footer_content["alignment"])
+            )
             footers.append(TemplatePreviewBlock(
                 kind=PreviewBlockKind.FOOTER,
-                text=footer_text if hf.footer.enabled else "",
+                text=footer_text,
                 style=_typography_style(hf.footer.typography, fallback_size=9.0),
-                alignment=str(footer_content["alignment"]),
+                alignment=footer_alignment,
                 text_color="#667085" if unknown_footer else "",
                 page_variant=variant_name,
             ))
@@ -483,13 +489,27 @@ def _resolved_header_footer_content(hf, variant_name: str, part_name: str) -> di
             "styleref_include_number": True,
         }
     else:
+        page_enabled = bool(getattr(hf, "page_number_enabled", True))
+        fixed_text = (
+            str(part.fixed_text or "")
+            if bool(getattr(part, "enabled", True))
+            and str(part.content_mode or "none") in {"fixed", "page_number_with_text"}
+            else ""
+        )
         base = {
-            "mode": str(part.content_mode or "page_number"),
-            "fixed_text": str(part.fixed_text or ""),
-            "template": str(part.page_number_template or "{page}"),
+            "mode": "fixed" if fixed_text else "none",
+            "fixed_text": fixed_text,
+            "template": "",
             "alignment": str(part.alignment or "center"),
             "styleref_level": 1,
             "styleref_include_number": True,
+            "page_number_visible": page_enabled,
+            "page_number_template": str(
+                getattr(hf, "page_number_template", "{page}") or "{page}"
+            ),
+            "page_number_alignment": str(
+                getattr(hf, "page_number_alignment", "center") or "center"
+            ),
         }
     variants = getattr(hf, "variants", None)
     candidates = []
@@ -504,9 +524,13 @@ def _resolved_header_footer_content(hf, variant_name: str, part_name: str) -> di
         mode = str(getattr(content, "mode", "inherit") or "inherit").strip().lower()
         if mode == "inherit":
             continue
-        return {
+        resolved = {
             "mode": mode,
-            "fixed_text": str(getattr(content, "fixed_text", "") or ""),
+            "fixed_text": (
+                str(getattr(content, "fixed_text", "") or "")
+                if part_name == "header" or bool(getattr(hf.footer, "enabled", True))
+                else ""
+            ),
             "template": str(getattr(content, "template", "") or ""),
             "alignment": str(getattr(content, "alignment", "center") or "center"),
             "styleref_level": int(getattr(content, "styleref_level", 1) or 1),
@@ -514,7 +538,51 @@ def _resolved_header_footer_content(hf, variant_name: str, part_name: str) -> di
                 getattr(content, "styleref_include_number", True)
             ),
         }
+        if part_name == "footer":
+            if mode == "page_number":
+                resolved["mode"] = "none"
+                resolved["fixed_text"] = ""
+                resolved["template"] = ""
+            elif mode == "page_number_with_text":
+                resolved["mode"] = "fixed"
+                resolved["template"] = ""
+            resolved.update(
+                page_number_visible=bool(getattr(hf, "page_number_enabled", True)),
+                page_number_template=str(
+                    getattr(hf, "page_number_template", "{page}") or "{page}"
+                ),
+                page_number_alignment=str(
+                    getattr(hf, "page_number_alignment", "center") or "center"
+                ),
+            )
+            _apply_preview_page_number_variant(hf, variant_name, resolved)
+        return resolved
+    if part_name == "footer":
+        _apply_preview_page_number_variant(hf, variant_name, base)
     return base
+
+
+def _apply_preview_page_number_variant(
+    hf,
+    variant_name: str,
+    resolved: dict[str, object],
+) -> None:
+    if variant_name not in {"first", "even"}:
+        return
+    page_number_plan = getattr(hf, "page_number_plan", None)
+    variant = getattr(page_number_plan, variant_name, None)
+    visibility = str(getattr(variant, "visibility", "inherit") or "inherit")
+    globally_enabled = bool(getattr(hf, "page_number_enabled", True))
+    if visibility == "hide":
+        resolved["page_number_visible"] = False
+    elif visibility == "show":
+        resolved["page_number_visible"] = globally_enabled
+    template = str(getattr(variant, "template", "") or "")
+    if template:
+        resolved["page_number_template"] = template
+    alignment = str(getattr(variant, "alignment", "inherit") or "inherit")
+    if alignment in {"left", "center", "right"}:
+        resolved["page_number_alignment"] = alignment
 
 
 def _header_content_sample(
@@ -552,30 +620,39 @@ def _header_content_sample(
 
 
 def _footer_content_sample(hf, content: dict[str, object]) -> str:
-    if not hf.footer.enabled:
-        return ""
     if bool(getattr(hf.behavior, "preserve_existing_content", False)):
         return "保留原页脚（内容取决于原文）"
     mode = str(content["mode"])
-    if mode == "none":
-        return ""
     if mode == "preserve":
         return "保留原页脚（内容取决于原文）"
     fixed_text = str(content["fixed_text"])
-    if mode == "fixed":
-        return fixed_text
-    page_number = _page_number_sample(hf)
-    template = str(content["template"] or "{page}")
-    if mode == "page_number_with_text" and fixed_text and "{text}" not in template:
-        template = f"{template} {{text}}"
-    if mode in {"page_number", "page_number_with_text", "template"}:
-        return _content_template_sample(
-            template,
+    if mode == "template":
+        footer_text = _content_template_sample(
+            str(content["template"]),
             fixed_text=fixed_text,
-            page_number=page_number,
+            page_number=_page_number_sample(hf),
             styleref="标题",
         )
-    return ""
+    else:
+        footer_text = fixed_text if mode == "fixed" else ""
+    if not bool(content.get("page_number_visible", False)):
+        return footer_text
+    page_text = _content_template_sample(
+        str(content.get("page_number_template", "{page}") or "{page}"),
+        fixed_text="",
+        page_number=_page_number_sample(hf),
+        styleref="标题",
+    )
+    if not footer_text:
+        return page_text
+    text_alignment = str(content.get("alignment", "center") or "center")
+    page_alignment = str(content.get("page_number_alignment", "center") or "center")
+    return (
+        f"{footer_text}    {page_text}"
+        if {text_alignment, page_alignment} != {"center"}
+        and text_alignment != page_alignment
+        else f"{page_text} {footer_text}"
+    )
 
 
 def _content_template_sample(
@@ -658,15 +735,32 @@ def _plan_status_details(
     pruned: list[PreviewPrunedModule] = []
     for feature in TEMPLATE_FEATURE_SPECS:
         for control in feature.module_controls:
-            decision = selection.decision_for(control.module_name)
-            if decision.disposition is ModuleDisposition.DISABLED_BY_PLAN:
+            decisions = tuple(
+                selection.decision_for(module_name)
+                for module_name in control.module_names
+            )
+            if all(
+                decision.disposition is ModuleDisposition.DISABLED_BY_PLAN
+                for decision in decisions
+            ):
                 hidden.append(control.status_label)
-            elif decision.disposition is ModuleDisposition.AUTO_PRUNED:
+            pruned_decisions = tuple(
+                decision
+                for decision in decisions
+                if decision.disposition is ModuleDisposition.AUTO_PRUNED
+            )
+            if pruned_decisions:
                 pruned.append(
                     PreviewPrunedModule(
-                        module_name=decision.module_name,
+                        module_name=control.module_name,
                         label=control.status_label,
-                        unmet_dependencies=decision.unmet_dependencies,
+                        unmet_dependencies=tuple(
+                            dict.fromkeys(
+                                dependency
+                                for decision in pruned_decisions
+                                for dependency in decision.unmet_dependencies
+                            )
+                        ),
                     )
                 )
     return tuple(hidden), tuple(pruned)

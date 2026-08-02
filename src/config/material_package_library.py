@@ -1,39 +1,42 @@
-"""Mode-scoped on-disk library for generic material packages."""
+"""Product-facing facade for the canonical material-package repository."""
 
 from __future__ import annotations
 
-import copy
-from contextlib import contextmanager
+import shutil
 from dataclasses import dataclass
-import hashlib
-import json
-import os
 from pathlib import Path
-from shutil import rmtree
-import threading
-from collections.abc import Iterator
 
-from src.config.atomic_io import atomic_write_bytes
-from src.config.entity import EntityArchive, load_entity_archive, save_entity_archive
-
+from src.app_paths import config_library_data_root
+from src.application.materials.contracts import get_package_material_contract
+from src.domain.materials import (
+    MaterialPackage,
+    clone_material_package,
+    generate_package_id,
+)
+from src.infrastructure.materials.repository import (
+    MaterialPackageEntry as RepositoryEntry,
+)
+from src.infrastructure.materials.repository import (
+    MaterialPackageRepository,
+    MaterialPackageSnapshot,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-MATERIAL_PACKAGE_LIBRARY_DIR = PROJECT_ROOT / "config_library" / "material_packages"
+CANONICAL_MATERIAL_PACKAGE_LIBRARY_DIR = (
+    PROJECT_ROOT / "config_library" / "material_packages"
+)
+MATERIAL_PACKAGE_LIBRARY_DIR = config_library_data_root() / "material_packages"
 PACKAGE_FILE_NAME = "package.json"
+_SEEDED_LIBRARY_ROOTS: set[Path] = set()
 
-
-_TARGET_LOCKS_GUARD = threading.Lock()
-_TARGET_LOCKS: dict[str, threading.RLock] = {}
-
-
-def _target_lock_key(path: str | Path) -> str:
-    return os.path.normcase(os.path.abspath(Path(path)))
-
-
-def _target_lock(path: str | Path) -> threading.RLock:
-    key = _target_lock_key(path)
-    with _TARGET_LOCKS_GUARD:
-        return _TARGET_LOCKS.setdefault(key, threading.RLock())
+# Defaults are explicit product configuration.  Missing defaults never fall
+# back to the first package because that would silently change task identity.
+DEFAULT_MATERIAL_PACKAGE_IDENTITIES: dict[str, str] = {
+    "custom": "pkg_d47a4d51a9fd408195db973db06b6036",
+    "exam": "pkg_f952ac3781c84e8faf87648c2d75aeb0",
+    "thesis": "pkg_0a796fdc9c5a45a79a36215ad512e647",
+    "official": "pkg_8af8fddc57b34616ada5893c43aa20fa",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,11 +46,15 @@ class MaterialPackageLibraryEntry:
     path: Path
     mode_id: str
     source_type: str
+    material_contract_id: str = ""
+    revision: str = ""
     load_error: str = ""
 
     @property
     def qualified_id(self) -> str:
-        return f"{self.source_type}/{self.package_id}"
+        """Package IDs are globally unique; source is display metadata only."""
+
+        return self.package_id
 
     @property
     def is_available(self) -> bool:
@@ -59,181 +66,92 @@ class MaterialPackageLibraryEntry:
 
 
 @dataclass(frozen=True, slots=True)
-class MaterialPackageFileSnapshot:
-    """Exact bytes and revision of one validated user package target."""
-
-    path: Path
-    payload: bytes | None
-    revision: str
-
-    @property
-    def exists(self) -> bool:
-        return self.payload is not None
-
-
-@dataclass(frozen=True, slots=True)
 class MaterialPackagePublicationReceipt:
-    """Writer-returned target identity plus an optional observed revision."""
-
     entry: MaterialPackageLibraryEntry
-    snapshot: MaterialPackageFileSnapshot | None = None
-
-    @property
-    def revision_confirmed(self) -> bool:
-        return self.snapshot is not None
-
-    def with_snapshot(
-        self,
-        snapshot: MaterialPackageFileSnapshot,
-    ) -> MaterialPackagePublicationReceipt:
-        return MaterialPackagePublicationReceipt(entry=self.entry, snapshot=snapshot)
+    snapshot: MaterialPackageSnapshot
 
 
-@contextmanager
-def material_package_entry_target_lock(
-    entry: MaterialPackageLibraryEntry,
-) -> Iterator[Path]:
-    """Serialize same-process operations for one validated user target."""
-
-    if entry.source_type != "user":
-        raise PermissionError("builtin_material_package_is_read_only")
-    target = _assert_user_package_path(
-        entry.path,
-        mode_id=entry.mode_id,
-        package_id=entry.package_id,
-    )
-    lock = _target_lock(target)
-    with lock:
-        # Revalidate after waiting: another actor may have replaced a path
-        # component while this thread was blocked on the in-process lock.
-        yield _assert_user_package_path(
-            target,
-            mode_id=entry.mode_id,
-            package_id=entry.package_id,
-        )
-
-
-def capture_material_package_entry_snapshot(
-    entry: MaterialPackageLibraryEntry,
-) -> MaterialPackageFileSnapshot:
-    """Read one package target through the library's path/reparse boundary."""
-
-    with material_package_entry_target_lock(entry) as target:
-        try:
-            payload = target.read_bytes()
-        except FileNotFoundError:
-            payload = None
-        # Recheck after the read so a path swapped to a reparse point while it
-        # was observed cannot be accepted as a valid revision token.
-        target = _assert_user_package_path(
-            target,
-            mode_id=entry.mode_id,
-            package_id=entry.package_id,
-        )
-    revision = (
-        "missing"
-        if payload is None
-        else f"sha256:{hashlib.sha256(payload).hexdigest()}"
-    )
-    return MaterialPackageFileSnapshot(
-        path=target,
-        payload=payload,
-        revision=revision,
+def material_package_repository() -> MaterialPackageRepository:
+    ensure_material_package_library()
+    return MaterialPackageRepository(
+        MATERIAL_PACKAGE_LIBRARY_DIR,
+        contract_provider=get_package_material_contract,
     )
 
 
-def material_package_entry_matches_snapshot(
-    entry: MaterialPackageLibraryEntry,
-    expected: MaterialPackageFileSnapshot,
-) -> bool:
-    """Return whether the exact safe target still has ``expected`` revision."""
+def ensure_material_package_library() -> None:
+    """Mirror packaged built-ins to runtime storage without touching user data."""
 
-    with material_package_entry_target_lock(entry):
-        current = capture_material_package_entry_snapshot(entry)
-        return (
-            os.path.normcase(os.path.abspath(current.path))
-            == os.path.normcase(os.path.abspath(expected.path))
-            and current.revision == expected.revision
-        )
+    runtime_root = MATERIAL_PACKAGE_LIBRARY_DIR.expanduser().resolve()
+    if runtime_root in _SEEDED_LIBRARY_ROOTS:
+        return
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    canonical_root = CANONICAL_MATERIAL_PACKAGE_LIBRARY_DIR.resolve()
+    canonical_bundles: dict[tuple[str, str], Path] = {}
+    for source in canonical_root.glob("*/builtin/*"):
+        if source.is_dir() and (source / PACKAGE_FILE_NAME).is_file():
+            canonical_bundles[(source.parent.parent.name, source.name)] = source
+
+    for mode_dir in runtime_root.iterdir():
+        builtin_dir = mode_dir / "builtin"
+        if not mode_dir.is_dir() or not builtin_dir.is_dir():
+            continue
+        for candidate in builtin_dir.iterdir():
+            if (
+                candidate.is_dir()
+                and (candidate / PACKAGE_FILE_NAME).is_file()
+                and (mode_dir.name, candidate.name) not in canonical_bundles
+            ):
+                _remove_managed_builtin(candidate, runtime_root)
+
+    for (mode_id, _package_id), source in canonical_bundles.items():
+        target = runtime_root / mode_id / "builtin" / source.name
+        shutil.copytree(source, target, dirs_exist_ok=True)
+    _SEEDED_LIBRARY_ROOTS.add(runtime_root)
 
 
-def restore_material_package_entry_snapshot(
-    entry: MaterialPackageLibraryEntry,
-    *,
-    expected_current: MaterialPackageFileSnapshot,
-    restore: MaterialPackageFileSnapshot,
-) -> bool:
-    """CAS-restore exact package bytes without deleting unrelated siblings.
-
-    ``False`` means another writer changed the target after publication.  In
-    that case this function deliberately leaves both the target and directory
-    untouched.
-    """
-
-    with material_package_entry_target_lock(entry) as target:
-        if not material_package_entry_matches_snapshot(entry, expected_current):
-            return False
-        if os.path.normcase(os.path.abspath(target)) != os.path.normcase(
-            os.path.abspath(restore.path)
-        ):
-            raise ValueError("material_package_snapshot_path_mismatch")
-        if restore.payload is not None:
-            atomic_write_bytes(target, restore.payload)
-            return material_package_entry_matches_snapshot(entry, restore)
-
-        target.unlink(missing_ok=True)
-        try:
-            # Only remove the directory if it is now empty. Concurrent or
-            # external sibling content is never recursively deleted.
-            target.parent.rmdir()
-        except OSError:
-            pass
-        return not target.exists()
+def _remove_managed_builtin(candidate: Path, runtime_root: Path) -> None:
+    resolved_root = runtime_root.resolve()
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError as exc:
+        raise OSError("material_package_builtin_cleanup_escape") from exc
+    if candidate.is_symlink():
+        raise OSError("material_package_builtin_cleanup_link_rejected")
+    shutil.rmtree(candidate)
 
 
 def material_package_user_dir(mode_id: str | None) -> Path:
-    return _mode_dir(mode_id) / "user"
+    return MATERIAL_PACKAGE_LIBRARY_DIR / _mode(mode_id) / "user"
 
 
 def material_package_builtin_dir(mode_id: str | None) -> Path:
-    return _mode_dir(mode_id) / "builtin"
+    return MATERIAL_PACKAGE_LIBRARY_DIR / _mode(mode_id) / "builtin"
 
 
 def material_package_library_watch_dirs(mode_id: str | None) -> tuple[Path, ...]:
-    user_dir = material_package_user_dir(mode_id)
+    ensure_material_package_library()
     return tuple(
         path
-        for path in (material_package_builtin_dir(mode_id), user_dir)
-        if path.exists() and path.is_dir()
+        for path in (
+            material_package_builtin_dir(mode_id),
+            material_package_user_dir(mode_id),
+        )
+        if path.is_dir()
     )
 
 
 def list_material_package_entries(
-    *, mode_id: str | None
+    *,
+    mode_id: str | None,
 ) -> tuple[MaterialPackageLibraryEntry, ...]:
-    entries: list[MaterialPackageLibraryEntry] = []
-    for source_type, directory in (
-        ("builtin", material_package_builtin_dir(mode_id)),
-        ("user", material_package_user_dir(mode_id)),
-    ):
-        if not directory.exists() or not directory.is_dir():
-            continue
-        candidates = directory.glob(f"*/{PACKAGE_FILE_NAME}")
-        for path in sorted(candidates, key=lambda item: str(item).casefold()):
-            entry = _entry_from_path(
-                path,
-                mode_id=_normalize_mode_id(mode_id),
-                source_type=source_type,
-            )
-            entries.append(entry)
-    entries.sort(
-        key=lambda item: (
-            item.name.casefold(),
-            0 if item.source_type == "user" else 1,
-            item.package_id.casefold(),
+    return tuple(
+        _entry(item)
+        for item in material_package_repository().list_entries(
+            work_mode_id=_mode(mode_id)
         )
     )
-    return tuple(entries)
 
 
 def get_material_package_entry(
@@ -241,399 +159,174 @@ def get_material_package_entry(
     *,
     mode_id: str | None,
 ) -> MaterialPackageLibraryEntry | None:
-    target = str(identity or "").strip()
-    if not target:
+    package_id = str(identity or "").strip()
+    if not package_id:
         return None
-    entries = list_material_package_entries(mode_id=mode_id)
-    if "/" in target:
-        return next((item for item in entries if item.qualified_id == target), None)
-    matches = [item for item in entries if item.package_id == target]
-    return next((item for item in matches if item.source_type == "user"), None) or (
-        matches[0] if matches else None
+    return next(
+        (
+            item
+            for item in list_material_package_entries(mode_id=mode_id)
+            if item.package_id == package_id
+        ),
+        None,
     )
 
 
-def load_material_package_entry(entry: MaterialPackageLibraryEntry) -> EntityArchive:
+def default_material_package_entry(
+    *,
+    mode_id: str | None,
+    entries: tuple[MaterialPackageLibraryEntry, ...] | None = None,
+) -> MaterialPackageLibraryEntry | None:
+    mode = _mode(mode_id)
+    package_id = DEFAULT_MATERIAL_PACKAGE_IDENTITIES.get(mode, "")
+    if not package_id:
+        return None
+    candidates = entries or list_material_package_entries(mode_id=mode)
+    return next(
+        (
+            item
+            for item in candidates
+            if item.package_id == package_id and item.is_available
+        ),
+        None,
+    )
+
+
+def load_material_package_entry(
+    entry: MaterialPackageLibraryEntry,
+) -> MaterialPackageSnapshot:
     if not entry.is_available:
         raise ValueError(entry.load_error or "material_package_unavailable")
-    current = _entry_from_path(
-        entry.path,
-        mode_id=_normalize_mode_id(entry.mode_id),
+    snapshot = material_package_repository().load(
+        work_mode_id=entry.mode_id,
         source_type=entry.source_type,
+        package_id=entry.package_id,
     )
-    if not current.is_available:
-        raise ValueError(current.load_error or "material_package_unavailable")
-    if (
-        current.package_id != entry.package_id
-        or current.mode_id != entry.mode_id
-        or current.source_type != entry.source_type
-        or os.path.normcase(os.path.abspath(current.path))
-        != os.path.normcase(os.path.abspath(entry.path))
-    ):
-        raise ValueError("material_package_entry_identity_changed")
-    return load_entity_archive(current.path)
+    if snapshot.ref.revision != entry.revision:
+        raise RuntimeError(
+            "material_package_entry_revision_changed:"
+            f"{entry.revision}:{snapshot.ref.revision}"
+        )
+    return snapshot
 
 
 def create_material_package_in_library_with_receipt(
-    archive: EntityArchive,
-    *,
-    mode_id: str | None,
-    requested_id: str | None = None,
+    package: MaterialPackage,
 ) -> MaterialPackagePublicationReceipt:
-    mode = _normalize_mode_id(mode_id)
-    base_id = _safe_package_id(
-        requested_id or archive.package_id or archive.archive_id or archive.archive_name
+    snapshot = material_package_repository().create_user(package)
+    return MaterialPackagePublicationReceipt(
+        entry=_entry_from_snapshot(snapshot),
+        snapshot=snapshot,
     )
-    package_id, target = _unique_user_package_path(base_id, mode_id=mode)
-    stored = copy.deepcopy(archive)
-    stored.mode_id = mode
-    stored.package_id = package_id
-    stored.archive_id = package_id
-    package_dir = target.parent
-    with _target_lock(target):
-        package_dir.mkdir(parents=True, exist_ok=False)
-        owned_directory_stat = None
-        try:
-            owned_directory_stat = package_dir.stat(follow_symlinks=False)
-            save_entity_archive(stored, target)
-            entry = _entry_from_saved_archive(stored, target, source_type="user")
-            snapshot: MaterialPackageFileSnapshot | None = None
-            for attempt in range(2):
-                try:
-                    snapshot = capture_material_package_entry_snapshot(entry)
-                    break
-                except Exception:
-                    if attempt == 1:
-                        raise
-            assert snapshot is not None
-            # The identity and revision are captured before releasing the
-            # creator's first target lock. A later writer therefore cannot be
-            # mistaken for this creator's publication.
-            return MaterialPackagePublicationReceipt(entry=entry, snapshot=snapshot)
-        except BaseException as exc:
-            # This function created exactly one previously absent directory.
-            # It owns that directory only while its identity is unchanged.
-            try:
-                if owned_directory_stat is None:
-                    exc.add_note(
-                        "material_package_cleanup_skipped:"
-                        "owned_directory_identity_unknown:"
-                        f"{package_dir}"
-                    )
-                else:
-                    current_directory_stat = package_dir.stat(follow_symlinks=False)
-                    if os.path.samestat(owned_directory_stat, current_directory_stat):
-                        rmtree(package_dir)
-                    else:
-                        exc.add_note(
-                            "material_package_cleanup_skipped:"
-                            "owned_directory_identity_changed:"
-                            f"{package_dir}"
-                        )
-            except FileNotFoundError:
-                pass
-            except OSError as cleanup_exc:
-                exc.add_note(
-                    "material_package_cleanup_failed:"
-                    f"{package_dir}:{cleanup_exc}"
-                )
-            raise
 
 
 def create_material_package_in_library(
-    archive: EntityArchive,
-    *,
-    mode_id: str | None,
-    requested_id: str | None = None,
+    package: MaterialPackage,
 ) -> MaterialPackageLibraryEntry:
-    return create_material_package_in_library_with_receipt(
-        archive,
-        mode_id=mode_id,
-        requested_id=requested_id,
-    ).entry
+    return create_material_package_in_library_with_receipt(package).entry
 
 
 def save_material_package_entry(
-    archive: EntityArchive,
+    package: MaterialPackage,
     entry: MaterialPackageLibraryEntry,
 ) -> MaterialPackageLibraryEntry:
-    if entry.source_type != "user":
-        raise PermissionError("builtin_material_package_is_read_only")
-    with material_package_entry_target_lock(entry) as target:
-        stored = copy.deepcopy(archive)
-        stored.mode_id = entry.mode_id
-        stored.package_id = entry.package_id
-        stored.archive_id = entry.package_id
-        save_entity_archive(stored, target)
-    return _entry_from_saved_archive(stored, target, source_type="user")
-
-
-def duplicate_material_package_entry(
-    archive: EntityArchive,
-    *,
-    mode_id: str | None,
-    name: str,
-) -> MaterialPackageLibraryEntry:
-    return duplicate_material_package_entry_with_receipt(
-        archive,
-        mode_id=mode_id,
-        name=name,
-    ).entry
+    if package.package_id != entry.package_id:
+        raise ValueError("material_package_entry_identity_changed")
+    snapshot = material_package_repository().save_user(
+        package,
+        expected_revision=entry.revision,
+    )
+    return _entry_from_snapshot(snapshot)
 
 
 def duplicate_material_package_entry_with_receipt(
-    archive: EntityArchive,
+    source: MaterialPackageSnapshot,
     *,
-    mode_id: str | None,
     name: str,
 ) -> MaterialPackagePublicationReceipt:
-    duplicated = copy.deepcopy(archive)
-    duplicated.archive_name = str(name or "").strip() or "资料包副本"
-    duplicated.package_id = ""
-    duplicated.archive_id = ""
-    duplicated.source_path = ""
-    return create_material_package_in_library_with_receipt(
-        duplicated,
-        mode_id=mode_id,
-        requested_id=duplicated.archive_name,
+    duplicate = clone_material_package(
+        source.package,
+        package_id=generate_package_id(),
+        display_name=name,
     )
+    snapshot = material_package_repository().duplicate_to_user(source, duplicate)
+    return MaterialPackagePublicationReceipt(
+        entry=_entry_from_snapshot(snapshot),
+        snapshot=snapshot,
+    )
+
+
+def duplicate_material_package_entry(
+    source: MaterialPackageSnapshot,
+    *,
+    name: str,
+) -> MaterialPackageLibraryEntry:
+    return duplicate_material_package_entry_with_receipt(source, name=name).entry
 
 
 def delete_material_package_entry(entry: MaterialPackageLibraryEntry) -> None:
     if entry.source_type != "user":
         raise PermissionError("builtin_material_package_is_read_only")
-    with material_package_entry_target_lock(entry) as target:
-        package_dir = target.parent
-        if package_dir.exists():
-            rmtree(package_dir)
-
-
-def _entry_from_path(
-    path: Path,
-    *,
-    mode_id: str,
-    source_type: str,
-) -> MaterialPackageLibraryEntry:
-    fallback_id = path.parent.name
-    try:
-        canonical_path = _assert_scoped_package_path(
-            path,
-            mode_id=mode_id,
-            source_type=source_type,
-        )
-    except Exception as exc:
-        return MaterialPackageLibraryEntry(
-            package_id=fallback_id,
-            name=fallback_id,
-            path=path,
-            mode_id=mode_id,
-            source_type=source_type,
-            load_error=str(exc),
-        )
-    try:
-        payload = json.loads(canonical_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        return MaterialPackageLibraryEntry(
-            package_id=fallback_id,
-            name=fallback_id,
-            path=canonical_path,
-            mode_id=mode_id,
-            source_type=source_type,
-            load_error=str(exc),
-        )
-    if not isinstance(payload, dict):
-        return MaterialPackageLibraryEntry(
-            package_id=fallback_id,
-            name=fallback_id,
-            path=canonical_path,
-            mode_id=mode_id,
-            source_type=source_type,
-            load_error="material_package_payload_must_be_object",
-        )
-    package_id = fallback_id
-    raw_name = payload.get("archive_name", "")
-    name = (
-        raw_name.strip()
-        if type(raw_name) is str and raw_name.strip()
-        else package_id
+    material_package_repository().delete_user(
+        work_mode_id=entry.mode_id,
+        package_id=entry.package_id,
+        expected_revision=entry.revision,
     )
-    load_error = ""
-    raw_package_id = payload.get("package_id")
-    raw_mode_id = payload.get("mode_id")
-    if type(raw_package_id) is not str or raw_package_id != fallback_id:
-        load_error = (
-            "material_package_path_identity_mismatch:"
-            f"{fallback_id}:{raw_package_id}"
-        )
-    elif type(raw_mode_id) is not str or raw_mode_id != mode_id:
-        load_error = (
-            "material_package_mode_scope_mismatch:"
-            f"{mode_id}:{raw_mode_id}"
-        )
-    else:
-        try:
-            load_entity_archive(canonical_path)
-        except Exception as exc:
-            load_error = str(exc)
+
+
+def _entry(item: RepositoryEntry) -> MaterialPackageLibraryEntry:
     return MaterialPackageLibraryEntry(
-        package_id=package_id,
-        name=name,
-        path=canonical_path,
-        mode_id=mode_id,
-        source_type=source_type,
-        load_error=load_error,
+        package_id=item.package_id,
+        name=item.display_name,
+        path=item.bundle_path / PACKAGE_FILE_NAME,
+        mode_id=item.work_mode_id,
+        source_type=item.source_type,
+        material_contract_id=item.material_contract_id,
+        revision=item.revision,
+        load_error=item.load_error,
     )
 
 
-def _assert_scoped_package_path(
-    path: Path,
-    *,
-    mode_id: str,
-    source_type: str,
-) -> Path:
-    if source_type not in {"builtin", "user"}:
-        raise ValueError(f"material_package_source_type_invalid:{source_type}")
-    normalized_mode = _normalize_mode_id(mode_id)
-    if normalized_mode != mode_id:
-        raise ValueError(f"material_package_mode_scope_invalid:{mode_id}")
-    root = Path(os.path.abspath(_mode_dir(normalized_mode) / source_type))
-    candidate = Path(os.path.abspath(path))
-    try:
-        relative = candidate.relative_to(root)
-    except ValueError as exc:
-        raise ValueError(f"material_package_path_outside_scope:{path}") from exc
-    if candidate.name != PACKAGE_FILE_NAME or len(relative.parts) != 2:
-        raise ValueError(f"material_package_path_invalid:{path}")
-    if not relative.parts[0] or relative.parts[0] in {".", ".."}:
-        raise ValueError(f"material_package_path_identity_invalid:{path}")
-    for component in (candidate.parent, candidate):
-        if _is_link_or_reparse(component):
-            raise ValueError(f"material_package_path_link_or_reparse:{component}")
-    try:
-        resolved_relative = candidate.resolve(strict=False).relative_to(root.resolve())
-    except ValueError as exc:
-        raise ValueError(f"material_package_path_outside_scope:{path}") from exc
-    if tuple(part.casefold() for part in resolved_relative.parts) != tuple(
-        part.casefold() for part in relative.parts
-    ):
-        raise ValueError(f"material_package_path_identity_changed:{path}")
-    return candidate
-
-
-def _entry_from_saved_archive(
-    archive: EntityArchive,
-    path: Path,
-    *,
-    source_type: str,
+def _entry_from_snapshot(
+    snapshot: MaterialPackageSnapshot,
 ) -> MaterialPackageLibraryEntry:
     return MaterialPackageLibraryEntry(
-        package_id=str(archive.package_id or archive.archive_id or path.parent.name),
-        name=str(archive.archive_name or archive.package_id or path.parent.name),
-        path=path.resolve(),
-        mode_id=_normalize_mode_id(archive.mode_id),
-        source_type=source_type,
+        package_id=snapshot.package.package_id,
+        name=snapshot.package.display_name,
+        path=snapshot.bundle_path / PACKAGE_FILE_NAME,
+        mode_id=snapshot.package.work_mode_id,
+        source_type=snapshot.source_type,
+        material_contract_id=snapshot.package.material_contract_id,
+        revision=snapshot.ref.revision,
     )
 
 
-def _unique_user_package_path(base_id: str, *, mode_id: str) -> tuple[str, Path]:
-    user_dir = material_package_user_dir(mode_id)
-    user_dir.mkdir(parents=True, exist_ok=True)
-    for index in range(1, 1000):
-        candidate = base_id if index == 1 else f"{base_id}_{index}"
-        package_dir = user_dir / candidate
-        if not package_dir.exists():
-            return candidate, package_dir / PACKAGE_FILE_NAME
-    candidate = f"{base_id}_1000"
-    return candidate, user_dir / candidate / PACKAGE_FILE_NAME
-
-
-def _assert_user_package_path(
-    path: Path,
-    *,
-    mode_id: str,
-    package_id: str,
-) -> Path:
-    root = Path(os.path.abspath(material_package_user_dir(mode_id)))
-    candidate = Path(os.path.abspath(path))
-    try:
-        relative = candidate.relative_to(root)
-    except ValueError as exc:
-        raise ValueError(f"material_package_path_outside_user_library:{path}") from exc
-    if candidate.name != PACKAGE_FILE_NAME or len(relative.parts) != 2:
-        raise ValueError(f"material_package_path_invalid:{path}")
-    if relative.parts[0].casefold() != str(package_id or "").strip().casefold():
-        raise ValueError(
-            "material_package_path_identity_mismatch:"
-            f"{package_id}:{relative.parts[0]}"
-        )
-    for component in (candidate.parent, candidate):
-        if _is_link_or_reparse(component):
-            raise ValueError(f"material_package_path_link_or_reparse:{component}")
-    try:
-        resolved_relative = candidate.resolve(strict=False).relative_to(root.resolve())
-    except ValueError as exc:
-        raise ValueError(f"material_package_path_outside_user_library:{path}") from exc
-    if tuple(part.casefold() for part in resolved_relative.parts) != tuple(
-        part.casefold() for part in relative.parts
-    ):
-        raise ValueError(f"material_package_path_identity_changed:{path}")
-    return candidate
-
-
-def _is_link_or_reparse(path: Path) -> bool:
-    try:
-        if path.is_symlink():
-            return True
-        is_junction = getattr(path, "is_junction", None)
-        if callable(is_junction) and is_junction():
-            return True
-        attributes = getattr(path.stat(follow_symlinks=False), "st_file_attributes", 0)
-        return bool(attributes & 0x400)
-    except FileNotFoundError:
-        return False
-    except OSError as exc:
-        raise ValueError(f"material_package_path_unreadable:{path}") from exc
-
-
-def _mode_dir(mode_id: str | None) -> Path:
-    return MATERIAL_PACKAGE_LIBRARY_DIR / _normalize_mode_id(mode_id)
-
-
-def _normalize_mode_id(mode_id: str | None) -> str:
-    value = str(mode_id or "").strip().lower().replace(" ", "_")
-    safe = "".join(char for char in value if char.isalnum() or char in {"_", "-"})
-    return safe or "custom"
-
-
-def _safe_package_id(value: object) -> str:
-    forbidden = '<>:"/\\|?*'
-    cleaned = "".join(
-        char if char not in forbidden and ord(char) >= 32 else "_"
-        for char in str(value or "").strip()
-    )
-    cleaned = cleaned.strip(" ._")
-    return cleaned or "material_package"
+def _mode(value: str | None) -> str:
+    mode = str(value or "").strip()
+    if not mode:
+        raise ValueError("material_package_work_mode_id_required")
+    return mode
 
 
 __all__ = [
+    "CANONICAL_MATERIAL_PACKAGE_LIBRARY_DIR",
+    "DEFAULT_MATERIAL_PACKAGE_IDENTITIES",
     "MATERIAL_PACKAGE_LIBRARY_DIR",
-    "MaterialPackageFileSnapshot",
     "MaterialPackageLibraryEntry",
     "MaterialPackagePublicationReceipt",
-    "capture_material_package_entry_snapshot",
     "create_material_package_in_library",
     "create_material_package_in_library_with_receipt",
+    "default_material_package_entry",
     "delete_material_package_entry",
     "duplicate_material_package_entry",
     "duplicate_material_package_entry_with_receipt",
+    "ensure_material_package_library",
     "get_material_package_entry",
     "list_material_package_entries",
     "load_material_package_entry",
     "material_package_builtin_dir",
     "material_package_library_watch_dirs",
+    "material_package_repository",
     "material_package_user_dir",
-    "material_package_entry_matches_snapshot",
-    "material_package_entry_target_lock",
-    "restore_material_package_entry_snapshot",
     "save_material_package_entry",
 ]

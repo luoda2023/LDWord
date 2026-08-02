@@ -13,7 +13,6 @@
     "bid_custom"
   ],
   "master_id": "",
-  "default_material_profile_id": "",
   "document_scope": {
     "mode": "all",
     "selected_roles": []
@@ -34,12 +33,10 @@
     "placeholder_replace": true,
     "image_insertion": true,
     "watermark": true,
-    "chem_typography": false,
     "md_cleanup": true,
     "whitespace_normalize": true,
     "validation": true,
     "citation_link": false,
-    "equation_table_format": false,
     "reference_format": false
   },
   "input_source_profile": {
@@ -228,37 +225,6 @@
     "auto_number_reference_entries": true,
     "superscript_outer_page_numbers": false
   },
-  "formula_convert": {
-    "output_mode": "word_native",
-    "low_confidence_policy": "skip_and_mark",
-    "office_fallback_enabled": false,
-    "office_fallback_timeout_sec": 30
-  },
-  "chem_typography": {
-    "western_font": "Times New Roman",
-    "scopes": {
-      "references": false,
-      "body": false,
-      "headings": false,
-      "abstract_cn": false,
-      "abstract_en": false,
-      "captions": false,
-      "tables": false
-    },
-    "allow_tokens": [],
-    "allow_patterns": [],
-    "ignore_tokens": [],
-    "ignore_patterns": [],
-    "manual_overrides": {}
-  },
-  "formula_style": {
-    "unify_font": true,
-    "unify_size": true,
-    "unify_spacing": true
-  },
-  "equation_numbering": {
-    "numbering_format": "chapter.seq"
-  },
   "reference_style": {
     "hanging_indent_cm": 0.74,
     "space_after_pt": 0,
@@ -276,5 +242,6 @@
   },
   "template_overrides": {},
   "batch_preset": null,
-  "strict_mode": true
+  "strict_mode": true,
+  "thesis_formula_rules": null
 }

@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
+from urllib.parse import urlsplit
 
+from src.assistant.application.template_authoring import (
+    AssistantTemplateAuthoringCompletion,
+    complete_template_authoring,
+)
 from src.assistant.contracts.jobs import (
     JOB_CANCELLED,
     JOB_FAILED,
@@ -13,13 +19,13 @@ from src.assistant.contracts.jobs import (
 )
 from src.assistant.contracts.messages import ROLE_ASSISTANT, AssistantMessage
 from src.assistant.contracts.runtime import (
-    AssistantRuntimeResult,
     TURN_CANCELLED,
     TURN_COMPLETED,
     TURN_FAILED,
     TURN_WAITING_DATA_PERMISSION,
     TURN_WAITING_TOOL_PERMISSION,
     TURN_WAITING_USER_QUESTION,
+    AssistantRuntimeResult,
 )
 from src.assistant.ui.provider_presentation import provider_error_text
 from src.assistant.ui.runtime_result_presentation import format_evidence_payload
@@ -31,12 +37,30 @@ class AssistantTurnCompletionMixin:
         if self._turn_workers.get(worker.request.session_id) is not worker:
             return
         origin_session_id = worker.request.session_id
+        if (
+            self._active_session is not None
+            and self._active_session.session_id == origin_session_id
+        ):
+            self._flush_active_turn_preview()
         self._clear_turn_preview(origin_session_id)
         try:
             origin = self._coordinator.load_session(origin_session_id)
         except (OSError, ValueError, TypeError):
             self._finish_turn_ui(worker)
             return
+        template_authoring = None
+        if (
+            worker.request.template_authoring_mode_id
+            and result.status == TURN_COMPLETED
+        ):
+            try:
+                template_authoring = complete_template_authoring(
+                    mode_id=worker.request.template_authoring_mode_id,
+                    provider_text=result.visible_text,
+                )
+            except Exception as exc:
+                template_authoring = exc
+            result = replace(result, visible_text="")
         if result.visible_text:
             assistant_message = AssistantMessage.text(
                 role=ROLE_ASSISTANT,
@@ -67,10 +91,7 @@ class AssistantTurnCompletionMixin:
                 pending_continuation=continuation,
                 turn_status=result.status,
             )
-            if (
-                str(origin.document_job.get("status") or "")
-                == JOB_PROVIDER_RUNNING
-            ):
+            if str(origin.document_job.get("status") or "") == JOB_PROVIDER_RUNNING:
                 origin = self._coordinator.update_state(
                     origin,
                     document_job={
@@ -78,16 +99,19 @@ class AssistantTurnCompletionMixin:
                         "status": JOB_RESPONSE_WAITING,
                     },
                 )
-        elif (
-            worker.request.conversation_cursor
-            and result.status == TURN_COMPLETED
-        ):
+        elif worker.request.conversation_cursor and result.status == TURN_COMPLETED:
             origin = self._coordinator.update_state(
                 origin,
                 pending_continuation={},
             )
-        for message in self._runtime_result_messages(result):
+        for message in self._runtime_result_messages(
+            result,
+            pending_continuation=origin.pending_continuation,
+        ):
             origin = self._coordinator.append_message(origin, message)
+        if template_authoring is not None:
+            for message in self._template_authoring_messages(template_authoring):
+                origin = self._coordinator.append_message(origin, message)
         raw_runtime_results = origin.document_job.get("runtime_results", ())
         runtime_results = (
             [dict(item) for item in raw_runtime_results if isinstance(item, Mapping)]
@@ -95,12 +119,17 @@ class AssistantTurnCompletionMixin:
             else []
         )
         runtime_results.append(result.to_dict())
+        next_document_job = {
+            **dict(origin.document_job),
+            "runtime_results": runtime_results[-50:],
+        }
+        if template_authoring is not None:
+            next_document_job["template_authoring"] = (
+                self._template_authoring_job_payload(template_authoring)
+            )
         origin = self._coordinator.update_state(
             origin,
-            document_job={
-                **dict(origin.document_job),
-                "runtime_results": runtime_results[-50:],
-            },
+            document_job=next_document_job,
         )
         if result.status == TURN_COMPLETED:
             next_job = dict(origin.document_job)
@@ -129,8 +158,7 @@ class AssistantTurnCompletionMixin:
                             or worker.request.provider_profile_id
                         ),
                         "model_id": (
-                            continuation.get("model_id")
-                            or worker.request.model_id
+                            continuation.get("model_id") or worker.request.model_id
                         ),
                         "submitted_response": (
                             continuation.get("submitted_response")
@@ -143,10 +171,7 @@ class AssistantTurnCompletionMixin:
                     origin,
                     pending_continuation=continuation,
                 )
-            if (
-                str(origin.document_job.get("status") or "")
-                == JOB_PROVIDER_RUNNING
-            ):
+            if str(origin.document_job.get("status") or "") == JOB_PROVIDER_RUNNING:
                 origin = self._coordinator.update_state(
                     origin,
                     document_job={
@@ -173,11 +198,7 @@ class AssistantTurnCompletionMixin:
                 AssistantMessage.interaction(
                     role=ROLE_ASSISTANT,
                     interaction_type="recovery",
-                    title=(
-                        "本次请求已取消"
-                        if cancelled
-                        else "模型响应未完成"
-                    ),
+                    title=("本次请求已取消" if cancelled else "模型响应未完成"),
                     body=(
                         "未执行任何文档生产操作。"
                         + (
@@ -193,22 +214,150 @@ class AssistantTurnCompletionMixin:
                 ),
                 turn_status=result.status,
             )
-        if self._active_session is not None and self._active_session.session_id == origin_session_id:
+        origin = self._project_completion_read_state(origin)
+        if (
+            self._active_session is not None
+            and self._active_session.session_id == origin_session_id
+        ):
             self._active_session = origin
             self._render_active_session()
-        self._refresh_session_list(select_session_id=origin_session_id)
+        self._refresh_session_list()
         self._finish_turn_ui(worker)
-        if result.status == TURN_COMPLETED and self._active_session is not None and self._active_session.session_id == origin_session_id:
+        if (
+            result.status == TURN_COMPLETED
+            and self._active_session is not None
+            and self._active_session.session_id == origin_session_id
+        ):
             self._composer.focus_input()
+
+    def _template_authoring_messages(
+        self,
+        completion: AssistantTemplateAuthoringCompletion | Exception,
+    ) -> tuple[AssistantMessage, ...]:
+        """Project the host-validated template write, never the raw model JSON."""
+
+        if isinstance(completion, Exception):
+            return (
+                AssistantMessage.interaction(
+                    role=ROLE_ASSISTANT,
+                    interaction_type="recovery",
+                    title="模板未写入",
+                    body=(
+                        "模型已经返回结果，但本地模板校验或写入没有完成；"
+                        f"用户模板库未被更新。\n原因：{completion}"
+                    ),
+                    payload={"actions": []},
+                ),
+            )
+
+        batch = completion.batch
+        if not batch.successes:
+            reasons = [issue.message for issue in batch.rejections]
+            reasons.extend(issue.message for issue in batch.warnings)
+            if not reasons and batch.pending_count:
+                reasons.append("模板来源归档仍在等待，尚未形成可核验的成功记录")
+            return (
+                AssistantMessage.interaction(
+                    role=ROLE_ASSISTANT,
+                    interaction_type="recovery",
+                    title="模板未通过本地校验",
+                    body=(
+                        "没有把未通过合同与字段边界检查的结果写入用户模板库。"
+                        + ("\n原因：" + "\n".join(reasons) if reasons else "")
+                    ),
+                    payload={"actions": []},
+                ),
+            )
+
+        success = batch.successes[0]
+        entry = success.entry
+        notices = [issue.message for issue in batch.warnings]
+        observation_labels = {
+            "master": "母版边界",
+            "scene": "方案边界",
+            "material": "资料边界",
+            "unsupported": "未支持项",
+        }
+        for field_name, label in observation_labels.items():
+            values = getattr(success.observations, field_name)
+            notices.extend(f"{label}：{value}" for value in values)
+        reference = {
+            "path": str(entry.path),
+            "title": entry.path.name,
+            "description": "已写入当前模式的用户模板库",
+            "kind": "template_config",
+            "owner": "form",
+        }
+        self.bridge.template_library_events.import_completed.emit(
+            completion.mode_id,
+            batch,
+        )
+        return (
+            AssistantMessage.interaction(
+                role=ROLE_ASSISTANT,
+                interaction_type="artifact",
+                title="新模板已创建并写入模板库",
+                body=(
+                    "模板已经通过本地合同、可写字段边界和无损读回校验。"
+                ),
+                payload={
+                    "facts": [
+                        {"label": "模板名称", "value": entry.name},
+                        {"label": "工作模式", "value": completion.mode_id},
+                        {"label": "模板标识", "value": entry.config_id},
+                    ],
+                    "notices": notices[:8],
+                    "reference": reference,
+                    "actions": [
+                        {
+                            "id": "open_template_artifact",
+                            "label": "打开模板文件",
+                            "variant": "secondary",
+                        }
+                    ],
+                },
+            ),
+        )
+
+    @staticmethod
+    def _template_authoring_job_payload(
+        completion: AssistantTemplateAuthoringCompletion | Exception,
+    ) -> dict[str, object]:
+        if isinstance(completion, Exception):
+            return {
+                "status": "failed",
+                "error": str(completion),
+            }
+        batch = completion.batch
+        if batch.successes:
+            entry = batch.successes[0].entry
+            return {
+                "status": "completed",
+                "mode_id": completion.mode_id,
+                "template_id": entry.config_id,
+                "template_name": entry.name,
+                "template_path": str(entry.path),
+                "warning_count": len(batch.warnings),
+            }
+        return {
+            "status": "failed",
+            "mode_id": completion.mode_id,
+            "issues": [
+                issue.message
+                for issue in (*batch.rejections, *batch.warnings)
+            ],
+        }
 
     def _runtime_result_messages(
         self,
         result: AssistantRuntimeResult,
+        *,
+        pending_continuation: Mapping[str, object] | None = None,
     ) -> tuple[AssistantMessage, ...]:
         """Project Flow result side channels into durable, actionable messages."""
 
         messages: list[AssistantMessage] = []
-        continuation = dict(result.continuation_ref)
+        continuation = dict(pending_continuation or result.continuation_ref)
         if result.source_refs and not result.visible_text:
             messages.append(
                 AssistantMessage.text(
@@ -219,15 +368,9 @@ class AssistantTurnCompletionMixin:
             )
         context_audit = result.provider_audit.get("context")
         if isinstance(context_audit, Mapping):
-            raw_summaries = context_audit.get(
-                "attachment_format_evidence_summaries"
-            )
+            raw_summaries = context_audit.get("attachment_format_evidence_summaries")
             summaries = (
-                tuple(
-                    dict(item)
-                    for item in raw_summaries
-                    if isinstance(item, Mapping)
-                )
+                tuple(dict(item) for item in raw_summaries if isinstance(item, Mapping))
                 if isinstance(raw_summaries, (list, tuple))
                 else ()
             )
@@ -259,11 +402,7 @@ class AssistantTurnCompletionMixin:
                 )
             raw_coverage = context_audit.get("attachment_coverage")
             coverage = (
-                tuple(
-                    dict(item)
-                    for item in raw_coverage
-                    if isinstance(item, Mapping)
-                )
+                tuple(dict(item) for item in raw_coverage if isinstance(item, Mapping))
                 if isinstance(raw_coverage, (list, tuple))
                 else ()
             )
@@ -274,11 +413,7 @@ class AssistantTurnCompletionMixin:
             )
             raw_errors = context_audit.get("attachment_errors")
             material_errors = (
-                tuple(
-                    dict(item)
-                    for item in raw_errors
-                    if isinstance(item, Mapping)
-                )
+                tuple(dict(item) for item in raw_errors if isinstance(item, Mapping))
                 if isinstance(raw_errors, (list, tuple))
                 else ()
             )
@@ -286,11 +421,7 @@ class AssistantTurnCompletionMixin:
                 facts: list[dict[str, str]] = []
                 for item in incomplete:
                     kind = str(item.get("kind") or "")
-                    label = (
-                        "附件正文"
-                        if kind == "document_text"
-                        else "格式证据"
-                    )
+                    label = "附件正文" if kind == "document_text" else "格式证据"
                     facts.append(
                         {
                             "label": str(item.get("name") or label),
@@ -306,8 +437,7 @@ class AssistantTurnCompletionMixin:
                         {
                             "label": str(item.get("name") or "附件"),
                             "value": (
-                                "读取失败："
-                                + str(item.get("reason") or "unknown")
+                                "读取失败：" + str(item.get("reason") or "unknown")
                             ),
                         }
                     )
@@ -327,10 +457,7 @@ class AssistantTurnCompletionMixin:
                     )
                 )
         history_audit = result.provider_audit.get("history")
-        if (
-            isinstance(history_audit, Mapping)
-            and history_audit.get("truncated")
-        ):
+        if isinstance(history_audit, Mapping) and history_audit.get("truncated"):
             messages.append(
                 AssistantMessage.interaction(
                     role=ROLE_ASSISTANT,
@@ -366,7 +493,9 @@ class AssistantTurnCompletionMixin:
                 )
             )
         for request in result.confirmation_requests:
-            kind = str(request.get("kind") or request.get("type") or "question").casefold()
+            kind = str(
+                request.get("kind") or request.get("type") or "question"
+            ).casefold()
             is_permission = "permission" in kind or "approval" in kind
             actions = (
                 []
@@ -389,7 +518,10 @@ class AssistantTurnCompletionMixin:
                 AssistantMessage.interaction(
                     role=ROLE_ASSISTANT,
                     interaction_type="permission" if is_permission else "question",
-                    title=str(request.get("title") or ("需要权限确认" if is_permission else "需要补充信息")),
+                    title=str(
+                        request.get("title")
+                        or ("需要权限确认" if is_permission else "需要补充信息")
+                    ),
                     body=body,
                     payload={
                         "actions": actions,
@@ -400,21 +532,22 @@ class AssistantTurnCompletionMixin:
             )
         for action in result.proposed_actions:
             target = str(
-                action.get("path")
-                or action.get("url")
-                or action.get("href")
-                or ""
+                action.get("path") or action.get("url") or action.get("href") or ""
             ).strip()
             messages.append(
                 AssistantMessage.interaction(
                     role=ROLE_ASSISTANT,
                     interaction_type="info",
                     title=str(action.get("title") or action.get("label") or "建议操作"),
-                    body=str(action.get("description") or action.get("body") or "这是模型提出的后续建议。"),
+                    body=str(
+                        action.get("description")
+                        or action.get("body")
+                        or "这是模型提出的后续建议。"
+                    ),
                     payload={
                         "actions": (
                             [{"id": "runtime_open_reference", "label": "打开"}]
-                            if target
+                            if target and _provider_reference_is_openable(action)
                             else []
                         ),
                         "reference": dict(action),
@@ -431,12 +564,18 @@ class AssistantTurnCompletionMixin:
             messages.append(
                 AssistantMessage.artifact(
                     role=ROLE_ASSISTANT,
-                    title=str(artifact.get("title") or artifact.get("name") or "生成的产物"),
-                    body=str(artifact.get("description") or artifact.get("summary") or "产物已记录到当前对话。"),
+                    title=str(
+                        artifact.get("title") or artifact.get("name") or "生成的产物"
+                    ),
+                    body=str(
+                        artifact.get("description")
+                        or artifact.get("summary")
+                        or "产物已记录到当前对话。"
+                    ),
                     reference=dict(artifact),
                     actions=(
                         ({"id": "runtime_open_reference", "label": "打开产物"},)
-                        if target
+                        if target and _provider_reference_is_openable(artifact)
                         else ()
                     ),
                 )
@@ -463,3 +602,19 @@ class AssistantTurnCompletionMixin:
                 )
             )
         return tuple(messages)
+
+
+def _provider_reference_is_openable(reference: Mapping[str, object]) -> bool:
+    """Provider side channels may open remote links, never local shell targets."""
+
+    if any(
+        str(reference.get(key) or "").strip()
+        for key in ("path", "file_path", "local_path")
+    ):
+        return False
+    target = str(
+        reference.get("url") or reference.get("href") or reference.get("uri") or ""
+    ).strip()
+    return bool(
+        target and urlsplit(target).scheme.casefold() in {"http", "https", "mailto"}
+    )

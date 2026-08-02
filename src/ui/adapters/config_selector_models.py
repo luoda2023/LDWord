@@ -7,19 +7,22 @@ plans, templates, and masters.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
+from contextvars import ContextVar
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
-from typing import Iterable
 
 from src.config.library import (
     ConfigLibraryEntry,
     SceneLibraryDescriptor,
+    get_template_entry,
+    library_read_session,
     list_scene_descriptors,
     list_template_entries,
-    get_template_entry,
 )
 from src.config.master_library import MasterSpec, list_masters
-
+from src.config.material_package_library import list_material_package_entries
 
 SOURCE_LABELS: dict[str, str] = {
     "builtin": "内置",
@@ -27,6 +30,26 @@ SOURCE_LABELS: dict[str, str] = {
     "legacy": "旧版",
     "discovered": "用户",
 }
+
+_SELECTOR_PROJECTION_CACHE: ContextVar[dict[object, object] | None] = ContextVar(
+    "selector_projection_cache",
+    default=None,
+)
+
+
+def scoped_selector_projections(function: Callable):
+    """Share immutable selector reads only within one UI construction call."""
+
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        token = _SELECTOR_PROJECTION_CACHE.set({})
+        try:
+            with library_read_session():
+                return function(*args, **kwargs)
+        finally:
+            _SELECTOR_PROJECTION_CACHE.reset(token)
+
+    return wrapped
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +123,15 @@ def plan_selector_options(
 def plan_selector_descriptors(mode_id: str) -> tuple[SceneLibraryDescriptor, ...]:
     """Return the processing plans owned by one work mode."""
 
-    return tuple(list_scene_descriptors(mode_id=str(mode_id or "").strip()))
+    normalized_mode = str(mode_id or "").strip()
+    cache = _SELECTOR_PROJECTION_CACHE.get()
+    cache_key = ("plan_descriptors", normalized_mode)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+    result = tuple(list_scene_descriptors(mode_id=normalized_mode))
+    if cache is not None:
+        cache[cache_key] = result
+    return result
 
 
 def template_display_label(
@@ -109,10 +140,23 @@ def template_display_label(
     mode_id: str,
     fallback: str = "",
 ) -> str:
+    cache = _SELECTOR_PROJECTION_CACHE.get()
+    cache_key = (
+        "template_display_label",
+        str(mode_id or "").strip(),
+        str(template_id or "").strip(),
+        str(fallback or ""),
+    )
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
     entry = get_template_entry(template_id, mode_id=mode_id)
     if entry is not None:
-        return str(entry.display_name or entry.config_id).strip()
-    return str(fallback or template_id or "").strip()
+        result = str(entry.display_name or entry.config_id).strip()
+    else:
+        result = str(fallback or template_id or "").strip()
+    if cache is not None:
+        cache[cache_key] = result
+    return result
 
 
 def template_combo_label(
@@ -142,6 +186,16 @@ def template_selector_options(
         for template_id in list(template_ids or ())
         if str(template_id or "").strip()
     ]
+    cache = _SELECTOR_PROJECTION_CACHE.get()
+    cache_key = (
+        "template_options",
+        str(mode_id or "").strip(),
+        tuple(requested_ids),
+        tuple(sorted((str(key), str(value)) for key, value in fallbacks.items())),
+        bool(include_source_prefix),
+    )
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
     if not requested_ids:
         requested_ids = [
             str(entry.config_id or "").strip()
@@ -184,7 +238,10 @@ def template_selector_options(
                 disabled=bool(getattr(entry, "load_error", "")),
             )
         )
-    return tuple(options)
+    result = tuple(options)
+    if cache is not None:
+        cache[cache_key] = result
+    return result
 
 
 def master_display_label(master: MasterSpec) -> str:
@@ -231,48 +288,27 @@ def master_selector_options(
     )
 
 
-def material_package_sample_selector_options(
+def material_package_selector_options(
     mode_id: str,
     *,
-    source_type: str | None = None,
-    profile_id: str | None = None,
-    include_source_prefix: bool = True,
+    include_source_prefix: bool = False,
 ) -> tuple[SelectorOption, ...]:
-    """Return material package samples visible for one work mode."""
-
-    mode = str(mode_id or "").strip()
-    if mode != "official":
-        return ()
-
-    from src.shared.engine.official_document_material_package import (
-        list_official_document_material_package_samples,
-    )
-
-    target_profile = str(profile_id or "").strip()
-    if target_profile.startswith("official:"):
-        target_profile = target_profile.split(":", 1)[1].strip()
+    """Return every saved material package visible in one work mode."""
 
     return tuple(
         SelectorOption(
-            value=sample.qualified_id,
+            value=entry.qualified_id,
             label=_source_prefixed(
-                str(sample.label or sample.sample_id).strip(),
-                sample.source_type,
+                entry.display_name,
+                entry.source_type,
                 "资料包",
                 include_source_prefix=include_source_prefix,
             ),
-            tooltip=_path_or_error_tooltip(sample.path, sample.load_error),
-            source_type=sample.source_type,
-            disabled=not sample.is_available,
+            tooltip=_path_or_error_tooltip(entry.path, entry.load_error),
+            source_type=entry.source_type,
+            disabled=not entry.is_available,
         )
-        for sample in list_official_document_material_package_samples(
-            source_type=source_type,
-        )
-        if (
-            not target_profile
-            or sample.profile_id == target_profile
-            or not sample.is_available
-        )
+        for entry in list_material_package_entries(mode_id=mode_id)
     )
 
 
@@ -337,11 +373,11 @@ def _path_or_error_tooltip(path: Path | str | None, error: str) -> str:
 
 
 __all__ = [
-    "SelectorOption",
     "SOURCE_LABELS",
+    "SelectorOption",
     "master_display_label",
     "master_selector_options",
-    "material_package_sample_selector_options",
+    "material_package_selector_options",
     "plan_combo_label",
     "plan_display_label",
     "plan_selector_descriptors",

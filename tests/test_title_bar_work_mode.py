@@ -4,24 +4,24 @@ import pytest
 
 from src.config import library as config_library
 from src.config import material_package_library
+from src.application.materials import default_material_contract_id
+from src.domain.materials import (
+    MaterialIssue,
+    MaterialPackage,
+    MaterialRecord,
+    generate_package_id,
+    generate_record_id,
+)
 
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.qt_api import QMainWindow
 from src.ui.bridge import PanelBridge
 from src.ui import main_window as main_window_module
-from src.ui.main_window import MainWindow as _ProductMainWindow
+from src.ui.main_window import MainWindow
 from src.ui.panel_registry import PANEL_SPECS
 from src.ui.panels import scene_session_coordinator as scene_session_module
 from src.ui.panels.template_panel import TemplatePanel
 from src.ui.title_bar import TitleBar
-
-
-class MainWindow(_ProductMainWindow):
-    """Exercise source-only optional panels in the legacy integration suite."""
-
-    def __init__(self, *args, **kwargs):
-        kwargs.setdefault("include_optional_panels", True)
-        super().__init__(*args, **kwargs)
 
 
 @pytest.fixture(autouse=True)
@@ -41,11 +41,57 @@ def _load_assets_panel(window):
     return window._show_panel(assets_index, allow_async=False)
 
 
+@pytest.fixture
+def canonical_user_materials(tmp_path, monkeypatch):
+    root = tmp_path / "material_packages"
+    monkeypatch.setattr(
+        material_package_library,
+        "MATERIAL_PACKAGE_LIBRARY_DIR",
+        root,
+    )
+    identities = {}
+    repository = material_package_library.material_package_repository()
+    for mode_id in ("custom", "exam", "thesis", "official"):
+        package = MaterialPackage(
+            package_id=generate_package_id(),
+            display_name=f"{mode_id} 测试资料包",
+            work_mode_id=mode_id,
+            material_contract_id=default_material_contract_id(mode_id),
+            records=(
+                MaterialRecord(
+                    record_id=generate_record_id(),
+                    display_name="测试记录",
+                    lifecycle="active",
+                ),
+            ),
+        )
+        repository.create_user(package)
+        identities[mode_id] = package.package_id
+    monkeypatch.setattr(
+        material_package_library,
+        "DEFAULT_MATERIAL_PACKAGE_IDENTITIES",
+        identities,
+    )
+    return identities
+
+
 def _edit_material_field(panel, value: str = "Acme") -> None:
-    archive = panel.current_archive()
-    archive.profiles[0].fields["company_name"] = value
-    panel.set_archive(archive)
+    record_id = panel._current_record_id
+    result = panel._service().set_field(
+        panel._package,
+        owner_scope="record",
+        owner_id=record_id,
+        key="title",
+        value=value,
+        provenance="test",
+    )
+    assert panel._apply_result(result)
     assert panel.has_pending_material_changes() is True
+
+
+def _current_material_title(panel) -> str:
+    record = panel._package.get_record(panel._current_record_id)
+    return str(record.scope.fields.get("title", ""))
 
 
 def _saved_material_packages(tmp_path):
@@ -66,7 +112,9 @@ def _close_test_window(window, qapp) -> None:
     window.bridge.clear_scene_dirty()
     assets = window._loaded_panel_for_id("assets")
     if assets is not None and assets.has_pending_material_changes():
-        assets._capture_material_persistence_snapshot()
+        assets.prepare_pending_material_changes("discard")
+        assets.commit_prepared_material_changes()
+        assets.finalize_prepared_material_changes()
     window.close()
     qapp.processEvents()
 
@@ -83,6 +131,15 @@ def test_title_bar_projects_bridge_work_mode(qapp):
     assert combo.maximumSize().height() == 28
     assert combo.currentData() == "custom"
     assert combo.currentText() == "通用版"
+    assert [
+        (combo.itemText(index), combo.itemData(index))
+        for index in range(combo.count())
+    ] == [
+        ("通用版", "custom"),
+        ("试卷版", "exam"),
+        ("论文版", "thesis"),
+        ("公文版", "official"),
+    ]
 
     bridge.set_current_work_mode("exam")
 
@@ -419,6 +476,7 @@ def test_dirty_material_cancel_keeps_mode_editor_and_disk_unchanged(
     qapp,
     tmp_path,
     monkeypatch,
+    canonical_user_materials,
 ):
     window = MainWindow(enable_background_services=False)
     try:
@@ -436,14 +494,19 @@ def test_dirty_material_cancel_keeps_mode_editor_and_disk_unchanged(
 
         assert window.bridge.current_work_mode_id() == "custom"
         assert combo.currentData() == "custom"
-        assert panel.current_archive().profiles[0].fields["company_name"] == "Cancel Corp"
+        assert _current_material_title(panel) == "Cancel Corp"
         assert panel.has_pending_material_changes() is True
-        assert _saved_material_packages(tmp_path) == []
+        assert len(_saved_material_packages(tmp_path)) == 4
     finally:
         _close_test_window(window, qapp)
 
 
-def test_dirty_material_discard_switches_without_writing(qapp, tmp_path, monkeypatch):
+def test_dirty_material_discard_switches_without_writing(
+    qapp,
+    tmp_path,
+    monkeypatch,
+    canonical_user_materials,
+):
     window = MainWindow(enable_background_services=False)
     try:
         panel = _load_assets_panel(window)
@@ -461,8 +524,8 @@ def test_dirty_material_discard_switches_without_writing(qapp, tmp_path, monkeyp
         assert window.bridge.current_work_mode_id() == "official"
         assert combo.currentData() == "official"
         assert panel.has_pending_material_changes() is False
-        assert "company_name" not in panel.current_archive().profiles[0].fields
-        assert _saved_material_packages(tmp_path) == []
+        assert _current_material_title(panel) == ""
+        assert len(_saved_material_packages(tmp_path)) == 4
     finally:
         _close_test_window(window, qapp)
 
@@ -471,6 +534,7 @@ def test_dirty_material_save_writes_once_to_previous_mode_before_switch(
     qapp,
     tmp_path,
     monkeypatch,
+    canonical_user_materials,
 ):
     window = MainWindow(enable_background_services=False)
     prompted = []
@@ -492,11 +556,16 @@ def test_dirty_material_save_writes_once_to_previous_mode_before_switch(
         qapp.processEvents()
 
         saved = _saved_material_packages(tmp_path)
-        assert len(saved) == 1
-        assert "/custom/user/" in saved[0].as_posix()
-        payload = json.loads(saved[0].read_text(encoding="utf-8"))
-        assert payload["mode_id"] == "custom"
-        assert payload["profiles"][0]["fields"]["company_name"] == "Saved Corp"
+        assert len(saved) == 4
+        custom_path = next(
+            path
+            for path in saved
+            if f"/custom/user/{canonical_user_materials['custom']}/"
+            in path.as_posix()
+        )
+        payload = json.loads(custom_path.read_text(encoding="utf-8"))
+        assert payload["work_mode_id"] == "custom"
+        assert payload["records"][0]["scope"]["fields"]["title"] == "Saved Corp"
         assert prompted == ["official"]
         assert config_library.scene_user_target_path(
             "material scene saved", mode_id="custom"
@@ -511,6 +580,7 @@ def test_dirty_material_save_failure_never_changes_mode_or_writes(
     qapp,
     tmp_path,
     monkeypatch,
+    canonical_user_materials,
 ):
     window = MainWindow(enable_background_services=False)
     try:
@@ -523,7 +593,7 @@ def test_dirty_material_save_failure_never_changes_mode_or_writes(
             "_prompt_work_mode_dirty_switch_action",
             lambda _mode: main_window_module.WORK_MODE_DIRTY_SAVE,
         )
-        monkeypatch.setattr(panel, "save_pending_material_changes", lambda: False)
+        monkeypatch.setattr(panel, "_save", lambda: False)
         combo = window.title_bar.findChild(StyledComboBox, "titlebar_work_mode_combo")
 
         combo.setCurrentIndex(combo.findData("official"))
@@ -531,13 +601,13 @@ def test_dirty_material_save_failure_never_changes_mode_or_writes(
 
         assert window.bridge.current_work_mode_id() == "custom"
         assert combo.currentData() == "custom"
-        assert panel.current_archive().profiles[0].fields["company_name"] == "Failed Corp"
+        assert _current_material_title(panel) == "Failed Corp"
         assert panel.has_pending_material_changes() is True
         assert window.bridge.is_scene_dirty() is True
         assert not config_library.scene_user_target_path(
             "must not be saved", mode_id="custom"
         ).exists()
-        assert _saved_material_packages(tmp_path) == []
+        assert len(_saved_material_packages(tmp_path)) == 4
     finally:
         _close_test_window(window, qapp)
 
@@ -545,6 +615,7 @@ def test_dirty_material_save_failure_never_changes_mode_or_writes(
 def test_programmatic_work_mode_switch_never_implicitly_saves_materials(
     qapp,
     tmp_path,
+    canonical_user_materials,
 ):
     window = MainWindow(enable_background_services=False)
     try:
@@ -556,31 +627,38 @@ def test_programmatic_work_mode_switch_never_implicitly_saves_materials(
 
         assert window.bridge.current_work_mode_id() == "official"
         assert panel.has_pending_material_changes() is False
-        assert _saved_material_packages(tmp_path) == []
+        custom_path = next(
+            path
+            for path in _saved_material_packages(tmp_path)
+            if f"/custom/user/{canonical_user_materials['custom']}/"
+            in path.as_posix()
+        )
+        payload = json.loads(custom_path.read_text(encoding="utf-8"))
+        assert payload["records"][0]["scope"]["fields"].get("title", "") == ""
     finally:
         _close_test_window(window, qapp)
 
 
-def test_failed_mode_default_load_restores_complete_material_scope(qapp, monkeypatch):
-    from src.config.material_batch import MaterialBatchSelection
-    from src.config.material_context import MaterialExecutionContext
-
+def test_failed_mode_default_load_restores_complete_material_scope(
+    qapp,
+    monkeypatch,
+    canonical_user_materials,
+):
     window = MainWindow(enable_background_services=False)
     try:
         window._ensure_panel_loaded_for_id("scene")
-        context = MaterialExecutionContext(
-            mode_id="custom",
-            scene_id="custom",
-            entity_data={"sentinel": "kept"},
+        _load_assets_panel(window)
+        package_ref = window.bridge.current_material_package_ref()
+        selection = window.bridge.current_material_run_selection()
+        preview = window.bridge.current_material_preview_snapshot()
+        issues = (
+            MaterialIssue(
+                code="material.test.sentinel",
+                message="kept",
+                severity="warning",
+            ),
         )
-        selection = MaterialBatchSelection(
-            mode_id="custom",
-            scene_id="custom",
-            package_id="package-one",
-            profile_ids=["profile-one"],
-        )
-        window.bridge.set_current_material_context(context, emit_signal=False)
-        window.bridge.set_current_material_batch_selection(selection, emit_signal=False)
+        window.bridge.set_current_material_issues(issues, emit_signal=False)
         original_scene_id = window.bridge.current_scene_id()
         original_template_id = window.bridge.current_template_id()
 
@@ -595,8 +673,10 @@ def test_failed_mode_default_load_restores_complete_material_scope(qapp, monkeyp
         assert window.bridge.current_work_mode_id() == "custom"
         assert window.bridge.current_scene_id() == original_scene_id
         assert window.bridge.current_template_id() == original_template_id
-        assert window.bridge.current_material_context() == context
-        assert window.bridge.current_material_batch_selection() == selection
+        assert window.bridge.current_material_package_ref() == package_ref
+        assert window.bridge.current_material_run_selection() == selection
+        assert window.bridge.current_material_preview_snapshot() == preview
+        assert window.bridge.current_material_issues() == issues
         assert window.bridge.suspended_material_states() == ()
     finally:
         _close_test_window(window, qapp)
@@ -605,6 +685,7 @@ def test_failed_mode_default_load_restores_complete_material_scope(qapp, monkeyp
 def test_failed_mode_activation_rolls_back_prepared_material_discard(
     qapp,
     monkeypatch,
+    canonical_user_materials,
 ):
     window = MainWindow(enable_background_services=False)
     try:
@@ -626,9 +707,7 @@ def test_failed_mode_activation_rolls_back_prepared_material_discard(
         qapp.processEvents()
 
         assert window.bridge.current_work_mode_id() == "custom"
-        assert panel.current_archive().profiles[0].fields["company_name"] == (
-            "UNSAVED MATERIAL"
-        )
+        assert _current_material_title(panel) == "UNSAVED MATERIAL"
         assert panel.has_pending_material_changes() is True
     finally:
         _close_test_window(window, qapp)
@@ -658,6 +737,7 @@ def test_scene_save_failure_rolls_back_material_save_before_mode_switch(
     qapp,
     tmp_path,
     monkeypatch,
+    canonical_user_materials,
 ):
     window = MainWindow(enable_background_services=False)
     try:
@@ -686,13 +766,24 @@ def test_scene_save_failure_rolls_back_material_save_before_mode_switch(
         assert window.bridge.current_work_mode_id() == "custom"
         assert window.bridge.is_scene_dirty() is True
         assert panel.has_pending_material_changes() is True
-        assert panel.current_archive().profiles[0].fields["company_name"] == "Rollback Corp"
-        assert _saved_material_packages(tmp_path) == []
+        assert _current_material_title(panel) == "Rollback Corp"
+        custom_path = next(
+            path
+            for path in _saved_material_packages(tmp_path)
+            if f"/custom/user/{canonical_user_materials['custom']}/"
+            in path.as_posix()
+        )
+        payload = json.loads(custom_path.read_text(encoding="utf-8"))
+        assert payload["records"][0]["scope"]["fields"].get("title", "") == ""
     finally:
         _close_test_window(window, qapp)
 
 
-def test_material_close_discard_can_be_rolled_back(qapp, monkeypatch):
+def test_material_close_discard_can_be_rolled_back(
+    qapp,
+    monkeypatch,
+    canonical_user_materials,
+):
     window = MainWindow(enable_background_services=False)
     try:
         panel = _load_assets_panel(window)
@@ -709,10 +800,7 @@ def test_material_close_discard_can_be_rolled_back(qapp, monkeypatch):
 
         assert panel.rollback_close_pending_changes() is True
         assert panel.has_pending_material_changes() is True
-        assert (
-            panel.current_archive().profiles[0].fields["company_name"]
-            == "Close Rollback Corp"
-        )
+        assert _current_material_title(panel) == "Close Rollback Corp"
     finally:
         _close_test_window(window, qapp)
 

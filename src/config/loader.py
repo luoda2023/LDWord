@@ -13,13 +13,13 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from src.config.atomic_io import atomic_write_text
 from src.config.dataclass_utils import dict_to_dataclass
 from src.config.execution_config_integrity import delivery_preset_identity_issue
 from src.config.strict_payload_validation import (
     StrictPayloadValidationError,
     validate_complete_dataclass_payload,
 )
-from src.config.atomic_io import atomic_write_text
 
 if TYPE_CHECKING:
     from src.config.scene import SceneWorkspace
@@ -43,11 +43,27 @@ def load_template(path: str | Path) -> "TemplateConfig":
     )
 
 
+def load_compatible_user_template(path: str | Path) -> "TemplateConfig":
+    """Load a user-library template with the bounded V0.2 policy upgrade."""
+
+    from src.config.migration import upgrade_legacy_user_template_layout_policies
+    from src.config.template import TemplateConfig
+
+    data = upgrade_legacy_user_template_layout_policies(_load_file(path))
+    return _materialize_canonical_payload(
+        TemplateConfig,
+        data,
+        path=Path(path),
+        root_label="模板根对象",
+    )
+
+
 def load_scene(path: str | Path) -> "SceneWorkspace":
     """Load a complete current-version ``SceneWorkspace`` payload."""
     from src.config.scene import SceneWorkspace
+    from src.config.migration import upgrade_scene_formula_policy_ownership
 
-    data = _load_file(path)
+    data = upgrade_scene_formula_policy_ownership(_load_file(path))
     materialized = _materialize_canonical_payload(
         SceneWorkspace,
         data,
@@ -177,7 +193,13 @@ def _materialize_canonical_payload(
             root_label=root_label,
         )
     except StrictPayloadValidationError as exc:
-        raise ConfigLoadError(f"Invalid canonical config payload: {path}: {exc}") from exc
+        message = f"Invalid canonical config payload: {path}: {exc}"
+        if "存在未支持字段" in str(exc):
+            message += (
+                "。若配置文件来自较新的结构，或应用在代码更新前已经启动，"
+                "请先重启/升级应用再加载；不要用旧窗口覆盖保存该配置"
+            )
+        raise ConfigLoadError(message) from exc
 
     try:
         materialized = dict_to_dataclass(dataclass_type, data)

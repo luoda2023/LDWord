@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.application.materials import MaterialPreviewSnapshot
 from src.config.master_library import get_master
-from src.config.material_context import MaterialExecutionContext
 from src.config.official_document_profiles import (
     get_official_document_assembly_contract,
     get_official_document_profile,
@@ -193,24 +193,20 @@ def resolve_official_document_profile_id(
     explicit_profile_id: str,
     scene: SceneWorkspace | None,
 ) -> str:
+    # Document type belongs to the task/work-mode selection.  MaterialPackage
+    # V1 removed the former scene-level material-profile back-channel, so a
+    # scene must never choose a material record implicitly.
+    del scene
     explicit = str(explicit_profile_id or "").strip()
     if explicit and get_official_document_profile(explicit) is not None:
         return explicit
-    scene_profile = str(
-        getattr(scene, "default_material_profile_id", "") or ""
-    ).strip()
-    if ":" in scene_profile:
-        _prefix, scene_profile = scene_profile.split(":", 1)
-    scene_profile = scene_profile.strip()
-    if scene_profile and get_official_document_profile(scene_profile) is not None:
-        return scene_profile
     return "notice"
 
 
 def build_official_document_readiness_projection(
     *,
     profile_id: str,
-    material_context: MaterialExecutionContext,
+    preview_snapshot: MaterialPreviewSnapshot | None,
     plan_label: str,
     template_label: str,
 ) -> tuple[str, dict[str, str]]:
@@ -236,36 +232,48 @@ def build_official_document_readiness_projection(
         if bool(getattr(binding, "required", False))
         and str(getattr(binding, "field_key", "") or "").strip()
     ]
-    entity_data = material_context.resolved_entity_data()
-    field_scopes = dict(getattr(material_context, "field_scopes", {}) or {})
-    active_token_keys = {
-        key for key, scope in field_scopes.items() if scope in {"fixed", "floating"}
-    }
-    mapped_fields = [field for field in required_fields if field in active_token_keys]
-    unmapped_fields = [field for field in required_fields if field not in active_token_keys]
-    missing_fields = [
-        field
-        for field in mapped_fields
-        if not str(entity_data.get(field, "") or "").strip()
-    ]
-    floating_fields = [
-        key for key, scope in field_scopes.items() if scope == "floating"
-    ]
-    return _official_readiness_summary(unmapped_fields, missing_fields), {
+    preview = (
+        preview_snapshot
+        if isinstance(preview_snapshot, MaterialPreviewSnapshot)
+        else None
+    )
+    required_count = (
+        preview.required_field_count
+        if preview is not None
+        else len(required_fields)
+    )
+    filled_count = (
+        preview.filled_required_field_count
+        if preview is not None
+        else 0
+    )
+    missing_count = max(0, required_count - filled_count)
+    summary = (
+        "公文执行前检查：未选择资料包"
+        if preview is None
+        else (
+            f"公文执行前检查：缺 {missing_count} 个必填值"
+            if missing_count
+            else "公文执行前检查：必填字段已齐"
+        )
+    )
+    fields_text = (
+        "请在资料区选择并确认本次运行记录"
+        if preview is None
+        else (
+            f"当前契约需要 {required_count} 项 · "
+            f"已填写 {filled_count} 项 · "
+            f"资料记录 {preview.record_count} 条"
+        )
+    )
+    return summary, {
         "source": plan_label,
         "assembly": f"{profile_label} ({profile_id})",
         "delivery": _official_master_and_template_text(
             contract.master_id,
             template_label,
         ),
-        "fields": _official_readiness_fields_text(
-            required_fields=required_fields,
-            mapped_fields=mapped_fields,
-            unmapped_fields=unmapped_fields,
-            missing_fields=missing_fields,
-            floating_fields=floating_fields,
-            entity_data=entity_data,
-        ),
+        "fields": fields_text,
     }
 
 

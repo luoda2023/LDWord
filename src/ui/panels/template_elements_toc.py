@@ -578,6 +578,7 @@ class TocDetailSection:
                 self._toc_role_items.pop(key, None)
                 self._toc_role_widgets.pop(key, None)
                 if widget is not None:
+                    widget.hide()
                     widget.setParent(None)
                     widget.deleteLater()
 

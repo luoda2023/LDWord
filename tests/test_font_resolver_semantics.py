@@ -19,6 +19,17 @@ def test_resolve_font_returns_actual_available_cn_alias_family(monkeypatch):
     assert font_resolver.resolve_font("宋体", lang="cn") == "SimSun"
 
 
+def test_small_title_song_prefers_open_source_family(monkeypatch):
+    monkeypatch.setattr(font_resolver, "qt_font_families", lambda: ())
+    monkeypatch.setattr(
+        font_resolver,
+        "list_system_fonts",
+        lambda: {"Noto Serif SC", "SimSun", "FZXiaoBiaoSong-B05"},
+    )
+
+    assert font_resolver.resolve_font("小标宋", lang="cn") == "Noto Serif SC"
+
+
 def test_resolve_font_falls_back_to_available_english_family(monkeypatch):
     monkeypatch.setattr(font_resolver, "qt_font_families", lambda: ())
     monkeypatch.setattr(font_resolver, "list_system_fonts", lambda: {"Arial"})

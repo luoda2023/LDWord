@@ -279,14 +279,17 @@ def test_scene_activation_failure_restores_model_overview_selector_and_dirty(
                 fail_after_bridge_publication,
             )
 
-        assert panel._activate_scene(
-            target,
-            scene_id="exam_quiz",
-            path=str(descriptor.path),
-            source="library",
-            source_type=descriptor.source_type,
-            dirty=False,
-        ) is False
+        assert (
+            panel._activate_scene(
+                target,
+                scene_id="exam_quiz",
+                path=str(descriptor.path),
+                source="library",
+                source_type=descriptor.source_type,
+                dirty=False,
+            )
+            is False
+        )
 
         assert bridge.current_scene_id() == old_scene_id
         assert bridge.current_scene_path() == old_path
@@ -295,7 +298,7 @@ def test_scene_activation_failure_restores_model_overview_selector_and_dirty(
         assert bridge.is_scene_dirty() is True
         assert panel._current_scene is bridge.current_scene()
         assert panel._current_scene.name == "SCENE_DRAFT_SENTINEL"
-        assert panel._content._current_scene.name == "SCENE_DRAFT_SENTINEL"
+        assert panel._content._scene.name == "SCENE_DRAFT_SENTINEL"
         assert panel._overview._combo.currentData() == old_scene_id
     finally:
         bridge.clear_scene_dirty()
@@ -315,9 +318,7 @@ def test_scene_save_projection_failure_restores_file_bridge_and_dirty_draft(
     bridge.commit_pending_work_mode_transition()
     try:
         scene_id = "projection-user-scene"
-        baseline_scene = copy.deepcopy(
-            load_scene_from_library("exam", mode_id="exam")
-        )
+        baseline_scene = copy.deepcopy(load_scene_from_library("exam", mode_id="exam"))
         baseline_scene.scene_id = scene_id
         baseline_scene.name = "PROJECTION_USER_BASELINE"
         baseline_entry = config_library.save_scene_to_library(
@@ -325,14 +326,17 @@ def test_scene_save_projection_failure_restores_file_bridge_and_dirty_draft(
             scene_id=scene_id,
             mode_id="exam",
         )
-        assert panel._activate_scene(
-            load_scene_from_library(scene_id, mode_id="exam"),
-            scene_id=scene_id,
-            path=str(baseline_entry.path),
-            source="library",
-            source_type="user",
-            dirty=False,
-        ) is True
+        assert (
+            panel._activate_scene(
+                load_scene_from_library(scene_id, mode_id="exam"),
+                scene_id=scene_id,
+                path=str(baseline_entry.path),
+                source="library",
+                source_type="user",
+                dirty=False,
+            )
+            is True
+        )
         target = baseline_entry.path
         original_bytes = target.read_bytes()
 
@@ -360,11 +364,14 @@ def test_scene_save_projection_failure_restores_file_bridge_and_dirty_draft(
             assert target.read_bytes() != original_bytes
             return entry
 
-        assert panel.prepare_pending_scene_changes(
-            "save",
-            save_callable=write_then_return,
-            mode_id="exam",
-        ) is True
+        assert (
+            panel.prepare_pending_scene_changes(
+                "save",
+                save_callable=write_then_return,
+                mode_id="exam",
+            )
+            is True
+        )
 
         original_apply = panel._apply_scene
         injected = {"raised": False}
@@ -407,9 +414,7 @@ def test_scene_save_revision_conflict_preserves_external_writer(
     bridge.commit_pending_work_mode_transition()
     try:
         scene_id = "revision-user-scene"
-        baseline_scene = copy.deepcopy(
-            load_scene_from_library("exam", mode_id="exam")
-        )
+        baseline_scene = copy.deepcopy(load_scene_from_library("exam", mode_id="exam"))
         baseline_scene.scene_id = scene_id
         baseline_scene.name = "REVISION_USER_BASELINE"
         baseline_entry = config_library.save_scene_to_library(
@@ -417,14 +422,17 @@ def test_scene_save_revision_conflict_preserves_external_writer(
             scene_id=scene_id,
             mode_id="exam",
         )
-        assert panel._activate_scene(
-            load_scene_from_library(scene_id, mode_id="exam"),
-            scene_id=scene_id,
-            path=str(baseline_entry.path),
-            source="library",
-            source_type="user",
-            dirty=False,
-        ) is True
+        assert (
+            panel._activate_scene(
+                load_scene_from_library(scene_id, mode_id="exam"),
+                scene_id=scene_id,
+                path=str(baseline_entry.path),
+                source="library",
+                source_type="user",
+                dirty=False,
+            )
+            is True
+        )
         bridge.set_scene_dirty(True)
         target = baseline_entry.path
         called = {"save": False}
@@ -433,11 +441,14 @@ def test_scene_save_revision_conflict_preserves_external_writer(
             called["save"] = True
             raise AssertionError("revision conflict must stop before publication")
 
-        assert panel.prepare_pending_scene_changes(
-            "save",
-            save_callable=unexpected_save,
-            mode_id="exam",
-        ) is True
+        assert (
+            panel.prepare_pending_scene_changes(
+                "save",
+                save_callable=unexpected_save,
+                mode_id="exam",
+            )
+            is True
+        )
         target.write_bytes(b"EXTERNAL_WRITER_REVISION")
 
         assert panel.commit_prepared_scene_changes() is False
@@ -542,11 +553,14 @@ def test_scene_save_rejects_and_rolls_back_unprepared_returned_target(
                 mode_id="exam",
             )
 
-        assert panel.prepare_pending_scene_changes(
-            "save",
-            save_callable=save_to_returned_target,
-            mode_id="exam",
-        ) is True
+        assert (
+            panel.prepare_pending_scene_changes(
+                "save",
+                save_callable=save_to_returned_target,
+                mode_id="exam",
+            )
+            is True
+        )
         assert panel.commit_prepared_scene_changes() is False
 
         assert returned_target.read_bytes() == baseline_bytes

@@ -3,70 +3,54 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from dataclasses import replace
 from pathlib import Path
-from uuid import uuid4
 
-from src.assistant.adapters.content_generation_adapter import (
-    AssistantContentGenerationAdapter,
-    generated_draft_source_ref,
-    is_generated_draft,
-)
-from src.assistant.adapters.production_adapter import public_execution_result
-from src.assistant.application.content_generation_service import (
-    AssistantContentGenerationService,
-    ContentGenerationRequest,
-)
+from src.application.materials import ExecutionMaterialSnapshot
 from src.assistant.application.document_job_controller import DocumentJobController
-from src.assistant.application.generated_draft_binding import bind_generated_draft
-from src.assistant.application.plan_presentation import present_document_plan
+from src.assistant.application.preflight_presentation import (
+    active_preflight_card_presentation,
+)
 from src.assistant.application.session_coordinator import AssistantSessionCoordinator
 from src.assistant.application.session_recovery import AssistantSessionRecovery
-from src.assistant.contracts.document_plan import DocumentPlan
-from src.assistant.contracts.execution import PreflightReceipt
-from src.assistant.contracts.material_snapshot import MaterialContextSnapshot
-from src.assistant.contracts.permissions import DisclosureGrant
 from src.assistant.contracts.messages import (
     BLOCK_ARTIFACT,
     BLOCK_INTERACTION,
     BLOCK_TEXT,
     ROLE_ASSISTANT,
     ROLE_USER,
-    AssistantMessage,
-)
-from src.assistant.contracts.runtime import (
-    TURN_COMPLETED,
-    TURN_WAITING_DATA_PERMISSION,
 )
 from src.assistant.runtime.cancellation import AssistantCancellationToken
-from src.assistant.runtime.providers.router import ProviderResolutionError, ProviderRouter
-from src.assistant.runtime.providers.profiles import default_mock_profile
-from src.assistant.runtime.turn_runner import AssistantTurnRunner
-from src.assistant.runtime.turn_runner import (
-    attachment_fingerprints,
-    history_fingerprint,
+from src.assistant.runtime.providers.router import (
+    ProviderRouter,
 )
-from src.assistant.storage.models import AssistantSession
+from src.assistant.runtime.turn_runner import (
+    AssistantTurnRunner,
+)
 from src.assistant.storage.execution_journal import ExecutionJournalStore
-from src.assistant.ui.design_tokens import TOKENS
+from src.assistant.storage.models import AssistantSession
+from src.assistant.ui.card_action_mixin import AssistantCardActionMixin
 from src.assistant.ui.conversation_presentation import (
+    build_interaction_action_scope,
     interaction_is_active,
-    project_output_references,
 )
 from src.assistant.ui.conversation_view import (
     AssistantConversationMessage,
     AssistantConversationSurface,
 )
 from src.assistant.ui.creative_home import AssistantCreativeHome, AssistantHeroComposer
-from src.assistant.ui.card_action_mixin import AssistantCardActionMixin
+from src.assistant.ui.design_tokens import TOKENS
+from src.assistant.ui.document_workflow_mixin import AssistantDocumentWorkflowMixin
 from src.assistant.ui.interaction_card import AssistantInteractionCard
-from src.assistant.ui.provider_presentation import (
-    provider_connection_badge,
-)
-from src.assistant.ui.provider_selection import ProviderSelectionCoordinator
-from src.assistant.ui.session_sidebar import AssistantSessionSidebar
 from src.assistant.ui.panel_theme_mixin import AssistantPanelThemeMixin
+from src.assistant.ui.provider_selection import ProviderSelectionCoordinator
+from src.assistant.ui.session_sidebar import (
+    SESSION_ICON_OPTIONS,
+    AssistantSessionSidebar,
+    session_row_presentation,
+)
 from src.assistant.ui.turn_flow_mixin import AssistantTurnFlowMixin
+from src.assistant.ui.viewport_mixin import AssistantViewportMixin
 from src.assistant.ui.workers import (
     AssistantTurnWorker,
     ContentGenerationWorker,
@@ -78,36 +62,45 @@ from src.qt_api import (
     QDesktopServices,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
-    QLineEdit,
     QLayout,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSize,
     QSizePolicy,
     QStackedWidget,
+    Qt,
     QTimer,
     QToolButton,
     QUrl,
     QVBoxLayout,
     QWidget,
-    Qt,
 )
 from src.shared.ui.button_style import apply_button_variant
 from src.shared.ui.context_menu import ContextMenu
+from src.shared.ui.dialogs import (
+    DialogAction,
+    decision,
+    input_text,
+)
+from src.shared.ui.dialogs import (
+    info as show_info,
+)
+from src.shared.ui.dialogs import (
+    warning as show_warning,
+)
 from src.shared.ui.drawer import Drawer
-from src.shared.ui.theme import bind_theme
-from src.config.material_context import MaterialExecutionContext
-from src.ui.base_panel import BasePanel
 from src.shared.ui.icons.catalog import get_icon
+from src.shared.ui.theme import bind_theme
+from src.ui.base_panel import BasePanel
 
 
 class AssistantPanel(
+    AssistantDocumentWorkflowMixin,
     AssistantCardActionMixin,
     AssistantTurnFlowMixin,
+    AssistantViewportMixin,
     AssistantPanelThemeMixin,
     BasePanel,
 ):
@@ -145,9 +138,13 @@ class AssistantPanel(
         self._active_cancellation: AssistantCancellationToken | None = None
         self._turn_worker: AssistantTurnWorker | None = None
         self._turn_workers: dict[str, AssistantTurnWorker] = {}
-        self._turn_previews: dict[str, dict[str, str]] = {}
-        self._turn_material_snapshots: dict[str, MaterialExecutionContext] = {}
-        self._plan_material_snapshots: dict[str, MaterialExecutionContext] = {}
+        self._turn_previews: dict[str, dict[str, object]] = {}
+        self._turn_material_snapshots: dict[
+            str, ExecutionMaterialSnapshot | None
+        ] = {}
+        self._plan_material_snapshots: dict[
+            str, ExecutionMaterialSnapshot | None
+        ] = {}
         self._content_worker: ContentGenerationWorker | None = None
         self._preflight_worker: PreflightWorker | None = None
         self._execution_worker: DocumentExecutionWorker | None = None
@@ -163,7 +160,24 @@ class AssistantPanel(
         self._turn_preview_status = ""
         self._turn_preview_widget: AssistantConversationMessage | None = None
         self._rendered_session_id = ""
+        self._follow_latest_layout_pending = False
         super().__init__(bridge, parent)
+        self._pending_draft_session_id = ""
+        self._draft_save_timer = QTimer(self)
+        self._draft_save_timer.setSingleShot(True)
+        self._draft_save_timer.setInterval(350)
+        self._draft_save_timer.timeout.connect(self._flush_active_draft)
+        self._turn_preview_flush_timer = QTimer(self)
+        self._turn_preview_flush_timer.setSingleShot(True)
+        self._turn_preview_flush_timer.setInterval(16)
+        self._turn_preview_flush_timer.timeout.connect(self._flush_active_turn_preview)
+        self._follow_latest_settle_timer = QTimer(self)
+        self._follow_latest_settle_timer.setSingleShot(True)
+        self._follow_latest_settle_timer.setInterval(80)
+        self._follow_latest_settle_timer.timeout.connect(
+            self._finish_follow_latest_layout_settle
+        )
+        self._scroll_update_pending = False
 
     def _setup_ui(self) -> None:
         self.setObjectName("AssistantPanel")
@@ -213,6 +227,19 @@ class AssistantPanel(
             self._show_session_menu_for_session
         )
         self._session_sidebar.session_pin_requested.connect(self._set_session_pinned)
+        self._session_sidebar.session_rename_requested.connect(self._rename_session)
+        self._session_sidebar.session_delete_requested.connect(
+            self._confirm_delete_session
+        )
+        self._session_sidebar.session_icon_requested.connect(
+            self._show_session_icon_menu
+        )
+        self._session_sidebar.session_order_requested.connect(
+            self._reorder_session_section
+        )
+        self._session_sidebar.session_move_requested.connect(
+            self._move_session_to_section
+        )
         self._empty_input.set_submission_handler(
             lambda text: self._send_message(text, source=self._empty_input)
         )
@@ -222,11 +249,11 @@ class AssistantPanel(
         self._empty_input.text_changed.connect(self._save_active_draft)
         self._composer.text_changed.connect(self._save_active_draft)
         self._creative_home.provider_changed.connect(self._on_home_provider_selected)
-        self._empty_input.document_path_changed.connect(
-            self._on_composer_document_selected
+        self._empty_input.document_paths_changed.connect(
+            self._on_composer_documents_selected
         )
-        self._composer.document_path_changed.connect(
-            self._on_composer_document_selected
+        self._composer.document_paths_changed.connect(
+            self._on_composer_documents_selected
         )
         self.bridge.document_loaded.connect(self._on_workspace_document_loaded)
         self._stop_button.clicked.connect(self.cancel_active_turn)
@@ -247,7 +274,9 @@ class AssistantPanel(
             "scene_changed",
             "template_changed",
             "work_mode_changed",
-            "material_context_changed",
+            "material_package_ref_changed",
+            "material_run_selection_changed",
+            "material_preview_snapshot_changed",
         ):
             signal = getattr(self.bridge, signal_name, None)
             if signal is not None:
@@ -259,7 +288,7 @@ class AssistantPanel(
     def _build_session_rail(self) -> QFrame:
         sidebar = AssistantSessionSidebar(self)
         self._session_sidebar = sidebar
-        self._new_session_button = sidebar._new_button
+        self._new_session_button = sidebar.new_session_button
         # Compatibility alias for callers that previously opened a concrete
         # QListWidget item. New code must use AssistantSessionSidebar.
         self._session_list = sidebar.recent_list
@@ -342,6 +371,10 @@ class AssistantPanel(
         self._message_scroll.setWidgetResizable(True)
         self._message_scroll.setFrameShape(QFrame.NoFrame)
         self._message_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Reserve the vertical gutter even before content overflows. Otherwise
+        # the viewport becomes narrower as soon as a new card needs scrolling,
+        # which makes every centered card jump horizontally by half the gutter.
+        self._message_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self._message_scroll.viewport().setObjectName("assistant_message_viewport")
         self._message_scroll.viewport().setAttribute(Qt.WA_StyledBackground, True)
         self._message_host = QWidget(self._message_scroll)
@@ -355,25 +388,20 @@ class AssistantPanel(
             self._sync_jump_to_latest
         )
         self._message_scroll.verticalScrollBar().rangeChanged.connect(
-            lambda _minimum, _maximum: self._sync_jump_to_latest(
-                self._message_scroll.verticalScrollBar().value()
-            )
+            self._on_message_scroll_range_changed
         )
         layout.addWidget(self._message_scroll, 1)
 
-        self._jump_latest_button = QToolButton(page)
+        # This control overlays the viewport instead of occupying a layout row.
+        # Showing it must not shrink the message viewport and change the range
+        # that caused it to appear.
+        self._jump_latest_button = QToolButton(self._message_scroll.viewport())
         self._jump_latest_button.setObjectName("assistant_jump_latest")
         self._jump_latest_button.setText("回到最新消息")
         self._jump_latest_button.setIcon(get_icon("chevron-down", 14))
         self._jump_latest_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self._jump_latest_button.setCursor(Qt.PointingHandCursor)
         self._jump_latest_button.hide()
-        jump_row = QHBoxLayout()
-        jump_row.setContentsMargins(0, 0, 0, 4)
-        jump_row.addStretch(1)
-        jump_row.addWidget(self._jump_latest_button)
-        jump_row.addStretch(1)
-        layout.addLayout(jump_row)
 
         composer_host = QWidget(page)
         composer_host.setObjectName("assistant_composer_host")
@@ -444,26 +472,66 @@ class AssistantPanel(
         return label
 
     def new_session(self) -> None:
-        profile_id, model_id = self._provider_selection.selected_identity()
-        session = self._coordinator.create_session(
-            provider_profile_id=profile_id,
-            model_id=model_id,
-        )
-        initial_refs = self._context_refs_for_path(
-            str(self.bridge.current_document_path() or "")
-        )
-        if initial_refs:
-            session = self._coordinator.update_state(
-                session,
-                context_refs=initial_refs,
+        if not self._flush_active_draft():
+            return
+        if self._active_session is not None and self._session_is_pristine(
+            self._active_session
+        ):
+            self._session_sidebar.select_session(
+                self._active_session.session_id
             )
+            self._render_active_session()
+            self._sync_composer_busy_state()
+            self._empty_input.focus_input()
+            self._close_session_drawer_after_navigation()
+            return
+        profile_id, model_id = self._provider_selection.selected_identity()
+        session = None
+        try:
+            session = self._coordinator.create_session(
+                provider_profile_id=profile_id,
+                model_id=model_id,
+            )
+            initial_refs = self._context_refs_for_path(
+                str(self.bridge.current_document_path() or "")
+            )
+            if initial_refs:
+                session = self._coordinator.update_state(
+                    session,
+                    context_refs=initial_refs,
+                    touch_activity=False,
+                )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            if session is not None:
+                try:
+                    self._coordinator.delete_session(session.session_id)
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    pass
+            self._show_session_navigation_error(
+                "无法新建对话",
+                exc,
+            )
+            return
         self._active_session = session
+        self._clear_session_navigation_error()
         self._refresh_session_list(select_session_id=session.session_id)
         self._render_active_session()
         self._load_draft_text("")
         self._sync_session_document_path()
         self._sync_composer_busy_state()
         self._empty_input.focus_input()
+        self._close_session_drawer_after_navigation()
+
+    def _session_is_pristine(self, session: AssistantSession) -> bool:
+        return (
+            not session.messages
+            and not session.draft_text
+            and not session.active_plan
+            and not session.pending_continuation
+            and not session.document_job
+            and not session.context_refs
+            and session.session_id not in self._turn_workers
+        )
 
     def _open_session_item(self, item: QListWidgetItem) -> None:
         session_id = str(item.data(Qt.UserRole) or "")
@@ -471,6 +539,18 @@ class AssistantPanel(
 
     def _open_session_by_id(self, session_id: str) -> None:
         if not str(session_id or ""):
+            return
+        if (
+            self._active_session is not None
+            and self._active_session.session_id == session_id
+        ):
+            self._active_session = self._mark_session_read(
+                self._active_session
+            )
+            self._refresh_session_list(select_session_id=session_id)
+            self._close_session_drawer_after_navigation()
+            return
+        if not self._flush_active_draft():
             return
         corrupt_summary = next(
             (
@@ -486,45 +566,167 @@ class AssistantPanel(
             )
             return
         try:
-            self._active_session = self._coordinator.load_session(session_id)
-        except (OSError, ValueError, TypeError):
+            loaded_session = self._coordinator.load_session(session_id)
+        except (OSError, ValueError, TypeError) as exc:
+            self._show_session_navigation_error(
+                "无法打开该对话",
+                exc,
+            )
             return
-        self._session_sidebar.select_session(session_id)
+        self._active_session = self._mark_session_read(loaded_session)
+        self._clear_session_navigation_error()
+        self._refresh_session_list(select_session_id=session_id)
         self._provider_selection.select(self._active_session.provider_profile_id)
         self._render_active_session()
         self._load_draft_text(self._active_session.draft_text)
         self._sync_session_document_path()
         self._sync_composer_busy_state()
+        self._close_session_drawer_after_navigation()
+
+    def _show_session_navigation_error(
+        self,
+        message: str,
+        exc: BaseException,
+    ) -> None:
+        reason = f"{message}。错误类型：{type(exc).__name__}"
+        self._composer.set_submission_error(reason)
+        self._empty_input.set_submission_error(reason)
+
+    def _clear_session_navigation_error(self) -> None:
+        self._composer.set_submission_error("")
+        self._empty_input.set_submission_error("")
+
+    def _session_snapshot_for_mutation(
+        self,
+        session_id: str,
+    ) -> AssistantSession:
+        if (
+            self._active_session is not None
+            and self._active_session.session_id == session_id
+        ):
+            return self._active_session
+        return self._coordinator.load_session(session_id)
+
+    def _adopt_persisted_session_snapshot(
+        self,
+        session: AssistantSession,
+    ) -> None:
+        if (
+            self._active_session is None
+            or self._active_session.session_id != session.session_id
+        ):
+            return
+        self._active_session = session
+        if self._pending_draft_session_id == session.session_id:
+            self._draft_save_timer.stop()
+            self._pending_draft_session_id = ""
+
+    def _mark_session_read(
+        self,
+        session: AssistantSession,
+    ) -> AssistantSession:
+        if not session.unread:
+            return session
+        try:
+            return self._coordinator.set_unread(session, False)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self._show_session_state_persistence_error(
+                "已读状态",
+                exc,
+            )
+            return session
+
+    def _project_completion_read_state(
+        self,
+        session: AssistantSession,
+    ) -> AssistantSession:
+        is_active = (
+            self._active_session is not None
+            and self._active_session.session_id == session.session_id
+        )
+        target_unread = not is_active
+        if session.unread == target_unread:
+            return session
+        try:
+            return self._coordinator.set_unread(
+                session,
+                target_unread,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self._show_session_state_persistence_error(
+                "未读状态",
+                exc,
+            )
+            return session
+
+    def _show_session_state_persistence_error(
+        self,
+        state_name: str,
+        exc: BaseException,
+    ) -> None:
+        show_warning(
+            "会话状态未保存",
+            (
+                f"{state_name}没有写入本地存储，请检查磁盘后重试。"
+                f"\n错误类型：{type(exc).__name__}"
+            ),
+            parent=self,
+        )
 
     def _show_corrupt_session_recovery(self, recovery_path: str) -> None:
         path = Path(str(recovery_path or "")).expanduser()
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle("会话文件需要恢复")
-        box.setText("该会话文件无法解析，应用没有删除或覆盖原文件。")
-        box.setInformativeText(
+        action = decision(
+            "会话文件需要恢复",
+            "该会话文件无法解析，应用没有删除或覆盖原文件。\n"
             f"原文件：{path}\n"
-            "可以打开所在文件夹，备份或交给维护人员修复。"
+            "可以打开所在文件夹，备份或交给维护人员修复。",
+            actions=(
+                DialogAction("close", "关闭", default=True, escape=True),
+                DialogAction("open", "打开所在文件夹", variant="primary"),
+            ),
+            icon_style="warning",
+            parent=self,
         )
-        open_button = box.addButton(
-            "打开所在文件夹",
-            QMessageBox.ButtonRole.ActionRole,
+        if action == "open":
+            self._open_corrupt_session_folder(str(path))
+
+    @staticmethod
+    def _open_corrupt_session_folder(recovery_path: str) -> None:
+        path = Path(str(recovery_path or "")).expanduser()
+        QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(path.parent.resolve(strict=False)))
         )
-        box.addButton(QMessageBox.StandardButton.Close)
-        box.exec()
-        if box.clickedButton() is open_button:
-            QDesktopServices.openUrl(
-                QUrl.fromLocalFile(str(path.parent.resolve(strict=False)))
-            )
 
     def _save_active_draft(self, text: str) -> None:
         if self._loading_draft or self._active_session is None:
             return
+        normalized = str(text or "")
+        if normalized == self._active_session.draft_text:
+            if (
+                not normalized
+                and self._pending_draft_session_id
+                == self._active_session.session_id
+            ):
+                self._draft_save_timer.stop()
+                self._pending_draft_session_id = ""
+            return
+        self._active_session = self._coordinator.stage_draft(
+            self._active_session,
+            normalized,
+        )
+        self._pending_draft_session_id = self._active_session.session_id
+        self._draft_save_timer.start()
+
+    def _flush_active_draft(self) -> bool:
+        self._draft_save_timer.stop()
+        pending_session_id = self._pending_draft_session_id
+        if not pending_session_id:
+            return True
+        session = self._active_session
+        if session is None or session.session_id != pending_session_id:
+            return False
         try:
-            self._active_session = self._coordinator.update_draft(
-                self._active_session,
-                text,
-            )
+            self._active_session = self._coordinator.persist(session)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             reason = (
                 "草稿暂未保存到本地；输入内容仍保留在当前窗口。"
@@ -532,28 +734,29 @@ class AssistantPanel(
             )
             self._composer.set_submission_error(reason)
             self._empty_input.set_submission_error(reason)
-            return
+            return False
+        self._pending_draft_session_id = ""
         self._composer.set_submission_error("")
         self._empty_input.set_submission_error("")
-        source = self.sender()
-        peer = self._composer if source is self._empty_input else self._empty_input
-        if peer.get_text() != text:
-            self._loading_draft = True
-            try:
-                peer.set_text(text)
-            finally:
-                self._loading_draft = False
+        return True
 
     def _load_draft_text(self, text: str) -> None:
         self._loading_draft = True
         try:
-            self._empty_input.set_text(text)
-            self._composer.set_text(text)
+            if self._empty_input.get_text() != text:
+                self._empty_input.set_text(text)
+            if self._composer.get_text() != text:
+                self._composer.set_text(text)
         finally:
             self._loading_draft = False
 
     def _on_composer_document_selected(self, path: str) -> None:
-        """Own assistant attachments by session instead of the global bridge."""
+        """Compatibility adapter for callers that still select one material."""
+
+        self._on_composer_documents_selected((str(path or ""),) if path else ())
+
+    def _on_composer_documents_selected(self, paths: object) -> None:
+        """Own the complete composer material set by assistant session."""
 
         self._composer.set_submission_gate("")
         self._empty_input.set_submission_gate("")
@@ -563,10 +766,13 @@ class AssistantPanel(
                 provider_profile_id=profile_id,
                 model_id=model_id,
             )
-        refs = self._context_refs_for_path(path)
+        refs = self._context_refs_for_paths(
+            tuple(paths) if isinstance(paths, (tuple, list)) else ()
+        )
         self._active_session = self._coordinator.update_state(
             self._active_session,
             context_refs=refs,
+            touch_activity=False,
         )
         self._sync_session_document_path()
         self._refresh_session_list(
@@ -581,18 +787,19 @@ class AssistantPanel(
         if session is not None and (session.context_refs or session.messages):
             return
         normalized = str(path or "").strip()
-        self._empty_input.set_document_path(normalized)
-        self._composer.set_document_path(normalized)
-        self._creative_home._sync_action_availability()
+        selected_paths = (normalized,) if normalized else ()
+        self._empty_input.set_document_paths(selected_paths)
+        self._composer.set_document_paths(selected_paths)
         if session is not None:
             self._active_session = self._coordinator.update_state(
                 session,
                 context_refs=self._context_refs_for_path(normalized),
+                touch_activity=False,
             )
         self._refresh_context()
 
     def _sync_session_document_path(self) -> None:
-        path = ""
+        paths: list[str] = []
         if self._active_session is not None:
             for reference in self._active_session.context_refs:
                 path = str(
@@ -602,10 +809,10 @@ class AssistantPanel(
                     or ""
                 ).strip()
                 if path:
-                    break
-        self._empty_input.set_document_path(path)
-        self._composer.set_document_path(path)
-        self._creative_home._sync_action_availability()
+                    paths.append(path)
+        selected_paths = tuple(paths)
+        self._empty_input.set_document_paths(selected_paths)
+        self._composer.set_document_paths(selected_paths)
 
     def _show_session_menu(self, position) -> None:
         item = self._session_list.itemAt(position)
@@ -620,9 +827,39 @@ class AssistantPanel(
     def _show_session_menu_for_session(self, session_id: str, global_position) -> None:
         if not session_id:
             return
+        corrupt_summary = next(
+            (
+                summary
+                for summary in self._coordinator.list_sessions()
+                if summary.session_id == session_id and summary.corrupt
+            ),
+            None,
+        )
+        if corrupt_summary is not None:
+            menu = ContextMenu(parent=self)
+            menu.add_action(
+                "打开所在文件夹",
+                callback=lambda: self._open_corrupt_session_folder(
+                    corrupt_summary.recovery_path
+                ),
+            )
+            menu.add_separator()
+            menu.add_action(
+                "从列表移除",
+                callback=lambda: self._session_sidebar.request_delete_confirmation(
+                    session_id
+                ),
+            )
+            menu.exec_(global_position)
+            return
         try:
             session = self._coordinator.load_session(session_id)
         except (OSError, ValueError, TypeError):
+            show_warning(
+                "无法打开菜单",
+                "对话无法读取，可刷新列表后重试。",
+                parent=self,
+            )
             return
         menu = ContextMenu(parent=self)
         menu.add_action(
@@ -630,8 +867,21 @@ class AssistantPanel(
             callback=lambda: self._set_session_pinned(session_id, not session.pinned),
         )
         menu.add_action("重命名", callback=lambda: self._prompt_rename_session(session_id))
+        icon_menu = ContextMenu(parent=menu)
+        icon_menu.setTitle("更换图标")
+        self._populate_session_icon_menu(
+            icon_menu,
+            session_id=session_id,
+            current_icon=session.icon_name,
+        )
+        menu.addMenu(icon_menu)
         menu.add_separator()
-        menu.add_action("删除", callback=lambda: self._confirm_delete_session(session_id))
+        menu.add_action(
+            "删除",
+            callback=lambda: self._session_sidebar.request_delete_confirmation(
+                session_id
+            ),
+        )
         menu.exec_(global_position)
 
     def _show_active_session_menu(self) -> None:
@@ -649,47 +899,218 @@ class AssistantPanel(
         try:
             session = self._coordinator.load_session(session_id)
         except (OSError, ValueError, TypeError):
+            show_warning(
+                "无法重命名",
+                "对话无法读取，名称没有更改。",
+                parent=self,
+            )
             return
-        title, accepted = QInputDialog.getText(
-            self,
+        title = input_text(
             "重命名对话",
             "对话名称：",
-            QLineEdit.Normal,
-            session.title,
+            default=session.title,
+            parent=self,
         )
-        if accepted:
+        if title is not None:
             self._rename_session(session_id, title)
 
     def _rename_session(self, session_id: str, title: str) -> bool:
         normalized = str(title or "").strip()
         if not normalized:
+            show_warning(
+                "无法重命名",
+                "对话名称不能为空。",
+                parent=self,
+            )
             return False
         try:
-            session = self._coordinator.load_session(session_id)
+            session = self._session_snapshot_for_mutation(session_id)
             updated = self._coordinator.rename(session, normalized)
         except (OSError, ValueError, TypeError):
+            show_warning(
+                "无法重命名",
+                "新名称没有保存，请稍后重试。",
+                parent=self,
+            )
+            self._session_sidebar.restore_rename(session_id, normalized)
             return False
+        self._adopt_persisted_session_snapshot(updated)
         if self._active_session is not None and self._active_session.session_id == session_id:
-            self._active_session = updated
             self._conversation_title.setText(updated.title)
-        self._refresh_session_list(select_session_id=session_id)
+        self._refresh_session_list()
         return True
 
     def _set_session_pinned(self, session_id: str, pinned: bool) -> bool:
         try:
-            session = self._coordinator.load_session(session_id)
+            session = self._session_snapshot_for_mutation(session_id)
             updated = self._coordinator.set_pinned(session, pinned)
         except (OSError, ValueError, TypeError):
+            show_warning(
+                "无法调整固定状态",
+                "固定状态没有保存，请稍后重试。",
+                parent=self,
+            )
             return False
         if self._active_session is not None and self._active_session.session_id == session_id:
             self._active_session = updated
-        self._refresh_session_list(select_session_id=session_id)
+        self._refresh_session_list()
         return True
 
-    def _confirm_delete_session(self, session_id: str) -> None:
+    def _show_session_icon_menu(self, session_id: str, global_position) -> None:
         try:
             session = self._coordinator.load_session(session_id)
         except (OSError, ValueError, TypeError):
+            show_warning(
+                "无法更换图标",
+                "对话无法读取，图标没有更改。",
+                parent=self,
+            )
+            return
+        menu = ContextMenu(parent=self)
+        self._populate_session_icon_menu(
+            menu,
+            session_id=session_id,
+            current_icon=session.icon_name,
+        )
+        menu.exec_(global_position)
+
+    def _populate_session_icon_menu(
+        self,
+        menu: ContextMenu,
+        *,
+        session_id: str,
+        current_icon: str,
+    ) -> None:
+        for icon_name, label in SESSION_ICON_OPTIONS:
+            menu.add_action(
+                label,
+                icon="✓" if current_icon == icon_name else "",
+                callback=lambda _checked=False, value=icon_name: (
+                    self._set_session_icon(session_id, value)
+                ),
+            )
+
+    def _set_session_icon(self, session_id: str, icon_name: str) -> bool:
+        try:
+            session = self._session_snapshot_for_mutation(session_id)
+            updated = self._coordinator.set_icon(session, icon_name)
+        except (OSError, ValueError, TypeError):
+            show_warning(
+                "无法更换图标",
+                "会话图标没有保存，请稍后重试。",
+                parent=self,
+            )
+            return False
+        self._adopt_persisted_session_snapshot(updated)
+        self._refresh_session_list()
+        return True
+
+    def _reorder_session_section(
+        self,
+        ordered_ids,
+        pinned: bool,
+    ) -> bool:
+        normalized = tuple(str(value or "") for value in ordered_ids)
+        try:
+            updated = self._coordinator.reorder_sessions(
+                normalized,
+                pinned=bool(pinned),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            show_warning(
+                "无法调整顺序",
+                "对话顺序没有保存，列表已恢复到上次保存的状态。",
+                parent=self,
+            )
+            self._refresh_session_list(
+                select_session_id=(
+                    self._active_session.session_id
+                    if self._active_session is not None
+                    else ""
+                )
+            )
+            return False
+        self._adopt_updated_active_session(updated)
+        self._refresh_session_list(
+            select_session_id=(
+                self._active_session.session_id
+                if self._active_session is not None
+                else ""
+            )
+        )
+        return True
+
+    def _move_session_to_section(
+        self,
+        session_id: str,
+        pinned: bool,
+        target_index: int,
+    ) -> bool:
+        normalized_id = str(session_id or "")
+        try:
+            updated = self._coordinator.move_session_to_section(
+                normalized_id,
+                pinned=bool(pinned),
+                target_index=int(target_index),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            show_warning(
+                "无法移动对话",
+                "对话位置没有保存，列表已恢复到上次保存的状态。",
+                parent=self,
+            )
+            self._refresh_session_list(
+                select_session_id=(
+                    self._active_session.session_id
+                    if self._active_session is not None
+                    else ""
+                )
+            )
+            return False
+        self._adopt_updated_active_session(updated)
+        self._refresh_session_list()
+        return True
+
+    def _adopt_updated_active_session(self, sessions) -> None:
+        if self._active_session is None:
+            return
+        active_id = self._active_session.session_id
+        replacement = next(
+            (
+                session
+                for session in sessions
+                if session.session_id == active_id
+            ),
+            None,
+        )
+        if replacement is not None:
+            self._active_session = replace(
+                self._active_session,
+                pinned=replacement.pinned,
+                sidebar_order=replacement.sidebar_order,
+            )
+
+    def _confirm_delete_session(self, session_id: str) -> None:
+        """Handle a deletion that the user already confirmed in the session row."""
+        corrupt_summary = next(
+            (
+                summary
+                for summary in self._coordinator.list_sessions()
+                if summary.session_id == session_id and summary.corrupt
+            ),
+            None,
+        )
+        if corrupt_summary is not None:
+            self._confirm_remove_corrupt_session(corrupt_summary)
+            return
+        try:
+            session = self._coordinator.load_session(session_id)
+        except (OSError, ValueError, TypeError):
+            show_warning(
+                "无法删除",
+                "对话无法读取，因此没有删除任何内容。",
+                parent=self,
+            )
             return
         job_status = str(session.document_job.get("status") or "")
         if session.turn_status == "provider_running" or job_status in {
@@ -697,42 +1118,71 @@ class AssistantPanel(
             "preflight_running",
             "execution_running",
         }:
-            QMessageBox.information(
-                self,
+            show_info(
                 "任务仍在运行",
                 "请先停止当前任务，再删除该对话。文档产物不会随对话删除。",
+                parent=self,
             )
             return
-        answer = QMessageBox.question(
-            self,
-            "删除对话",
-            f"确定删除“{session.title}”吗？已生成的文档不会被删除。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer == QMessageBox.StandardButton.Yes:
-            self._delete_session(session_id)
+        self._delete_session(session_id)
+
+    def _confirm_remove_corrupt_session(self, summary) -> None:
+        try:
+            self._coordinator.quarantine_corrupt_session(
+                summary.recovery_path
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            show_warning(
+                "无法移除会话",
+                "损坏会话文件未移动，请检查文件是否仍存在或是否可写。",
+                parent=self,
+            )
+            return
+        self._refresh_session_list()
 
     def _delete_session(self, session_id: str) -> bool:
         if session_id in self._turn_workers:
+            show_info(
+                "任务仍在运行",
+                "请先停止当前任务，再删除该对话。",
+                parent=self,
+            )
             return False
-        if not self._coordinator.delete_session(session_id):
+        discard_pending_draft = self._pending_draft_session_id == session_id
+        try:
+            deleted = self._coordinator.delete_session(session_id)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            deleted = False
+        if not deleted:
+            show_warning(
+                "无法删除",
+                "对话没有被删除，请检查本地存储是否可写。",
+                parent=self,
+            )
             return False
+        if discard_pending_draft:
+            self._draft_save_timer.stop()
+            self._pending_draft_session_id = ""
         was_active = (
             self._active_session is not None
             and self._active_session.session_id == session_id
         )
         if was_active:
             summaries = self._coordinator.list_sessions()
-            if summaries:
+            self._active_session = None
+            for summary in summaries:
+                if summary.corrupt:
+                    continue
                 try:
                     self._active_session = self._coordinator.load_session(
-                        summaries[0].session_id
+                        summary.session_id
                     )
                 except (OSError, ValueError, TypeError):
-                    self._active_session = None
-            else:
-                self._active_session = None
+                    continue
+                self._active_session = self._mark_session_read(
+                    self._active_session
+                )
+                break
             if self._active_session is None:
                 self._show_empty_state()
                 self._load_draft_text("")
@@ -767,6 +1217,7 @@ class AssistantPanel(
         self._conversation_stack.setCurrentWidget(self._active_page)
         self._header_widget.setVisible(True)
         self._conversation_title.setText(session.title)
+        interaction_card_width = self._interaction_card_available_width()
         while self._message_layout.count() > 1:
             item = self._message_layout.takeAt(0)
             widget = item.widget()
@@ -774,6 +1225,17 @@ class AssistantPanel(
                 widget.hide()
                 widget.deleteLater()
         self._turn_preview_widget = None
+        latest_recovery_message_id = ""
+        for candidate_message in session.messages:
+            for candidate_block in candidate_message.blocks:
+                if (
+                    candidate_block.type == BLOCK_INTERACTION
+                    and str(
+                        candidate_block.data.get("interaction_type") or ""
+                    ).casefold()
+                    == "recovery"
+                ):
+                    latest_recovery_message_id = candidate_message.message_id
         for message in session.messages:
             for block in message.blocks:
                 if block.type == BLOCK_TEXT:
@@ -794,13 +1256,54 @@ class AssistantPanel(
                         block.data.get("interaction_type") or "info"
                     )
                     card_payload = dict(block.data)
+                    card_payload["_is_latest_recovery"] = bool(
+                        latest_recovery_message_id
+                        and message.message_id == latest_recovery_message_id
+                    )
                     card_payload["active"] = interaction_is_active(
                         interaction_type=interaction_type,
                         payload=card_payload,
                         pending_continuation=session.pending_continuation,
                         active_plan=session.active_plan,
                         document_job=session.document_job,
+                        turn_status=session.turn_status,
                     )
+                    card_payload["action_scope"] = (
+                        build_interaction_action_scope(
+                            pending_continuation=session.pending_continuation,
+                            active_plan=session.active_plan,
+                            document_job=session.document_job,
+                            turn_status=session.turn_status,
+                        )
+                        if card_payload["active"]
+                        else {}
+                    )
+                    card_title = str(block.data.get("title") or "需要确认")
+                    card_body = block.text
+                    if interaction_type in {"preflight", "approval"} and card_payload[
+                        "active"
+                    ]:
+                        active_preflight = active_preflight_card_presentation(
+                            active_plan=session.active_plan,
+                            document_job=session.document_job,
+                        )
+                        if active_preflight is not None:
+                            interaction_type = active_preflight.interaction_type
+                            card_title = active_preflight.title
+                            card_body = active_preflight.body
+                            card_payload.update(
+                                {
+                                    "interaction_type": interaction_type,
+                                    "title": card_title,
+                                    "facts": [
+                                        {"label": label, "value": value}
+                                        for label, value in active_preflight.facts
+                                    ],
+                                    "notices": list(active_preflight.notices),
+                                    "actions": list(active_preflight.actions),
+                                    "presentation_version": 2,
+                                }
+                            )
                     if (
                         interaction_type == "progress"
                         and bool(card_payload.get("ephemeral"))
@@ -815,13 +1318,19 @@ class AssistantPanel(
                     card_layout.addStretch(1)
                     card = AssistantInteractionCard(
                         interaction_type=interaction_type,
-                        title=str(block.data.get("title") or "需要确认"),
-                        body=block.text,
+                        title=card_title,
+                        body=card_body,
                         payload=card_payload,
                         parent=card_host,
                     )
                     card.action_requested.connect(self._handle_card_action)
                     card.setMaximumWidth(TOKENS.assistant_message_max_width)
+                    # Apply the final geometry before the card enters a visible
+                    # layout. Letting Qt paint its natural width first and then
+                    # fixing it on a timer produces a conspicuous center jump.
+                    card.setFixedWidth(
+                        card.preferred_width(interaction_card_width)
+                    )
                     card_layout.addWidget(card)
                     card_layout.addStretch(1)
                     self._message_layout.insertWidget(
@@ -844,8 +1353,9 @@ class AssistantPanel(
             )
         self._rendered_session_id = session.session_id
         if follow_latest:
-            QTimer.singleShot(0, self._scroll_to_bottom)
+            self._begin_follow_latest_layout_settle()
         else:
+            self._cancel_follow_latest_layout_settle()
             QTimer.singleShot(
                 0,
                 lambda value=previous_scroll: self._restore_scroll_value(value),
@@ -895,6 +1405,37 @@ class AssistantPanel(
     def _open_message_link(self, target: str) -> None:
         self._open_message_reference({"url": str(target or "")})
 
+    def _open_runtime_reference(self, reference: object) -> None:
+        """Open only remote provider references; host artifacts use typed actions."""
+
+        if not isinstance(reference, Mapping):
+            return
+        if any(
+            str(reference.get(key) or "").strip()
+            for key in ("path", "file_path", "local_path")
+        ):
+            show_warning(
+                "链接不可用",
+                "模型返回的本地路径不会由应用直接打开。",
+                parent=self,
+            )
+            return
+        url_text = str(
+            reference.get("url")
+            or reference.get("href")
+            or reference.get("uri")
+            or ""
+        ).strip()
+        url = QUrl(url_text)
+        if url_text and url.scheme().casefold() in {"http", "https", "mailto"}:
+            QDesktopServices.openUrl(url)
+            return
+        show_warning(
+            "链接不可用",
+            "模型建议仅支持 http、https 和 mailto 链接。",
+            parent=self,
+        )
+
     def _open_message_reference(self, reference: object) -> None:
         if not isinstance(reference, Mapping):
             return
@@ -909,7 +1450,11 @@ class AssistantPanel(
             if path.exists():
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve())))
                 return
-            QMessageBox.warning(self, "来源不可用", f"找不到本地来源：\n{target}")
+            show_warning(
+                "来源不可用",
+                f"找不到本地来源：\n{target}",
+                parent=self,
+            )
             return
         url_text = str(
             reference.get("url")
@@ -922,7 +1467,11 @@ class AssistantPanel(
             if url.scheme().casefold() in {"http", "https", "mailto", "file"}:
                 QDesktopServices.openUrl(url)
                 return
-            QMessageBox.warning(self, "链接不可用", "仅支持 http、https、mailto 和 file 链接。")
+            show_warning(
+                "链接不可用",
+                "仅支持 http、https、mailto 和 file 链接。",
+                parent=self,
+            )
             return
         title = str(reference.get("title") or reference.get("name") or "来源详情")
         snippet = str(
@@ -931,903 +1480,7 @@ class AssistantPanel(
             or reference.get("text")
             or "该来源没有可打开的目标。"
         )
-        QMessageBox.information(self, title, snippet)
-
-    def _plan_message(self, plan: DocumentPlan) -> AssistantMessage:
-        presentation = present_document_plan(plan)
-        return AssistantMessage.interaction(
-            role=ROLE_ASSISTANT,
-            interaction_type="plan",
-            title=presentation.title,
-            body=presentation.body,
-            payload={
-                "plan_id": plan.plan_id,
-                "revision": plan.revision,
-                "actions": list(presentation.actions),
-                "facts": [
-                    {"label": label, "value": value}
-                    for label, value in presentation.facts
-                ],
-                "notices": list(presentation.notices),
-            },
-        )
-
-    def _open_provider_settings(self) -> None:
-        navigate = getattr(self.bridge, "navigate_to_preferences", None)
-        if callable(navigate):
-            navigate("ai")
-
-    def _provider_disclosure_facts(
-        self,
-        session: AssistantSession,
-    ) -> list[dict[str, str]]:
-        profile_label = session.provider_profile_id or "当前所选服务"
-        profile_model_id = ""
-        try:
-            profile = self._provider_router.profiles.get(
-                session.provider_profile_id
-            )
-        except (KeyError, OSError, TypeError, ValueError):
-            pass
-        else:
-            profile_label = profile.label
-            profile_model_id = profile.model_id
-        return [
-            {"label": "服务", "value": profile_label},
-            {
-                "label": "模型",
-                "value": (
-                    session.model_id
-                    or profile_model_id
-                    or "当前所选模型"
-                ),
-            },
-        ]
-
-    def _queue_content_generation_disclosure(
-        self,
-        session: AssistantSession,
-        plan: DocumentPlan,
-        context_documents: tuple[dict[str, object], ...],
-    ) -> None:
-        disclosure_id = uuid4().hex
-        continuation = {
-            "kind": "local_content_disclosure",
-            "disclosure_id": disclosure_id,
-            "plan_id": plan.plan_id,
-            "plan_revision": plan.revision,
-            "context_refs": [dict(item) for item in context_documents],
-        }
-        job = {
-            **dict(session.document_job),
-            "status": "needs_data_disclosure",
-            "disclosure_id": disclosure_id,
-            "disclosure_purpose": "content_generation",
-        }
-        session = self._coordinator.update_state(
-            session,
-            pending_continuation=continuation,
-            document_job=job,
-            turn_status=TURN_WAITING_DATA_PERMISSION,
-        )
-        names = "、".join(
-            str(item.get("name") or item.get("title") or "DOCX 材料")
-            for item in context_documents
-        )
-        session = self._coordinator.append_message(
-            session,
-            AssistantMessage.interaction(
-                role=ROLE_ASSISTANT,
-                interaction_type="disclosure",
-                title="确认用于内容生成的材料",
-                body=(
-                    "确认后，材料正文仅用于本次内容生成；本地路径、资料包结构化字段、"
-                    "Logo 和公章不会发送给模型。"
-                ),
-                payload={
-                    "disclosure_id": disclosure_id,
-                    "facts": [
-                        {"label": "材料", "value": names or "DOCX 材料"},
-                        {"label": "发送内容", "value": "附件正文"},
-                        {"label": "用途", "value": "生成并校验文档内容"},
-                        *self._provider_disclosure_facts(session),
-                    ],
-                    "actions": [
-                        {
-                            "id": "approve_content_disclosure",
-                            "label": "同意并生成",
-                            "variant": "primary",
-                        },
-                        {
-                            "id": "deny_content_disclosure",
-                            "label": "不发送",
-                            "variant": "secondary",
-                        },
-                    ],
-                },
-            ),
-            turn_status=TURN_WAITING_DATA_PERMISSION,
-        )
-        self._active_session = session
-        self._render_active_session()
-        self._refresh_session_list(select_session_id=session.session_id)
-
-    def _resolve_content_disclosure(
-        self,
-        payload: Mapping[str, object],
-        *,
-        approved: bool,
-    ) -> None:
-        session = self._active_session
-        if session is None:
-            return
-        continuation = dict(session.pending_continuation)
-        if continuation.get("kind") != "local_content_disclosure":
-            return
-        expected_id = str(continuation.get("disclosure_id") or "")
-        submitted_id = str(payload.get("disclosure_id") or "")
-        if not expected_id or submitted_id != expected_id:
-            return
-        try:
-            plan = DocumentPlan.from_dict(session.active_plan)
-        except (TypeError, ValueError):
-            return
-        if (
-            plan.plan_id != str(continuation.get("plan_id") or "")
-            or plan.revision != int(continuation.get("plan_revision") or 0)
-        ):
-            return
-        job = {
-            **dict(session.document_job),
-            "status": "plan_ready" if not approved else "content_generation_ready",
-            "disclosure_decision": "approved" if approved else "denied",
-        }
-        session = self._coordinator.update_state(
-            session,
-            pending_continuation={},
-            document_job=job,
-            turn_status=TURN_COMPLETED if not approved else "local_processing",
-        )
-        self._active_session = session
-        if not approved:
-            session = self._coordinator.append_message(
-                session,
-                AssistantMessage.interaction(
-                    role=ROLE_ASSISTANT,
-                    interaction_type="boundary",
-                    title="已取消材料发送",
-                    body="未向模型发送材料正文；当前计划仍保留，可调整后重新发起。",
-                    payload={"actions": []},
-                ),
-                turn_status=TURN_COMPLETED,
-            )
-            self._active_session = session
-            self._render_active_session()
-            self._refresh_session_list(select_session_id=session.session_id)
-            return
-        self._start_content_generation(
-            session,
-            plan,
-            approved_disclosure=True,
-        )
-
-    def _start_content_generation(
-        self,
-        session: AssistantSession,
-        plan: DocumentPlan,
-        *,
-        approved_disclosure: bool = False,
-    ) -> None:
-        if self._content_worker is not None and self._content_worker.is_running:
-            return
-        if not plan.generation_required or plan.blocking_issues:
-            return
-        context_documents = tuple(dict(item) for item in plan.material_refs)
-        if context_documents and not approved_disclosure:
-            self._queue_content_generation_disclosure(
-                session,
-                plan,
-                context_documents,
-            )
-            return
-        try:
-            gateway = (
-                self._fixed_turn_runner.gateway
-                if self._fixed_turn_runner is not None
-                else self._provider_router.resolve(session.provider_profile_id)
-            )
-        except ProviderResolutionError as exc:
-            self._append_content_generation_failure(session.session_id, str(exc))
-            return
-        context_ref_ids = tuple(
-            str(item.get("path") or item.get("artifact_id") or item.get("name") or "")
-            for item in context_documents
-            if str(item.get("path") or item.get("artifact_id") or item.get("name") or "")
-        )
-        context_fingerprints = attachment_fingerprints(context_documents)
-        disclosure_grant = (
-            DisclosureGrant(
-                grant_id=uuid4().hex,
-                session_id=session.session_id,
-                provider_id=session.provider_profile_id,
-                model_id=session.model_id,
-                allowed_refs=context_ref_ids,
-                allowed_fields=("document_text",),
-                created_at=datetime.now(timezone.utc).isoformat(),
-                scope="once",
-                content_fingerprints=context_fingerprints,
-            )
-            if context_documents
-            else None
-        )
-        request = ContentGenerationRequest(
-            session_id=session.session_id,
-            turn_id=plan.created_by_turn_id,
-            prompt=plan.intent,
-            provider_id=session.provider_profile_id,
-            model_id=session.model_id,
-            context_documents=context_documents,
-            context_refs=context_ref_ids,
-            context_fields=(("document_text",) if context_documents else ()),
-            context_fingerprints=tuple(context_fingerprints.items()),
-            disclosure_grant=disclosure_grant,
-            capability_id=plan.capability_ref.capability_id,
-            artifact_kind=plan.generation_contract.artifact_kind,
-            prompt_profile_id=plan.generation_contract.prompt_profile_id,
-        )
-        adapter = AssistantContentGenerationAdapter(self._coordinator.store.root)
-        service = AssistantContentGenerationService(adapter)
-        worker = ContentGenerationWorker(service, request, gateway, parent=self)
-        self._content_worker = worker
-        job = {
-            **dict(session.document_job),
-            "status": "content_generation_running",
-            "content_generation_turn_id": plan.created_by_turn_id,
-        }
-        session = self._coordinator.update_state(session, document_job=job)
-        session = self._coordinator.append_message(
-            session,
-            AssistantMessage.interaction(
-                role=ROLE_ASSISTANT,
-                interaction_type="progress",
-                title="正在起草文档内容",
-                body=(
-                    (
-                        "已按你的确认把材料正文提供给当前模型。"
-                        if context_documents
-                        else ""
-                    )
-                    + "模型只负责生成能力契约要求的 Markdown；完成后将由 Form 的"
-                    "领域校验器确认结构，再绑定到对应生产链路。"
-                ),
-                payload={"actions": [], "ephemeral": True},
-            ),
-        )
-        if self._active_session is not None and self._active_session.session_id == session.session_id:
-            self._active_session = session
-            self._render_active_session()
-        self._composer.set_busy(True)
-        worker.finished.connect(self._on_content_generation_finished)
-        worker.failed.connect(
-            lambda error, session_id=session.session_id: self._append_content_generation_failure(
-                session_id,
-                error,
-            )
-        )
-        worker.start()
-        self._sync_composer_busy_state()
-
-    def _on_content_generation_finished(self, draft: object) -> None:
-        worker = self._content_worker
-        if worker is None or not is_generated_draft(draft):
-            return
-        origin_session_id = worker.request.session_id
-        try:
-            session = self._coordinator.load_session(origin_session_id)
-            plan = DocumentPlan.from_dict(session.active_plan)
-        except (OSError, ValueError, TypeError):
-            self._finish_content_generation_ui()
-            return
-        try:
-            updated_plan = bind_generated_draft(plan, draft)
-        except ValueError as exc:
-            self._append_content_generation_failure(origin_session_id, str(exc))
-            return
-        source_ref = generated_draft_source_ref(draft)
-        preview_path = str(draft.preview_path)
-        production_input_path = str(draft.production_input_path)
-        job = {
-            **dict(session.document_job),
-            "status": "content_draft_ready",
-            "plan_id": updated_plan.plan_id,
-            "plan_revision": updated_plan.revision,
-            "generated_content_draft_id": draft.draft_id,
-            "generated_content_markdown_path": draft.markdown_path,
-            "generated_content_document_path": preview_path,
-            "generated_content_preview_path": preview_path,
-            "generated_content_production_input_path": production_input_path,
-            "generated_content_artifact_kind": draft.artifact_kind,
-            "generated_content_schema_id": source_ref.schema_id,
-        }
-        session = self._coordinator.update_state(
-            session,
-            active_plan=updated_plan.to_dict(),
-            document_job=job,
-            turn_status=TURN_COMPLETED,
-        )
-        session = self._coordinator.append_message(
-            session,
-            AssistantMessage.interaction(
-                role=ROLE_ASSISTANT,
-                interaction_type="artifact",
-                title="内容草稿已生成",
-                body=(
-                    "内容已通过当前能力对应的本地结构校验，并绑定到唯一生产入口。"
-                    "你可以先打开草稿审阅，再进行生产执行前检查。"
-                ),
-                payload={
-                    "draft_id": draft.draft_id,
-                    "artifact_kind": draft.artifact_kind,
-                    "schema_id": source_ref.schema_id,
-                    "reference": {
-                        "type": "file",
-                        "title": Path(preview_path).name,
-                        "path": preview_path,
-                    },
-                    "actions": [
-                        {"id": "runtime_open_reference", "label": "打开内容草稿"},
-                        {"id": "generate_content_draft", "label": "重新生成"},
-                        {"id": "preflight", "label": "在本地检查并继续"},
-                    ],
-                },
-            ),
-        )
-        if self._active_session is not None and self._active_session.session_id == origin_session_id:
-            self._active_session = session
-            self._render_active_session()
-        self._refresh_session_list(select_session_id=origin_session_id)
-        self._finish_content_generation_ui()
-
-    def _append_content_generation_failure(self, session_id: str, error: str) -> None:
-        try:
-            session = self._coordinator.load_session(session_id)
-        except (OSError, ValueError, TypeError):
-            self._finish_content_generation_ui()
-            return
-        cancelled = "cancel" in str(error or "").casefold()
-        job = {
-            **dict(session.document_job),
-            "status": "cancelled" if cancelled else "failed",
-            "error_text": str(error or "content_generation_failed"),
-        }
-        session = self._coordinator.update_state(session, document_job=job)
-        session = self._coordinator.append_message(
-            session,
-            AssistantMessage.interaction(
-                role=ROLE_ASSISTANT,
-                interaction_type="recovery",
-                title="内容起草已取消" if cancelled else "内容草稿未生成",
-                body=(
-                    "没有创建或覆盖正式输出文件。可以检查模型配置后重试。"
-                    f"\n原因：{error}"
-                ),
-                payload={
-                    "actions": [
-                        {"id": "generate_content_draft", "label": "重新生成内容草稿"}
-                    ]
-                },
-            ),
-        )
-        if self._active_session is not None and self._active_session.session_id == session_id:
-            self._active_session = session
-            self._render_active_session()
-        self._refresh_session_list(select_session_id=session_id)
-        self._finish_content_generation_ui()
-
-    def _finish_content_generation_ui(self) -> None:
-        worker = self._content_worker
-        if worker is not None:
-            worker.deleteLater()
-        self._content_worker = None
-        self._sync_composer_busy_state()
-        if self._execution_worker is None or not self._execution_worker.is_running:
-            self._stop_button.setVisible(False)
-
-    @staticmethod
-    def _material_context_for_plan(
-        session: AssistantSession,
-        plan: DocumentPlan,
-    ) -> MaterialExecutionContext:
-        raw = session.document_job.get("material_snapshot")
-        if not isinstance(raw, Mapping):
-            raise ValueError("assistant_material_snapshot_missing")
-        snapshot = MaterialContextSnapshot.from_dict(raw)
-        expected = str(plan.material_snapshot_ref.get("digest") or "")
-        if not expected or expected != snapshot.digest:
-            raise ValueError("assistant_material_snapshot_plan_mismatch")
-        return snapshot.restore()
-
-    def _run_preflight(self, session: AssistantSession, plan: DocumentPlan) -> None:
-        if self._preflight_worker is not None and self._preflight_worker.is_running:
-            return
-        try:
-            material_context = self._material_context_for_plan(session, plan)
-        except (TypeError, ValueError):
-            self._on_preflight_failed(
-                session.session_id,
-                "assistant_material_snapshot_unavailable",
-            )
-            return
-        job = {
-            **dict(session.document_job),
-            "status": "preflight_running",
-        }
-        session = self._coordinator.update_state(session, document_job=job)
-        session = self._coordinator.append_message(
-            session,
-            AssistantMessage.interaction(
-                role=ROLE_ASSISTANT,
-                interaction_type="progress",
-                title="正在进行本地执行前检查",
-                body="正在校验输入文件、方案、模板和输出目录的完整性；不会上传正文。",
-                payload={"actions": [], "ephemeral": True},
-            ),
-        )
-        if self._active_session is not None and self._active_session.session_id == session.session_id:
-            self._active_session = session
-            self._render_active_session()
-        worker = PreflightWorker(
-            self._document_jobs,
-            session_id=session.session_id,
-            plan=plan,
-            material_context=material_context,
-            parent=self,
-        )
-        self._preflight_worker = worker
-        self._composer.set_busy(True)
-        worker.finished.connect(self._on_preflight_finished)
-        worker.failed.connect(
-            lambda error, session_id=session.session_id: self._on_preflight_failed(
-                session_id,
-                error,
-            )
-        )
-        worker.start()
-        self._sync_composer_busy_state()
-
-    def _on_preflight_finished(self, preflight: object) -> None:
-        worker = self._preflight_worker
-        if worker is None or not isinstance(preflight, PreflightReceipt):
-            return
-        try:
-            session = self._coordinator.load_session(worker.session_id)
-            current_plan = DocumentPlan.from_dict(session.active_plan)
-        except (OSError, ValueError, TypeError):
-            self._finish_preflight_ui()
-            return
-        if current_plan.fingerprint != preflight.plan_fingerprint:
-            self._on_preflight_failed(worker.session_id, "assistant_preflight_became_stale")
-            return
-        job = {
-            **dict(session.document_job),
-            "status": "needs_execution_approval" if preflight.ready else "preflight_failed",
-            "preflight": preflight.to_dict(),
-        }
-        session = self._coordinator.update_state(session, document_job=job)
-        if preflight.ready:
-            plan_presentation = present_document_plan(current_plan)
-            approval_labels = {
-                "任务",
-                "操作",
-                "输入",
-                "方案",
-                "模板",
-                "资料",
-                "交付",
-                "输出",
-                "数据范围",
-            }
-            approval_facts = [
-                {"label": label, "value": value}
-                for label, value in plan_presentation.facts
-                if label in approval_labels
-            ]
-            approval_facts.append(
-                {
-                    "label": "原文件",
-                    "value": (
-                        "允许覆盖（已要求再次确认）"
-                        if current_plan.output_policy.overwrite
-                        else "保留，不覆盖"
-                    ),
-                }
-            )
-            body = (
-                "请确认本次实际生产范围。输入、方案、模板、资料和输出位置已由本地预检绑定；"
-                "确认后才会创建交付文件。"
-            )
-            actions = [{"id": "approve_execute", "label": "确认并生成文档"}]
-            interaction_type = "approval"
-            title = "执行前检查已通过"
-        else:
-            body = "\n".join(f"• {item}" for item in preflight.issues)
-            actions = [{"id": "open_workbench", "label": "返回工作台处理"}]
-            approval_facts = [
-                {"label": "输出目录", "value": Path(preflight.output_root).name}
-            ]
-            interaction_type = "preflight"
-            title = "执行前检查未通过"
-        session = self._coordinator.append_message(
-            session,
-            AssistantMessage.interaction(
-                role=ROLE_ASSISTANT,
-                interaction_type=interaction_type,
-                title=title,
-                body=body,
-                payload={
-                    "preflight_id": preflight.preflight_id,
-                    "facts": approval_facts,
-                    "evidence": {
-                        "input_hash": preflight.input_hash,
-                        "material_context_digest": (
-                            preflight.material_context_digest
-                        ),
-                        "plan_fingerprint": preflight.plan_fingerprint,
-                        "resource_fingerprints": dict(
-                            preflight.resource_fingerprints
-                        ),
-                    },
-                    "notices": list(preflight.warnings),
-                    "actions": actions,
-                },
-            ),
-        )
-        if self._active_session is not None and self._active_session.session_id == session.session_id:
-            self._active_session = session
-            self._render_active_session()
-        self._refresh_session_list(select_session_id=session.session_id)
-        self._finish_preflight_ui()
-
-    def _on_preflight_failed(self, session_id: str, error: str) -> None:
-        try:
-            session = self._coordinator.load_session(session_id)
-        except (OSError, ValueError, TypeError):
-            self._finish_preflight_ui()
-            return
-        cancelled = "cancel" in str(error or "").casefold()
-        job = {
-            **dict(session.document_job),
-            "status": "cancelled" if cancelled else "preflight_failed",
-            "error_text": str(error or "assistant_preflight_failed"),
-        }
-        session = self._coordinator.update_state(session, document_job=job)
-        session = self._coordinator.append_message(
-            session,
-            AssistantMessage.interaction(
-                role=ROLE_ASSISTANT,
-                interaction_type="recovery",
-                title="本地检查已取消" if cancelled else "本地检查未完成",
-                body=f"未执行文档生产，也未覆盖任何文件。\n原因：{error}",
-                payload={
-                    "actions": [
-                        {"id": "retry_preflight", "label": "重新检查"},
-                        {"id": "open_workbench", "label": "返回工作台"},
-                    ]
-                },
-            ),
-        )
-        if self._active_session is not None and self._active_session.session_id == session_id:
-            self._active_session = session
-            self._render_active_session()
-        self._refresh_session_list(select_session_id=session_id)
-        self._finish_preflight_ui()
-
-    def _finish_preflight_ui(self) -> None:
-        worker = self._preflight_worker
-        if worker is not None:
-            worker.deleteLater()
-        self._preflight_worker = None
-        self._sync_composer_busy_state()
-        if (
-            (self._content_worker is None or not self._content_worker.is_running)
-            and (self._execution_worker is None or not self._execution_worker.is_running)
-        ):
-            self._stop_button.setVisible(False)
-
-    def _start_execution(self, session: AssistantSession, plan: DocumentPlan) -> None:
-        raw_preflight = session.document_job.get("preflight")
-        if not isinstance(raw_preflight, dict):
-            return
-        try:
-            preflight = PreflightReceipt.from_dict(raw_preflight)
-            approval = self._document_jobs.approve(
-                session_id=session.session_id,
-                plan=plan,
-                preflight=preflight,
-            )
-        except (ValueError, TypeError):
-            return
-        execution_id = uuid4().hex
-        try:
-            material_context = self._material_context_for_plan(session, plan)
-        except (TypeError, ValueError):
-            self._on_preflight_failed(
-                session.session_id,
-                "assistant_material_snapshot_unavailable",
-            )
-            return
-        job = {
-            **dict(session.document_job),
-            "status": "execution_running",
-            "execution_id": execution_id,
-            "approval": approval.to_dict(),
-        }
-        session = self._coordinator.update_state(session, document_job=job)
-        session = self._coordinator.append_message(
-            session,
-            AssistantMessage.interaction(
-                role=ROLE_ASSISTANT,
-                interaction_type="progress",
-                title="正在生成文档",
-                body="任务已交给 Form 本地生产引擎。可以切换对话，任务仍归属于当前会话。",
-                payload={
-                    "execution_id": execution_id,
-                    "actions": [],
-                    "ephemeral": True,
-                },
-            ),
-        )
-        self._active_session = session
-        self._render_active_session()
-        worker = DocumentExecutionWorker(
-            self._document_jobs,
-            session_id=session.session_id,
-            plan=plan,
-            preflight=preflight,
-            approval=approval,
-            material_context=material_context,
-            execution_id=execution_id,
-            parent=self,
-        )
-        self._execution_worker = worker
-        worker.progress.connect(self._on_execution_progress)
-        worker.finished.connect(self._on_execution_finished)
-        self._composer.set_busy(True)
-        worker.start()
-        self._sync_composer_busy_state()
-
-    def _on_execution_progress(self, current: int, total: int, message: str) -> None:
-        worker = self._execution_worker
-        if (
-            worker is None
-            or self._active_session is None
-            or self._active_session.session_id != worker.session_id
-        ):
-            return
-        text = str(message or "正在生成文档")
-        if total > 0:
-            text = f"{text}（{current}/{total}）"
-        self._conversation_title.setText(text)
-
-    def _on_execution_finished(self, result: object) -> None:
-        worker = self._execution_worker
-        if worker is None or not isinstance(result, dict):
-            return
-        origin_session_id = worker.session_id
-        try:
-            session = self._coordinator.load_session(origin_session_id)
-        except (OSError, ValueError, TypeError):
-            session = None
-        if session is not None:
-            status = str(result.get("status") or "failed")
-            public = public_execution_result(result)
-            primary_path = str(result.get("output_path") or "")
-            output_references = project_output_references(result)
-            if not primary_path and output_references:
-                primary_path = str(output_references[0].get("path") or "")
-            job = {
-                **dict(session.document_job),
-                "status": status,
-                "result": dict(result),
-                "primary_output_path": primary_path,
-            }
-            session = self._coordinator.update_state(session, document_job=job)
-            successful = status in {"success", "partial_success"}
-            if status == "success":
-                body = "全部产物已通过交付完整性检查，可直接打开审阅。"
-            elif status == "partial_success":
-                body = "部分产物已生成；缺失项没有被静默忽略，请处理后重试。"
-            else:
-                body = "没有形成可确认的完整交付结果。"
-            if public.get("error_text"):
-                body += f"\n原因：{public['error_text']}"
-            actions = []
-            if successful and primary_path:
-                actions.append({"id": "runtime_open_reference", "label": "打开文档"})
-            if status in {"partial_success", "failed", "cancelled"}:
-                actions.append({"id": "retry_preflight", "label": "重新检查后重试"})
-            session = self._coordinator.append_message(
-                session,
-                AssistantMessage.interaction(
-                    role=ROLE_ASSISTANT,
-                    interaction_type="artifact" if successful else "recovery",
-                    title="文档已生成" if status == "success" else ("部分文档已生成" if status == "partial_success" else "文档生成未完成"),
-                    body=body,
-                    payload={
-                        "execution_id": worker.execution_id,
-                        "actions": actions,
-                        "reference": {
-                            "type": "file",
-                            "title": Path(primary_path).name if primary_path else "",
-                            "path": primary_path,
-                        },
-                        "references": list(output_references),
-                    },
-                ),
-            )
-            if self._active_session is not None and self._active_session.session_id == origin_session_id:
-                self._active_session = session
-                self._render_active_session()
-        worker.deleteLater()
-        self._execution_worker = None
-        self._sync_composer_busy_state()
-        if (
-            (self._turn_worker is None or not self._turn_worker.is_running)
-            and (self._content_worker is None or not self._content_worker.is_running)
-            and (self._preflight_worker is None or not self._preflight_worker.is_running)
-        ):
-            self._stop_button.setVisible(False)
-        self._refresh_session_list(select_session_id=origin_session_id)
-
-    def _runner_for_session(self, session: AssistantSession) -> AssistantTurnRunner:
-        if self._fixed_turn_runner is not None:
-            return self._fixed_turn_runner
-        return AssistantTurnRunner(self._provider_router.resolve(session.provider_profile_id))
-
-    def _refresh_provider_profiles(self) -> None:
-        if self._active_session is not None:
-            self._active_session = self._provider_selection.synchronize_session(
-                self._active_session
-            )
-        selected = (
-            self._active_session.provider_profile_id
-            if self._active_session is not None
-            else (
-                self._creative_home.composer.selected_provider_id()
-                or str(self._provider_combo.currentData() or "")
-                or "mock-default"
-            )
-        )
-        projected_profiles: list[tuple[str, str, str, bool, str, str]] = []
-        try:
-            profiles = self._provider_router.profiles.list_profiles()
-        except (OSError, RuntimeError, TypeError, ValueError):
-            profiles = (default_mock_profile(),)
-        for profile in profiles:
-            readiness = self._provider_router.readiness(profile.profile_id)
-            status = provider_connection_badge(profile, ready=readiness.ready)
-            projected_profiles.append(
-                (
-                    profile.label,
-                    profile.profile_id,
-                    profile.model_id,
-                    readiness.ready,
-                    readiness.message,
-                    status,
-                )
-            )
-        self._composer.set_provider_profiles(
-            projected_profiles,
-            selected_id=selected,
-        )
-        self._creative_home.composer.set_provider_profiles(
-            projected_profiles,
-            selected_id=selected,
-        )
-        self._provider_selection.select(selected)
-
-    def _on_provider_selected(self, _index: int) -> None:
-        profile_id = str(self._provider_combo.currentData() or "")
-        if profile_id:
-            self._creative_home.composer.select_provider(profile_id)
-        if self._active_session is None:
-            return
-        profile_id, model_id = self._provider_selection.selected_identity()
-        previous_profile_id = self._active_session.provider_profile_id
-        if profile_id == previous_profile_id:
-            self._active_session = self._coordinator.update_state(
-                self._active_session,
-                model_id=model_id,
-            )
-            return
-        previous_domain = self._provider_data_domain(previous_profile_id)
-        target_domain = self._provider_data_domain(profile_id)
-        visible_history = tuple(
-            message
-            for message in self._active_session.messages
-            if message.visible_text()
-        )
-        history_grant: dict[str, object] = {}
-        if visible_history and previous_domain != target_domain:
-            decision = self._confirm_provider_history_transition(
-                previous_profile_id,
-                profile_id,
-                message_count=len(visible_history),
-                character_count=sum(
-                    len(message.visible_text())
-                    for message in visible_history
-                ),
-            )
-            if decision == "cancel":
-                self._provider_selection.select(previous_profile_id)
-                return
-            if decision == "new":
-                self.new_session()
-                return
-            history_grant = {
-                "schema_version": "assistant-provider-history-grant-v1",
-                "grant_id": uuid4().hex,
-                "session_id": self._active_session.session_id,
-                "source_profile_id": previous_profile_id,
-                "source_domain": previous_domain,
-                "target_profile_id": profile_id,
-                "target_domain": target_domain,
-                "history_message_count": len(visible_history),
-                "history_character_count": sum(
-                    len(message.visible_text())
-                    for message in visible_history
-                ),
-                "history_fingerprint": history_fingerprint(
-                    self._active_session.messages
-                ),
-                "approved_at": datetime.now(timezone.utc).isoformat(),
-            }
-        self._active_session = self._coordinator.update_state(
-            self._active_session,
-            provider_profile_id=profile_id,
-            model_id=model_id,
-            provider_history_grant=history_grant,
-        )
-        if history_grant:
-            self._active_session = self._coordinator.append_message(
-                self._active_session,
-                AssistantMessage.interaction(
-                    role=ROLE_ASSISTANT,
-                    interaction_type="disclosure",
-                    title="已确认携带历史并切换模型服务",
-                    body=(
-                        f"已按你的确认，把当前会话的 "
-                        f"{history_grant['history_message_count']} 条可见消息"
-                        f"授权给 {profile_id}。附件仍需按每次请求单独确认。"
-                    ),
-                    payload={
-                        "active": False,
-                        "facts": [
-                            {
-                                "label": "来源服务",
-                                "value": previous_profile_id,
-                            },
-                            {
-                                "label": "目标服务",
-                                "value": profile_id,
-                            },
-                            {
-                                "label": "历史字符",
-                                "value": str(
-                                    history_grant[
-                                        "history_character_count"
-                                    ]
-                                ),
-                            },
-                        ],
-                        "actions": [],
-                    },
-                ),
-            )
-            self._render_active_session()
-            self._refresh_session_list(
-                select_session_id=self._active_session.session_id
-            )
+        show_info(title, snippet, parent=self)
 
     def _provider_data_domain(self, profile_id: str) -> str:
         try:
@@ -1849,35 +1502,19 @@ class AssistantPanel(
         message_count: int,
         character_count: int,
     ) -> str:
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle("确认历史对话的数据范围")
-        box.setText(
-            f"你正在从 {source_profile_id} 切换到 {target_profile_id}。"
-        )
-        box.setInformativeText(
+        return decision(
+            "确认历史对话的数据范围",
+            f"你正在从 {source_profile_id} 切换到 {target_profile_id}。\n"
             f"当前会话包含 {message_count} 条、约 {character_count} 个字符。"
-            "请选择是否把这些历史发送给新的模型服务。"
+            "请选择是否把这些历史发送给新的模型服务。",
+            actions=(
+                DialogAction("cancel", "取消", default=True, escape=True),
+                DialogAction("new", "新建空白对话"),
+                DialogAction("carry", "携带历史并切换", variant="primary"),
+            ),
+            icon_style="warning",
+            parent=self,
         )
-        carry_button = box.addButton(
-            "携带历史并切换",
-            QMessageBox.ButtonRole.AcceptRole,
-        )
-        new_button = box.addButton(
-            "新建空白对话",
-            QMessageBox.ButtonRole.ActionRole,
-        )
-        cancel_button = box.addButton(
-            QMessageBox.StandardButton.Cancel
-        )
-        box.setDefaultButton(cancel_button)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is carry_button:
-            return "carry"
-        if clicked is new_button:
-            return "new"
-        return "cancel"
 
     def _on_home_provider_selected(self, profile_id: str) -> None:
         self._provider_selection.select(profile_id)
@@ -1902,38 +1539,6 @@ class AssistantPanel(
         self._sync_composer_busy_state()
         self._empty_input.focus_input()
 
-    def _scroll_to_bottom(self) -> None:
-        bar = self._message_scroll.verticalScrollBar()
-        bar.setValue(bar.maximum())
-        self._jump_latest_button.hide()
-
-    def _restore_scroll_value(self, value: int) -> None:
-        bar = self._message_scroll.verticalScrollBar()
-        bar.setValue(min(max(0, int(value)), bar.maximum()))
-        self._sync_jump_to_latest(bar.value())
-
-    def _is_near_latest(self) -> bool:
-        bar = self._message_scroll.verticalScrollBar()
-        return bar.maximum() - bar.value() <= 64
-
-    def _sync_jump_to_latest(self, _value: int) -> None:
-        if self._conversation_stack.currentWidget() is not self._active_page:
-            self._jump_latest_button.hide()
-            return
-        self._jump_latest_button.setVisible(not self._is_near_latest())
-
-    def _sync_active_reading_widths(self) -> None:
-        page_width = max(0, self._active_page.width())
-        if page_width > 48:
-            self._composer.setFixedWidth(page_width - 48)
-        viewport_width = max(0, self._message_scroll.viewport().width())
-        card_width = min(
-            TOKENS.assistant_message_max_width,
-            max(260, viewport_width - 96),
-        )
-        for card in self._message_host.findChildren(AssistantInteractionCard):
-            card.setFixedWidth(card_width)
-
     def _refresh_session_list(self, *, select_session_id: str = "") -> None:
         selected = select_session_id or (
             self._active_session.session_id if self._active_session is not None else ""
@@ -1950,7 +1555,14 @@ class AssistantPanel(
                 self._embedded_session_combo.addItem("历史对话", "")
                 selected_index = 0
                 for summary in summaries:
-                    status = " · 运行中" if summary.turn_status == "provider_running" else ""
+                    status_label = session_row_presentation(
+                        summary
+                    ).status_label
+                    status = (
+                        f" · {status_label}"
+                        if status_label
+                        else ""
+                    )
                     self._embedded_session_combo.addItem(
                         f"{'★ ' if summary.pinned else ''}{summary.title}{status}",
                         summary.session_id,
@@ -1966,27 +1578,81 @@ class AssistantPanel(
         session_id = str(self._embedded_session_combo.currentData() or "")
         if not session_id:
             return
-        try:
-            self._active_session = self._coordinator.load_session(session_id)
-        except (OSError, ValueError, TypeError):
+        if (
+            self._active_session is not None
+            and self._active_session.session_id == session_id
+        ):
+            self._active_session = self._mark_session_read(
+                self._active_session
+            )
+            self._refresh_session_list(select_session_id=session_id)
             return
+        if not self._flush_active_draft():
+            self._restore_embedded_session_selection()
+            return
+        corrupt_summary = next(
+            (
+                summary
+                for summary in self._coordinator.list_sessions()
+                if summary.session_id == session_id and summary.corrupt
+            ),
+            None,
+        )
+        if corrupt_summary is not None:
+            self._restore_embedded_session_selection()
+            self._show_corrupt_session_recovery(
+                corrupt_summary.recovery_path
+            )
+            return
+        try:
+            loaded_session = self._coordinator.load_session(session_id)
+        except (OSError, ValueError, TypeError) as exc:
+            self._restore_embedded_session_selection()
+            self._show_session_navigation_error(
+                "无法打开该对话",
+                exc,
+            )
+            return
+        self._active_session = self._mark_session_read(loaded_session)
+        self._clear_session_navigation_error()
+        self._refresh_session_list(select_session_id=session_id)
         self._provider_selection.select(self._active_session.provider_profile_id)
         self._render_active_session()
         self._load_draft_text(self._active_session.draft_text)
         self._sync_session_document_path()
         self._sync_composer_busy_state()
 
+    def _restore_embedded_session_selection(self) -> None:
+        session_id = (
+            self._active_session.session_id
+            if self._active_session is not None
+            else ""
+        )
+        index = self._embedded_session_combo.findData(session_id)
+        blocked = self._embedded_session_combo.blockSignals(True)
+        try:
+            self._embedded_session_combo.setCurrentIndex(max(0, index))
+        finally:
+            self._embedded_session_combo.blockSignals(blocked)
+
     def _filter_sessions(self, text: str) -> None:
         self._session_sidebar.filter_sessions(text)
 
     def _refresh_context(self) -> None:
-        path = ""
+        paths: list[str] = []
         if self._active_session is not None:
             for reference in self._active_session.context_refs:
                 path = str(reference.get("path") or "").strip()
                 if path:
-                    break
-        self._context_document.setText(Path(path).name if path else "未选择")
+                    paths.append(path)
+        if not paths:
+            document_text = "未选择"
+        elif len(paths) == 1:
+            document_text = Path(paths[0]).name
+        else:
+            document_text = f"{Path(paths[0]).name} 等 {len(paths)} 份材料"
+        self._context_document.setText(document_text)
+        self._context_document.setToolTip("\n".join(paths))
         mode = self.bridge.current_work_mode()
         self._context_mode.setText(str(getattr(mode, "label", "") or self.bridge.current_work_mode_id() or "未选择"))
         self._context_scene.setText(self.bridge.current_scene_id() or "未选择")
@@ -2032,6 +1698,10 @@ class AssistantPanel(
         rail.setVisible(True)
         drawer.open()
 
+    def _close_session_drawer_after_navigation(self) -> None:
+        if self._session_drawer is not None and self._session_drawer.isVisible():
+            self._session_drawer.close()
+
     def _restore_rails_to_layout(self) -> None:
         if self._session_drawer is not None and self._session_rail.window() is self._session_drawer:
             self._session_drawer.take_body()
@@ -2051,6 +1721,7 @@ class AssistantPanel(
         # width projection on the next event-loop turn so cards never retain the
         # previous wide-layout width when entering compact mode.
         QTimer.singleShot(0, self._sync_active_reading_widths)
+        QTimer.singleShot(0, self._position_jump_latest_button)
         width = event.size().width()
         if self._embedded:
             self._responsive_mode = "embedded"
@@ -2112,7 +1783,13 @@ class AssistantPanel(
 
         return QSize(420, 360)
 
+    def prepare_close_pending_changes(self) -> bool:
+        return self._flush_active_draft()
+
     def closeEvent(self, event) -> None:
+        if not self._flush_active_draft():
+            event.ignore()
+            return
         self._restore_rails_to_layout()
         for drawer in (self._session_drawer, self._context_drawer):
             if drawer is not None:

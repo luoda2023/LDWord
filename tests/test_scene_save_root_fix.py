@@ -115,6 +115,103 @@ def _close_clean(window: MainWindow, qapp) -> None:
     qapp.processEvents()
 
 
+def test_owned_user_scene_autosaves_after_an_edit_burst(
+    qapp,
+    isolated_scene_config_library,
+):
+    scene_id = "autosave_owned_plan"
+    bridge, panel, path = _open_owned_user_scene_panel(
+        scene_id=scene_id,
+        name="自动保存方案",
+    )
+    try:
+        _mark_scene_dirty(bridge, description="autosaved-in-place")
+
+        assert panel._scene_autosave_state == "pending"
+        assert panel._scene_autosave_timer.isActive()
+
+        panel._scene_autosave_timer.start(0)
+        qapp.processEvents()
+
+        persisted = config_library.load_scene_from_library(
+            scene_id,
+            mode_id="exam",
+        )
+        assert persisted.description == "autosaved-in-place"
+        assert path.exists()
+        assert bridge.is_scene_dirty() is False
+        assert panel._scene_autosave_state == "saved"
+    finally:
+        _dispose_panel(bridge, panel, qapp)
+
+
+def test_builtin_scene_first_autosave_creates_owned_copy_without_prompt(
+    qapp,
+    isolated_scene_config_library,
+    monkeypatch,
+):
+    bridge, panel = _open_scene_panel("custom", "custom")
+    builtin_path = Path(bridge.current_scene_path())
+    builtin_bytes = builtin_path.read_bytes()
+    monkeypatch.setattr(
+        panel,
+        "_prompt_scene_save_as_name",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("autosave must not prompt for a copy name")
+        ),
+    )
+    try:
+        _mark_scene_dirty(bridge, description="autosaved-user-copy")
+
+        assert panel.flush_pending_scene_autosave() is True
+
+        copied_id = bridge.current_scene_id()
+        assert copied_id and copied_id != "custom"
+        assert bridge.current_scene_source_type() == "user"
+        assert builtin_path.read_bytes() == builtin_bytes
+        persisted = config_library.load_scene_from_library(
+            copied_id,
+            mode_id="custom",
+        )
+        assert persisted.description == "autosaved-user-copy"
+        assert bridge.is_scene_dirty() is False
+        assert panel._scene_autosave_state == "saved"
+    finally:
+        _dispose_panel(bridge, panel, qapp)
+
+
+def test_autosave_failure_keeps_dirty_draft_and_reports_failed_state(
+    qapp,
+    isolated_scene_config_library,
+    monkeypatch,
+):
+    scene_id = "autosave_failure_plan"
+    bridge, panel, _path = _open_owned_user_scene_panel(
+        scene_id=scene_id,
+        name="自动保存失败方案",
+    )
+    try:
+        _mark_scene_dirty(bridge, description="must-remain-in-memory")
+        monkeypatch.setattr(
+            panel,
+            "prepare_pending_scene_changes",
+            lambda *_args, **_kwargs: False,
+        )
+
+        assert panel.flush_pending_scene_autosave() is False
+
+        persisted = config_library.load_scene_from_library(
+            scene_id,
+            mode_id="exam",
+        )
+        assert persisted.description != "must-remain-in-memory"
+        assert bridge.current_scene().description == "must-remain-in-memory"
+        assert bridge.is_scene_dirty() is True
+        assert panel._scene_autosave_state == "failed"
+    finally:
+        _dispose_panel(bridge, panel, qapp)
+
+
 @pytest.mark.parametrize(("mode_id", "scene_id"), BUILTIN_SCENES)
 def test_every_builtin_manual_save_forks_to_an_owned_user_scene(
     qapp,

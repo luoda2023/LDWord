@@ -114,7 +114,6 @@ class AssistantMessageBodyRenderer(QTextEdit):
         cursor.movePosition(QTextCursor.End)
         cursor.insertText(delta)
         self.setTextCursor(cursor)
-        self._apply_document_geometry()
 
     def apply_semantic_theme(self) -> None:
         self._prepare_document()

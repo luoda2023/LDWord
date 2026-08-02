@@ -63,3 +63,28 @@ def test_resolve_chapter_number_returns_zero_outside_body_scoped_ranges():
     assert resolve_chapter_number(1, ranges) == 0
     assert resolve_chapter_number(3, ranges) == 1
     assert resolve_chapter_number(5, ranges) == 0
+
+
+def test_build_heading_chapter_ranges_excludes_non_numbered_special_titles():
+    doc_tree = DocTree(
+        sections=[DocSection("body", 0, 8)],
+        special_title_matches={
+            0: "special_title:图和附表清单",
+        },
+    )
+    heading_map = {
+        0: 1,
+        2: 1,
+        5: 1,
+    }
+
+    ranges = build_heading_chapter_ranges(
+        heading_map,
+        8,
+        doc_tree=doc_tree,
+    )
+
+    assert ranges == [
+        (2, 4, 1),
+        (5, 7, 2),
+    ]

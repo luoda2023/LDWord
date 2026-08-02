@@ -6,6 +6,9 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+from src.config.special_title_rules import match_special_title_model
 from src.config.section_semantics import canonicalize_section_type
 from src.modules.base import BaseModule, ModuleMeta
 from src.shared.engine.docx_heading_semantics import get_paragraph_outline_level
@@ -90,20 +93,6 @@ SPECIAL_SECTION_TITLES: dict[str, str] = {
     "\u6bd5\u4e1a\u8bba\u6587": "cover",
     "\u672c\u79d1\u6bd5\u4e1a\u8bbe\u8ba1": "cover",
     "\u6bd5\u4e1a\u8bbe\u8ba1": "cover",
-    "\u539f\u521b\u6027\u58f0\u660e": "statement",
-    "\u72ec\u521b\u6027\u58f0\u660e": "statement",
-    "\u5b66\u4f4d\u8bba\u6587\u539f\u521b\u6027\u58f0\u660e": "statement",
-    "\u58f0\u660e": "statement",
-    "\u627f\u8bfa\u4e66": "statement",
-    "\u8bda\u4fe1\u627f\u8bfa\u4e66": "statement",
-    "\u5b66\u4f4d\u8bba\u6587\u7248\u6743\u4f7f\u7528\u6388\u6743\u4e66": "authorization",
-    "\u7248\u6743\u4f7f\u7528\u6388\u6743\u4e66": "authorization",
-    "\u6388\u6743\u4e66": "authorization",
-    "\u8bf4\u660e": "front_note",
-    "\u586b\u8868\u8bf4\u660e": "front_note",
-    "\u4f7f\u7528\u8bf4\u660e": "front_note",
-    "\u7b54\u8fa9\u59d4\u5458\u4f1a": "front_note",
-    "\u8bc4\u9605\u4eba": "front_note",
     "\u53c2\u8003\u6587\u732e": "references",
     "references": "references",
     "bibliography": "references",
@@ -134,26 +123,6 @@ SECTION_ANCHORS: dict[str, tuple[str, ...]] = {
         "\u672c\u79d1\u6bd5\u4e1a\u8bbe\u8ba1",
         "\u6bd5\u4e1a\u8bbe\u8ba1",
     ),
-    "statement": (
-        "\u5b66\u4f4d\u8bba\u6587\u539f\u521b\u6027\u58f0\u660e",
-        "\u539f\u521b\u6027\u58f0\u660e",
-        "\u72ec\u521b\u6027\u58f0\u660e",
-        "\u8bda\u4fe1\u627f\u8bfa\u4e66",
-        "\u627f\u8bfa\u4e66",
-        "\u58f0\u660e",
-    ),
-    "authorization": (
-        "\u5b66\u4f4d\u8bba\u6587\u7248\u6743\u4f7f\u7528\u6388\u6743\u4e66",
-        "\u7248\u6743\u4f7f\u7528\u6388\u6743\u4e66",
-        "\u6388\u6743\u4e66",
-    ),
-    "front_note": (
-        "\u586b\u8868\u8bf4\u660e",
-        "\u4f7f\u7528\u8bf4\u660e",
-        "\u8bf4\u660e",
-        "\u7b54\u8fa9\u59d4\u5458\u4f1a",
-        "\u8bc4\u9605\u4eba",
-    ),
     "abstract_cn": ("\u6458\u8981", "\u6458 \u8981"),
     "abstract_en": ("abstract",),
     "toc": ("\u76ee\u5f55", "\u76ee \u5f55", "contents", "table of contents"),
@@ -170,9 +139,6 @@ SECTION_ANCHORS: dict[str, tuple[str, ...]] = {
 
 SECTION_ORDER = [
     "cover",
-    "statement",
-    "authorization",
-    "front_note",
     "abstract_cn",
     "abstract_en",
     "toc",
@@ -186,9 +152,6 @@ SECTION_ORDER = [
 
 SECTION_MIN_ACCEPT_SCORE = {
     "cover": 8.0,
-    "statement": 8.0,
-    "authorization": 8.0,
-    "front_note": 8.0,
     "abstract_cn": 8.0,
     "abstract_en": 8.0,
     "toc": 8.0,
@@ -199,12 +162,15 @@ SECTION_MIN_ACCEPT_SCORE = {
     "resume": 8.0,
 }
 SECTION_TITLE_CONFIDENCE = {key: 10.0 for key in SECTION_MIN_ACCEPT_SCORE}
-PRE_BODY_TYPES = {"cover", "statement", "authorization", "front_note", "abstract_cn", "abstract_en", "toc"}
+PRE_BODY_TYPES = {"cover", "abstract_cn", "abstract_en", "toc"}
 POST_BODY_TYPES = {"references", "errata", "appendix", "acknowledgment", "resume"}
 POST_BODY_MIN_RATIO = 0.35
 PRE_BODY_MAX_RATIO = 0.70
 HIGH_CONF_OVERRIDE = 12.0
 MIN_SECTION_SCORE = 4.0
+GENERIC_COVER_DATE_RE = re.compile(
+    r"(?:[二〇零○一一二三四五六七八九十\d]{4}\s*年(?:\s*[一二三四五六七八九十\d]{1,3}\s*月)?|20\d{2}\s*年)"
+)
 
 
 @dataclass
@@ -230,7 +196,7 @@ class HeadingRecognitionModule(BaseModule):
         tracker: ChangeTracker,
         context: PipelineContext,
     ) -> None:
-        doc_tree = rebuild_document_index(doc, context)
+        doc_tree = rebuild_document_index(doc, context, config)
         headings = doc_tree.headings
 
         if headings:
@@ -247,7 +213,11 @@ class HeadingRecognitionModule(BaseModule):
             )
 
 
-def rebuild_document_index(doc: Document, context: PipelineContext) -> DocTree:
+def rebuild_document_index(
+    doc: Document,
+    context: PipelineContext,
+    config: ResolvedConfig | None = None,
+) -> DocTree:
     """Rebuild the shared heading/section index after a structural mutation.
 
     The pipeline may call this between modules without replaying the heading
@@ -256,7 +226,12 @@ def rebuild_document_index(doc: Document, context: PipelineContext) -> DocTree:
     caption, TOC, section, or image mutations.
     """
 
-    doc_tree = analyze_document_tree(doc)
+    if config is not None:
+        context.heading_model_config = getattr(config, "heading_model", None)
+    doc_tree = analyze_document_tree(
+        doc,
+        heading_model=getattr(context, "heading_model_config", None),
+    )
     from src.shared.engine.document_scope_runtime import project_document_scope_tree
 
     doc_tree = project_document_scope_tree(
@@ -271,10 +246,16 @@ def rebuild_document_index(doc: Document, context: PipelineContext) -> DocTree:
     return doc_tree
 
 
-def analyze_document_tree(doc: Document) -> DocTree:
+def analyze_document_tree(
+    doc: Document,
+    heading_model=None,
+) -> DocTree:
     """Return the canonical read-only heading and logical-region analysis."""
 
-    candidate_headings = _scan_heading_infos(doc)
+    candidate_headings, special_title_matches = _scan_heading_infos(
+        doc,
+        heading_model,
+    )
     sections, detection_log = _build_sections(doc, candidate_headings)
     headings = _filter_body_headings(candidate_headings, sections)
     heading_map = {heading.para_index: heading.level for heading in headings}
@@ -282,29 +263,79 @@ def analyze_document_tree(doc: Document) -> DocTree:
         section.section_type: (section.start_index, section.end_index)
         for section in sections
     }
+    special_title_ranges = _build_special_title_ranges(
+        len(doc.paragraphs),
+        candidate_headings,
+        special_title_matches,
+    )
     return DocTree(
         headings=headings,
         heading_map=heading_map,
         section_ranges=section_ranges,
         sections=sections,
+        special_title_matches=special_title_matches,
+        special_title_ranges=special_title_ranges,
         detection_log=detection_log,
     )
 
 
-def _scan_heading_infos(doc: Document) -> list[HeadingInfo]:
+def _scan_heading_infos(
+    doc: Document,
+    heading_model=None,
+) -> tuple[list[HeadingInfo], dict[int, str]]:
     headings: list[HeadingInfo] = []
+    special_title_matches: dict[int, str] = {}
     previous_level: int | None = None
     for index, para in enumerate(doc.paragraphs):
         text = (para.text or "").strip()
         if not text:
             continue
-        level = _detect_heading(para, text)
+        special_match = match_special_title_model(text, heading_model)
+        if special_match is not None:
+            special_title_matches[index] = special_match.selector
+        level = 1 if special_match is not None else _detect_heading(para, text)
         if level is None:
             level = _detect_heading_from_context(para, text, previous_level)
         if level is not None:
             headings.append(HeadingInfo(index, level, text[:80]))
             previous_level = level
-    return headings
+    return headings, special_title_matches
+
+
+def _build_special_title_ranges(
+    total_paragraphs: int,
+    headings: list[HeadingInfo],
+    matches: dict[int, str],
+) -> list[DocSection]:
+    """End each matched range at the next special title or ordinary H1."""
+
+    level_one_indices = sorted(
+        heading.para_index
+        for heading in headings
+        if heading.level == 1
+    )
+    ranges: list[DocSection] = []
+    for start_index, selector in sorted(matches.items()):
+        end_index = next(
+            (
+                heading_index
+                for heading_index in level_one_indices
+                if heading_index > start_index
+            ),
+            total_paragraphs,
+        )
+        if end_index <= start_index:
+            continue
+        ranges.append(
+            DocSection(
+                section_type=selector,
+                start_index=start_index,
+                end_index=end_index,
+                confidence=10.0,
+                title_confident=True,
+            )
+        )
+    return ranges
 
 
 def _section_type_for_paragraph(sections: list[DocSection], para_index: int) -> str:
@@ -613,7 +644,10 @@ def _is_candidate_credible(candidate: _SectionCandidate, total: int) -> bool:
     return True
 
 
-def _scan_section_candidates(doc: Document, total: int) -> list[_SectionCandidate]:
+def _scan_section_candidates(
+    doc: Document,
+    total: int,
+) -> list[_SectionCandidate]:
     candidates: list[_SectionCandidate] = []
     for index, para in enumerate(doc.paragraphs):
         if not (para.text or "").strip():
@@ -679,7 +713,10 @@ def _order_compatible(prev_type: str, cur_type: str, order_rank: dict[str, int])
     return order_rank.get(prev_type, 10_000) < order_rank.get(cur_type, 10_000)
 
 
-def _order_validate_sections(sections_by_type: dict[str, DocSection], detection_log: list[str]) -> list[DocSection]:
+def _order_validate_sections(
+    sections_by_type: dict[str, DocSection],
+    detection_log: list[str],
+) -> list[DocSection]:
     if "cover" in sections_by_type:
         sections_by_type["cover"].start_index = 0
     sorted_sections = sorted(sections_by_type.values(), key=lambda section: section.start_index)
@@ -797,7 +834,75 @@ def _detect_cover_by_content(doc: Document, total: int) -> DocSection | None:
     return None
 
 
-def _scan_body_start_range(doc: Document, headings: list[HeadingInfo], start: int, end: int) -> int | None:
+def _detect_cover_by_first_section(doc: Document, total: int) -> DocSection | None:
+    """Recognize a sparse, centered first page terminated by a page section break."""
+
+    from src.shared.engine.ooxml_ops import qn
+
+    if total < 4:
+        return None
+    boundary = None
+    for index, paragraph in enumerate(doc.paragraphs[:-1]):
+        paragraph_properties = paragraph._p.pPr
+        section_properties = (
+            paragraph_properties.find(qn("w:sectPr"))
+            if paragraph_properties is not None
+            else None
+        )
+        if section_properties is None:
+            continue
+        section_type = section_properties.find(qn("w:type"))
+        type_value = (
+            str(section_type.get(qn("w:val")) or "").strip()
+            if section_type is not None
+            else "nextPage"
+        )
+        if type_value in {"nextPage", "oddPage", "evenPage"}:
+            boundary = index + 1
+        break
+    if boundary is None:
+        return None
+
+    early_limit = min(80, max(30, int(total * 0.35)))
+    if boundary < 3 or boundary > early_limit:
+        return None
+    nonempty = [
+        (index, paragraph, str(paragraph.text or "").strip())
+        for index, paragraph in enumerate(doc.paragraphs[:boundary])
+        if str(paragraph.text or "").strip()
+    ]
+    if not 1 <= len(nonempty) <= 12 or len(nonempty) / boundary > 0.55:
+        return None
+
+    centered = sum(
+        paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER
+        for _index, paragraph, _text in nonempty
+    )
+    has_title = any(
+        4 <= len(text) <= 80
+        and not NARRATIVE_PUNCT.search(text)
+        and not looks_like_date_placeholder_line(text)
+        for _index, _paragraph, text in nonempty
+    )
+    has_date = any(GENERIC_COVER_DATE_RE.search(text) for _index, _paragraph, text in nonempty)
+    if centered < 2 or not has_title or not has_date:
+        return None
+    return DocSection(
+        "cover",
+        0,
+        boundary,
+        confidence=9.0,
+        title_confident=True,
+        boundary_confident=True,
+    )
+
+
+def _scan_body_start_range(
+    doc: Document,
+    headings: list[HeadingInfo],
+    start: int,
+    end: int,
+) -> int | None:
     for heading in headings:
         if not (start <= heading.para_index < end):
             continue
@@ -828,7 +933,13 @@ def _scan_body_start_range(doc: Document, headings: list[HeadingInfo], start: in
     return None
 
 
-def _insert_body_section(doc: Document, headings: list[HeadingInfo], special_sections: list[DocSection], total: int, detection_log: list[str]) -> list[DocSection]:
+def _insert_body_section(
+    doc: Document,
+    headings: list[HeadingInfo],
+    special_sections: list[DocSection],
+    total: int,
+    detection_log: list[str],
+) -> list[DocSection]:
     if not special_sections:
         return [DocSection("body", 0, total, confidence=10.0)] if total > 0 else []
 
@@ -836,7 +947,15 @@ def _insert_body_section(doc: Document, headings: list[HeadingInfo], special_sec
     pre_sections = [section for section in sections if section.section_type in PRE_BODY_TYPES]
     post_sections = [section for section in sections if section.section_type in POST_BODY_TYPES]
 
-    body_scan_start = max((section.start_index + 1 for section in pre_sections), default=0)
+    body_scan_start = max(
+        (
+            section.end_index
+            if section.boundary_confident and section.end_index > section.start_index
+            else section.start_index + 1
+            for section in pre_sections
+        ),
+        default=0,
+    )
     first_post = next((section for section in post_sections if section.start_index >= body_scan_start), None)
     body_scan_end = first_post.start_index if first_post is not None else total
 
@@ -856,14 +975,17 @@ def _insert_body_section(doc: Document, headings: list[HeadingInfo], special_sec
     return sorted([section for section in sections if section.end_index > section.start_index], key=lambda section: section.start_index)
 
 
-def _build_sections(doc: Document, headings: list[HeadingInfo]) -> tuple[list[DocSection], list[str]]:
+def _build_sections(
+    doc: Document,
+    headings: list[HeadingInfo],
+) -> tuple[list[DocSection], list[str]]:
     total = len(doc.paragraphs)
     detection_log: list[str] = []
 
     candidates = _scan_section_candidates(doc, total)
     anchors = _pick_best_section_candidates(candidates, total, detection_log)
 
-    cover_section = _detect_cover_by_content(doc, total)
+    cover_section = _detect_cover_by_first_section(doc, total) or _detect_cover_by_content(doc, total)
     if "cover" not in anchors and cover_section is not None:
         anchors["cover"] = cover_section
         detection_log.append(f"fallback cover by content: @{cover_section.start_index}")
@@ -897,7 +1019,10 @@ def _build_sections(doc: Document, headings: list[HeadingInfo]) -> tuple[list[Do
     ordered = _order_validate_sections(anchors, detection_log)
     for index, section in enumerate(ordered):
         next_start = ordered[index + 1].start_index if index + 1 < len(ordered) else total
-        section.end_index = next_start
+        if section.boundary_confident and section.end_index > section.start_index:
+            section.end_index = min(section.end_index, next_start)
+        else:
+            section.end_index = next_start
     finalized = [section for section in ordered if section.end_index > section.start_index]
 
     sections = _insert_body_section(doc, headings, finalized, total, detection_log)

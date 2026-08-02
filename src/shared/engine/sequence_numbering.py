@@ -40,6 +40,7 @@ def build_heading_chapter_ranges(
         if level == 1
         and body_start <= index < body_end
         and _is_body_paragraph(doc_tree, index)
+        and not _is_special_title_heading(doc_tree, index)
     )
     if not h1_indices:
         return []
@@ -99,3 +100,17 @@ def _is_body_paragraph(doc_tree: Any | None, para_index: int) -> bool:
         return False
 
     return str(section_type or "").strip().lower() == "body"
+
+
+def _is_special_title_heading(doc_tree: Any | None, para_index: int) -> bool:
+    if doc_tree is None:
+        return False
+
+    getter = getattr(doc_tree, "get_special_title_match", None)
+    if not callable(getter):
+        return False
+
+    try:
+        return bool(getter(para_index))
+    except Exception:
+        return False

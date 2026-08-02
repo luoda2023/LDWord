@@ -14,11 +14,11 @@ class TemplateNavigationContextMixin:
     """Own inbound navigation, field focus, and return-context presentation."""
 
     def handle_navigation_intent(self, intent) -> None:
-        self._set_return_navigation_intent(intent)
-        self._set_entry_context(intent)
         card_id = str(
             navigation_intent_value(intent, "card_id", "") or ""
         ).strip()
+        self._set_return_navigation_intent(intent)
+        self._set_entry_context(intent)
         if not card_id:
             return
         if card_id in self._detail_map or card_id in self._detail_factories:

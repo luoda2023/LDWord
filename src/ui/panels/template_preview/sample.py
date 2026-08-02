@@ -38,7 +38,7 @@ DEFAULT_TEMPLATE_PREVIEW_SAMPLE = TemplatePreviewSample(
     secondary_body_text="此段用于观察标题后的段前、段后、行距与首行缩进。",
     compact_secondary_body_text="观察标题后的间距与缩进。",
     non_numbered_title="摘要",
-    non_numbered_body="此处用于预览非编号标题样式，不显示标题编号。",
+    non_numbered_body="此处用于预览特殊标题样式；它不参与标题编号。",
     table_rows=(
         ("指标", "数值", "说明"),
         ("样本 A", "1.23", "有效"),

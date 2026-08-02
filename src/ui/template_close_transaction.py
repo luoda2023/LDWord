@@ -14,6 +14,9 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from src.shared.ui import Toast
+from src.ui.template_close_recovery_projection import (
+    refresh_template_close_rollback_projections,
+)
 from src.ui.template_draft_save_coordinator import PreparedTemplateSave
 from src.ui.template_edit_session import (
     TemplateDraftContext,
@@ -323,20 +326,19 @@ class TemplateCloseTransaction:
                 snapshot.bridge_state,
                 emit_signal=False,
             )
-            host._set_detail_templates(host._current_template)
-            host._set_detail_save_enabled(host._edit_session.is_dirty())
-            host._refresh_template_selector_options()
-            host._sync_template_file_status()
-            host._refresh_overview_projection(
-                reason="template_close_rolled_back"
-            )
-            # Notify other panels only after this panel is internally coherent.
-            host.bridge.restore_state_snapshot(
-                snapshot.bridge_state,
-                emit_signal=True,
+            projection_errors = refresh_template_close_rollback_projections(
+                host,
+                bridge_state=snapshot.bridge_state,
             )
         finally:
             self._restoring_snapshot = False
+
+        if projection_errors:
+            Toast.show_warning(
+                "模板草稿状态已恢复，但部分界面未能刷新"
+                f"（{'、'.join(projection_errors)}）。"
+                "请重启应用后再继续编辑；不要在旧窗口中覆盖保存模板。"
+            )
 
     def _clear(self) -> None:
         self._action = ""

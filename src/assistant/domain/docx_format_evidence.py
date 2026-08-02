@@ -96,10 +96,24 @@ _TARGET_APPLICATION_TERMS = (
     "格式化另一",
     "统一另一",
 )
+_TEMPLATE_AUTHORING_PATTERNS = (
+    re.compile(
+        r"(?:写入|保存|创建|新建|制作|做成|生成|导入)"
+        r"(?:为|成)?(?:一个|一份)?(?:全新|新的|新)?"
+        r"[^，。；！？]{0,16}?模板"
+    ),
+    re.compile(r"(?:另存为|保存为|写入为)(?:一个|一份)?(?:全新|新的|新)?模板"),
+)
+_NEGATION_TERMS = ("不要", "不用", "无需", "不需要", "别", "请勿")
 _MAX_STYLE_ROWS = 24
 _MAX_SECTION_ROWS = 12
 _MAX_TABLE_STYLE_ROWS = 12
 _MAX_SAMPLE_TEXT = 120
+_OFFICE_NS = "urn:schemas-microsoft-com:office:office"
+_FORMULA_OLE_PROGID_RE = re.compile(
+    r"(?:equation|mathtype|eqn)",
+    re.IGNORECASE,
+)
 
 
 def is_format_requirements_request(query: str) -> bool:
@@ -114,6 +128,22 @@ def is_format_requirements_request(query: str) -> bool:
     has_analysis = any(term in normalized for term in _FORMAT_ANALYSIS_TERMS)
     has_reference = any(term in normalized for term in _REFERENCE_TERMS)
     return bool(has_analysis or (has_requirement and has_reference))
+
+
+def is_template_authoring_request(query: str) -> bool:
+    """Return whether the user asks to persist a new reusable template."""
+
+    normalized = _normalize_query(query)
+    if not normalized or "模板" not in normalized:
+        return False
+    for pattern in _TEMPLATE_AUTHORING_PATTERNS:
+        match = pattern.search(normalized)
+        if match is None:
+            continue
+        prefix = normalized[max(0, match.start() - 6) : match.start()]
+        if not any(term in prefix for term in _NEGATION_TERMS):
+            return True
+    return False
 
 
 def is_format_reference_application_request(query: str) -> bool:
@@ -147,7 +177,10 @@ def bind_attachment_semantic_roles(
 ) -> tuple[dict[str, object], ...]:
     """Bind per-turn semantic roles without leaking intent into later turns."""
 
-    reference_request = is_format_requirements_request(query)
+    template_authoring_request = is_template_authoring_request(query)
+    reference_request = (
+        is_format_requirements_request(query) or template_authoring_request
+    )
     rows = [dict(value) for value in refs]
     has_explicit_reference = any(
         str(row.get("semantic_role") or "") == STANDARD_FORMAT_REFERENCE_ROLE
@@ -158,19 +191,42 @@ def bind_attachment_semantic_roles(
         reference_request
         and len(rows) == 1
         and not has_explicit_reference
+        and Path(
+            str(
+                rows[0].get("path")
+                or rows[0].get("file_path")
+                or rows[0].get("local_path")
+                or ""
+            )
+        ).suffix.casefold()
+        == ".docx"
     )
     for row in rows:
         if infer_single_reference:
             row["semantic_role"] = STANDARD_FORMAT_REFERENCE_ROLE
             row["semantic_role_source"] = "assistant_intent"
+            if template_authoring_request:
+                row["template_authoring_source"] = True
+            else:
+                row.pop("template_authoring_source", None)
             if is_format_reference_application_request(query):
                 row["target_attachment_required"] = True
+            else:
+                row.pop("target_attachment_required", None)
+        elif (
+            template_authoring_request
+            and len(rows) == 1
+            and str(row.get("semantic_role") or "")
+            == STANDARD_FORMAT_REFERENCE_ROLE
+        ):
+            row["template_authoring_source"] = True
         elif (
             not reference_request or len(rows) != 1
         ) and row.get("semantic_role_source") == "assistant_intent":
             row.pop("semantic_role", None)
             row.pop("semantic_role_source", None)
             row.pop("target_attachment_required", None)
+            row.pop("template_authoring_source", None)
     return tuple(rows)
 
 
@@ -181,6 +237,8 @@ def attachment_disclosure_fields(
     for item in refs:
         role = str(item.get("semantic_role") or "")
         if role == STANDARD_FORMAT_REFERENCE_ROLE:
+            if bool(item.get("template_authoring_source")):
+                fields.append("document_text")
             fields.append(FORMAT_EVIDENCE_DISCLOSURE_FIELD)
         elif role in {
             SOURCE_ROLE_PRODUCTION_INPUT,
@@ -236,6 +294,21 @@ def extract_docx_format_evidence(path: str | Path) -> dict[str, object]:
     )
     settings = document.settings.element
     document_element = document.element
+    omml_formula_count = sum(1 for _ in document_element.iter(qn("m:oMath")))
+    ole_objects = tuple(
+        document_element.iter(f"{{{_OFFICE_NS}}}OLEObject")
+    )
+    formula_ole_object_count = sum(
+        1
+        for element in ole_objects
+        if _FORMULA_OLE_PROGID_RE.search(
+            str(
+                element.get("ProgID")
+                or element.get(f"{{{_OFFICE_NS}}}ProgID")
+                or ""
+            )
+        )
+    )
     return {
         "schema_version": DOCX_FORMAT_EVIDENCE_SCHEMA_VERSION,
         "source": {
@@ -258,7 +331,10 @@ def extract_docx_format_evidence(path: str | Path) -> dict[str, object]:
             "direct_run_format_count": direct_run_count,
             "inline_shape_count": len(document.inline_shapes),
             "drawing_count": sum(1 for _ in document_element.iter(qn("w:drawing"))),
-            "formula_count": sum(1 for _ in document_element.iter(qn("m:oMath"))),
+            "formula_count": omml_formula_count + formula_ole_object_count,
+            "omml_formula_count": omml_formula_count,
+            "ole_object_count": len(ole_objects),
+            "formula_ole_object_count": formula_ole_object_count,
             "field_instruction_count": sum(
                 1 for _ in document_element.iter(qn("w:instrText"))
             ),

@@ -83,8 +83,6 @@ OPTIONAL_PLACEHOLDERS_BY_FAMILY = {
         "official_printing_date",
     ),
     "order": (
-        "official_security_level",
-        "official_urgency",
         "official_organization",
         "official_document_no",
         "official_issue_date",

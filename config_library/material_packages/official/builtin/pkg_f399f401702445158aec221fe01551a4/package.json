@@ -1,0 +1,45 @@
+{
+  "kind": "alavette.material_package",
+  "schema_version": 1,
+  "package_id": "pkg_f399f401702445158aec221fe01551a4",
+  "display_name": "批复资料包样例",
+  "work_mode_id": "official",
+  "material_contract_id": "official_document_v1",
+  "shared_scope": {
+    "fields": {},
+    "resources": {},
+    "derivations": {},
+    "timelines": {},
+    "provenance": {}
+  },
+  "groups": [],
+  "records": [
+    {
+      "record_id": "rec_8067dad139e5463a90a83c7c895c2233",
+      "display_name": "批复",
+      "group_id": "",
+      "lifecycle": "active",
+      "scope": {
+        "fields": {
+          "document_type": "approval",
+          "title": "关于电子档案管理系统升级事项的批复",
+          "body": "你局有关请示收悉。经研究，同意按程序推进电子档案管理系统升级工作。",
+          "organization": "示例市人民政府",
+          "document_no": "示政复〔2026〕12号",
+          "recipient": "示例市档案局",
+          "issuer": "示例市人民政府",
+          "issue_date": "2026年7月10日",
+          "copy_scope": "市财政局、市政务服务管理局",
+          "printing_org": "示例市人民政府办公室",
+          "printing_date": "2026年7月10日"
+        },
+        "resources": {},
+        "derivations": {},
+        "timelines": {},
+        "provenance": {}
+      },
+      "origin": {}
+    }
+  ],
+  "metadata": {}
+}

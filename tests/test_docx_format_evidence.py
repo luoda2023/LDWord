@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from docx import Document
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
+from lxml import etree
 import pytest
 
 from src.assistant.domain.docx_format_evidence import (
@@ -91,6 +93,15 @@ def test_format_requirements_intent_does_not_guess_among_multiple_attachments():
     assert attachment_disclosure_fields(bound) == ("document_text",)
 
 
+def test_markdown_reference_remains_text_material_for_format_request():
+    refs = ({"path": "C:/requirements.md", "title": "requirements.md"},)
+
+    bound = bind_attachment_semantic_roles(refs, FORMAT_QUERY)
+
+    assert "semantic_role" not in bound[0]
+    assert attachment_disclosure_fields(bound) == ("document_text",)
+
+
 def test_docx_format_evidence_extracts_geometry_styles_and_headers_without_path(
     tmp_path,
 ):
@@ -128,3 +139,34 @@ def test_docx_format_evidence_extracts_geometry_styles_and_headers_without_path(
     assert by_name["Heading 1"]["semantic_level"] == 1
     assert by_name["Heading 1"]["font"]["size_pt"] == 16.0
     assert by_name["Heading 1"]["font"]["bold"] is True
+
+
+def test_docx_format_evidence_counts_omml_and_equation_ole_objects(tmp_path):
+    path = tmp_path / "formula-evidence.docx"
+    document = Document()
+
+    omml_paragraph = document.add_paragraph()
+    math = OxmlElement("m:oMath")
+    math_run = OxmlElement("m:r")
+    math_text = OxmlElement("m:t")
+    math_text.text = "x"
+    math_run.append(math_text)
+    math.append(math_run)
+    omml_paragraph._element.append(math)
+
+    ole_paragraph = document.add_paragraph()
+    word_object = OxmlElement("w:object")
+    ole = etree.SubElement(
+        word_object,
+        "{urn:schemas-microsoft-com:office:office}OLEObject",
+    )
+    ole.set("ProgID", "Equation.3")
+    ole_paragraph._element.append(word_object)
+    document.save(path)
+
+    inventory = extract_docx_format_evidence(path)["inventory"]
+
+    assert inventory["omml_formula_count"] == 1
+    assert inventory["ole_object_count"] == 1
+    assert inventory["formula_ole_object_count"] == 1
+    assert inventory["formula_count"] == 2

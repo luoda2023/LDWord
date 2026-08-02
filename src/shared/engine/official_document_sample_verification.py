@@ -379,8 +379,15 @@ def _all_docx_text(path: Path) -> str:
                     collect(cell)
         if hasattr(container, "sections"):
             for section in container.sections:
-                collect(section.header)
-                collect(section.footer)
+                for part in (
+                    section.header,
+                    section.first_page_header,
+                    section.even_page_header,
+                    section.footer,
+                    section.first_page_footer,
+                    section.even_page_footer,
+                ):
+                    collect(part)
 
     collect(document)
     return "\n".join(parts)

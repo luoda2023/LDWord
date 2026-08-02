@@ -47,6 +47,7 @@ from src.modules.registry import create_all_modules
 from src.pipeline.module_selection import (
     ModuleDisposition,
     ModuleSelectionPlan,
+    build_module_selection_plan,
 )
 from src.ui.base_panel import BasePanel
 from src.ui.template_library_controller import TemplateLibraryController
@@ -65,10 +66,13 @@ from src.ui.panels.template_feature_specs import (
     TEMPLATE_CARD_DEFINITIONS,
     TEMPLATE_DETAIL_CARD_IDS,
     TEMPLATE_FEATURE_BY_CARD_ID,
+    feature_module_names,
+    module_control_switch_updates,
 )
 from src.ui.panels.template_detail_lifecycle import (
     TemplateDetailLifecycleMixin,
 )
+from src.ui.panels.template_close_lifecycle_mixin import TemplateCloseLifecycleMixin
 from src.ui.panels.template_library_management_mixin import (
     TemplateLibraryManagementMixin,
 )
@@ -191,6 +195,7 @@ class _PlaceholderDetail(QWidget):
 # ═══════════════════════════════════════════════════════════════════════
 
 class TemplatePanel(
+    TemplateCloseLifecycleMixin,
     TemplateDetailLifecycleMixin,
     TemplateLibraryManagementMixin,
     TemplateNavigationContextMixin,
@@ -246,6 +251,7 @@ class TemplatePanel(
         self._overview_projection: TemplateOverviewProjection | None = None
         self._preview_mode = TemplatePreviewMode.TEMPLATE_BASELINE
         self._module_selection = None
+        self._overview_projection_stale = False
         self._projection_refresh_count = 0
         self._publishing_template = False
         self._preview_modules = tuple(create_all_modules())
@@ -471,43 +477,6 @@ class TemplatePanel(
         if hasattr(self.bridge, "work_mode_changed"):
             self.bridge.work_mode_changed.connect(self._on_work_mode_changed)
 
-    def _has_pending_template_edits(self) -> bool:
-        return bool(self._edit_session.is_dirty())
-
-    def request_leave_pending_changes(self, reason: str = "离开模板管理") -> bool:
-        """Keep drafts in memory while ordinary application navigation continues."""
-
-        del reason
-        return True
-
-    def pending_template_draft_count(self) -> int:
-        return len(self._draft_store.dirty_contexts())
-
-    def _prompt_close_template_draft_action(self, count: int) -> str:
-        return self._close_prompt.ask(count)
-
-    def prepare_close_pending_changes(self) -> bool:
-        return self._close_transaction.prepare()
-
-    def commit_close_pending_changes(self) -> bool:
-        return self._close_transaction.commit()
-
-    def rollback_close_pending_changes(self) -> bool:
-        return self._close_transaction.rollback()
-
-    def finalize_close_pending_changes(self) -> None:
-        self._close_transaction.finalize()
-
-    def cancel_prepared_close(self) -> None:
-        self._close_transaction.cancel()
-
-    def __getattr__(self, name: str):
-        detail_attrs = self.__dict__.get("_detail_attr_names", {})
-        card_id = detail_attrs.get(name)
-        if card_id:
-            return self._ensure_detail_loaded(card_id)
-        raise AttributeError(f"{type(self).__name__} object has no attribute {name!r}")
-
     def _attach_participation_section(
         self,
         card_id: str,
@@ -545,8 +514,8 @@ class TemplatePanel(
             card_id = feature.card_id
             decisions = (
                 tuple(
-                    selection.decision_for(control.module_name)
-                    for control in feature.module_controls
+                    selection.decision_for(module_name)
+                    for module_name in feature_module_names(feature)
                 )
                 if has_scene and selection is not None
                 else ()
@@ -581,10 +550,35 @@ class TemplatePanel(
         enabled: bool,
     ) -> None:
         changed = self.bridge.update_current_scene_module_switches(
-            {module_name: bool(enabled)}
+            module_control_switch_updates(module_name, enabled)
         )
         if not changed:
             self._apply_module_selection(self._module_selection)
+
+    def _apply_participation_scene_update(self, scene) -> None:
+        """Project a switch-only scene update without rebuilding hidden UI."""
+
+        if scene is None:
+            self._module_selection = None
+            self._apply_module_selection(None)
+        else:
+            selection = build_module_selection_plan(
+                self._preview_modules,
+                is_requested=scene.is_module_enabled,
+            )
+            self._module_selection = selection
+            self._apply_module_selection(selection)
+        self._overview_projection_stale = True
+
+    def _request_overview_projection_refresh(self, *, reason: str) -> None:
+        if self._current_detail_card_id == "tpl_overview":
+            self._refresh_overview_projection(reason=reason)
+        else:
+            self._overview_projection_stale = True
+
+    def _on_detail_shown(self, card_id: str) -> None:
+        if card_id == "tpl_overview" and self._overview_projection_stale:
+            self._refresh_overview_projection(reason="deferred_detail_change")
 
     def _wire_parameter_detail_signals(self, card_id: str, detail: QWidget) -> None:
         del card_id
@@ -654,18 +648,27 @@ class TemplatePanel(
         self._refresh_overview_projection(reason="preview_mode_changed")
 
     def _on_template_edited(self, template: TemplateConfig) -> None:
+        editing_detail = self.sender()
         draft = self._edit_session.replace_draft(template)
         self._current_template = draft
         if draft is not template:
             self._set_detail_templates(draft)
+        elif editing_detail is getattr(self, "_heading_detail", None):
+            header_footer_detail = getattr(self, "_header_footer_detail", None)
+            if header_footer_detail is not None:
+                self._apply_detail_context(header_footer_detail, draft)
         self._sync_template_dirty_state()
         self._sync_template_file_status()
-        self._refresh_overview_projection(reason="template_draft_changed")
+        self._request_overview_projection_refresh(
+            reason="template_draft_changed"
+        )
 
     def on_scene_changed(self, scene) -> None:
         if self._close_transaction.is_restoring_snapshot:
             return
-        self._refresh_template_selector_options()
+        if self.bridge.scene_change_reason() == "module_switches":
+            self._apply_participation_scene_update(scene)
+            return
         self._set_detail_scenes(scene)
         self._refresh_overview_projection(reason="scene_changed")
 

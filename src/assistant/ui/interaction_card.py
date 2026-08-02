@@ -6,6 +6,7 @@ from collections.abc import Mapping
 
 from src.assistant.ui.conversation_presentation import (
     ActionPresentation,
+    action_icon_name,
     build_question_response,
     project_interaction,
 )
@@ -20,15 +21,16 @@ from src.qt_api import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QSize,
+    Qt,
     QToolButton,
     QVBoxLayout,
     QWidget,
-    Qt,
     Signal,
 )
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
-from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.icons.catalog import get_icon
+from src.shared.ui.theme import bind_theme, get_theme
 
 
 class _ChoiceButton(QPushButton):
@@ -91,34 +93,63 @@ class AssistantInteractionCard(QFrame):
             payload=self.payload,
         )
         self.interaction_type = self.presentation.interaction_type
+        self._uses_compact_heading = self.interaction_type in {
+            "artifact",
+            "approval",
+            "plan",
+            "preflight",
+            "progress",
+            "recovery",
+        } or self.presentation.compact_heading
         self.setObjectName("assistant_interaction_card")
         self.setProperty("tone", self.presentation.tone)
         self.setProperty("active", self.presentation.active)
+        self.setProperty(
+            "structuredQuestion",
+            bool(self.presentation.question_inputs),
+        )
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setAccessibleName(
             f"{self.presentation.eyebrow}：{self.presentation.title}"
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(8)
+        if self.interaction_type == "plan":
+            layout.setContentsMargins(14, 14, 14, 14)
+            layout.setSpacing(10)
+        elif self.interaction_type == "progress":
+            layout.setContentsMargins(14, 12, 14, 12)
+            layout.setSpacing(7)
+        else:
+            layout.setContentsMargins(14, 12, 14, 12)
+            layout.setSpacing(8)
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(7)
+        header.setSpacing(10 if self._uses_compact_heading else 7)
         self._type_icon = QLabel(self)
         self._type_icon.setObjectName("assistant_card_type_icon")
-        self._type_icon.setFixedSize(18, 18)
+        self._type_icon.setAlignment(Qt.AlignCenter)
+        icon_box_size = 30 if self._uses_compact_heading else 18
+        self._type_icon.setFixedSize(icon_box_size, icon_box_size)
         header.addWidget(self._type_icon)
         self._eyebrow = QLabel(self.presentation.eyebrow, self)
         self._eyebrow.setObjectName("assistant_card_eyebrow")
-        header.addWidget(self._eyebrow)
-        header.addStretch(1)
-        layout.addLayout(header)
-
         self._title = QLabel(self.presentation.title, self)
         self._title.setObjectName("assistant_card_title")
         self._title.setWordWrap(True)
-        layout.addWidget(self._title)
+        if self._uses_compact_heading:
+            self._eyebrow.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            self._title.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            header.addWidget(self._eyebrow)
+            header.addWidget(self._title, 1)
+            header.setAlignment(self._type_icon, Qt.AlignVCenter)
+        else:
+            header.addWidget(self._eyebrow)
+            header.addStretch(1)
+        layout.addLayout(header)
+
+        if not self._uses_compact_heading:
+            layout.addWidget(self._title)
         self._body = QLabel(self.presentation.body, self)
         self._body.setObjectName("assistant_card_body")
         self._body.setWordWrap(True)
@@ -130,25 +161,45 @@ class AssistantInteractionCard(QFrame):
         if self.presentation.facts:
             self._fact_host = QWidget(self)
             self._fact_host.setObjectName("assistant_plan_facts")
+            if self.interaction_type == "plan":
+                self._fact_host.setAttribute(Qt.WA_StyledBackground, True)
             facts = QGridLayout(self._fact_host)
-            facts.setContentsMargins(0, 2, 0, 2)
-            facts.setHorizontalSpacing(12)
-            facts.setVerticalSpacing(6)
+            facts.setContentsMargins(
+                10 if self.interaction_type == "plan" else 0,
+                8 if self.interaction_type == "plan" else 2,
+                10 if self.interaction_type == "plan" else 0,
+                8 if self.interaction_type == "plan" else 2,
+            )
+            facts.setHorizontalSpacing(18)
+            facts.setVerticalSpacing(7 if self.interaction_type == "plan" else 8)
             for index, (label, value) in enumerate(self.presentation.facts):
                 label_widget = QLabel(label, self._fact_host)
                 label_widget.setObjectName("assistant_plan_fact_label")
                 value_widget = QLabel(value, self._fact_host)
                 value_widget.setObjectName("assistant_plan_fact_value")
                 value_widget.setWordWrap(True)
+                value_widget.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 row, column = divmod(index, 2)
                 facts.addWidget(label_widget, row, column * 2)
                 facts.addWidget(value_widget, row, column * 2 + 1)
             facts.setColumnStretch(1, 1)
             facts.setColumnStretch(3, 1)
             layout.addWidget(self._fact_host)
-            if self.presentation.notices:
+            if self.presentation.body or self.presentation.notices:
+                notice_text = (
+                    "\n".join(self.presentation.notices)
+                    if self.interaction_type == "plan"
+                    else "\n".join(
+                        f"• {item}" for item in self.presentation.notices
+                    )
+                )
+                if self.interaction_type == "plan" and self.presentation.notices:
+                    self._body.setProperty("variant", "notice")
+                body_text = str(self.presentation.body or "").strip()
                 self._body.setText(
-                    "\n".join(f"• {item}" for item in self.presentation.notices)
+                    "\n".join(
+                        item for item in (body_text, notice_text) if item
+                    )
                 )
                 self._body.show()
 
@@ -172,10 +223,12 @@ class AssistantInteractionCard(QFrame):
 
         self._choice_buttons: list[_ChoiceButton] = []
         self._choice_group: QButtonGroup | None = None
+        self._choice_toggle: QToolButton | None = None
         self._other_input: QLineEdit | None = None
+        self._question_inputs: dict[str, QLineEdit] = {}
         self._question_submit: QPushButton | None = None
         self._question_skip: QToolButton | None = None
-        if self.presentation.choices:
+        if self.presentation.choices or self.presentation.question_inputs:
             self._build_question_choices(layout)
 
         self._progress: QProgressBar | None = None
@@ -191,33 +244,35 @@ class AssistantInteractionCard(QFrame):
             else:
                 self._progress.setRange(0, 0)
                 self._progress.setTextVisible(False)
+                self._progress.setMaximumWidth(180)
             layout.addWidget(self._progress)
 
         self._actions = QHBoxLayout()
         self._actions.setContentsMargins(0, 4, 0, 0)
         self._actions.setSpacing(8)
         self._buttons: list[QPushButton] = []
-        if not self.presentation.choices:
-            for action in self.presentation.actions:
+        if not (
+            self.presentation.choices or self.presentation.question_inputs
+        ):
+            left_actions = tuple(
+                action
+                for action in self.presentation.actions
+                if action.alignment != "right"
+            )
+            right_actions = tuple(
+                action
+                for action in self.presentation.actions
+                if action.alignment == "right"
+            )
+            for action in left_actions:
                 self._add_action_button(action)
-        self._actions.addStretch(1)
+            self._actions.addStretch(1)
+            for action in right_actions:
+                self._add_action_button(action)
+        else:
+            self._actions.addStretch(1)
         if self._buttons:
             layout.addLayout(self._actions)
-
-        receipt_text = {
-            "question": "已提交 · 当前问题仅供回看",
-            "disclosure": "已处理 · 当前披露确认仅供回看",
-            "permission": "不可执行 · 没有可验证的权限恢复通道",
-            "plan_candidate": "已处理 · 当前候选已不再生效",
-            "plan": "已进入后续阶段 · 当前计划仅供回看",
-            "approval": "审批状态已变化 · 当前卡片仅供回看",
-            "progress": "该处理阶段已经结束",
-        }.get(self.interaction_type, "")
-        self._receipt = QLabel(receipt_text, self)
-        self._receipt.setObjectName("assistant_card_receipt")
-        self._receipt.setVisible(bool(receipt_text) and not self.presentation.active)
-        if receipt_text:
-            layout.addWidget(self._receipt)
 
         bind_theme(self, self._apply_theme)
         self._apply_theme()
@@ -229,43 +284,165 @@ class AssistantInteractionCard(QFrame):
         choice_host.setObjectName("assistant_question_choices")
         choice_layout = QVBoxLayout(choice_host)
         choice_layout.setContentsMargins(0, 2, 0, 0)
-        choice_layout.setSpacing(7)
-        for choice in self.presentation.choices:
-            button = _ChoiceButton(
-                choice.choice_id,
-                choice.label,
-                choice.description,
-                multiple=self.presentation.multiple,
-                parent=choice_host,
+        choice_layout.setSpacing(9)
+        if self.presentation.choices:
+            if self.presentation.choices_label:
+                label = QLabel(self.presentation.choices_label, choice_host)
+                label.setObjectName("assistant_question_section_label")
+                choice_layout.addWidget(label)
+            choice_grid = QGridLayout()
+            choice_grid.setContentsMargins(0, 0, 0, 0)
+            choice_grid.setHorizontalSpacing(8)
+            choice_grid.setVerticalSpacing(8)
+            for index, choice in enumerate(self.presentation.choices):
+                button = _ChoiceButton(
+                    choice.choice_id,
+                    choice.label,
+                    choice.description,
+                    multiple=self.presentation.multiple,
+                    parent=choice_host,
+                )
+                button.toggled.connect(self._sync_question_submit)
+                button.setEnabled(self.presentation.active)
+                self._choice_group.addButton(button)
+                self._choice_buttons.append(button)
+                if (
+                    self.presentation.initial_choice_count > 0
+                    and index >= self.presentation.initial_choice_count
+                ):
+                    button.setVisible(False)
+                row, column = divmod(
+                    index,
+                    self.presentation.choice_columns,
+                )
+                choice_grid.addWidget(button, row, column)
+            for column in range(self.presentation.choice_columns):
+                choice_grid.setColumnStretch(column, 1)
+            choice_layout.addLayout(choice_grid)
+            hidden_count = len(self.presentation.choices) - (
+                self.presentation.initial_choice_count or len(self.presentation.choices)
             )
-            button.toggled.connect(self._sync_question_submit)
-            button.setEnabled(self.presentation.active)
-            self._choice_group.addButton(button)
-            self._choice_buttons.append(button)
-            choice_layout.addWidget(button)
+            if hidden_count > 0:
+                self._choice_toggle = QToolButton(choice_host)
+                self._choice_toggle.setObjectName(
+                    "assistant_question_choice_toggle"
+                )
+                self._choice_toggle.setCheckable(True)
+                self._choice_toggle.setCursor(Qt.PointingHandCursor)
+                self._choice_toggle.setArrowType(Qt.DownArrow)
+                self._choice_toggle.setToolButtonStyle(
+                    Qt.ToolButtonTextBesideIcon
+                )
+                self._choice_toggle.setText(
+                    self.presentation.expand_choices_label
+                    or f"更多选项（{hidden_count}）"
+                )
+                self._choice_toggle.setEnabled(self.presentation.active)
+                self._choice_toggle.toggled.connect(
+                    self._set_choice_options_expanded
+                )
+                choice_layout.addWidget(
+                    self._choice_toggle,
+                    0,
+                    Qt.AlignLeft,
+                )
         if self.presentation.allow_other:
             self._other_input = QLineEdit(choice_host)
             self._other_input.setObjectName("assistant_question_other")
-            self._other_input.setPlaceholderText("其他，请补充…")
+            self._other_input.setPlaceholderText(
+                self.presentation.other_placeholder or "其他，请补充…"
+            )
             self._other_input.setMinimumHeight(TOKENS.question_option_height)
             self._other_input.setEnabled(self.presentation.active)
             self._other_input.textChanged.connect(self._sync_question_submit)
             choice_layout.addWidget(self._other_input)
+        if self.presentation.question_inputs:
+            if self.presentation.inputs_label:
+                label = QLabel(self.presentation.inputs_label, choice_host)
+                label.setObjectName("assistant_question_section_label")
+                choice_layout.addWidget(label)
+            input_panel = QWidget(choice_host)
+            input_panel.setObjectName("assistant_question_input_panel")
+            input_panel.setAttribute(Qt.WA_StyledBackground, True)
+            input_grid = QGridLayout(input_panel)
+            input_grid.setContentsMargins(10, 9, 10, 10)
+            input_grid.setHorizontalSpacing(10)
+            input_grid.setVerticalSpacing(8)
+            input_columns = self.presentation.question_input_columns
+            cursor = 0
+            for input_spec in self.presentation.question_inputs:
+                span = min(input_columns, input_spec.column_span)
+                column = cursor % input_columns
+                if column + span > input_columns:
+                    cursor += input_columns - column
+                    column = 0
+                field = QWidget(input_panel)
+                field.setObjectName("assistant_question_input_field")
+                field_layout = QVBoxLayout(field)
+                field_layout.setContentsMargins(0, 0, 0, 0)
+                field_layout.setSpacing(4)
+                label = QLabel(
+                    f"{input_spec.label}{' *' if input_spec.required else ''}",
+                    field,
+                )
+                label.setObjectName("assistant_question_input_label")
+                editor = QLineEdit(field)
+                editor.setObjectName("assistant_question_input")
+                editor.setPlaceholderText(input_spec.placeholder)
+                editor.setText(input_spec.value)
+                editor.setMinimumHeight(TOKENS.question_option_height)
+                editor.setEnabled(self.presentation.active)
+                editor.textChanged.connect(self._sync_question_submit)
+                field_layout.addWidget(label)
+                field_layout.addWidget(editor)
+                row = cursor // input_columns
+                input_grid.addWidget(field, row, column, 1, span)
+                cursor += span
+                self._question_inputs[input_spec.input_id] = editor
+            for column in range(input_columns):
+                input_grid.setColumnStretch(column, 1)
+            choice_layout.addWidget(input_panel)
         layout.addWidget(choice_host)
 
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 2, 0, 0)
         footer.setSpacing(8)
-        self._question_submit = QPushButton("提交", self)
+        if any(item.required for item in self.presentation.question_inputs):
+            required_hint = QLabel("* 为必填项", self)
+            required_hint.setObjectName("assistant_question_required_hint")
+            footer.addWidget(required_hint)
+        self._question_submit = QPushButton(
+            self.presentation.submit_label or "提交",
+            self,
+        )
         self._question_submit.setObjectName("assistant_question_submit")
+        self._question_submit.setProperty(
+            "iconName",
+            action_icon_name(
+                "submit_question_answer",
+                self.presentation.submit_label or "提交",
+                alignment="right",
+            ),
+        )
+        self._question_submit.setIconSize(QSize(16, 16))
+        if self.presentation.compact_heading:
+            self._question_submit.setMinimumWidth(96)
         apply_button_variant(self._question_submit, "primary")
         self._question_submit.setEnabled(False)
         self._question_submit.clicked.connect(self._submit_question)
-        footer.addWidget(self._question_submit)
         if self.presentation.can_skip:
             self._question_skip = QToolButton(self)
             self._question_skip.setObjectName("assistant_question_skip")
             self._question_skip.setText("跳过")
+            self._question_skip.setProperty(
+                "iconName",
+                action_icon_name(
+                    "skip_question_answer",
+                    "跳过",
+                    alignment="left",
+                ),
+            )
+            self._question_skip.setIconSize(QSize(16, 16))
             self._question_skip.setEnabled(self.presentation.active)
             self._question_skip.setCursor(Qt.PointingHandCursor)
             self._question_skip.clicked.connect(
@@ -273,7 +450,34 @@ class AssistantInteractionCard(QFrame):
             )
             footer.addWidget(self._question_skip)
         footer.addStretch(1)
+        footer.addWidget(self._question_submit)
         layout.addLayout(footer)
+        self._sync_question_submit()
+
+    def _set_choice_options_expanded(self, expanded: bool) -> None:
+        visible_count = self.presentation.initial_choice_count
+        if visible_count <= 0:
+            return
+        for index, button in enumerate(self._choice_buttons):
+            if index >= visible_count:
+                button.setVisible(bool(expanded))
+        if self._choice_toggle is None:
+            return
+        hidden_count = max(0, len(self._choice_buttons) - visible_count)
+        self._choice_toggle.setArrowType(
+            Qt.UpArrow if expanded else Qt.DownArrow
+        )
+        self._choice_toggle.setText(
+            (
+                self.presentation.collapse_choices_label
+                or "收起更多选项"
+            )
+            if expanded
+            else (
+                self.presentation.expand_choices_label
+                or f"更多选项（{hidden_count}）"
+            )
+        )
 
     def _selected_choice_labels(self) -> tuple[str, ...]:
         return tuple(
@@ -284,14 +488,45 @@ class AssistantInteractionCard(QFrame):
         if self._question_submit is None:
             return
         other = self._other_input.text().strip() if self._other_input is not None else ""
+        input_values = self._question_input_values()
+        required_inputs_ready = all(
+            bool(input_values.get(item.input_id))
+            for item in self.presentation.question_inputs
+            if item.required
+        )
+        choice_ready = bool(self._selected_choice_labels() or other)
+        has_response = bool(choice_ready or any(input_values.values()))
         self._question_submit.setEnabled(
             self.presentation.active
-            and bool(self._selected_choice_labels() or other)
+            and required_inputs_ready
+            and (
+                choice_ready
+                if self.presentation.requires_choice
+                else has_response
+            )
         )
+        self._apply_button_icon(self._question_submit, get_theme())
+
+    def _question_input_values(self) -> dict[str, str]:
+        return {
+            input_id: editor.text().strip()
+            for input_id, editor in self._question_inputs.items()
+            if editor.text().strip()
+        }
 
     def _submit_question(self, _checked: bool = False, *, skipped: bool = False) -> None:
+        input_values = self._question_input_values()
+        input_labels = {
+            item.input_id: item.label
+            for item in self.presentation.question_inputs
+        }
+        response_labels = list(self._selected_choice_labels())
+        response_labels.extend(
+            f"{input_labels.get(input_id, input_id)}：{value}"
+            for input_id, value in input_values.items()
+        )
         response = build_question_response(
-            self._selected_choice_labels(),
+            response_labels,
             other_text=self._other_input.text() if self._other_input is not None else "",
             skipped=skipped,
         )
@@ -300,11 +535,17 @@ class AssistantInteractionCard(QFrame):
         emitted = {
             **self.payload,
             "response": response,
+            "other_text": (
+                self._other_input.text().strip()
+                if self._other_input is not None
+                else ""
+            ),
             "selected_choice_ids": [
                 button.choice_id
                 for button in self._choice_buttons
                 if button.isChecked()
             ],
+            "field_values": input_values,
             "skipped": bool(skipped),
         }
         self.action_requested.emit("submit_question_answer", emitted)
@@ -312,6 +553,9 @@ class AssistantInteractionCard(QFrame):
     def _add_action_button(self, action: ActionPresentation) -> None:
         button = QPushButton(action.label, self)
         button.setObjectName("assistant_card_action")
+        button.setProperty("actionId", action.action_id)
+        button.setProperty("iconName", action.icon_name)
+        button.setIconSize(QSize(16, 16))
         variant = action.variant
         if variant == "ghost":
             variant = "ghost-primary"
@@ -324,24 +568,79 @@ class AssistantInteractionCard(QFrame):
         }:
             variant = "secondary"
         apply_button_variant(button, variant)
-        button.setEnabled(action.enabled and self.presentation.active)
+        # ActionPresentation already applies the card lifecycle policy while
+        # allowing explicitly safe read-only actions to outlive a workflow.
+        button.setEnabled(action.enabled)
         button.clicked.connect(
-            lambda _checked=False, value=action.action_id: self.action_requested.emit(
-                value,
-                dict(self.payload),
-            )
+            lambda _checked=False, value=action.action_id: self._emit_action(value)
         )
         self._actions.addWidget(button)
         self._buttons.append(button)
 
+    def _emit_action(self, action_id: str) -> None:
+        if action_id in {
+            "approve_execute",
+            "generate_content_draft",
+            "preflight",
+            "retry_preflight",
+        }:
+            for button in self._buttons:
+                button.setEnabled(False)
+            self._apply_action_icons(get_theme())
+        self.action_requested.emit(action_id, dict(self.payload))
+
+    @staticmethod
+    def _apply_button_icon(button, theme) -> None:
+        icon_name = str(button.property("iconName") or "").strip()
+        if not icon_name:
+            return
+        variant = str(button.property("variant") or "").strip()
+        if not button.isEnabled():
+            color = theme.text_disabled
+        elif variant in {"primary", "danger"}:
+            color = theme.text_on_primary
+        elif variant == "ghost-danger":
+            color = theme.error
+        elif variant == "ghost-primary":
+            color = theme.primary
+        else:
+            color = theme.icon_secondary
+        button.setIcon(get_icon(icon_name, 16, color))
+
+    def _apply_action_icons(self, theme) -> None:
+        for button in self._buttons:
+            self._apply_button_icon(button, theme)
+        if self._question_submit is not None:
+            self._apply_button_icon(self._question_submit, theme)
+        if self._question_skip is not None:
+            self._apply_button_icon(self._question_skip, theme)
+
     def _open_reference(self, reference: object) -> None:
         payload = {**self.payload, "reference": reference}
+        if (
+            isinstance(reference, Mapping)
+            and str(reference.get("owner") or "") == "form"
+            and str(reference.get("kind") or "") == "template_config"
+        ):
+            self.action_requested.emit("open_template_artifact", payload)
+            return
         self.action_requested.emit("runtime_open_reference", payload)
 
     def _type_label(self) -> str:
         """Compatibility helper retained for existing integrations."""
 
         return self.presentation.eyebrow
+
+    def preferred_width(self, available_width: int) -> int:
+        """Return a readable card width without weakening compact layouts."""
+
+        upper_bound = {
+            "artifact": TOKENS.plan_card_max_width,
+            "plan": TOKENS.plan_card_max_width,
+            "progress": TOKENS.progress_card_max_width,
+            "recovery": TOKENS.plan_card_max_width,
+        }.get(self.interaction_type, TOKENS.assistant_message_max_width)
+        return min(max(260, int(available_width)), upper_bound)
 
     def _tone_colors(self):
         theme = get_theme()
@@ -350,11 +649,15 @@ class AssistantInteractionCard(QFrame):
             "danger": (theme.error, theme.error_bg),
             "success": (theme.success, theme.success_bg),
             "progress": (theme.primary, theme.info_bg),
-        }.get(self.presentation.tone, (theme.primary, theme.bg_card))
+        }.get(self.presentation.tone, (theme.primary, theme.primary_light))
 
     def _apply_theme(self) -> None:
         theme = get_theme()
         accent, surface = self._tone_colors()
+        edge_rule = (
+            "" if self._uses_compact_heading else f"border-left: 3px solid {accent};"
+        )
+        fact_surface = theme.bg_window if self.interaction_type == "plan" else "transparent"
         icon_name = {
             "question": "circle-help",
             "disclosure": "eye",
@@ -363,7 +666,7 @@ class AssistantInteractionCard(QFrame):
             "plan": "list-ordered",
             "preflight": "scan",
             "approval": "circle-check",
-            "progress": "clock",
+            "progress": "loader",
             "artifact": "file-text",
             "boundary": "circle-alert",
             "recovery": "circle-alert",
@@ -374,42 +677,58 @@ class AssistantInteractionCard(QFrame):
             QFrame#assistant_interaction_card {{
                 background: {theme.bg_card};
                 border: 1px solid {theme.border_light};
-                border-left: 3px solid {accent};
-                border-radius: {theme.radius_md}px;
+                {edge_rule}
+                border-radius: {theme.radius_lg if self._uses_compact_heading else theme.radius_md}px;
             }}
             QWidget#assistant_artifact_stack,
             QWidget#assistant_question_choices,
-            QWidget#assistant_plan_facts {{
+            QWidget#assistant_question_input_field {{
                 background: transparent;
                 border: none;
             }}
-            QLabel#assistant_card_type_icon {{
-                background: transparent;
+            QWidget#assistant_question_input_panel {{
+                background: {theme.bg_window};
                 border: none;
+                border-radius: {theme.radius_sm}px;
+            }}
+            QWidget#assistant_plan_facts {{
+                background: {fact_surface};
+                border: none;
+                border-radius: {theme.radius_sm}px;
+            }}
+            QLabel#assistant_card_type_icon {{
+                background: {surface if self._uses_compact_heading else "transparent"};
+                border: none;
+                border-radius: {theme.radius_sm}px;
             }}
             QLabel#assistant_card_eyebrow {{
                 color: {accent};
                 background: transparent;
-                font-size: {theme.font_size_sm}px;
+                font-size: {theme.font_size_lg if self._uses_compact_heading else theme.font_size_sm}px;
                 font-weight: {theme.font_weight_emphasis};
             }}
             QLabel#assistant_card_title {{
                 color: {theme.text_primary};
                 background: transparent;
-                font-size: {theme.font_size_lg}px;
-                font-weight: {theme.font_weight_emphasis};
+                font-size: {theme.font_size_md if self._uses_compact_heading else theme.font_size_lg}px;
+                font-weight: {theme.font_weight_normal if self._uses_compact_heading else theme.font_weight_emphasis};
             }}
             QLabel#assistant_card_body {{
                 color: {theme.text_secondary};
                 background: transparent;
                 font-size: {theme.font_size_md}px;
             }}
-            QLabel#assistant_card_receipt {{
-                color: {theme.text_hint};
-                background: {theme.bg_window};
-                border: 1px solid {theme.border_light};
+            QFrame#assistant_interaction_card[structuredQuestion="true"]
+            QLabel#assistant_card_body {{
+                color: {theme.text_secondary};
+                font-size: {theme.font_size_sm}px;
+            }}
+            QLabel#assistant_card_body[variant="notice"] {{
+                color: {theme.text_secondary};
+                background: {theme.primary_light};
+                border: none;
                 border-radius: {theme.radius_sm}px;
-                padding: 5px 8px;
+                padding: 6px 9px;
                 font-size: {theme.font_size_sm}px;
             }}
             QLabel#assistant_plan_fact_label {{
@@ -420,11 +739,11 @@ class AssistantInteractionCard(QFrame):
             }}
             QLabel#assistant_plan_fact_value {{
                 color: {theme.text_primary};
-                background: {theme.bg_window};
-                border: 1px solid {theme.border_light};
-                border-radius: {theme.radius_sm}px;
-                padding: 4px 7px;
+                background: transparent;
+                border: none;
+                padding: 1px 0;
                 font-size: {theme.font_size_sm}px;
+                font-weight: {theme.font_weight_emphasis};
             }}
             QPushButton#assistant_question_choice {{
                 color: {theme.text_primary};
@@ -433,6 +752,13 @@ class AssistantInteractionCard(QFrame):
                 border-radius: {theme.radius_sm}px;
                 padding: 5px 10px;
                 text-align: left;
+            }}
+            QFrame#assistant_interaction_card[structuredQuestion="true"]
+            QPushButton#assistant_question_choice {{
+                background: {theme.bg_window};
+                border-color: transparent;
+                padding: 5px 9px;
+                font-size: {theme.font_size_sm}px;
             }}
             QPushButton#assistant_question_choice:hover {{
                 background: {theme.bg_hover};
@@ -443,14 +769,47 @@ class AssistantInteractionCard(QFrame):
                 background: {theme.primary_light};
                 border-color: {theme.border_focus};
             }}
-            QLineEdit#assistant_question_other {{
+            QToolButton#assistant_question_choice_toggle {{
+                color: {theme.primary};
+                background: transparent;
+                border: none;
+                border-radius: {theme.radius_sm}px;
+                padding: 4px 7px;
+                font-size: {theme.font_size_sm}px;
+                font-weight: {theme.font_weight_emphasis};
+            }}
+            QToolButton#assistant_question_choice_toggle:hover {{
+                background: {theme.primary_light};
+            }}
+            QLabel#assistant_question_section_label {{
+                color: {theme.text_primary};
+                background: transparent;
+                border: none;
+                font-size: {theme.font_size_sm}px;
+                font-weight: {theme.font_weight_emphasis};
+            }}
+            QLabel#assistant_question_input_label {{
+                color: {theme.text_secondary};
+                background: transparent;
+                border: none;
+                font-size: {theme.font_size_sm}px;
+            }}
+            QLabel#assistant_question_required_hint {{
+                color: {theme.text_hint};
+                background: transparent;
+                border: none;
+                font-size: {theme.font_size_sm}px;
+            }}
+            QLineEdit#assistant_question_other,
+            QLineEdit#assistant_question_input {{
                 color: {theme.text_primary};
                 background: {theme.bg_input};
                 border: 1px solid {theme.border};
                 border-radius: {theme.radius_sm}px;
                 padding: 4px 8px;
             }}
-            QLineEdit#assistant_question_other:focus {{
+            QLineEdit#assistant_question_other:focus,
+            QLineEdit#assistant_question_input:focus {{
                 border-color: {theme.border_focus};
             }}
             QToolButton#assistant_question_skip {{
@@ -467,16 +826,16 @@ class AssistantInteractionCard(QFrame):
             }}
             QProgressBar#assistant_card_progress {{
                 color: {theme.text_secondary};
-                background: {surface};
-                border: 1px solid {theme.border_light};
-                border-radius: 4px;
-                min-height: 8px;
-                max-height: 8px;
+                background: {theme.progress_track};
+                border: none;
+                border-radius: 2px;
+                min-height: 4px;
+                max-height: 4px;
                 text-align: center;
             }}
             QProgressBar#assistant_card_progress::chunk {{
                 background: {accent};
-                border-radius: 3px;
+                border-radius: 2px;
             }}
             """
         )
@@ -485,6 +844,7 @@ class AssistantInteractionCard(QFrame):
             button.setStyleSheet(button_style)
         if self._question_submit is not None:
             self._question_submit.setStyleSheet(button_style)
+        self._apply_action_icons(theme)
 
 
 __all__ = ["AssistantInteractionCard"]

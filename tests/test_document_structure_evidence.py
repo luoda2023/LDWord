@@ -1,4 +1,6 @@
 from docx import Document
+from docx.enum.section import WD_SECTION
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from src.services.document_structure_evidence import (
     RegionDecision,
@@ -18,6 +20,38 @@ def _save_structured_doc(path):
     doc.add_heading("参考文献", level=1)
     doc.add_paragraph("[1] Author. Title. 2024.")
     doc.save(path)
+
+
+def test_sparse_centered_first_section_is_accepted_as_generic_cover(tmp_path):
+    source = tmp_path / "generic-cover.docx"
+    doc = Document()
+    for _index in range(3):
+        doc.add_paragraph("")
+    title = doc.add_paragraph("\u56db\u5ddd\u7701\u591a\u5f0f\u8054\u8fd0\u57fa\u5730\u5efa\u8bbe\u89c4\u5212")
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for _index in range(14):
+        doc.add_paragraph("")
+    authority = doc.add_paragraph("\u4e50\u5c71\u5e02\u4eba\u6c11\u653f\u5e9c")
+    authority.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    date = doc.add_paragraph("\u4e8c\u25cb\u4e8c\u516d\u5e74\u4e8c\u6708")
+    date.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    section_boundary = len(doc.paragraphs) + 1
+    doc.add_section(WD_SECTION.NEW_PAGE)
+    doc.add_heading("\u7b2c\u4e00\u7ae0 \u6b63\u6587", level=1)
+    for index in range(60):
+        doc.add_paragraph(f"\u6b63\u6587\u5185\u5bb9 {index}\u3002")
+    doc.save(source)
+
+    evidence = build_document_structure_evidence(source)
+    cover = next(region for region in evidence.regions if region.role_id == "cover")
+    body = next(region for region in evidence.regions if region.role_id == "body")
+
+    assert cover.detection_status == "accepted"
+    assert cover.start_anchor.source_index == 0
+    assert cover.end_anchor is not None
+    assert cover.end_anchor.source_index == section_boundary
+    assert body.start_anchor.source_index >= section_boundary
+    assert not evidence.requires_review
 
 
 def test_document_structure_evidence_is_stable_and_bound_to_source_revision(tmp_path):

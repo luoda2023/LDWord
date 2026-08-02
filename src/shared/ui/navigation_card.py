@@ -302,6 +302,7 @@ class NavigationCard(Card):
             return
         if self._title_action is not None:
             self._title_row.removeWidget(self._title_action)
+            self._title_action.hide()
             self._title_action.setParent(None)
         self._title_action = widget
         if widget is not None:

@@ -122,11 +122,6 @@ class StartupSplash(QWidget):
         row_layout.addStretch(1)
         layout.addWidget(row)
 
-        hint = QLabel("首次加载会预热常用页面", surface)
-        hint.setObjectName("startup_hint")
-        hint.setAlignment(Qt.AlignCenter)
-        layout.addWidget(hint)
-
         self.setStyleSheet(
             f"""
             QFrame#startup_surface {{
@@ -147,10 +142,6 @@ class StartupSplash(QWidget):
                 color: {t.text_primary};
                 font-size: {t.font_size_md}px;
                 min-width: 150px;
-            }}
-            QLabel#startup_hint {{
-                color: {t.text_hint};
-                font-size: {t.font_size_sm}px;
             }}
             """
         )

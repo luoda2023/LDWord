@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-import json
 from pathlib import Path
 import random
 import time
@@ -12,21 +11,16 @@ import time
 from src.qt_api import (
     QColor,
     QDesktopServices,
-    QEvent,
     QFileDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
-    QMenu,
-    QMessageBox,
+    QLayout,
     QPainter,
     QPainterPath,
     QPen,
-    QPushButton,
+    QPixmap,
     QScrollArea,
-    QSettings,
     QSizePolicy,
     QTextCursor,
     QTextEdit,
@@ -63,6 +57,8 @@ _GRID_AMBIENT_ALPHA = (5, 8, 6, 7)
 _HERO_COMPOSER_HEIGHT = 220
 _COMPACT_COMPOSER_HEIGHT = 154
 _HERO_STABLE_SLOT_HEIGHT = 240
+_HERO_TITLE_HEIGHT = 44
+_HERO_TITLE_GAP = 30
 _HERO_EDIT_HEIGHT = 84
 _HERO_EDIT_HEIGHT_WITH_ATTACHMENT = 56
 _COMPACT_EDIT_HEIGHT = 52
@@ -70,21 +66,19 @@ _COMPACT_EDIT_HEIGHT_WITH_ATTACHMENT = 38
 _HERO_ROOT_SPACING = 10
 _COMPACT_ROOT_SPACING = 9
 _ATTACHMENT_SLOT_HEIGHT = 34
+_MAX_COMPOSER_ATTACHMENTS = 6
+_ATTACHMENT_MEDIA_TYPES = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+}
 _HERO_SEND_BUTTON_SIZE = 36
 _COMPACT_SEND_BUTTON_SIZE = 32
 _FOOTER_CONTROL_HEIGHT = 34
-_QUICK_TASK_ROW_HEIGHT = 50
-_QUICK_TASK_VIEWPORT_HEIGHT = 150
-_NEW_TASK_TOP_STRETCH = 3
-_NEW_TASK_BOTTOM_STRETCH = 2
 _PROVIDER_MODEL_ROLE = int(Qt.UserRole) + 201
 _PROVIDER_READY_ROLE = int(Qt.UserRole) + 202
 _PROVIDER_REASON_ROLE = int(Qt.UserRole) + 203
 _PROVIDER_STATUS_ROLE = int(Qt.UserRole) + 204
-_CUSTOM_TASK_SCHEMA_VERSION = "assistant-custom-tasks-v1"
-_MAX_CUSTOM_TASK_LABEL_CHARACTERS = 80
-_MAX_CUSTOM_TASK_PROMPT_CHARACTERS = 16_000
-_MAX_CUSTOM_TASK_TOTAL_CHARACTERS = 100_000
 
 
 @dataclass
@@ -104,78 +98,46 @@ def _grid_origin(width: int, height: int, spacing: int) -> tuple[int, int]:
     return -overscan, -overscan
 
 
-@dataclass(frozen=True)
-class _PromptAction:
-    label: str
-    description: str
-    prompt: str
-    icon_name: str
-    requires_document: bool = False
+class _AssistantPromptTextEdit(QTextEdit):
+    """Text editor that submits only when Enter is not owned by an IME."""
 
+    submit_requested = Signal()
+    editing_activity_changed = Signal(bool)
 
-_QUICK_START_ACTIONS = (
-    _PromptAction(
-        "生成文档初稿",
-        "根据你的目标或已添加材料生成一份可审阅初稿",
-        "请根据我提供的目标和材料生成一份结构清晰的文档初稿，并先给出可审阅的执行计划。",
-        "file-text",
-    ),
-    _PromptAction(
-        "检查结构与格式",
-        "按优先级列出结构、样式和版式问题",
-        "请分析当前文档的结构与格式问题，列出优先级、风险和修改建议。",
-        "search",
-        True,
-    ),
-    _PromptAction(
-        "检查交付完整性",
-        "核对缺失项、潜在风险和下一步动作",
-        "请检查当前文档阶段产物，指出缺失项、潜在问题和下一步建议。",
-        "circle-check",
-        True,
-    ),
-)
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._preedit_active = False
+        # QFile URLs belong to the composer attachment boundary.  Leaving
+        # QTextEdit's default drop handling enabled inserts ``file:///...`` as
+        # ordinary prompt text before the parent can turn it into a material.
+        self.setAcceptDrops(False)
 
-_COMMON_TASKS = (
-    _PromptAction(
-        "确认文档目标",
-        "先澄清读者、结构和交付要求",
-        "请先通过必要的问题帮我确认文档目标、读者、结构和交付要求。",
-        "crosshair",
-    ),
-    _PromptAction(
-        "生成项目报告",
-        "生成进展、风险和下一步报告",
-        "请生成一份项目进展报告，先给出结构与执行计划供我确认。",
-        "file-text",
-    ),
-    _PromptAction(
-        "整理会议纪要",
-        "提取结论、责任人和待办事项",
-        "请把当前材料整理成会议纪要，提取结论、责任人和待办事项。",
-        "list",
-    ),
-    _PromptAction(
-        "起草通知公文",
-        "确认文种、对象和关键事项后起草",
-        "请起草一份正式通知公文，并在生成前确认文种、对象和关键事项。",
-        "scroll-text",
-    ),
-    _PromptAction(
-        "统一现有格式",
-        "检查标题、正文、列表、表格和页码",
-        "请检查并统一当前文档的标题、正文、列表、表格和页码格式。",
-        "sliders-horizontal",
-        True,
-    ),
-    _PromptAction(
-        "套用模板排版",
-        "按当前模板生成可审阅排版计划",
-        "请基于当前模板重新规划并排版这份文档，先生成可审阅计划。",
-        "layout",
-        True,
-    ),
-)
+    def inputMethodEvent(self, event) -> None:  # noqa: N802
+        self._preedit_active = bool(event.preeditString())
+        super().inputMethodEvent(event)
+        self.editing_activity_changed.emit(
+            self.hasFocus() or self._preedit_active
+        )
+
+    def focusInEvent(self, event) -> None:
+        super().focusInEvent(event)
+        self.editing_activity_changed.emit(True)
+
+    def focusOutEvent(self, event) -> None:
+        self._preedit_active = False
+        super().focusOutEvent(event)
+        self.editing_activity_changed.emit(False)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if (
+            event.key() in {Qt.Key_Return, Qt.Key_Enter}
+            and event.modifiers() in {Qt.NoModifier, Qt.KeypadModifier}
+            and not self._preedit_active
+        ):
+            self.submit_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class AssistantHeroComposer(QWidget):
@@ -185,7 +147,9 @@ class AssistantHeroComposer(QWidget):
     text_changed = Signal(str)
     provider_changed = Signal(str)
     document_path_changed = Signal(str)
+    document_paths_changed = Signal(object)
     cancel_requested = Signal()
+    editing_activity_changed = Signal(bool)
 
     def __init__(
         self,
@@ -206,7 +170,10 @@ class AssistantHeroComposer(QWidget):
         self._submission_gate = ""
         self._submission_error = ""
         self._submission_handler: Callable[[str], bool] | None = None
+        self._document_paths: tuple[str, ...] = ()
         self._document_path = ""
+        self._keyboard_hint_state: tuple[str, bool, bool] | None = None
+        self._send_visual_state: tuple[object, ...] | None = None
         self.setObjectName(
             "assistant_task_composer" if mode == "compact" else "assistant_hero_composer"
         )
@@ -233,15 +200,47 @@ class AssistantHeroComposer(QWidget):
         self._attachment_slot = QWidget(self)
         self._attachment_slot.setObjectName("assistant_hero_attachment_slot")
         self._attachment_slot.setFixedHeight(0)
-        attachment_slot_layout = QVBoxLayout(self._attachment_slot)
+        attachment_slot_layout = QHBoxLayout(self._attachment_slot)
         attachment_slot_layout.setContentsMargins(0, 0, 0, 0)
-        attachment_slot_layout.setSpacing(0)
+        attachment_slot_layout.setSpacing(4)
 
-        self._attachment_row = QWidget(self._attachment_slot)
+        self._attachment_previous = QToolButton(self._attachment_slot)
+        self._attachment_previous.setObjectName("assistant_attachment_scroll_button")
+        self._attachment_previous.setAccessibleName("查看前面的材料")
+        self._attachment_previous.setFixedSize(28, 28)
+        self._attachment_previous.setCursor(Qt.PointingHandCursor)
+        self._attachment_previous.clicked.connect(
+            lambda: self._scroll_attachment_chips(-1)
+        )
+        self._attachment_previous.hide()
+        attachment_slot_layout.addWidget(
+            self._attachment_previous,
+            0,
+            Qt.AlignVCenter,
+        )
+
+        self._attachment_scroll = QScrollArea(self._attachment_slot)
+        self._attachment_scroll.setObjectName("assistant_attachment_scroll")
+        self._attachment_scroll.setFrameShape(QFrame.NoFrame)
+        self._attachment_scroll.setWidgetResizable(False)
+        self._attachment_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._attachment_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._attachment_scroll.setFixedHeight(_ATTACHMENT_SLOT_HEIGHT)
+        self._attachment_scroll.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed,
+        )
+        attachment_slot_layout.addWidget(self._attachment_scroll, 1)
+
+        self._attachment_row = QWidget(self._attachment_scroll)
         self._attachment_row.setObjectName("assistant_hero_attachment_row")
         self._attachment_layout = QHBoxLayout(self._attachment_row)
         self._attachment_layout.setContentsMargins(0, 0, 0, 0)
         self._attachment_layout.setSpacing(8)
+        self._attachment_layout.setSizeConstraint(QLayout.SetFixedSize)
+        self._attachment_chips: list[AssistantComposerAttachmentChip] = []
+        # Compatibility alias for older integration checks that expect one
+        # current chip.  It always points at the first selected material.
         self._attachment_chip: AssistantComposerAttachmentChip | None = None
         # Kept as a non-visual compatibility alias for existing integration checks.
         self._attachment_label = QLabel(self._attachment_row)
@@ -256,10 +255,31 @@ class AssistantHeroComposer(QWidget):
         self._remove_attachment.hide()
         self._attachment_layout.addStretch(1)
         self._attachment_row.hide()
-        attachment_slot_layout.addWidget(self._attachment_row)
+        self._attachment_scroll.setWidget(self._attachment_row)
+        self._attachment_scroll.horizontalScrollBar().rangeChanged.connect(
+            self._sync_attachment_scroll_controls
+        )
+        self._attachment_scroll.horizontalScrollBar().valueChanged.connect(
+            lambda _value: self._sync_attachment_scroll_controls()
+        )
+
+        self._attachment_next = QToolButton(self._attachment_slot)
+        self._attachment_next.setObjectName("assistant_attachment_scroll_button")
+        self._attachment_next.setAccessibleName("查看更多材料")
+        self._attachment_next.setFixedSize(28, 28)
+        self._attachment_next.setCursor(Qt.PointingHandCursor)
+        self._attachment_next.clicked.connect(
+            lambda: self._scroll_attachment_chips(1)
+        )
+        self._attachment_next.hide()
+        attachment_slot_layout.addWidget(
+            self._attachment_next,
+            0,
+            Qt.AlignVCenter,
+        )
         self._root_layout.addWidget(self._attachment_slot)
 
-        self._text_edit = QTextEdit(self)
+        self._text_edit = _AssistantPromptTextEdit(self)
         self._text_edit.setObjectName("assistant_hero_editor")
         self._text_edit.setPlaceholderText(
             (
@@ -274,8 +294,11 @@ class AssistantHeroComposer(QWidget):
             _COMPACT_EDIT_HEIGHT if mode == "compact" else _HERO_EDIT_HEIGHT
         )
         self._text_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._text_edit.installEventFilter(self)
+        self._text_edit.submit_requested.connect(self._on_send)
         self._text_edit.textChanged.connect(self._on_text_changed)
+        self._text_edit.editing_activity_changed.connect(
+            self.editing_activity_changed.emit
+        )
         self._root_layout.addWidget(self._text_edit)
         if mode == "hero":
             self._root_layout.addStretch(1)
@@ -380,23 +403,28 @@ class AssistantHeroComposer(QWidget):
         self._sync_keyboard_hint()
 
     @staticmethod
-    def _docx_path_from_drop(event) -> str:
+    def _attachment_paths_from_drop(event) -> tuple[str, ...]:
         mime = event.mimeData()
         if mime is None or not mime.hasUrls():
-            return ""
+            return ()
+        paths: list[str] = []
         for url in mime.urls():
             if not url.isLocalFile():
                 continue
             path = Path(url.toLocalFile())
-            if path.is_file() and path.suffix.casefold() == ".docx":
-                return str(path.resolve())
-        return ""
+            if path.is_file() and path.suffix.casefold() in _ATTACHMENT_MEDIA_TYPES:
+                normalized = str(path.resolve())
+                if normalized.casefold() not in {
+                    existing.casefold() for existing in paths
+                }:
+                    paths.append(normalized)
+        return tuple(paths)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
         if (
             not self._busy
             and self._interaction_enabled
-            and self._docx_path_from_drop(event)
+            and self._attachment_paths_from_drop(event)
         ):
             self._drop_overlay.setGeometry(self.rect())
             self._drop_overlay.show()
@@ -410,13 +438,12 @@ class AssistantHeroComposer(QWidget):
         event.accept()
 
     def dropEvent(self, event) -> None:  # noqa: N802
-        path = self._docx_path_from_drop(event)
+        paths = self._attachment_paths_from_drop(event)
         self._drop_overlay.hide()
-        if not path:
+        if not paths:
             event.ignore()
             return
-        self.set_document_path(path)
-        self.document_path_changed.emit(path)
+        self._add_document_paths(paths)
         event.acceptProposedAction()
 
     def _sync_keyboard_hint(self) -> None:
@@ -431,33 +458,45 @@ class AssistantHeroComposer(QWidget):
             or self._input_limit_requirement
             or self._blocking_requirement
         )
-        self._keyboard_hint.setText(requirement if blocking else self._default_keyboard_hint)
+        display_text = requirement if blocking else self._default_keyboard_hint
         if self._submission_error and not blocking:
-            self._keyboard_hint.setText(self._submission_error)
+            display_text = self._submission_error
+        visible = bool(requirement) or (self._mode == "hero" and self.width() >= 720)
+        state = (display_text, blocking, visible)
+        if state == self._keyboard_hint_state:
+            return
+        self._keyboard_hint_state = state
+        self._keyboard_hint.setText(display_text)
         self._keyboard_hint.setProperty("blocking", blocking)
-        self._keyboard_hint.setVisible(
-            bool(requirement)
-            or (self._mode == "hero" and self.width() >= 720)
-        )
+        self._keyboard_hint.setVisible(visible)
         self._keyboard_hint.style().unpolish(self._keyboard_hint)
         self._keyboard_hint.style().polish(self._keyboard_hint)
 
     def set_blocking_requirement(self, reason: str) -> None:
-        self._blocking_requirement = str(reason or "").strip()
+        normalized = str(reason or "").strip()
+        if normalized == self._blocking_requirement:
+            return
+        self._blocking_requirement = normalized
         self._sync_keyboard_hint()
         self._update_send_state()
 
     def set_submission_gate(self, reason: str) -> None:
         """Block submission without disabling editing or discarding the draft."""
 
-        self._submission_gate = str(reason or "").strip()
+        normalized = str(reason or "").strip()
+        if normalized == self._submission_gate:
+            return
+        self._submission_gate = normalized
         self._sync_keyboard_hint()
         self._update_send_state()
 
     def set_submission_error(self, reason: str) -> None:
         """Show a retryable submission error without discarding the draft."""
 
-        self._submission_error = str(reason or "").strip()
+        normalized = str(reason or "").strip()
+        if normalized == self._submission_error:
+            return
+        self._submission_error = normalized
         self._sync_keyboard_hint()
         self._update_send_state()
 
@@ -469,17 +508,9 @@ class AssistantHeroComposer(QWidget):
 
         self._submission_handler = handler
 
-    def eventFilter(self, obj, event) -> bool:
-        if obj is self._text_edit and event.type() == QEvent.KeyPress:
-            if event.key() in {Qt.Key_Return, Qt.Key_Enter}:
-                modifiers = event.modifiers()
-                if modifiers in {Qt.NoModifier, Qt.KeypadModifier}:
-                    self._on_send()
-                    return True
-        return super().eventFilter(obj, event)
-
     def _on_text_changed(self) -> None:
-        character_count = len(self.get_text())
+        text = self._text_edit.toPlainText()
+        character_count = len(text)
         self._input_limit_requirement = (
             f"当前输入为 {character_count} 字符，单次最多 "
             f"{MAX_ASSISTANT_USER_MESSAGE_CHARACTERS} 字符；"
@@ -488,8 +519,8 @@ class AssistantHeroComposer(QWidget):
             else ""
         )
         self._sync_keyboard_hint()
-        self._update_send_state()
-        self.text_changed.emit(self.get_text())
+        self._update_send_state(text)
+        self.text_changed.emit(text)
 
     def _on_send(self) -> None:
         if self._busy:
@@ -525,8 +556,9 @@ class AssistantHeroComposer(QWidget):
         self.message_sent.emit(text)
         self.clear()
 
-    def _update_send_state(self) -> None:
-        has_text = bool(self.get_text().strip())
+    def _update_send_state(self, text: str | None = None) -> None:
+        current_text = self.get_text() if text is None else text
+        has_text = bool(current_text.strip())
         can_send = (
             self._interaction_enabled
             and has_text
@@ -534,7 +566,6 @@ class AssistantHeroComposer(QWidget):
             and not self._input_limit_requirement
             and not self._submission_gate
         )
-        self._send_btn.setEnabled(self._busy or can_send)
         if self._busy:
             tooltip = "停止当前任务"
         elif not self._interaction_enabled:
@@ -551,24 +582,42 @@ class AssistantHeroComposer(QWidget):
             tooltip = "输入任务内容后发送"
         else:
             tooltip = "发送任务（Enter）"
-        self._send_btn.setToolTip(tooltip)
         theme = get_theme()
         icon_color = theme.text_on_primary if (self._busy or can_send) else theme.text_hint
+        icon_name = "square" if self._busy else "send"
+        icon_size = 18 if self._busy else 20
+        state = (
+            self._busy,
+            can_send,
+            tooltip,
+            icon_name,
+            icon_size,
+            icon_color,
+        )
+        if state == self._send_visual_state:
+            return
+        self._send_visual_state = state
+        self._send_btn.setEnabled(self._busy or can_send)
+        self._send_btn.setToolTip(tooltip)
         self._send_btn.setIcon(
-            get_icon("square" if self._busy else "send", 18 if self._busy else 20, icon_color)
+            get_icon(icon_name, icon_size, icon_color)
         )
 
     def get_text(self) -> str:
         return self._text_edit.toPlainText()
 
     def set_text(self, text: str) -> None:
-        self._text_edit.setPlainText(str(text or ""))
+        normalized = str(text or "")
+        if self._text_edit.toPlainText() == normalized:
+            return
+        self._text_edit.setPlainText(normalized)
         cursor = self._text_edit.textCursor()
         cursor.movePosition(QTextCursor.End)
         self._text_edit.setTextCursor(cursor)
 
     def clear(self) -> None:
-        self._text_edit.clear()
+        if self._text_edit.toPlainText():
+            self._text_edit.clear()
 
     def set_placeholder(self, placeholder: str) -> None:
         self._text_edit.setPlaceholderText(str(placeholder or ""))
@@ -586,7 +635,10 @@ class AssistantHeroComposer(QWidget):
     def set_busy(self, busy: bool) -> None:
         """Keep cancellation reachable while locking turn-sensitive controls."""
 
-        self._busy = bool(busy)
+        normalized = bool(busy)
+        if normalized == self._busy and self._interaction_enabled:
+            return
+        self._busy = normalized
         self._interaction_enabled = True
         self._drop_overlay.hide()
         self._text_edit.setEnabled(not self._busy)
@@ -706,55 +758,153 @@ class AssistantHeroComposer(QWidget):
     def _pick_attachment(self) -> None:
         current = self.document_path()
         start = str(Path(current).parent) if current else ""
-        path, _selected_filter = QFileDialog.getOpenFileName(
+        paths, _selected_filter = QFileDialog.getOpenFileNames(
             self,
             "添加文档材料",
             start,
-            "Word 文档 (*.docx)",
+            "文档材料 (*.docx *.md *.markdown);;Word 文档 (*.docx);;Markdown (*.md *.markdown)",
         )
-        if path:
-            self.set_document_path(path)
-            self.document_path_changed.emit(self._document_path)
+        if paths:
+            self._add_document_paths(tuple(paths))
 
-    def _clear_attachment(self) -> None:
-        self.set_document_path("")
-        self.document_path_changed.emit("")
+    def _add_document_paths(self, paths: tuple[str, ...]) -> None:
+        merged = list(self._document_paths)
+        identities = {path.casefold() for path in merged}
+        unsupported: list[str] = []
+        overflow = False
+        for raw_path in paths:
+            path = Path(str(raw_path or "").strip()).expanduser()
+            if not path.is_file() or path.suffix.casefold() not in _ATTACHMENT_MEDIA_TYPES:
+                unsupported.append(path.name or str(raw_path or ""))
+                continue
+            normalized = str(path.resolve())
+            if normalized.casefold() in identities:
+                continue
+            if len(merged) >= _MAX_COMPOSER_ATTACHMENTS:
+                overflow = True
+                self.set_submission_error(
+                    f"单次最多添加 {_MAX_COMPOSER_ATTACHMENTS} 份材料；已保留前 "
+                    f"{_MAX_COMPOSER_ATTACHMENTS} 份。"
+                )
+                break
+            merged.append(normalized)
+            identities.add(normalized.casefold())
+        if unsupported:
+            self.set_submission_error(
+                "暂不支持这些材料："
+                + "、".join(name for name in unsupported if name)
+                + "。当前支持 DOCX 和 Markdown。"
+            )
+        elif not overflow:
+            self.set_submission_error("")
+        if tuple(merged) == self._document_paths:
+            return
+        self.set_document_paths(tuple(merged))
+        self._emit_document_paths_changed()
+
+    def _clear_attachment(self, path: str | None = None) -> None:
+        if path is None:
+            remaining: tuple[str, ...] = ()
+        else:
+            identity = str(path or "").casefold()
+            remaining = tuple(
+                item for item in self._document_paths if item.casefold() != identity
+            )
+        if remaining == self._document_paths:
+            return
+        self.set_document_paths(remaining)
+        self._emit_document_paths_changed()
+
+    def _emit_document_paths_changed(self) -> None:
+        self.document_paths_changed.emit(self._document_paths)
+        # Preserve the legacy signal as a projection of the first material.
+        self.document_path_changed.emit(self.document_path())
+
+    def _scroll_attachment_chips(self, direction: int) -> None:
+        bar = self._attachment_scroll.horizontalScrollBar()
+        step = max(120, self._attachment_scroll.viewport().width() // 2)
+        bar.setValue(bar.value() + (step if direction > 0 else -step))
+
+    def _sync_attachment_scroll_controls(
+        self,
+        _minimum: int | None = None,
+        _maximum: int | None = None,
+    ) -> None:
+        bar = self._attachment_scroll.horizontalScrollBar()
+        overflow = bar.maximum() > bar.minimum()
+        self._attachment_previous.setVisible(
+            overflow and bool(self._document_paths)
+        )
+        self._attachment_next.setVisible(
+            overflow and bool(self._document_paths)
+        )
+        self._attachment_previous.setEnabled(bar.value() > bar.minimum())
+        self._attachment_next.setEnabled(bar.value() < bar.maximum())
 
     def set_document_path(self, path: str) -> None:
         normalized = str(path or "").strip()
-        self._document_path = normalized
-        if self._attachment_chip is not None:
-            self._attachment_layout.removeWidget(self._attachment_chip)
-            self._attachment_chip.hide()
-            self._attachment_chip.deleteLater()
-            self._attachment_chip = None
-        if normalized:
+        self.set_document_paths((normalized,) if normalized else ())
+
+    def set_document_paths(self, paths: tuple[str, ...]) -> None:
+        normalized_paths: list[str] = []
+        identities: set[str] = set()
+        for raw_path in tuple(paths or ())[:_MAX_COMPOSER_ATTACHMENTS]:
+            normalized = str(raw_path or "").strip()
+            if not normalized or normalized.casefold() in identities:
+                continue
+            normalized_paths.append(normalized)
+            identities.add(normalized.casefold())
+        self._document_paths = tuple(normalized_paths)
+        self._document_path = self._document_paths[0] if self._document_paths else ""
+        for chip in self._attachment_chips:
+            self._attachment_layout.removeWidget(chip)
+            chip.hide()
+            chip.deleteLater()
+        self._attachment_chips = []
+        self._attachment_chip = None
+        if self._document_paths:
             self._text_edit.setFixedHeight(
                 _COMPACT_EDIT_HEIGHT_WITH_ATTACHMENT
                 if self._mode == "compact"
                 else _HERO_EDIT_HEIGHT_WITH_ATTACHMENT
             )
-            self._attachment_button.setText("" if self._mode == "compact" else "更换材料")
-            self._attachment_button.setToolTip("更换当前 DOCX 文档材料")
-            self._attachment_label.setText(Path(normalized).name)
-            self._attachment_label.setToolTip(normalized)
-            self._attachment_chip = AssistantComposerAttachmentChip(
-                {
-                    "type": "file",
-                    "title": Path(normalized).name,
-                    "path": normalized,
-                },
-                self._attachment_row,
+            self._attachment_button.setText("" if self._mode == "compact" else "添加材料")
+            self._attachment_button.setToolTip(
+                f"继续添加文档材料（{len(self._document_paths)}/{_MAX_COMPOSER_ATTACHMENTS}）"
             )
-            self._attachment_chip.remove_requested.connect(self._clear_attachment)
-            self._attachment_chip.reference_requested.connect(
-                lambda _reference, target=normalized: QDesktopServices.openUrl(
-                    QUrl.fromLocalFile(target)
+            self._attachment_label.setText(
+                "、".join(Path(path).name for path in self._document_paths)
+            )
+            self._attachment_label.setToolTip("\n".join(self._document_paths))
+            for index, normalized in enumerate(self._document_paths):
+                chip = AssistantComposerAttachmentChip(
+                    {
+                        "type": "file",
+                        "title": Path(normalized).name,
+                        "path": normalized,
+                    },
+                    self._attachment_row,
                 )
-            )
-            self._attachment_layout.insertWidget(0, self._attachment_chip)
+                chip.remove_requested.connect(
+                    lambda target=normalized: self._clear_attachment(target)
+                )
+                chip.reference_requested.connect(
+                    lambda _reference, target=normalized: QDesktopServices.openUrl(
+                        QUrl.fromLocalFile(target)
+                    )
+                )
+                self._attachment_layout.insertWidget(index, chip)
+                self._attachment_chips.append(chip)
+            self._attachment_chip = self._attachment_chips[0]
+            self._attachment_row.adjustSize()
             self._attachment_slot.setFixedHeight(_ATTACHMENT_SLOT_HEIGHT)
             self._attachment_row.show()
+            QTimer.singleShot(
+                0,
+                lambda: self._attachment_scroll.horizontalScrollBar().setValue(
+                    self._attachment_scroll.horizontalScrollBar().maximum()
+                ),
+            )
         else:
             self._text_edit.setFixedHeight(
                 _COMPACT_EDIT_HEIGHT
@@ -762,14 +912,19 @@ class AssistantHeroComposer(QWidget):
                 else _HERO_EDIT_HEIGHT
             )
             self._attachment_button.setText("" if self._mode == "compact" else "添加材料")
-            self._attachment_button.setToolTip("添加文档材料（当前支持 DOCX）")
+            self._attachment_button.setToolTip("添加文档材料（支持 DOCX、Markdown，最多 6 份）")
             self._attachment_label.clear()
             self._attachment_label.setToolTip("")
             self._attachment_row.hide()
             self._attachment_slot.setFixedHeight(0)
+            self._attachment_previous.hide()
+            self._attachment_next.hide()
 
     def document_path(self) -> str:
         return self._document_path
+
+    def document_paths(self) -> tuple[str, ...]:
+        return self._document_paths
 
     def _apply_theme(self) -> None:
         theme = get_theme()
@@ -817,6 +972,26 @@ class AssistantHeroComposer(QWidget):
                 background: transparent;
                 border-color: transparent;
             }}
+            QScrollArea#assistant_attachment_scroll,
+            QWidget#assistant_hero_attachment_row {{
+                background: transparent;
+                border: none;
+            }}
+            QToolButton#assistant_attachment_scroll_button {{
+                color: {theme.text_secondary};
+                background: {theme.bg_hover};
+                border: 1px solid {theme.border_light};
+                border-radius: 14px;
+                padding: 0;
+            }}
+            QToolButton#assistant_attachment_scroll_button:hover {{
+                color: {theme.text_primary};
+                border-color: {theme.border_focus};
+            }}
+            QToolButton#assistant_attachment_scroll_button:disabled {{
+                color: {theme.text_disabled};
+                background: transparent;
+            }}
             QLabel#assistant_hero_keyboard_hint {{
                 color: {theme.text_hint};
                 background: transparent;
@@ -849,153 +1024,14 @@ class AssistantHeroComposer(QWidget):
         )
         icon_name = str(self._attachment_button.property("assistant_icon_name") or "")
         self._attachment_button.setIcon(get_icon(icon_name, 17, theme.icon_secondary))
+        self._attachment_previous.setIcon(
+            get_icon("chevron-left", 14, theme.text_secondary)
+        )
+        self._attachment_next.setIcon(
+            get_icon("chevron-right", 14, theme.text_secondary)
+        )
         self._model_settings_button.setIcon(get_icon("settings", 16, theme.icon_secondary))
         self._update_send_state()
-
-
-class _TaskRow(QFrame):
-    clicked = Signal(str, str)
-
-    def __init__(self, action: _PromptAction, parent=None) -> None:
-        super().__init__(parent)
-        self._action = action
-        self.setObjectName("assistant_home_task")
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setProperty("selected", False)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.setAccessibleName(action.label)
-        self.setAccessibleDescription(
-            f"{action.description}。激活后只填入输入框，不会自动发送。"
-        )
-        self.setToolTip(
-            f"{action.description}\n点击后填入输入框，可修改后再发送。"
-        )
-        self.setFixedHeight(_QUICK_TASK_ROW_HEIGHT)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 8, 5)
-        layout.setSpacing(12)
-        self._icon = QLabel(self)
-        self._icon.setFixedSize(24, 24)
-        self._icon.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._icon)
-
-        copy_layout = QVBoxLayout()
-        copy_layout.setContentsMargins(0, 0, 0, 0)
-        copy_layout.setSpacing(0)
-        self._label = QLabel(action.label, self)
-        self._label.setObjectName("assistant_home_task_label")
-        copy_layout.addWidget(self._label)
-        self._description = QLabel(action.description, self)
-        self._description.setObjectName("assistant_home_task_description")
-        copy_layout.addWidget(self._description)
-        layout.addLayout(copy_layout, 1)
-
-        self._arrow = QLabel(self)
-        self._arrow.setFixedSize(18, 18)
-        self._arrow.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._arrow)
-        self._apply_theme()
-        bind_theme(self, self._apply_theme)
-
-    def mouseReleaseEvent(self, event) -> None:
-        if (
-            self.isEnabled()
-            and event.button() == Qt.LeftButton
-            and self.rect().contains(event.position().toPoint())
-        ):
-            self.clicked.emit(self._action.label, self._action.prompt)
-        super().mouseReleaseEvent(event)
-
-    def keyPressEvent(self, event) -> None:  # noqa: N802
-        if self.isEnabled() and event.key() in {Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space}:
-            self.clicked.emit(self._action.label, self._action.prompt)
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def set_available(self, available: bool) -> None:
-        available = bool(available)
-        self.setEnabled(available)
-        self.setFocusPolicy(Qt.StrongFocus if available else Qt.NoFocus)
-        self.setCursor(Qt.PointingHandCursor if available else Qt.ForbiddenCursor)
-        if available:
-            description = self._action.description
-            tooltip = (
-                f"{description}\n点击后填入输入框，可修改后再发送。"
-            )
-        else:
-            description = f"{self._action.description} · 需先添加 DOCX"
-            tooltip = "此任务需要读取现有文档，请先点击“添加材料”。"
-        self._description.setText(description)
-        self.setToolTip(tooltip)
-        self._apply_theme()
-
-    def set_selected(self, selected: bool) -> None:
-        selected = bool(selected)
-        if bool(self.property("selected")) == selected:
-            return
-        self.setProperty("selected", selected)
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self._apply_theme()
-
-    def _apply_theme(self) -> None:
-        theme = get_theme()
-        self.setStyleSheet(
-            f"""
-            QFrame#assistant_home_task {{
-                background: transparent;
-                border: 1px solid transparent;
-                border-bottom-color: {theme.divider};
-            }}
-            QFrame#assistant_home_task:hover {{
-                background: {theme.bg_hover};
-                border-color: transparent;
-                border-bottom-color: {theme.border_light};
-                border-radius: {theme.radius_sm}px;
-            }}
-            QFrame#assistant_home_task:focus {{
-                background: {theme.bg_hover};
-                border: 1px solid {theme.border_focus};
-                border-radius: {theme.radius_sm}px;
-            }}
-            QFrame#assistant_home_task[selected="true"] {{
-                background: {theme.primary_light};
-                border-color: transparent;
-                border-bottom-color: {theme.border_focus};
-                border-radius: {theme.radius_sm}px;
-            }}
-            QFrame#assistant_home_task:disabled {{
-                background: transparent;
-                border-color: transparent;
-                border-bottom-color: {theme.divider};
-            }}
-            """
-        )
-        label_color = theme.text_primary if self.isEnabled() else theme.text_disabled
-        description_color = theme.text_hint if self.isEnabled() else theme.text_disabled
-        self._label.setStyleSheet(
-            f"color:{label_color}; font-size:{theme.font_size_md}px; background:transparent;"
-        )
-        self._description.setStyleSheet(
-            f"color:{description_color}; font-size:{theme.font_size_xs}px; background:transparent;"
-        )
-        selected = bool(self.property("selected"))
-        if not self.isEnabled():
-            icon_color = theme.text_disabled
-        else:
-            icon_color = theme.primary if selected else theme.icon_primary
-        self._icon.setPixmap(
-            get_icon(self._action.icon_name, 18, icon_color).pixmap(18, 18)
-        )
-        arrow_name = "circle-check" if selected else "chevron-right"
-        if not self.isEnabled():
-            arrow_color = theme.text_disabled
-        else:
-            arrow_color = theme.primary if selected else theme.text_hint
-        self._arrow.setPixmap(get_icon(arrow_name, 14, arrow_color).pixmap(14, 14))
 
 
 class AssistantCreativeHome(QWidget):
@@ -1005,9 +1041,6 @@ class AssistantCreativeHome(QWidget):
     text_changed = Signal(str)
     provider_changed = Signal(str)
 
-    _SETTINGS_KEY = "assistant/custom_document_tasks"
-    _MAX_CUSTOM_TASKS = 12
-
     def __init__(self, bridge, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._bridge = bridge
@@ -1015,35 +1048,33 @@ class AssistantCreativeHome(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setMinimumHeight(650)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._custom_task_load_warnings: list[str] = []
-        self._custom_tasks = self._load_custom_tasks()
-        self._selected_action_label = ""
-        self._applying_action_prompt = False
         self._grid_random = random.Random()
         self._grid_fills: list[_GridFill] = []
+        self._grid_static_cache: QPixmap | None = None
+        self._grid_static_cache_key: tuple[object, ...] | None = None
         self._grid_timer = QTimer(self)
         self._grid_timer.setInterval(90)
         self._grid_timer.timeout.connect(self._tick_grid_fills)
         self._grid_animation_requested = True
+        self._grid_interaction_suspended = False
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(72, 34, 72, 48)
+        root.setContentsMargins(72, 48, 72, 48)
         root.setSpacing(0)
-        root.addStretch(_NEW_TASK_TOP_STRETCH)
 
         self._center = QWidget(self)
         self._center.setObjectName("assistant_home_center")
-        self._center.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Maximum)
+        self._center.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         center_layout = QVBoxLayout(self._center)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(16)
+        center_layout.setSpacing(0)
 
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(16)
         self._title_accent = QWidget(self._center)
         self._title_accent.setObjectName("assistant_home_title_accent")
-        self._title_accent.setFixedSize(4, 44)
+        self._title_accent.setFixedSize(4, _HERO_TITLE_HEIGHT)
         title_row.addWidget(self._title_accent, 0, Qt.AlignVCenter)
 
         title_line = QHBoxLayout()
@@ -1059,12 +1090,15 @@ class AssistantCreativeHome(QWidget):
         title_line.addStretch(1)
         title_row.addLayout(title_line, 1)
         center_layout.addLayout(title_row)
-        center_layout.addSpacing(14)
+        center_layout.addSpacing(_HERO_TITLE_GAP)
 
         self.composer = AssistantHeroComposer(bridge, self._center)
         self.composer.message_sent.connect(self.message_sent.emit)
         self.composer.text_changed.connect(self._on_composer_text_changed)
         self.composer.provider_changed.connect(self.provider_changed.emit)
+        self.composer.editing_activity_changed.connect(
+            self._set_grid_interaction_suspended
+        )
         self._composer_slot = QFrame(self._center)
         self._composer_slot.setObjectName("assistant_home_composer_slot")
         self._composer_slot.setAttribute(Qt.WA_StyledBackground, True)
@@ -1074,503 +1108,38 @@ class AssistantCreativeHome(QWidget):
         composer_slot_layout.setSpacing(0)
         composer_slot_layout.addWidget(self.composer, 0, Qt.AlignVCenter)
         center_layout.addWidget(self._composer_slot)
+        # Mirror the title band below so the composer itself stays centered.
+        center_layout.addSpacing(_HERO_TITLE_HEIGHT + _HERO_TITLE_GAP)
 
-        suggestion_row = QHBoxLayout()
-        suggestion_row.setContentsMargins(0, 10, 0, 0)
-        suggestion_row.setSpacing(8)
-        self._suggestion_label = QLabel("快速开始", self._center)
-        self._suggestion_label.setObjectName("assistant_home_section_title")
-        self._suggestion_label.setToolTip("固定任务入口；点击后只填入输入框，不会自动发送")
-        suggestion_row.addWidget(self._suggestion_label)
-        self.suggestion_buttons: list[QPushButton] = []
-        for action in _QUICK_START_ACTIONS:
-            button = QPushButton(action.label, self._center)
-            button.setObjectName("assistant_home_suggestion")
-            button.setProperty("action_label", action.label)
-            button.setProperty("action_icon", action.icon_name)
-            button.setProperty("action_description", action.description)
-            button.setProperty("requires_document", action.requires_document)
-            button.setProperty("selected", False)
-            button.setCursor(Qt.PointingHandCursor)
-            button.setFixedHeight(32)
-            button.setIcon(get_icon(action.icon_name, 16))
-            button.setToolTip(
-                f"{action.description}\n点击后填入输入框，可修改后再发送。"
-            )
-            button.setAccessibleName(action.label)
-            button.setAccessibleDescription(
-                f"{action.description}。激活后只填入输入框，不会自动发送。"
-            )
-            button.clicked.connect(
-                lambda _checked=False, value=action: self.select_prompt(
-                    value.prompt,
-                    label=value.label,
-                )
-            )
-            suggestion_row.addWidget(button)
-            self.suggestion_buttons.append(button)
-        suggestion_row.addStretch(1)
-        center_layout.addLayout(suggestion_row)
-
-        task_header = QHBoxLayout()
-        task_header.setContentsMargins(2, 18, 2, 6)
-        task_header.setSpacing(8)
-        self._task_label = QLabel("常用任务", self._center)
-        self._task_label.setObjectName("assistant_home_section_title")
-        task_header.addWidget(self._task_label)
-        task_header.addStretch(1)
-        self._manage_button = QPushButton("管理任务", self._center)
-        self._manage_button.setObjectName("assistant_home_header_action")
-        self._manage_button.setFixedHeight(28)
-        self._manage_button.setToolTip("编辑或删除自己新增的常用任务")
-        self._manage_button.clicked.connect(self._show_manage_menu)
-        task_header.addWidget(self._manage_button)
-        self._add_button = QPushButton("新增任务", self._center)
-        self._add_button.setObjectName("assistant_home_header_action")
-        self._add_button.setFixedHeight(28)
-        self._add_button.setToolTip("新增一个可重复使用的提示词任务")
-        self._add_button.clicked.connect(self._add_custom_task)
-        task_header.addWidget(self._add_button)
-        center_layout.addLayout(task_header)
-
-        self._task_scroll = QScrollArea(self._center)
-        self._task_scroll.setObjectName("assistant_home_task_scroll")
-        self._task_scroll.setWidgetResizable(True)
-        self._task_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._task_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self._task_scroll.setFrameShape(QFrame.NoFrame)
-        self._task_scroll.setFixedHeight(_QUICK_TASK_VIEWPORT_HEIGHT)
-        self._task_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-        self._task_host = QWidget(self._task_scroll)
-        self._task_host.setObjectName("assistant_home_task_host")
-        self._task_grid = QGridLayout(self._task_host)
-        self._task_grid.setContentsMargins(0, 0, 0, 0)
-        self._task_grid.setHorizontalSpacing(34)
-        self._task_grid.setVerticalSpacing(0)
-        self._task_grid.setColumnStretch(0, 1)
-        self._task_grid.setColumnStretch(1, 1)
-        self._task_scroll.setWidget(self._task_host)
-        center_layout.addWidget(self._task_scroll)
-        self._task_rows: list[_TaskRow] = []
-        self._rebuild_tasks()
-
-        center_row = QHBoxLayout()
-        center_row.setContentsMargins(0, 0, 0, 0)
-        center_row.addStretch(1)
-        center_row.addWidget(self._center)
-        center_row.addStretch(1)
-        root.addLayout(center_row)
-        root.addStretch(_NEW_TASK_BOTTOM_STRETCH)
+        root.addWidget(self._center, 0, Qt.AlignCenter)
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
-        self.composer.document_path_changed.connect(self._sync_action_availability)
-        self._sync_action_availability()
         self._update_center_width()
 
-    def select_prompt(self, prompt: str, *, label: str = "") -> None:
-        self._set_selected_action(label)
-        self._applying_action_prompt = True
-        try:
-            self.composer.set_text(prompt)
-        finally:
-            self._applying_action_prompt = False
-        self._sync_action_availability()
-        self.composer.focus_input()
-
     def _on_composer_text_changed(self, text: str) -> None:
-        if not self._applying_action_prompt:
-            self._set_selected_action("")
-            self.composer.set_blocking_requirement("")
         self.text_changed.emit(text)
-
-    def _set_selected_action(self, label: str) -> None:
-        self._selected_action_label = str(label or "")
-        theme = get_theme()
-        for button in self.suggestion_buttons:
-            selected = str(button.property("action_label") or "") == label
-            button.setProperty("selected", selected)
-            button.style().unpolish(button)
-            button.style().polish(button)
-            icon_name = str(button.property("action_icon") or "sparkles")
-            icon_color = theme.primary if selected else theme.icon_primary
-            button.setIcon(get_icon(icon_name, 16, icon_color))
-        for row in getattr(self, "_task_rows", []):
-            row.set_selected(row._action.label == label)
-
-    def _sync_action_availability(self, *_args) -> None:
-        document_path = self.composer.document_path()
-        has_document = bool(document_path) and Path(document_path).is_file()
-        for button in self.suggestion_buttons:
-            requires_document = bool(button.property("requires_document"))
-            available = has_document or not requires_document
-            button.setEnabled(available)
-            button.setCursor(
-                Qt.PointingHandCursor if available else Qt.ForbiddenCursor
-            )
-            description = str(button.property("action_description") or "")
-            button.setToolTip(
-                f"{description}\n点击后填入输入框，可修改后再发送。"
-                if available
-                else "此任务需要读取现有文档，请先点击“添加材料”。"
-            )
-            button.style().unpolish(button)
-            button.style().polish(button)
-        for row in getattr(self, "_task_rows", []):
-            available = has_document or not row._action.requires_document
-            row.set_available(available)
-        self._set_selected_action(self._selected_action_label)
-        selected_requires_document = any(
-            action.label == self._selected_action_label and action.requires_document
-            for action in _QUICK_START_ACTIONS + _COMMON_TASKS
-        )
-        self.composer.set_blocking_requirement(
-            "请先添加 DOCX，才能发送当前检查任务"
-            if selected_requires_document and not has_document
-            else ""
-        )
 
     def focus_input(self) -> None:
         self.composer.focus_input()
-
-    def _rebuild_tasks(self) -> None:
-        while self._task_grid.count():
-            item = self._task_grid.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        self._task_rows.clear()
-        tasks = [
-            *_COMMON_TASKS,
-            *(
-                _PromptAction(
-                    label=label,
-                    description="自定义提示词任务",
-                    prompt=prompt,
-                    icon_name=icon_name,
-                )
-                for label, prompt, icon_name in self._custom_tasks
-            ),
-        ]
-        for index, action in enumerate(tasks):
-            row = _TaskRow(action, self._task_host)
-            row.clicked.connect(
-                lambda label, prompt: self.select_prompt(prompt, label=label)
-            )
-            self._task_grid.addWidget(row, index // 2, index % 2)
-            self._task_rows.append(row)
-        visible_rows = max(1, (len(tasks) + 1) // 2)
-        self._task_host.setMinimumHeight(visible_rows * _QUICK_TASK_ROW_HEIGHT)
-        self._manage_button.setEnabled(bool(self._custom_tasks))
-        self._manage_button.setToolTip(
-            (
-                "编辑或删除自己新增的常用任务"
-                + (
-                    f"\n已忽略 {len(self._custom_task_load_warnings)} 个"
-                    "不符合当前数据规则的旧任务。"
-                    if self._custom_task_load_warnings
-                    else ""
-                )
-            )
-            if self._custom_tasks
-            else (
-                "暂无自定义任务；可先点击“新增任务”"
-                + (
-                    f"\n已忽略 {len(self._custom_task_load_warnings)} 个"
-                    "不符合当前数据规则的旧任务。"
-                    if self._custom_task_load_warnings
-                    else ""
-                )
-            )
-        )
-        can_add = len(self._custom_tasks) < self._MAX_CUSTOM_TASKS
-        self._add_button.setEnabled(can_add)
-        self._add_button.setToolTip(
-            "新增一个可重复使用的提示词任务"
-            if can_add
-            else f"最多只能保存 {self._MAX_CUSTOM_TASKS} 个自定义任务"
-        )
-        self._set_selected_action(self._selected_action_label)
-        self._sync_action_availability()
-
-    def _add_custom_task(self) -> None:
-        if len(self._custom_tasks) >= self._MAX_CUSTOM_TASKS:
-            QMessageBox.information(
-                self,
-                "无法继续新增",
-                f"最多只能保存 {self._MAX_CUSTOM_TASKS} 个自定义任务。",
-            )
-            return
-        label, accepted = QInputDialog.getText(self, "新增常用任务", "任务名称")
-        label = str(label or "").strip()
-        if not accepted or not label:
-            return
-        if len(label) > _MAX_CUSTOM_TASK_LABEL_CHARACTERS:
-            QMessageBox.information(
-                self,
-                "任务名称过长",
-                f"任务名称最多 {_MAX_CUSTOM_TASK_LABEL_CHARACTERS} 个字符。",
-            )
-            return
-        if self._custom_task_name_exists(label):
-            QMessageBox.information(self, "名称已存在", "请使用不同的任务名称。")
-            return
-        prompt, accepted = QInputDialog.getMultiLineText(
-            self,
-            "新增常用任务",
-            "点击任务后填入输入框的提示词（不会自动发送）",
-            label,
-        )
-        prompt = str(prompt or "").strip()
-        if not accepted or not prompt:
-            return
-        if len(prompt) > _MAX_CUSTOM_TASK_PROMPT_CHARACTERS:
-            QMessageBox.information(
-                self,
-                "提示词过长",
-                f"单个提示词最多 {_MAX_CUSTOM_TASK_PROMPT_CHARACTERS} 个字符。",
-            )
-            return
-        previous = list(self._custom_tasks)
-        self._custom_tasks.append((label, prompt, "sparkles"))
-        if self._commit_custom_tasks(previous):
-            QTimer.singleShot(
-                0,
-                lambda: self._task_scroll.verticalScrollBar().setValue(
-                    self._task_scroll.verticalScrollBar().maximum()
-                ),
-            )
-
-    def _show_manage_menu(self) -> None:
-        if not self._custom_tasks:
-            return
-        menu = QMenu(self)
-        for index, (label, _prompt, _icon) in enumerate(self._custom_tasks):
-            task_menu = QMenu(label, menu)
-            task_menu.setIcon(get_icon("sparkles", 14))
-            edit_action = task_menu.addAction(get_icon("pencil-line", 14), "编辑")
-            edit_action.triggered.connect(
-                lambda _checked=False, item=index: self._edit_custom_task(item)
-            )
-            delete_action = task_menu.addAction(get_icon("trash-2", 14), "删除")
-            delete_action.triggered.connect(
-                lambda _checked=False, item=index: self._delete_custom_task(item)
-            )
-            menu.addMenu(task_menu)
-        menu.popup(self._manage_button.mapToGlobal(self._manage_button.rect().bottomLeft()))
-
-    def _edit_custom_task(self, index: int) -> None:
-        if not 0 <= index < len(self._custom_tasks):
-            return
-        current_label, current_prompt, icon_name = self._custom_tasks[index]
-        label, accepted = QInputDialog.getText(
-            self,
-            "编辑常用任务",
-            "任务名称",
-            text=current_label,
-        )
-        label = str(label or "").strip()
-        if not accepted or not label:
-            return
-        if len(label) > _MAX_CUSTOM_TASK_LABEL_CHARACTERS:
-            QMessageBox.information(
-                self,
-                "任务名称过长",
-                f"任务名称最多 {_MAX_CUSTOM_TASK_LABEL_CHARACTERS} 个字符。",
-            )
-            return
-        if self._custom_task_name_exists(label, except_index=index):
-            QMessageBox.information(self, "名称已存在", "请使用不同的任务名称。")
-            return
-        prompt, accepted = QInputDialog.getMultiLineText(
-            self,
-            "编辑常用任务",
-            "点击任务后填入输入框的提示词（不会自动发送）",
-            current_prompt,
-        )
-        prompt = str(prompt or "").strip()
-        if not accepted or not prompt:
-            return
-        if len(prompt) > _MAX_CUSTOM_TASK_PROMPT_CHARACTERS:
-            QMessageBox.information(
-                self,
-                "提示词过长",
-                f"单个提示词最多 {_MAX_CUSTOM_TASK_PROMPT_CHARACTERS} 个字符。",
-            )
-            return
-        previous = list(self._custom_tasks)
-        self._custom_tasks[index] = (label, prompt, icon_name)
-        self._set_selected_action("")
-        self._commit_custom_tasks(previous)
-
-    def _delete_custom_task(self, index: int) -> None:
-        if not 0 <= index < len(self._custom_tasks):
-            return
-        label = self._custom_tasks[index][0]
-        answer = QMessageBox.question(
-            self,
-            "删除常用任务",
-            f"确定删除“{label}”吗？此操作只删除快捷任务，不会删除已有对话。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        previous = list(self._custom_tasks)
-        self._custom_tasks.pop(index)
-        self._set_selected_action("")
-        self._commit_custom_tasks(previous)
-
-    def _custom_task_name_exists(
-        self,
-        label: str,
-        *,
-        except_index: int = -1,
-    ) -> bool:
-        normalized = str(label or "").strip().casefold()
-        return any(
-            index != except_index and existing_label.strip().casefold() == normalized
-            for index, (existing_label, _prompt, _icon) in enumerate(self._custom_tasks)
-        )
-
-    def _commit_custom_tasks(
-        self,
-        previous: list[tuple[str, str, str]],
-    ) -> bool:
-        if not self._custom_tasks_are_valid(self._custom_tasks):
-            self._custom_tasks = previous
-            self._rebuild_tasks()
-            QMessageBox.warning(
-                self,
-                "任务数据超出限制",
-                "任务名称、提示词或全部自定义任务总量超出限制，"
-                "已恢复修改前的内容。",
-            )
-            return False
-        if self._save_custom_tasks():
-            self._rebuild_tasks()
-            return True
-        self._custom_tasks = previous
-        self._rebuild_tasks()
-        QMessageBox.warning(
-            self,
-            "保存失败",
-            "常用任务未保存，已恢复修改前的内容。",
-        )
-        return False
-
-    def _load_custom_tasks(self) -> list[tuple[str, str, str]]:
-        raw = QSettings("Alavette", "Lark Formatter").value(self._SETTINGS_KEY, "")
-        try:
-            payload = json.loads(str(raw or ""))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            if str(raw or "").strip():
-                self._custom_task_load_warnings.append(
-                    "custom_task_json_invalid"
-                )
-            return []
-        if isinstance(payload, list):
-            raw_tasks = payload
-        elif (
-            isinstance(payload, dict)
-            and payload.get("schema_version") == _CUSTOM_TASK_SCHEMA_VERSION
-            and isinstance(payload.get("tasks"), list)
-        ):
-            raw_tasks = payload["tasks"]
-        else:
-            if payload:
-                self._custom_task_load_warnings.append(
-                    "custom_task_schema_unsupported"
-                )
-            return []
-        result: list[tuple[str, str, str]] = []
-        seen: set[str] = set()
-        total_characters = 0
-        for item in raw_tasks:
-            if not isinstance(item, dict):
-                self._custom_task_load_warnings.append(
-                    "custom_task_row_invalid"
-                )
-                continue
-            label = str(item.get("label") or "").strip()
-            prompt = str(item.get("prompt") or "").strip()
-            identity = label.casefold()
-            row_size = len(label) + len(prompt)
-            if (
-                not label
-                or not prompt
-                or len(label) > _MAX_CUSTOM_TASK_LABEL_CHARACTERS
-                or len(prompt) > _MAX_CUSTOM_TASK_PROMPT_CHARACTERS
-                or identity in seen
-                or total_characters + row_size
-                > _MAX_CUSTOM_TASK_TOTAL_CHARACTERS
-                or len(result) >= self._MAX_CUSTOM_TASKS
-            ):
-                self._custom_task_load_warnings.append(
-                    "custom_task_row_rejected"
-                )
-                continue
-            seen.add(identity)
-            total_characters += row_size
-            result.append((label, prompt, "sparkles"))
-        return result
-
-    def _save_custom_tasks(self) -> bool:
-        if not self._custom_tasks_are_valid(self._custom_tasks):
-            return False
-        payload = {
-            "schema_version": _CUSTOM_TASK_SCHEMA_VERSION,
-            "tasks": [
-                {"label": label, "prompt": prompt}
-                for label, prompt, _icon in self._custom_tasks
-            ],
-        }
-        settings = QSettings("Alavette", "Lark Formatter")
-        try:
-            settings.setValue(
-                self._SETTINGS_KEY,
-                json.dumps(payload, ensure_ascii=False),
-            )
-            settings.sync()
-            return settings.status() == QSettings.Status.NoError
-        except (OSError, RuntimeError, TypeError, ValueError):
-            return False
-
-    @staticmethod
-    def _custom_tasks_are_valid(
-        tasks: list[tuple[str, str, str]],
-    ) -> bool:
-        if len(tasks) > AssistantCreativeHome._MAX_CUSTOM_TASKS:
-            return False
-        seen: set[str] = set()
-        total_characters = 0
-        for label, prompt, _icon in tasks:
-            normalized_label = str(label or "").strip()
-            normalized_prompt = str(prompt or "").strip()
-            identity = normalized_label.casefold()
-            if (
-                not normalized_label
-                or not normalized_prompt
-                or len(normalized_label)
-                > _MAX_CUSTOM_TASK_LABEL_CHARACTERS
-                or len(normalized_prompt)
-                > _MAX_CUSTOM_TASK_PROMPT_CHARACTERS
-                or identity in seen
-            ):
-                return False
-            seen.add(identity)
-            total_characters += len(normalized_label) + len(
-                normalized_prompt
-            )
-        return total_characters <= _MAX_CUSTOM_TASK_TOTAL_CHARACTERS
 
     def set_grid_animation_active(self, active: bool) -> None:
         self._grid_animation_requested = bool(active)
         self._sync_grid_timer()
 
+    def _set_grid_interaction_suspended(self, suspended: bool) -> None:
+        suspended = bool(suspended)
+        if suspended == self._grid_interaction_suspended:
+            return
+        self._grid_interaction_suspended = suspended
+        self._sync_grid_timer()
+
     def _sync_grid_timer(self) -> None:
-        should_run = self._grid_animation_requested and self.isVisible()
+        should_run = (
+            self._grid_animation_requested
+            and not self._grid_interaction_suspended
+            and self.isVisible()
+        )
         if should_run and not self._grid_timer.isActive():
             self._grid_timer.start()
         elif not should_run and self._grid_timer.isActive():
@@ -1586,6 +1155,7 @@ class AssistantCreativeHome(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        self._invalidate_grid_static_cache()
         self._update_center_width()
 
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -1760,9 +1330,7 @@ class AssistantCreativeHome(QWidget):
         return max(0.0, 1.0 - ((progress - hold_end) / (1.0 - hold_end)))
 
     def _paint_slanted_grid(self) -> None:
-        theme = get_theme()
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
         width = self.width()
         height = self.height()
         if width <= 0 or height <= 0:
@@ -1770,9 +1338,36 @@ class AssistantCreativeHome(QWidget):
             return
 
         spacing = _GRID_SPACING
-        self._paint_grid_ambient_panels(painter, width, height)
+        painter.drawPixmap(0, 0, self._grid_static_pixmap(width, height))
+        painter.setRenderHint(QPainter.Antialiasing, True)
         self._paint_grid_fills(painter, width, height, spacing)
+        painter.end()
 
+    def _invalidate_grid_static_cache(self) -> None:
+        self._grid_static_cache = None
+        self._grid_static_cache_key = None
+
+    def _grid_static_pixmap(self, width: int, height: int) -> QPixmap:
+        theme = get_theme()
+        dpr = max(1.0, float(self.devicePixelRatioF()))
+        cache_key = (width, height, round(dpr, 3), theme.text_hint)
+        if (
+            self._grid_static_cache is not None
+            and self._grid_static_cache_key == cache_key
+        ):
+            return self._grid_static_cache
+
+        pixmap = QPixmap(
+            max(1, round(width * dpr)),
+            max(1, round(height * dpr)),
+        )
+        pixmap.setDevicePixelRatio(dpr)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        self._paint_grid_ambient_panels(painter, width, height)
+
+        spacing = _GRID_SPACING
         grid = QColor(theme.text_hint)
         grid.setAlpha(_GRID_LINE_ALPHA)
         painter.setPen(QPen(grid, 1))
@@ -1788,6 +1383,9 @@ class AssistantCreativeHome(QWidget):
             x2, y2 = self._grid_point(max_cols, row, width, height, spacing)
             painter.drawLine(int(x1), int(y1), int(x2), int(y2))
         painter.end()
+        self._grid_static_cache = pixmap
+        self._grid_static_cache_key = cache_key
+        return pixmap
 
     @staticmethod
     def _ambient_panel_points(
@@ -1872,20 +1470,12 @@ class AssistantCreativeHome(QWidget):
 
     def _apply_theme(self) -> None:
         theme = get_theme()
+        self._invalidate_grid_static_cache()
         self.setStyleSheet(
             f"""
             QWidget#assistant_creative_home {{ background: {theme.bg_window}; }}
             QWidget#assistant_home_center {{ background: transparent; }}
             QFrame#assistant_home_composer_slot {{
-                background: transparent;
-                border: none;
-            }}
-            QScrollArea#assistant_home_task_scroll,
-            QWidget#assistant_home_task_host {{
-                background: transparent;
-                border: none;
-            }}
-            QScrollArea#assistant_home_task_scroll QWidget#qt_scrollarea_viewport {{
                 background: transparent;
                 border: none;
             }}
@@ -1918,61 +1508,9 @@ class AssistantCreativeHome(QWidget):
                 background: transparent;
                 border: none;
             }}
-            QLabel#assistant_home_section_title {{
-                color: {theme.text_primary};
-                font-size: {theme.font_size_lg}px;
-                font-weight: {theme.font_weight_emphasis};
-            }}
-            QPushButton#assistant_home_suggestion {{
-                color: {theme.text_secondary};
-                background: {theme.bg_card};
-                border: 1px solid {theme.border_light};
-                border-radius: {theme.radius_full}px;
-                padding: 0 12px;
-                text-align: left;
-                font-size: {theme.font_size_sm}px;
-            }}
-            QPushButton#assistant_home_suggestion:hover {{
-                color: {theme.text_primary};
-                background: {theme.bg_hover};
-                border-color: {theme.border};
-            }}
-            QPushButton#assistant_home_suggestion:focus {{
-                color: {theme.text_primary};
-                background: {theme.bg_hover};
-                border-color: {theme.border_focus};
-            }}
-            QPushButton#assistant_home_suggestion[selected="true"] {{
-                color: {theme.primary};
-                background: {theme.primary_light};
-                border-color: {theme.border_focus};
-            }}
-            QPushButton#assistant_home_suggestion:disabled {{
-                color: {theme.text_disabled};
-                background: {theme.bg_input};
-                border-color: {theme.border_light};
-            }}
-            QPushButton#assistant_home_header_action {{
-                color: {theme.text_secondary};
-                background: {theme.bg_card};
-                border: 1px solid {theme.border_light};
-                border-radius: {theme.radius_sm}px;
-                padding: 0 10px;
-                font-size: {theme.font_size_sm}px;
-            }}
-            QPushButton#assistant_home_header_action:hover {{
-                color: {theme.text_primary};
-                background: {theme.bg_hover};
-                border-color: {theme.border};
-            }}
-            QPushButton#assistant_home_header_action:disabled {{
-                color: {theme.text_disabled};
-                background: {theme.bg_input};
-            }}
             """
         )
         self._spark.setPixmap(get_icon("sparkles", 29, theme.primary).pixmap(29, 29))
-        self._set_selected_action(self._selected_action_label)
 
 
 __all__ = ["AssistantCreativeHome", "AssistantHeroComposer"]

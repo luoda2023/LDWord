@@ -4,7 +4,9 @@ Dialog factory helpers.
 
 from __future__ import annotations
 
-from typing import Optional
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Literal
 
 from src.qt_api import QDialog, QHBoxLayout, QLabel, QTextEdit, QWidget
 
@@ -13,14 +15,36 @@ from src.shared.ui.dialog_style import (
     build_dialog_detail_stylesheet,
     build_dialog_path_label_stylesheet,
 )
-from src.shared.ui.theme import get_theme
 from src.shared.ui.icons.catalog import get_icon
+from src.shared.ui.theme import get_theme
 
 
 OK_TEXT = "确定"
 CONFIRM_TEXT = "确认"
 CANCEL_TEXT = "取消"
 LOG_PATH_PREFIX = "日志路径："
+
+
+DialogActionVariant = Literal["primary", "secondary", "danger"]
+
+
+@dataclass(frozen=True, slots=True)
+class DialogAction:
+    """One explicit action in a themed decision dialog."""
+
+    action_id: str
+    text: str
+    variant: DialogActionVariant = "secondary"
+    default: bool = False
+    escape: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.action_id.strip():
+            raise ValueError("dialog action_id must not be empty")
+        if not self.text.strip():
+            raise ValueError("dialog action text must not be empty")
+        if self.variant not in {"primary", "secondary", "danger"}:
+            raise ValueError(f"unsupported dialog action variant: {self.variant}")
 
 
 def _alert(
@@ -83,22 +107,89 @@ def confirm(
     cancel_text: str = CANCEL_TEXT,
     *,
     destructive: bool = False,
+    default_confirm: bool | None = None,
     parent=None,
 ) -> bool:
-    dlg = BaseDialog(
-        title=title,
-        icon_style='warning' if destructive else 'question',
-        parent=parent,
+    confirm_is_default = (
+        not destructive if default_confirm is None else bool(default_confirm)
     )
-    dlg.add_message(message)
+    return decision(
+        title,
+        message,
+        actions=(
+            DialogAction(
+                "cancel",
+                cancel_text,
+                default=not confirm_is_default,
+                escape=True,
+            ),
+            DialogAction(
+                "confirm",
+                confirm_text,
+                variant="danger" if destructive else "primary",
+                default=confirm_is_default,
+            ),
+        ),
+        icon_style="warning" if destructive else "question",
+        parent=parent,
+    ) == "confirm"
 
-    cancel_btn = dlg.add_secondary_button(cancel_text)
-    cancel_btn.clicked.connect(dlg.reject)
 
-    ok_btn = dlg.add_primary_button(confirm_text, destructive=destructive)
-    ok_btn.clicked.connect(dlg.accept)
+def decision(
+    title: str,
+    message: str,
+    actions: Sequence[DialogAction],
+    *,
+    icon_style: str = "question",
+    parent=None,
+) -> str:
+    """Show a themed multi-action dialog and return the selected action ID.
 
-    return dlg.exec() == QDialog.Accepted
+    Window close and Escape resolve to the action marked ``escape``.  Defaults
+    are explicit so button behaviour does not change with the host platform.
+    """
+
+    normalized = tuple(actions)
+    if not normalized:
+        raise ValueError("decision dialog requires at least one action")
+    action_ids = [action.action_id for action in normalized]
+    if len(set(action_ids)) != len(action_ids):
+        raise ValueError("decision dialog action IDs must be unique")
+    if sum(action.default for action in normalized) > 1:
+        raise ValueError("decision dialog can only have one default action")
+    escape_actions = tuple(action for action in normalized if action.escape)
+    if len(escape_actions) > 1:
+        raise ValueError("decision dialog can only have one escape action")
+
+    dlg = BaseDialog(title=title, icon_style=icon_style, parent=parent)
+    if message:
+        dlg.add_message(message)
+    selected = {
+        "action": escape_actions[0].action_id if escape_actions else ""
+    }
+
+    def choose(action_id: str) -> None:
+        selected["action"] = action_id
+        dlg.accept()
+
+    for action in normalized:
+        if action.variant == "secondary":
+            button = dlg.add_secondary_button(
+                action.text,
+                default=action.default,
+            )
+        else:
+            button = dlg.add_primary_button(
+                action.text,
+                destructive=action.variant == "danger",
+                default=action.default,
+            )
+        button.clicked.connect(
+            lambda _checked=False, action_id=action.action_id: choose(action_id)
+        )
+
+    dlg.exec()
+    return selected["action"]
 
 
 def input_text(
@@ -110,7 +201,7 @@ def input_text(
     cancel_text: str = CANCEL_TEXT,
     *,
     parent=None,
-) -> Optional[str]:
+) -> str | None:
     dlg = BaseDialog(title=title, icon_style='input', parent=parent)
     dlg.add_message(message)
 

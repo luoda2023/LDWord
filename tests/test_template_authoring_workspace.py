@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, fields, replace
 import json
 from pathlib import Path
+from threading import Event
+import time
 
 import pytest
 
@@ -131,6 +134,7 @@ def test_new_mode_without_exact_canonical_baseline_fails_without_partial_workspa
         mode_id="research_report",
         label="调研报告版",
         display_order=75,
+        status="active",
         aliases=("调研报告",),
     )
     monkeypatch.setattr(
@@ -225,6 +229,52 @@ def test_raw_template_import_has_structured_success_and_internal_archive(
         BASELINE_FILENAME,
         INBOX_NAME,
     }
+
+
+def test_assistant_commit_and_recovery_scan_are_serialized(
+    isolated_config_library: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import src.config.template_import_service as import_service
+
+    ensure_template_authoring_workspace("thesis")
+    original_load = import_service._load_external_template_strict
+    direct_load_entered = Event()
+    release_direct_load = Event()
+
+    def blocking_load(path: Path, **kwargs):
+        if path.name.startswith("assistant-"):
+            direct_load_entered.set()
+            assert release_direct_load.wait(timeout=2)
+        return original_load(path, **kwargs)
+
+    monkeypatch.setattr(
+        import_service,
+        "_load_external_template_strict",
+        blocking_load,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        direct = executor.submit(
+            import_service.import_template_authoring_result_text,
+            "thesis",
+            "{",
+        )
+        assert direct_load_entered.wait(timeout=2)
+        recovery = executor.submit(
+            import_service.process_template_import_inbox,
+            "thesis",
+            settle_seconds=0,
+        )
+        time.sleep(0.05)
+        assert recovery.done() is False
+        release_direct_load.set()
+
+        direct_batch = direct.result(timeout=2)
+        recovery_batch = recovery.result(timeout=2)
+
+    assert len(direct_batch.rejections) == 1
+    assert recovery_batch.has_activity is False
 
 
 def test_processing_file_recovers_after_crash_before_library_commit(

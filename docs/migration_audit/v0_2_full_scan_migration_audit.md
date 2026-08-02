@@ -1,4 +1,4 @@
-# V0.2 Full-Scan Migration Audit
+﻿# V0.2 Full-Scan Migration Audit
 
 ## 2026-04 Refresh
 
@@ -25,7 +25,7 @@
 
 ## Scope
 
-本次审计针对 `C:\Users\Administrator\Desktop\Lark-Formatter 1.0\lark-formatter V0.2 LTS\src` 做全量扫描。
+本次审计针对 `<LOCAL_PATH>` 做全量扫描。
 
 产出分两层：
 
@@ -328,11 +328,17 @@ V1.0 对位：
 
 V1.0 对位：
 
-- 当前只有 `equation_table_format`
+- `src/formula_core/*` 完整保留解析、修复、归一化、MathType/OLE 与 OMML 转换核心
+- `formula_convert` 保留输出模式、低置信策略和 Office fallback
+- `formula_to_table` 保留独立启用状态与 `block_only` 策略
+- `equation_table_format` 保留公式表格格式和章节/全局编号
+- `formula_style` 保留字体、字号、间距的独立统一开关
+- `chem_typography` 保留分范围的上下角标恢复和词典/人工覆盖策略
+- 所有启用状态与参数统一归属 `SceneWorkspace.thesis_formula_rules`；模板不再持有或预览公式规则
 
 判断：
 
-- 公式处理链整体未迁。
+- 公式处理链已完整迁移，并已恢复 V0.2 各子步骤的独立策略边界。
 
 ### 9. OOXML Fidelity / Clone / Repair
 

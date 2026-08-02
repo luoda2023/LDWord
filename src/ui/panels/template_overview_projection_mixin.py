@@ -131,6 +131,7 @@ class TemplateOverviewProjectionMixin:
     ) -> None:
         self._module_selection = plan_selection
         self._overview_projection = projection
+        self._overview_projection_stale = False
         self._projection_refresh_count += 1
         self._last_projection_refresh_reason = str(reason)
         self._overview_detail.apply_projection(projection)

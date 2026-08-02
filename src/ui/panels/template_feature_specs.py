@@ -14,6 +14,13 @@ class ModuleControlSpec:
     module_name: str
     label: str
     status_label: str
+    linked_module_names: tuple[str, ...] = ()
+
+    @property
+    def module_names(self) -> tuple[str, ...]:
+        """Return every backend module governed by this visible control."""
+
+        return (self.module_name, *self.linked_module_names)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,8 +45,12 @@ TEMPLATE_FEATURE_SPECS: tuple[TemplateFeatureSpec, ...] = (
         "ruler",
         ("page_setup", "section"),
         (
-            ModuleControlSpec("page_setup", "应用纸张与页边距", "纸张与页边距"),
-            ModuleControlSpec("section_format", "整理分节", "分节整理"),
+            ModuleControlSpec(
+                "page_setup",
+                "应用页面设置",
+                "页面设置",
+                ("section_format",),
+            ),
         ),
         "页面",
     ),
@@ -119,7 +130,6 @@ TEMPLATE_DETAIL_CARD_IDS = tuple(
     spec.card_id for spec in TEMPLATE_FEATURE_SPECS
 )
 
-
 TEMPLATE_CARD_DEFINITIONS: dict[str, tuple[str, str]] = {
     "tpl_overview": ("模板概览", "scan-text"),
     **{
@@ -133,9 +143,32 @@ def module_control_spec(module_name: str) -> ModuleControlSpec | None:
     target = str(module_name or "")
     for feature in TEMPLATE_FEATURE_SPECS:
         for control in feature.module_controls:
-            if control.module_name == target:
+            if target in control.module_names:
                 return control
     return None
+
+
+def feature_module_names(feature: TemplateFeatureSpec) -> tuple[str, ...]:
+    """Flatten the backend modules owned by a feature in stable order."""
+
+    return tuple(
+        dict.fromkeys(
+            module_name
+            for control in feature.module_controls
+            for module_name in control.module_names
+        )
+    )
+
+
+def module_control_switch_updates(
+    module_name: str,
+    enabled: bool,
+) -> dict[str, bool]:
+    """Build the atomic switch update represented by one visible control."""
+
+    control = module_control_spec(module_name)
+    governed_names = control.module_names if control is not None else (str(module_name),)
+    return {name: bool(enabled) for name in governed_names if name}
 
 
 __all__ = [
@@ -147,5 +180,7 @@ __all__ = [
     "TEMPLATE_FEATURE_BY_ID",
     "TEMPLATE_FEATURE_SPECS",
     "TemplateFeatureSpec",
+    "feature_module_names",
+    "module_control_switch_updates",
     "module_control_spec",
 ]

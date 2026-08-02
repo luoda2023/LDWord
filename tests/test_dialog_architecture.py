@@ -74,6 +74,119 @@ def test_confirm_dialog_further_decomposes_constructor_helpers():
     assert "self.add_primary_button(confirm_text" not in init_source
 
 
+def test_destructive_confirm_dialog_defaults_to_cancel():
+    app = _app()
+    dialog = ConfirmDialog(
+        title="删除项目",
+        message="删除后无法恢复。",
+        confirm_text="删除",
+        destructive=True,
+    )
+    try:
+        dialog.show()
+        app.processEvents()
+
+        assert dialog._cancel_btn.isDefault()
+        assert not dialog._confirm_btn.isDefault()
+    finally:
+        dialog.close()
+        app.processEvents()
+
+
+def test_dialog_action_rejects_ambiguous_or_empty_contracts():
+    import pytest
+
+    with pytest.raises(ValueError, match="action_id"):
+        dialogs.DialogAction("", "取消")
+    with pytest.raises(ValueError, match="action text"):
+        dialogs.DialogAction("cancel", "")
+    with pytest.raises(ValueError, match="variant"):
+        dialogs.DialogAction("save", "保存", variant="unknown")
+
+
+def test_destructive_confirm_contract_uses_cancel_as_default(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_decision(title, message, actions, **kwargs):
+        captured["title"] = title
+        captured["message"] = message
+        captured["actions"] = tuple(actions)
+        captured["kwargs"] = kwargs
+        return "cancel"
+
+    monkeypatch.setattr(dialogs, "decision", fake_decision)
+
+    assert not dialogs.confirm(
+        "删除项目",
+        "删除后无法恢复。",
+        confirm_text="删除",
+        destructive=True,
+    )
+    actions = captured["actions"]
+    cancel, confirm = actions
+    assert cancel.action_id == "cancel"
+    assert cancel.default and cancel.escape
+    assert confirm.action_id == "confirm"
+    assert confirm.variant == "danger"
+    assert not confirm.default
+
+
+def test_multi_action_decision_returns_clicked_action(monkeypatch):
+    class FakeSignal:
+        def __init__(self):
+            self.callback = None
+
+        def connect(self, callback):
+            self.callback = callback
+
+    class FakeButton:
+        def __init__(self, text):
+            self.text = text
+            self.clicked = FakeSignal()
+
+    class FakeDialog:
+        def __init__(self, **_kwargs):
+            self.buttons = []
+            self.accepted = False
+
+        def add_message(self, _message):
+            pass
+
+        def add_secondary_button(self, text, **_kwargs):
+            button = FakeButton(text)
+            self.buttons.append(button)
+            return button
+
+        def add_primary_button(self, text, **_kwargs):
+            button = FakeButton(text)
+            self.buttons.append(button)
+            return button
+
+        def accept(self):
+            self.accepted = True
+
+        def exec(self):
+            save = next(
+                button for button in self.buttons if button.text == "保存"
+            )
+            save.clicked.callback()
+            return 1
+
+    monkeypatch.setattr(dialogs, "BaseDialog", FakeDialog)
+
+    selected = dialogs.decision(
+        "资料包尚未保存",
+        "请选择保存、放弃修改或取消。",
+        actions=(
+            dialogs.DialogAction("cancel", "取消", default=True, escape=True),
+            dialogs.DialogAction("discard", "放弃修改", variant="danger"),
+            dialogs.DialogAction("save", "保存", variant="primary"),
+        ),
+    )
+
+    assert selected == "save"
+
+
 def test_shared_text_input_stylesheet_uses_theme_tokens():
     qss = build_text_input_stylesheet(LIGHT)
 

@@ -27,6 +27,12 @@ def test_template_config_hosts_feature_specific_configs():
     assert not hasattr(template.toc, "enabled")
     assert template.header_footer.page_number_enabled is True
     assert template.reference_style.hanging_indent_cm == 0.74
+    for removed_formula_root in (
+        "formula_table",
+        "formula_style",
+        "equation_numbering",
+    ):
+        assert not hasattr(template, removed_formula_root)
 
 
 def test_template_config_ignores_legacy_table_row_height_field():
@@ -143,14 +149,13 @@ def test_resolve_config_keeps_explicit_template_overrides_available():
 
 def test_resolve_config_keeps_scene_owned_runtime_policy_fields():
     template = TemplateConfig()
-    template.formula_style.unify_font = True
-    template.equation_numbering.numbering_format = "chapter.seq"
     template.watermark.enabled = False
     assert not hasattr(template, "output")
 
-    scene = SceneWorkspace()
-    scene.formula_style.unify_font = False
-    scene.equation_numbering.numbering_format = "global"
+    scene = SceneWorkspace(mode_id="thesis")
+    rules = scene.ensure_thesis_formula_rules()
+    rules.formula_style.unify_font = False
+    rules.equation_numbering.numbering_format = "global"
     scene.watermark.enabled = True
     scene.watermark.text = "内部传阅"
     scene.default_delivery_preset().artifacts.final_docx = False
@@ -173,6 +178,91 @@ def test_resolve_config_keeps_scene_owned_runtime_policy_fields():
     assert resolved.get_with_source("equation_numbering.numbering_format").source == "scene"
     assert resolved.get_with_source("watermark.enabled").source == "scene"
     assert resolved.get_with_source("output.final_docx").source == "scene"
+
+
+def test_default_valued_formula_policy_has_no_template_competitor():
+    template = TemplateConfig()
+    scene = SceneWorkspace(mode_id="thesis")
+
+    resolved = resolve_config(template, scene)
+
+    assert resolved.formula_style.unify_font is True
+    assert resolved.formula_style.unify_size is True
+    assert resolved.formula_style.unify_spacing is True
+    assert resolved.equation_numbering.numbering_format == "chapter.seq"
+    assert resolved.get_with_source("formula_style.unify_font").source == "scene"
+    assert resolved.get_with_source("formula_style.unify_size").source == "scene"
+    assert resolved.get_with_source("formula_style.unify_spacing").source == "scene"
+    assert resolved.get_with_source("equation_numbering.numbering_format").source == "scene"
+
+
+def test_thesis_formula_defaults_match_the_v02_proven_behavior():
+    rules = SceneWorkspace(mode_id="thesis").ensure_thesis_formula_rules()
+
+    assert rules.formula_enabled is True
+    assert rules.formula_convert.enabled is True
+    assert rules.formula_convert.output_mode == "word_native"
+    assert rules.formula_convert.low_confidence_policy == "skip_and_mark"
+    assert rules.formula_convert.office_fallback_enabled is False
+    assert rules.formula_convert.office_fallback_timeout_sec == 30
+    assert rules.formula_to_table.enabled is True
+    assert rules.formula_to_table.block_only is True
+    assert rules.equation_numbering.enabled is True
+    assert rules.equation_numbering.numbering_format == "chapter.seq"
+    assert rules.formula_style.enabled is True
+    assert rules.formula_style.unify_font is True
+    assert rules.formula_style.unify_size is True
+    assert rules.formula_style.unify_spacing is True
+
+    table = rules.formula_table
+    assert table.formula_font_name == "Cambria Math"
+    assert table.formula_font_size_pt == 12.0
+    assert table.formula_line_spacing == 1.0
+    assert table.formula_space_before_pt == 0.0
+    assert table.formula_space_after_pt == 0.0
+    assert table.block_alignment == "center"
+    assert table.table_alignment == "center"
+    assert table.formula_cell_alignment == "center"
+    assert table.number_alignment == "right"
+    assert table.number_font_name == "Times New Roman"
+    assert table.number_font_size_pt == 10.5
+    assert table.auto_shrink_number_column is True
+
+    assert rules.chem_typography.enabled is False
+    assert not any(rules.chem_typography.scopes.values())
+
+
+def test_formula_enablement_has_one_persisted_owner_and_runtime_projection():
+    scene = SceneWorkspace(mode_id="thesis")
+    rules = scene.ensure_thesis_formula_rules()
+    rules.formula_convert.enabled = False
+    rules.formula_to_table.enabled = True
+    rules.equation_numbering.enabled = False
+    rules.formula_style.enabled = False
+    rules.chem_typography.enabled = True
+
+    assert not (
+        {"formula_convert", "equation_table_format", "chem_typography"}
+        & set(scene.module_switches)
+    )
+
+    resolved = resolve_config(TemplateConfig(), scene)
+
+    assert resolved.module_switches["formula_convert"] is False
+    assert resolved.module_switches["equation_table_format"] is True
+    assert resolved.module_switches["chem_typography"] is False
+
+    rules.chem_typography.scopes["body"] = True
+    resolved = resolve_config(TemplateConfig(), scene)
+    assert resolved.module_switches["chem_typography"] is True
+    assert resolved.formula_to_table.enabled is True
+
+    rules.formula_enabled = False
+    resolved = resolve_config(TemplateConfig(), scene)
+    assert resolved.module_switches["formula_convert"] is False
+    assert resolved.module_switches["equation_table_format"] is False
+    assert resolved.module_switches["chem_typography"] is True
+    assert rules.formula_to_table.enabled is True
 
 
 def test_resolve_config_ignores_scene_page_number_strategy_fields():

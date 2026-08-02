@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 OFFICE_IMAGE_LAYOUT_CHILD_FLAG = "--office-image-layout-child"
 OFFICE_LAYOUT_PROBE_CHILD_FLAG = "--office-layout-probe-child"
+MATHTYPE_OFFICE_CHILD_FLAG = "--mathtype-office-child"
 
 
 def build_office_broker_child_command(
@@ -33,6 +33,7 @@ def build_office_broker_child_command(
 
 
 __all__ = [
+    "MATHTYPE_OFFICE_CHILD_FLAG",
     "OFFICE_IMAGE_LAYOUT_CHILD_FLAG",
     "OFFICE_LAYOUT_PROBE_CHILD_FLAG",
     "build_office_broker_child_command",

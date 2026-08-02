@@ -2,36 +2,38 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from src.qt_api import (
     QApplication,
     QColor,
     QDialog,
     QHBoxLayout,
-    QImageReader,
     QLabel,
     QPixmap,
     QPoint,
     QPushButton,
     QSize,
     QSplitter,
+    Qt,
     QTextEdit,
     QTimer,
     QVBoxLayout,
     QWidget,
-    Qt,
     Signal,
 )
+from src.shared.ui.bounded_raster import (
+    DEFAULT_PREVIEW_PIXEL_BUDGET,
+    load_bounded_raster,
+)
+from src.shared.ui.icons.catalog import get_icon
 from src.shared.ui.interactive_preview_scroll_area import InteractivePreviewScrollArea
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.typography_policy import TextRole, font_for_role
-from src.shared.ui.icons.catalog import get_icon
-
 
 _SCREEN_COVERAGE = 0.9
 _DIALOG_MARGIN = 12
@@ -202,6 +204,7 @@ class ZoomablePreviewViewport(QWidget):
         self._reset_actual_size_snap()
         previous = self.scroll.takeWidget()
         if previous is not None and previous is not content.widget:
+            previous.hide()
             previous.setParent(None)
             previous.deleteLater()
         self._content = content
@@ -922,18 +925,16 @@ class PreviewItem:
 
 
 def load_preview_pixmap(item: PreviewItem) -> tuple[QPixmap, str, str]:
-    """Load one image with EXIF orientation and a human-readable error."""
+    """Load one bounded image preview with EXIF orientation and an error."""
 
     path = Path(item.path)
     if not path.is_file():
         return QPixmap(), "", "文件不存在"
-    reader = QImageReader(str(path))
-    reader.setAutoTransform(True)
-    image = reader.read()
-    if image.isNull():
-        return QPixmap(), bytes(reader.format()).decode("ascii", "ignore"), reader.errorString()
-    image_format = bytes(reader.format()).decode("ascii", "ignore").upper()
-    return QPixmap.fromImage(image), image_format, ""
+    result = load_bounded_raster(
+        path,
+        max_pixels=DEFAULT_PREVIEW_PIXEL_BUDGET,
+    )
+    return result.pixmap, result.image_format, result.error
 
 
 class ImagePreviewDialog(PreviewDialog):

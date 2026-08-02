@@ -13,6 +13,14 @@ from uuid import uuid4
 from docx import Document
 
 from src.config.delivery_preset_display import delivery_preset_display_name
+from src.config.document_scope import (
+    DocumentScopePolicy,
+    document_scope_policy_issue,
+)
+from src.config.document_structure_contract import (
+    DocumentStructureEvidence,
+    RegionDecision,
+)
 from src.config.execution_config_integrity import (
     delivery_preset_identity_issue,
     execution_config_integrity_issue,
@@ -25,59 +33,53 @@ from src.config.material_schema_registry import (
 from src.config.official_document_profiles import get_official_document_profile
 from src.config.plugin_manual_gate import plugin_manual_gate_payload
 from src.config.resolved import ResolvedConfig
-from src.config.document_scope import (
-    DocumentScopePolicy,
-    document_scope_policy_issue,
-)
-from src.config.document_structure_contract import (
-    DocumentStructureEvidence,
-    RegionDecision,
-)
+from src.config.scene_family_registry import get_planned_scene_family
 from src.config.scene_product_coverage_manifest import (
     SceneCoveragePack,
     coverage_packs_for_config,
 )
-from src.config.scene_family_registry import get_planned_scene_family
 from src.modules.base import BaseModule
 from src.modules.structure.heading_recognition import rebuild_document_index
 from src.pipeline.context import PipelineContext
 from src.pipeline.journal_governance_mixin import PipelineJournalGovernanceMixin
 from src.pipeline.module_phases import build_module_phase_graph, order_modules_by_phase
 from src.pipeline.result import PipelineResult
-from src.shared.engine.field_refresh import (
-    document_has_toc,
-    refresh_doc_fields_with_word,
-)
-from src.shared.engine.document_scope_runtime import bind_document_scope
-from src.shared.engine.content_visibility import (
-    extract_content_visibility_rule_selectors,
-    preview_content_visibility_effects,
-    scan_content_visibility_markers,
-)
-from src.shared.engine.block_visibility import apply_block_visibility
-from src.shared.engine.material_field_consistency import (
-    inspect_material_field_consistency,
-)
-from src.shared.engine.exam_question_schema import inspect_exam_question_schema
-from src.shared.engine.exam_question_schema import build_exam_delivery_runtime
-from src.shared.engine.journal_citation_schema import inspect_journal_citations
-from src.shared.engine.official_numbering_preservation import (
-    inspect_official_numbering_preservation,
-)
-from src.shared.engine.official_document_assembly import (
-    assemble_official_document_docx,
-)
-from src.shared.engine.technical_chapter_inventory import (
-    inspect_technical_chapter_inventory,
-)
-from src.shared.engine.application_section_word_limits import (
-    inspect_application_section_word_limits,
-)
 from src.pipeline.scheduler import (
     validate_data_flow,
     validate_schema_contract,
 )
 from src.pipeline.tracker import ChangeTracker
+from src.pipeline.validation_mixin import PipelineValidationMixin
+from src.shared.engine.block_visibility import apply_block_visibility
+from src.shared.engine.content_visibility import (
+    extract_content_visibility_rule_selectors,
+    preview_content_visibility_effects,
+    scan_content_visibility_markers,
+)
+from src.shared.engine.document_scope_guard import (
+    capture_document_scope_guard,
+    validate_document_scope_guard,
+)
+from src.shared.engine.document_scope_runtime import bind_document_scope
+from src.shared.engine.field_refresh import (
+    document_has_toc,
+    refresh_doc_fields_with_word,
+)
+from src.shared.engine.material_field_consistency import (
+    inspect_material_field_consistency,
+)
+from src.shared.engine.object_preflight import (
+    inspect_docx_package,
+    object_preflight_module_skips,
+    object_preflight_targets_for_touchpoints,
+    refine_section_format_module_skips,
+)
+from src.shared.engine.official_document_assembly import (
+    assemble_official_document_docx,
+)
+from src.shared.engine.scene_journey_runtime import (
+    build_scene_journey_runtime_evidence,
+)
 from src.shared.io.artifact_transaction import (
     OwnedAssemblyTransaction,
     stable_file_evidence,
@@ -86,14 +88,6 @@ from src.shared.io.safe_docx_package import (
     DocxPackageError,
     SafeDocxPackage,
     capture_bounded_file,
-)
-from src.shared.engine.object_preflight import (
-    inspect_docx_package,
-    object_preflight_module_skips,
-    object_preflight_targets_for_touchpoints,
-)
-from src.shared.engine.scene_journey_runtime import (
-    build_scene_journey_runtime_evidence,
 )
 
 
@@ -196,7 +190,7 @@ def _coverage_boundary_payload(pack: SceneCoveragePack) -> dict[str, object]:
     }
 
 
-class Pipeline(PipelineJournalGovernanceMixin):
+class Pipeline(PipelineValidationMixin, PipelineJournalGovernanceMixin):
     """Execute registered modules against a document."""
 
     def __init__(
@@ -243,6 +237,7 @@ class Pipeline(PipelineJournalGovernanceMixin):
         self._document_structure_evidence = document_structure_evidence
         self._document_scope_decisions = tuple(document_scope_decisions or ())
         self._tracker = ChangeTracker()
+        self._mathtype_fallback_receipts: list[dict[str, object]] = []
 
         registered_modules = tuple(modules)
         self._phase_graph = build_module_phase_graph(registered_modules)
@@ -267,6 +262,7 @@ class Pipeline(PipelineJournalGovernanceMixin):
 
     def execute(self, doc_path: str) -> PipelineResult:
         """Run the full pipeline for one .docx file."""
+        self._mathtype_fallback_receipts = []
         if self._is_cancelled():
             return self._cancelled_result()
 
@@ -388,8 +384,9 @@ class Pipeline(PipelineJournalGovernanceMixin):
                     ctx.document_scope,
                     mode_id=ctx.mode_id,
                 )
-            rebuild_document_index(doc, ctx)
+            rebuild_document_index(doc, ctx, self._config)
             self._capture_document_scope_receipt(ctx)
+            ctx.document_scope_guard = capture_document_scope_guard(doc, ctx)
         except Exception as exc:
             return self._failed_result(
                 error=f"document_scope_binding_failed:{exc}",
@@ -565,6 +562,11 @@ class Pipeline(PipelineJournalGovernanceMixin):
 
             try:
                 issues = mod.validate(doc, self._config, ctx) or []
+                if mod.meta.name == "validation":
+                    # ValidationModule.apply normally stores these, but a fatal
+                    # preflight issue prevents apply from running. Preserve the
+                    # complete report in both strict and permissive execution.
+                    ctx.validation_issues = list(issues)
                 fatal_issues = self._record_validation_issues(mod, issues)
                 if fatal_issues:
                     error = (
@@ -636,6 +638,15 @@ class Pipeline(PipelineJournalGovernanceMixin):
         if self._is_cancelled():
             return self._cancelled_result()
 
+        guard_error = self._document_scope_guard_error(ctx)
+        if guard_error:
+            return self._failed_result(
+                error=guard_error,
+                doc=doc,
+                original_doc=original_doc,
+                ctx=ctx,
+            )
+
         self._run_official_numbering_preservation_validation(doc, original_doc, ctx)
         self._run_technical_chapter_inventory_validation(doc, ctx)
         self._run_application_section_word_limits_validation(doc, ctx)
@@ -669,6 +680,7 @@ class Pipeline(PipelineJournalGovernanceMixin):
             or _official_document_assembly_output_paths(ctx)
             or output_paths
         )
+        ctx.mathtype_office_fallback = list(self._mathtype_fallback_receipts)
         if self._is_cancelled():
             return self._cancelled_result(
                 doc=doc,
@@ -686,6 +698,37 @@ class Pipeline(PipelineJournalGovernanceMixin):
             output_paths=output_paths,
             ctx=ctx,
         )
+
+    def _document_scope_guard_error(self, ctx: PipelineContext) -> str:
+        guard = ctx.document_scope_guard
+        if guard is None:
+            return "document_scope_guard_missing"
+        violations = validate_document_scope_guard(guard)
+        receipt = dict(ctx.document_scope_receipt or {})
+        receipt.update(
+            {
+                "protected_paragraph_count": guard.protected_paragraph_count,
+                "protected_roles": list(guard.protected_roles),
+                "integrity_status": "violated" if violations else "verified",
+                "violation_count": len(violations),
+            }
+        )
+        ctx.document_scope_receipt = receipt
+        if not violations:
+            return ""
+        summary = ",".join(violations[:5])
+        self._tracker.record(
+            rule_name="document_scope_guard",
+            target="frozen_regions",
+            section="pipeline",
+            change_type="integrity_violation",
+            before="frozen",
+            after=summary,
+            paragraph_index=-1,
+            success=False,
+            failure_reason=summary,
+        )
+        return f"document_scope_violation:{summary}"
 
     def _execute_terminal_assembly(
         self,
@@ -1036,6 +1079,22 @@ class Pipeline(PipelineJournalGovernanceMixin):
             )
 
         preflight_skips = object_preflight_module_skips(result.findings, policy)
+        original_section_skip = preflight_skips.get("section_format")
+        preflight_skips = refine_section_format_module_skips(preflight_skips)
+        if original_section_skip is not None and "section_format" not in preflight_skips:
+            self._tracker.record(
+                rule_name="object_preflight",
+                target="section_format",
+                section="global",
+                change_type="granular_risk_clearance",
+                before=", ".join(original_section_skip.get("finding_kinds", []) or []),
+                after=(
+                    "section planner may run because these embedded-object findings "
+                    "do not intersect section-property mutation"
+                ),
+                paragraph_index=-1,
+                success=True,
+            )
         ctx.object_preflight_module_skips = list(preflight_skips.values())
         failure_policy = str(getattr(compliance, "failure_policy", "") or "").strip()
         blocked = not result.inspection_succeeded or (
@@ -1160,76 +1219,6 @@ class Pipeline(PipelineJournalGovernanceMixin):
         )
         return None
 
-    def _run_exam_question_schema_validation(self, ctx: PipelineContext) -> None:
-        result = inspect_exam_question_schema(self._config)
-        if str(getattr(result, "status", "") or "") == "not_applicable":
-            return
-        ctx.exam_question_schema = result
-        summary = getattr(result, "summary", None)
-        after = (
-            f"status={getattr(result, 'status', '') or '-'}; "
-            f"sections={int(getattr(summary, 'section_count', 0) or 0)}; "
-            f"questions={int(getattr(summary, 'question_count', 0) or 0)}; "
-            f"errors={int(getattr(result, 'error_count', 0) or 0)}; "
-            f"warnings={int(getattr(result, 'warning_count', 0) or 0)}"
-        )
-        self._tracker.record(
-            rule_name="exam_question_schema",
-            target=getattr(result, "schema_id", "") or "exam_items_v1",
-            section="input",
-            change_type=(
-                "schema_validation_warning"
-                if getattr(result, "has_issues", False)
-                else "schema_validation"
-            ),
-            before=getattr(result, "source_key", "") or "structured source",
-            after=after,
-            paragraph_index=-1,
-            success=True,
-        )
-
-    def _run_exam_delivery_runtime(self, ctx: PipelineContext) -> None:
-        result = ctx.exam_question_schema
-        if result is None:
-            result = inspect_exam_question_schema(self._config)
-            if str(getattr(result, "status", "") or "") == "not_applicable":
-                return
-            ctx.exam_question_schema = result
-        runtime_output_dir = self._output_dir or Path(ctx.source_doc_dir or ".")
-        runtime = build_exam_delivery_runtime(
-            self._config,
-            output_dir=runtime_output_dir,
-            source_stem=Path(ctx.source_doc_path or "exam").stem,
-            validation=result,
-            master=self._exam_master,
-        )
-        if str(getattr(runtime, "status", "") or "") == "not_applicable":
-            return
-        ctx.exam_delivery_runtime = runtime
-        self._tracker.record(
-            rule_name="exam_delivery_runtime",
-            target=getattr(runtime, "schema_id", "") or "exam_items_v1",
-            section="input_to_delivery",
-            change_type=(
-                "exam_delivery_runtime_blocked"
-                if getattr(runtime, "status", "") == "blocked"
-                else "exam_delivery_runtime"
-            ),
-            before=getattr(runtime, "source_key", "") or "structured source",
-            after=(
-                f"status={getattr(runtime, 'status', '') or '-'}; "
-                f"preview={getattr(runtime, 'markdown_preview_path', '') or '-'}; "
-                f"versions={int(getattr(runtime, 'version_count', 0) or 0)}"
-            ),
-            paragraph_index=-1,
-            success=str(getattr(runtime, "status", "") or "") in {"ok", "warning"},
-            failure_reason=(
-                None
-                if str(getattr(runtime, "status", "") or "") in {"ok", "warning"}
-                else str(getattr(runtime, "skipped_reason", "") or "runtime_blocked")
-            ),
-        )
-
     def _run_official_document_assembly_runtime(self, ctx: PipelineContext) -> None:
         profile_id = _official_document_assembly_profile_id(
             self._config,
@@ -1245,7 +1234,6 @@ class Pipeline(PipelineJournalGovernanceMixin):
             getattr(self._config, "entity_data", {}) or {},
             output_dir=runtime_output_dir,
             field_aliases=getattr(self._config, "field_aliases", {}) or {},
-            filename=f"{Path(ctx.source_doc_path or 'official_document').stem}_official.docx",
             master=self._official_master,
             removed_field_keys={
                 str(key)
@@ -1257,6 +1245,7 @@ class Pipeline(PipelineJournalGovernanceMixin):
             generate_review_pdf=bool(
                 getattr(output_config, "review_pdf", False)
             ),
+            delivery_versions=_official_delivery_versions(self._config),
         )
         ctx.official_document_assembly = result
         missing_required = ", ".join(
@@ -1289,143 +1278,6 @@ class Pipeline(PipelineJournalGovernanceMixin):
             after=after,
             paragraph_index=-1,
             success=getattr(result, "status", "") == "ok",
-        )
-
-    def _run_journal_citation_validation(self, doc: Document, ctx: PipelineContext) -> None:
-        result = inspect_journal_citations(self._config, doc)
-        if str(getattr(result, "status", "") or "") == "not_applicable":
-            return
-        ctx.journal_citations = result
-        summary = getattr(result, "summary", None)
-        after = (
-            f"status={getattr(result, 'status', '') or '-'}; "
-            f"references={int(getattr(summary, 'reference_count', 0) or 0)}; "
-            f"citations={int(getattr(summary, 'citation_count', 0) or 0)}; "
-            f"matched={int(getattr(summary, 'matched_citation_count', 0) or 0)}; "
-            f"missing={int(getattr(summary, 'missing_reference_count', 0) or 0)}; "
-            f"errors={int(getattr(result, 'error_count', 0) or 0)}; "
-            f"warnings={int(getattr(result, 'warning_count', 0) or 0)}"
-        )
-        self._tracker.record(
-            rule_name="journal_citations",
-            target=getattr(result, "schema_id", "") or "journal_submission_materials_v1",
-            section="input",
-            change_type=(
-                "citation_source_warning"
-                if getattr(result, "has_issues", False)
-                else "citation_source_validation"
-            ),
-            before=getattr(result, "source_key", "") or "BibTeX/CSL source",
-            after=after,
-            paragraph_index=-1,
-            success=True,
-        )
-
-    def _run_official_numbering_preservation_validation(
-        self,
-        doc: Document,
-        original_doc: Document,
-        ctx: PipelineContext,
-    ) -> None:
-        result = inspect_official_numbering_preservation(
-            self._config,
-            original_doc=original_doc,
-            current_doc=doc,
-            heading_map=ctx.heading_map,
-            tracker_records=self._tracker.get_all(),
-        )
-        if str(getattr(result, "status", "") or "") == "not_applicable":
-            return
-        ctx.official_numbering_preservation = result
-        summary = getattr(result, "summary", None)
-        after = (
-            f"status={getattr(result, 'status', '') or '-'}; "
-            f"strategy={getattr(result, 'strategy', '') or '-'}; "
-            f"headings={int(getattr(summary, 'heading_count', 0) or 0)}; "
-            f"changed_headings={int(getattr(summary, 'changed_heading_count', 0) or 0)}; "
-            f"numbering_records={int(getattr(summary, 'heading_numbering_record_count', 0) or 0)}"
-        )
-        if not getattr(result, "has_issues", False):
-            return
-        self._tracker.record(
-            rule_name="official_numbering_preservation",
-            target="numbering.xml",
-            section="official_policy",
-            change_type="preflight_warning",
-            before="official numbering preserve evidence",
-            after=after,
-            paragraph_index=-1,
-            success=True,
-        )
-
-    def _run_technical_chapter_inventory_validation(
-        self,
-        doc: Document,
-        ctx: PipelineContext,
-    ) -> None:
-        result = inspect_technical_chapter_inventory(
-            self._config,
-            doc,
-            doc_tree=ctx.doc_tree,
-            heading_map=ctx.heading_map,
-        )
-        if str(getattr(result, "status", "") or "") == "not_applicable":
-            return
-        ctx.technical_chapter_inventory = result
-        summary = getattr(result, "summary", None)
-        after = (
-            f"status={getattr(result, 'status', '') or '-'}; "
-            f"chapters={int(getattr(summary, 'chapter_count', 0) or 0)}; "
-            f"headings={int(getattr(summary, 'heading_count', 0) or 0)}; "
-            f"appendix={int(getattr(summary, 'appendix_count', 0) or 0)}; "
-            f"tables={int(getattr(summary, 'table_count', 0) or 0)}; "
-            f"figures={int(getattr(summary, 'figure_count', 0) or 0)}"
-        )
-        if not getattr(result, "has_issues", False):
-            return
-        self._tracker.record(
-            rule_name="technical_chapter_inventory",
-            target="chapter_inventory",
-            section="technical_long_docs",
-            change_type="preflight_warning",
-            before="technical chapter inventory",
-            after=after,
-            paragraph_index=-1,
-            success=True,
-        )
-
-    def _run_application_section_word_limits_validation(
-        self,
-        doc: Document,
-        ctx: PipelineContext,
-    ) -> None:
-        result = inspect_application_section_word_limits(
-            self._config,
-            doc,
-            doc_tree=ctx.doc_tree,
-            heading_map=ctx.heading_map,
-        )
-        if str(getattr(result, "status", "") or "") == "not_applicable":
-            return
-        ctx.application_section_word_limits = result
-        summary = getattr(result, "summary", None)
-        after = (
-            f"status={getattr(result, 'status', '') or '-'}; "
-            f"matched_sections={int(getattr(summary, 'matched_section_count', 0) or 0)}; "
-            f"exceeded={int(getattr(summary, 'exceeded_section_count', 0) or 0)}; "
-            f"required_missing={int(getattr(summary, 'required_missing_count', 0) or 0)}"
-        )
-        if not getattr(result, "has_issues", False):
-            return
-        self._tracker.record(
-            rule_name="application_section_word_limits",
-            target="section_limits",
-            section="application_reports",
-            change_type="preflight_warning",
-            before="application section word limit evidence",
-            after=after,
-            paragraph_index=-1,
-            success=True,
         )
 
     def _run_output_target_preflight(
@@ -1582,6 +1434,7 @@ class Pipeline(PipelineJournalGovernanceMixin):
         )
         return self._publish_output_documents(
             [("final", final_path, doc)],
+            ctx=ctx,
         )
 
     def _save_delivery_outputs(
@@ -1626,11 +1479,13 @@ class Pipeline(PipelineJournalGovernanceMixin):
             outputs.append((preset_id, final_path, preset_doc))
         if not outputs:
             return {}
-        return self._publish_output_documents(outputs)
+        return self._publish_output_documents(outputs, ctx=ctx)
 
     def _publish_output_documents(
         self,
         outputs: list[tuple[str, Path, Document]],
+        *,
+        ctx: PipelineContext | None = None,
     ) -> dict[str, str]:
         """Write caller-owned stages or atomically publish a complete final set."""
 
@@ -1641,7 +1496,7 @@ class Pipeline(PipelineJournalGovernanceMixin):
             for output_id, owned_stage_path, output_doc in outputs:
                 self._raise_if_cancelled()
                 owned_stage_path.parent.mkdir(parents=True, exist_ok=True)
-                self._save_staged_document(output_doc, owned_stage_path)
+                self._save_staged_document(output_doc, owned_stage_path, ctx=ctx)
                 self._raise_if_cancelled()
                 output_paths[output_id] = str(owned_stage_path)
             return output_paths
@@ -1657,7 +1512,7 @@ class Pipeline(PipelineJournalGovernanceMixin):
             for output_id, final_path, output_doc in outputs:
                 self._raise_if_cancelled()
                 stage_path = transaction.allocate_stage(output_id, final_path)
-                self._save_staged_document(output_doc, stage_path)
+                self._save_staged_document(output_doc, stage_path, ctx=ctx)
                 self._raise_if_cancelled()
                 candidates[final_path] = stable_file_evidence(stage_path)
             self._raise_if_cancelled()
@@ -1684,9 +1539,111 @@ class Pipeline(PipelineJournalGovernanceMixin):
         if self._is_cancelled():
             raise _PipelineCancellationRequested("Cancelled by user.")
 
-    def _save_staged_document(self, doc: Document, stage_path: Path) -> None:
+    def _save_staged_document(
+        self,
+        doc: Document,
+        stage_path: Path,
+        *,
+        ctx: PipelineContext | None = None,
+    ) -> None:
         doc.save(str(stage_path))
+        changed = self._apply_mathtype_fallback_to_stage(stage_path, ctx=ctx)
+        if changed:
+            self._postprocess_office_formula_stage(stage_path, ctx=ctx)
         self._best_effort_refresh_fields(doc, stage_path)
+
+    def _apply_mathtype_fallback_to_stage(
+        self,
+        stage_path: Path,
+        *,
+        ctx: PipelineContext | None = None,
+    ) -> bool:
+        policy = getattr(self._config, "formula_convert", None)
+        if not bool(getattr(policy, "office_fallback_enabled", False)):
+            return False
+        if not self._config.is_module_enabled("formula_convert"):
+            return False
+        scope_mode = str(
+            getattr(getattr(ctx, "document_scope", None), "mode", "all") or "all"
+        ).strip().lower()
+        if scope_mode != "all":
+            receipt = {
+                "path": str(stage_path),
+                "changed": False,
+                "detail": "skipped_non_global_document_scope",
+                "stats": {},
+            }
+            self._mathtype_fallback_receipts.append(receipt)
+            if ctx is not None:
+                ctx.mathtype_office_fallback = list(self._mathtype_fallback_receipts)
+            return False
+
+        from src.shared.io.mathtype_office_fallback import (
+            apply_mathtype_office_fallback,
+        )
+
+        timeout_sec = max(
+            10,
+            int(getattr(policy, "office_fallback_timeout_sec", 30) or 30),
+        )
+        try:
+            changed, detail, stats = apply_mathtype_office_fallback(
+                str(stage_path),
+                timeout_sec=timeout_sec,
+            )
+        except Exception as exc:
+            changed = False
+            detail = f"office_fallback_error:{exc}"
+            stats = {}
+
+        found = int(dict(stats or {}).get("found", 0) or 0)
+        if not found and detail == "no_mathtype_ole_found":
+            return False
+        receipt = {
+            "path": str(stage_path),
+            "changed": bool(changed),
+            "detail": str(detail or ""),
+            "stats": dict(stats or {}),
+        }
+        self._mathtype_fallback_receipts.append(receipt)
+        if ctx is not None:
+            ctx.mathtype_office_fallback = list(self._mathtype_fallback_receipts)
+        self._tracker.record(
+            rule_name="formula_convert",
+            target="MathType Office 回退",
+            section="formula",
+            change_type="convert" if changed else "skip",
+            before=f"{found} 个 MathType/OLE 对象",
+            after=str(detail or "未转换"),
+            success=True,
+        )
+        return bool(changed)
+
+    def _postprocess_office_formula_stage(
+        self,
+        stage_path: Path,
+        *,
+        ctx: PipelineContext | None,
+    ) -> None:
+        """Reapply structural/style rules to equations created by Office.
+
+        The Office broker runs after the first python-docx save, so its new
+        OMML did not exist during the normal formula-table and typography pass.
+        This deliberately does not invoke formula conversion again.
+        """
+        if not self._config.is_module_enabled("equation_table_format"):
+            return
+        from src.modules.special.equation_table_format import EquationTableFormatModule
+
+        post_document = Document(str(stage_path))
+        post_context = ctx if ctx is not None else PipelineContext()
+        EquationTableFormatModule().apply(
+            post_document,
+            self._config,
+            self._tracker,
+            post_context,
+        )
+        post_document.save(str(stage_path))
 
     def _record_content_visibility_summary(self, preset, receipt: dict[str, object]) -> None:
         removed_count = int(receipt.get("removed_paragraph_count") or 0)
@@ -2261,6 +2218,29 @@ def _official_document_assembly_profile_id(
             f"official_document_type_unknown:{profile_id}"
         )
     return profile_id
+
+
+def _official_delivery_versions(config) -> tuple[str, ...]:
+    """Project the selected delivery preset onto actual official artifacts."""
+
+    preset_id = str(
+        getattr(config, "default_delivery_preset_id", "") or ""
+    ).strip()
+    if preset_id == "internal_review":
+        return ("internal_review_docx",)
+    if preset_id in {
+        "formal_minutes",
+        "policy_collection",
+        "archive_manifest",
+    }:
+        return (
+            "official_docx",
+            "internal_review_docx",
+            "archive_manifest",
+        )
+    return ("official_docx",)
+
+
 def _official_document_assembly_output_paths(ctx: PipelineContext | None) -> dict[str, str]:
     if ctx is None:
         return {}

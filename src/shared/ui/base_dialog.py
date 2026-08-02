@@ -141,21 +141,35 @@ class BaseDialog(QDialog):
     def mouseReleaseEvent(self, event: QMouseEvent):
         self._drag_pos = None
 
-    def add_primary_button(self, text: str, *, destructive: bool = False) -> QPushButton:
+    @staticmethod
+    def _configure_default_button(button: QPushButton, *, default: bool) -> None:
+        """Make dialog default-key behaviour explicit instead of platform-driven."""
+
+        button.setAutoDefault(bool(default))
+        button.setDefault(bool(default))
+
+    def add_primary_button(
+        self,
+        text: str,
+        *,
+        destructive: bool = False,
+        default: bool = True,
+    ) -> QPushButton:
         btn = QPushButton(text)
         btn.setMinimumWidth(104)
         apply_size_class(btn, "md")
         btn.setCursor(Qt.PointingHandCursor)
-        btn.setDefault(True)
+        self._configure_default_button(btn, default=default)
         apply_button_variant(btn, "danger" if destructive else "primary")
         self._btn_layout.addWidget(btn)
         return btn
 
-    def add_secondary_button(self, text: str) -> QPushButton:
+    def add_secondary_button(self, text: str, *, default: bool = False) -> QPushButton:
         btn = QPushButton(text)
         btn.setMinimumWidth(104)
         apply_size_class(btn, "md")
         btn.setCursor(Qt.PointingHandCursor)
+        self._configure_default_button(btn, default=default)
         apply_button_variant(btn, "secondary")
         self._btn_layout.addWidget(btn)
         return btn

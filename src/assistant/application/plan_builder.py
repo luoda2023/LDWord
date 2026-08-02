@@ -11,8 +11,11 @@ from src.assistant.application.capability_registry import (
     classify_task_operation,
     resolve_assistant_capability,
 )
-from src.assistant.domain.exam_authoring_contract import (
-    exam_delivery_contract_for_intent,
+from src.assistant.application.output_location import default_assistant_output_root
+from src.assistant.application.official_plan_binding import bind_official_plan
+from src.assistant.application.request_semantics import (
+    is_format_mutation_request,
+    is_semantic_revision_request,
 )
 from src.assistant.contracts.document_plan import (
     DocumentPlan,
@@ -20,21 +23,29 @@ from src.assistant.contracts.document_plan import (
     PlanBlockingIssue,
 )
 from src.assistant.contracts.task_plan import (
-    CAPABILITY_PLANNED,
     CAPABILITY_GATED,
+    CAPABILITY_PLANNED,
     SOURCE_ROLE_REFERENCE_MATERIAL,
     SOURCE_ROLE_STANDARD_FORMAT_REFERENCE,
+    TASK_OPERATION_AUTHOR,
     SourceArtifactRef,
 )
 from src.assistant.domain.docx_format_evidence import (
     is_format_requirements_request,
+    is_template_authoring_request,
+)
+from src.assistant.domain.exam_authoring_contract import (
+    exam_delivery_contract_for_intent,
+    resolve_exam_blueprint,
 )
 from src.config.scene_natural_request_router import (
     get_natural_request_route,
     route_natural_scene_request,
 )
 from src.config.work_mode import get_work_mode
-
+from src.services.official_draft_source import (
+    infer_official_document_type_id,
+)
 
 _DOCUMENT_OBJECT_HINTS = (
     "文档",
@@ -48,30 +59,86 @@ _DOCUMENT_OBJECT_HINTS = (
     "标书",
     "申请书",
     "初稿",
+    "总结",
+    "周报",
+    "月报",
+    "季报",
+    "汇报材料",
+    "教案",
+    "练习册",
+    "作业",
+    "综述",
     "word",
     "docx",
     "排版",
     "格式",
     "模板",
     "试卷",
+    "卷子",
+    "考卷",
+    "试题",
     "题稿",
     "卷面",
+    "出题",
+    "页边距",
+    "字体",
+    "字号",
+    "行距",
+    "段距",
+    "目录",
 )
-_DOCUMENT_ACTION_HINTS = (
-    "生成",
-    "撰写",
-    "起草",
-    "写一份",
-    "帮我写",
-    "做一份",
-    "新建",
-    "创建",
-    "创作",
+_DOCUMENT_MUTATION_HINTS = (
     "排版",
     "格式化",
     "统一",
     "套用",
     "整理",
+    "修改",
+    "改一下",
+    "改改",
+    "改成",
+    "调整",
+    "润色",
+    "完善",
+    "优化",
+    "改写",
+    "修订",
+    "套模板",
+    "套一下",
+    "替换模板",
+    "应用模板",
+    "页边距",
+    "字体",
+    "字号",
+    "行距",
+    "段距",
+    "排一下版",
+    "美化",
+)
+_DOCUMENT_ADVISORY_HINTS = (
+    "只说明",
+    "只解释",
+    "告诉我",
+    "介绍一下",
+    "有什么要求",
+    "有哪些要求",
+    "注意事项",
+    "写作建议",
+    "修改建议",
+    "如何写",
+    "怎么写",
+    "怎样写",
+    "如何修改",
+    "怎么修改",
+    "怎样修改",
+    "有没有必要",
+    "是否需要",
+    "需不需要",
+    "要不要",
+    "假设",
+    "如果只是",
+    "想了解",
+    "需要准备什么",
 )
 
 
@@ -79,9 +146,15 @@ def requests_form_document_action(query: str) -> bool:
     """Whether a turn explicitly asks Form to create or transform a document."""
 
     normalized = " ".join(str(query or "").casefold().split())
+    if is_template_authoring_request(normalized):
+        # A request to create a reusable template owns a dedicated JSON
+        # authoring/import chain and must never materialize a document plan.
+        return False
     if is_format_requirements_request(normalized):
         # Format-reference inspection is read-only analysis.  It must not
         # create a production plan that would format the reference itself.
+        return False
+    if any(token in normalized for token in _DOCUMENT_ADVISORY_HINTS):
         return False
     operation = classify_task_operation(normalized)
     routed = route_natural_scene_request(query)
@@ -89,8 +162,17 @@ def requests_form_document_action(query: str) -> bool:
     return bool(
         normalized
         and (
+            is_format_mutation_request(normalized)
+            or
             (
-                any(token in normalized for token in _DOCUMENT_ACTION_HINTS)
+                (
+                    operation == TASK_OPERATION_AUTHOR
+                    or is_semantic_revision_request(normalized)
+                    or any(
+                        token in normalized
+                        for token in _DOCUMENT_MUTATION_HINTS
+                    )
+                )
                 and (
                     any(token in normalized for token in _DOCUMENT_OBJECT_HINTS)
                     or has_routed_object
@@ -111,6 +193,10 @@ class FormDocumentPlanBuilder:
         previous_plan: DocumentPlan | None = None,
         route_id_override: str = "",
     ) -> DocumentPlan:
+        if is_template_authoring_request(query):
+            raise ValueError(
+                "template_authoring_request_cannot_build_document_plan"
+            )
         route = route_natural_scene_request(query)
         override = str(route_id_override or "").strip()
         selected_route = (
@@ -127,28 +213,48 @@ class FormDocumentPlanBuilder:
             route=selected_route,
             workspace_mode_id=workspace.mode_id,
             operation=operation,
+            query=query,
         )
         mode_id = capability.mode_id
         mode = get_work_mode(mode_id) or get_work_mode("custom")
         if mode is None:  # pragma: no cover - guarded by Form registry tests.
             raise RuntimeError("Form default work mode is unavailable")
         keep_current = workspace.mode_id == mode.mode_id
+        preserve_user_scene = bool(
+            keep_current
+            and workspace.scene_id
+            and str(workspace.scene_source_type or "").strip()
+            not in {"", "builtin"}
+        )
         scene_id = (
             workspace.scene_id
-            if keep_current and workspace.scene_id and selected_route is None
+            if keep_current
+            and workspace.scene_id
+            and (selected_route is None or preserve_user_scene)
             else capability.scene_id
         )
+        exam_blueprint = None
+        if mode.mode_id == "exam":
+            scene_hint = (
+                workspace.scene_id
+                if keep_current and workspace.scene_id
+                else scene_id
+            )
+            exam_blueprint = resolve_exam_blueprint(
+                query,
+                scene_id=scene_hint,
+            )
+            if not preserve_user_scene:
+                scene_id = exam_blueprint.scene_id
         template_id = (
             workspace.template_id
-            if keep_current and workspace.template_id and selected_route is None
+            if keep_current
+            and workspace.template_id
+            and (selected_route is None or preserve_user_scene)
             else capability.template_id
         )
         input_path = Path(workspace.input_path) if workspace.input_path else None
-        output_root = (
-            input_path.parent / "Alavette-Form-Outputs"
-            if input_path is not None
-            else Path.home() / "Documents" / "Alavette-Form-Outputs"
-        )
+        output_root = default_assistant_output_root(input_path)
         warnings: list[str] = []
         questions: list[str] = []
         blockers: list[PlanBlockingIssue] = []
@@ -223,27 +329,38 @@ class FormDocumentPlanBuilder:
                     if str(value or "").strip()
                 }
                 if "bid_materials_v1" not in schema_ids:
-                    missing_material_parts.append("与标书正文匹配的资料包")
+                    message = (
+                        "当前资料包不是标书资料包，不能作为标书事实来源。"
+                    )
+                    questions.append(message)
+                    blockers.append(
+                        PlanBlockingIssue(
+                            code="bidding_material_package_incompatible",
+                            message=message,
+                        )
+                    )
             if _summary_count(material_summary, "field_count") < 3:
                 missing_material_parts.append("公司名称、项目名称、法定代表人")
             if _summary_count(material_summary, "asset_count") < 2:
                 missing_material_parts.append("Logo、公章")
             if missing_material_parts:
                 message = (
-                    "生成最终标书前请补充："
+                    "可先起草正文；生成最终标书前还需补充："
                     + "；".join(missing_material_parts)
                     + "。"
                 )
                 questions.append(message)
-                blockers.append(
-                    PlanBlockingIssue(
-                        code="bidding_materials_incomplete",
-                        message=message,
-                    )
-                )
+                warnings.append(message)
         production_contract = capability.production
         if mode.mode_id == "official":
-            document_type_id = str(workspace.document_type_id or "").strip()
+            document_type_id = (
+                (
+                    str(workspace.document_type_id or "").strip()
+                    if workspace.mode_id == "official"
+                    else ""
+                )
+                or infer_official_document_type_id(query)
+            )
             if document_type_id:
                 production_contract = replace(
                     production_contract,
@@ -304,7 +421,7 @@ class FormDocumentPlanBuilder:
                 query,
                 delivery_contract,
             )
-        return DocumentPlan(
+        plan = DocumentPlan(
             plan_id=plan_id,
             revision=revision,
             intent=str(query).strip(),
@@ -322,6 +439,19 @@ class FormDocumentPlanBuilder:
                 "profile_id": capability.ref.profile_id,
                 "route_type": capability.ref.route_type,
                 "generation_mode": generation_mode,
+                **(
+                    {
+                        "scale_profile_id": exam_blueprint.profile.profile_id,
+                        "scale_label": exam_blueprint.profile.label,
+                        "target_question_count": exam_blueprint.question_count,
+                        "target_student_page_range": [
+                            exam_blueprint.profile.min_student_pages,
+                            exam_blueprint.profile.max_student_pages,
+                        ],
+                    }
+                    if exam_blueprint is not None
+                    else {}
+                ),
             },
             template_ref={"id": template_id},
             material_refs=(
@@ -349,6 +479,7 @@ class FormDocumentPlanBuilder:
                 }.values()
             ),
         )
+        return bind_official_plan(plan)
 
 
 def _source_media_type(path: Path) -> str:

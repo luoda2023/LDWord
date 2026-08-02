@@ -6,6 +6,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Iterable
 
 from src.config.feature_configs import default_continuous_page_number_phases
+from src.config.special_title_rules import (
+    parse_special_title_selector,
+    special_title_selector_label,
+)
 from src.shared.engine.section_semantics import canonicalize_section_type
 
 if TYPE_CHECKING:
@@ -14,7 +18,7 @@ if TYPE_CHECKING:
 
 
 COVER_SECTION_TYPES = frozenset({"cover"})
-PRE_NUMBERING_SECTION_TYPES = frozenset({"cover", "statement", "authorization", "front_note"})
+PRE_NUMBERING_SECTION_TYPES = COVER_SECTION_TYPES
 FRONT_MATTER_SECTION_TYPES = frozenset({"abstract_cn", "abstract_en", "toc"})
 BACK_MATTER_SECTION_TYPES = frozenset(
     {"references", "errata", "appendix", "acknowledgment", "resume"}
@@ -26,9 +30,6 @@ BOUNDARY_SECTION_TYPES = PRE_NUMBERING_SECTION_TYPES | FRONT_MATTER_SECTION_TYPE
 _SELECTOR_SECTION_TYPES: dict[str, frozenset[str]] = {
     "cover": COVER_SECTION_TYPES,
     "pre_numbering": PRE_NUMBERING_SECTION_TYPES,
-    "statement": frozenset({"statement"}),
-    "authorization": frozenset({"authorization"}),
-    "front_note": frozenset({"front_note"}),
     "front_matter": FRONT_MATTER_SECTION_TYPES,
     "abstracts": frozenset({"abstract_cn", "abstract_en"}),
     "toc": frozenset({"toc"}),
@@ -75,7 +76,15 @@ class PageNumberSectionPlan:
     page_number_visible: bool
     number_format: str
     start_value: int | None
-    hide_header_footer: bool
+    header_visible: bool
+    footer_text_visible: bool
+    special_title_selector: str | None = None
+
+    @property
+    def hide_header_footer(self) -> bool:
+        """Compatibility projection for callers not yet migrated."""
+
+        return not self.header_visible and not self.footer_text_visible
 
 
 @dataclass(slots=True)
@@ -99,10 +108,7 @@ _SECTION_TYPE_LABELS: dict[str, str] = {
     "body": "正文部分",
     "back_matter": "后置部分",
     "cover": "封面",
-    "pre_numbering": "页码前排除分区",
-    "statement": "声明页",
-    "authorization": "授权书",
-    "front_note": "说明页",
+    "pre_numbering": "封面",
     "toc": "目录",
     "references": "参考文献",
     "appendix": "附录",
@@ -120,7 +126,8 @@ def build_page_number_execution_plan(
     header_footer,
 ) -> PageNumberExecutionPlan:
     rules, diagnostics = _resolve_phase_rules(header_footer)
-    suppressed_section_types = resolve_suppressed_header_footer_section_types(header_footer)
+    hidden_header_types = resolve_hidden_header_section_types(header_footer)
+    hidden_footer_types = resolve_hidden_footer_section_types(header_footer)
     missing_doc_tree = getattr(context, "doc_tree", None) is None
     boundaries = _collect_logical_boundaries(doc, context, rules)
     section_starts = _section_start_indices(doc)
@@ -129,20 +136,34 @@ def build_page_number_execution_plan(
     previous_phase_id: str | None = None
     for section_index, start_index in enumerate(section_starts):
         section_type = _resolve_section_type(context, start_index)
-        phase = _match_phase_rule(rules, section_type)
-        hide_header_footer = section_type in suppressed_section_types
+        scope_keys = _resolve_scope_keys(context, start_index)
+        phase = _match_phase_rule(rules, scope_keys)
         phase_id = phase.phase_id if phase is not None else None
-        page_number_visible = bool(header_footer.page_number_enabled) and not hide_header_footer
+        header_visible = bool(getattr(header_footer, "header_enabled", True)) and (
+            not _scope_is_hidden(scope_keys, hidden_header_types)
+        )
+        footer_text_visible = bool(getattr(header_footer, "footer_enabled", True)) and (
+            not _scope_is_hidden(scope_keys, hidden_footer_types)
+        )
+        special_title_selector = next(
+            (
+                key
+                for key in scope_keys
+                if parse_special_title_selector(key) is not None
+            ),
+            None,
+        )
+        page_number_visible = bool(header_footer.page_number_enabled)
         number_format = "decimal"
         start_value: int | None = None
 
-        if page_number_visible and phase is not None:
-            page_number_visible = bool(phase.visible)
+        if phase is not None:
+            page_number_visible = page_number_visible and bool(phase.visible)
             number_format = phase.number_format
             if phase.phase_id != previous_phase_id and phase.start_mode == "restart":
                 start_value = phase.start_value
-        elif page_number_visible and phase is None:
-            number_format = "decimal"
+        else:
+            page_number_visible = False
 
         sections.append(
             PageNumberSectionPlan(
@@ -153,7 +174,9 @@ def build_page_number_execution_plan(
                 page_number_visible=page_number_visible,
                 number_format=number_format,
                 start_value=start_value,
-                hide_header_footer=hide_header_footer,
+                header_visible=header_visible,
+                footer_text_visible=footer_text_visible,
+                special_title_selector=special_title_selector,
             )
         )
         previous_phase_id = phase_id
@@ -239,18 +262,37 @@ def expand_page_number_selectors(selectors: Iterable[str]) -> frozenset[str]:
     return frozenset(matched)
 
 
-def resolve_suppressed_header_footer_section_types(header_footer) -> frozenset[str]:
-    selectors_raw = getattr(header_footer, "suppress_header_footer_selectors", None)
-    if selectors_raw is None:
-        legacy_hide = bool(getattr(header_footer, "hide_cover_header_footer", True))
-        selectors = ("cover",) if legacy_hide else ()
-    else:
-        selectors = tuple(
-            str(selector or "").strip()
-            for selector in selectors_raw
-            if str(selector or "").strip()
-        )
+def _resolve_hidden_channel_section_types(
+    channel_config,
+) -> frozenset[str]:
+    selectors_raw = getattr(channel_config, "hidden_selectors", None)
+    selectors = tuple(
+        str(selector or "").strip()
+        for selector in (selectors_raw or ())
+        if str(selector or "").strip()
+    )
     return expand_page_number_selectors(selectors)
+
+
+def resolve_hidden_header_section_types(header_footer) -> frozenset[str]:
+    return _resolve_hidden_channel_section_types(
+        getattr(header_footer, "header", None),
+    )
+
+
+def resolve_hidden_footer_section_types(header_footer) -> frozenset[str]:
+    return _resolve_hidden_channel_section_types(
+        getattr(header_footer, "footer", None),
+    )
+
+
+def resolve_suppressed_header_footer_section_types(header_footer) -> frozenset[str]:
+    """Legacy common-scope projection; new code should use channel resolvers."""
+
+    return (
+        resolve_hidden_header_section_types(header_footer)
+        & resolve_hidden_footer_section_types(header_footer)
+    )
 
 
 def collect_page_number_diagnostics(
@@ -259,8 +301,11 @@ def collect_page_number_diagnostics(
     header_footer,
 ) -> list[PageNumberDiagnostic]:
     page_number_enabled = bool(getattr(header_footer, "page_number_enabled", True))
-    suppress_header_footer = bool(resolve_suppressed_header_footer_section_types(header_footer))
-    if not page_number_enabled and not suppress_header_footer:
+    has_scoped_output = bool(
+        resolve_hidden_header_section_types(header_footer)
+        or resolve_hidden_footer_section_types(header_footer)
+    )
+    if not page_number_enabled and not has_scoped_output:
         return []
 
     plan = build_page_number_execution_plan(doc, context, header_footer)
@@ -272,11 +317,11 @@ def collect_page_number_diagnostics(
 
     diagnostics: list[PageNumberDiagnostic] = []
     if plan.missing_doc_tree and on_missing_doc_tree == "warn_and_fallback":
-        message = "未识别到文档结构，页码编号和分区排除将按默认结构处理。"
+        message = "未识别到文档结构，页眉、页脚与页码范围将按默认正文结构处理。"
         suggestion = "先运行标题/结构识别，可获得更准确的页码范围。"
-        if not page_number_enabled and suppress_header_footer:
-            message = "未识别到文档结构，分区排除将按默认结构处理。"
-            suggestion = "先运行标题/结构识别，或关闭分区排除。"
+        if not page_number_enabled and has_scoped_output:
+            message = "未识别到文档结构，页眉和页脚文字范围将按默认正文结构处理。"
+            suggestion = "先运行标题/结构识别，或清空对应通道的隐藏范围。"
         diagnostics.append(
             PageNumberDiagnostic(
                 level="warning",
@@ -344,7 +389,7 @@ def collect_static_page_number_diagnostics(header_footer) -> list[PageNumberDiag
                 )
             )
 
-    rules, overlap_messages = _resolve_phase_rules(header_footer)
+    _rules, overlap_messages = _resolve_phase_rules(header_footer)
     diagnostics.extend(
         PageNumberDiagnostic(
             level="error" if item.level == "error" else level,
@@ -354,20 +399,6 @@ def collect_static_page_number_diagnostics(header_footer) -> list[PageNumberDiag
         )
         for item in overlap_messages
     )
-    suppressed = resolve_suppressed_header_footer_section_types(header_footer)
-    for rule in rules:
-        hidden_matches = sorted(rule.matched_section_types & suppressed)
-        if not hidden_matches:
-            continue
-        hidden_text = "、".join(_section_type_label(section_type) for section_type in hidden_matches)
-        diagnostics.append(
-            PageNumberDiagnostic(
-                level="warning",
-                message=f"编号分组“{rule.phase_id}”包含已排除部分：{hidden_text}。",
-                suggestion="这些部分不会显示页码；如需显示，请从分区排除中移除。",
-                location=location,
-            )
-        )
     return diagnostics
 
 
@@ -381,33 +412,45 @@ def _collect_logical_boundaries(
         return []
 
     section_boundary_starts: set[int] = set()
-    body_heading_starts: set[int] = set()
-
     for section in getattr(doc_tree, "sections", []) or []:
         section_type = canonicalize_section_type(getattr(section, "section_type", ""))
         start_index = int(getattr(section, "start_index", -1))
         if section_type in BOUNDARY_SECTION_TYPES and start_index > 0:
             section_boundary_starts.add(start_index)
 
-    body_section = getattr(doc_tree, "get_section", lambda *_: None)("body")
-    body_start = int(getattr(body_section, "start_index", -1)) if body_section is not None else -1
-    body_end = int(getattr(body_section, "end_index", len(doc.paragraphs))) if body_section is not None else len(doc.paragraphs)
-    for para_index, level in (getattr(context, "heading_map", None) or {}).items():
-        if level == 1 and body_start >= 0 and body_start < para_index < body_end:
-            body_heading_starts.add(int(para_index))
+    special_range_starts: set[int] = set()
+    special_range_ends: set[int] = set()
+    total = len(doc.paragraphs)
+    for section in getattr(doc_tree, "special_title_ranges", []) or []:
+        start_index = int(getattr(section, "start_index", -1))
+        end_index = int(getattr(section, "end_index", -1))
+        if 0 < start_index < total:
+            special_range_starts.add(start_index)
+        if 0 < end_index < total:
+            special_range_ends.add(end_index)
 
-    start_points = sorted(section_boundary_starts | body_heading_starts)
+    start_points = sorted(
+        section_boundary_starts | special_range_starts | special_range_ends
+    )
     boundaries: list[LogicalSectionBoundary] = []
-    previous_phase_id: str | None = _match_phase_id(rules, _resolve_section_type(context, 0))
+    previous_phase_id: str | None = _match_phase_id(
+        rules,
+        _resolve_scope_keys(context, 0),
+    )
 
     for start_index in start_points:
         section_type = _resolve_section_type(context, start_index)
-        phase_id = _match_phase_id(rules, section_type)
+        phase_id = _match_phase_id(
+            rules,
+            _resolve_scope_keys(context, start_index),
+        )
         reasons: list[str] = []
         if start_index in section_boundary_starts:
             reasons.append("section_start")
-        if start_index in body_heading_starts:
-            reasons.append("body_heading")
+        if start_index in special_range_starts:
+            reasons.append("special_title_start")
+        if start_index in special_range_ends:
+            reasons.append("special_title_end")
         if phase_id != previous_phase_id:
             reasons.append("phase_change")
         boundaries.append(
@@ -435,7 +478,7 @@ def _collect_missing_phase_diagnostics(
     seen_section_types: set[str] = set()
     for section in getattr(doc_tree, "sections", []) or []:
         section_type = canonicalize_section_type(getattr(section, "section_type", ""))
-        if section_type in seen_section_types or section_type not in ALL_NUMBERED_SECTION_TYPES:
+        if section_type in seen_section_types or section_type not in BOUNDARY_SECTION_TYPES:
             continue
         seen_section_types.add(section_type)
         if _match_phase_rule(rules, section_type) is None:
@@ -459,7 +502,10 @@ def format_page_number_diagnostic_text(diagnostic: PageNumberDiagnostic) -> str:
 
 
 def _section_type_label(section_type: str) -> str:
-    return _SECTION_TYPE_LABELS.get(section_type, section_type or "未知分区")
+    return _SECTION_TYPE_LABELS.get(
+        section_type,
+        special_title_selector_label(section_type) or "未知分区",
+    )
 
 
 def _build_phase_overlap_diagnostic(
@@ -507,6 +553,29 @@ def _resolve_section_type(context: PipelineContext, para_index: int) -> str:
     return canonicalize_section_type(section_type)
 
 
+def _resolve_scope_keys(
+    context: PipelineContext,
+    para_index: int,
+) -> frozenset[str]:
+    keys = {_resolve_section_type(context, para_index)}
+    doc_tree = getattr(context, "doc_tree", None)
+    getter = getattr(
+        doc_tree,
+        "get_special_title_selectors_for_paragraph",
+        None,
+    )
+    if callable(getter):
+        try:
+            keys.update(
+                str(selector or "").strip()
+                for selector in getter(para_index)
+                if str(selector or "").strip()
+            )
+        except Exception:
+            pass
+    return frozenset(keys)
+
+
 def _section_start_indices(doc: Document) -> list[int]:
     from src.shared.engine.ooxml_ops import qn
 
@@ -529,16 +598,63 @@ def _section_start_indices(doc: Document) -> list[int]:
 
 def _match_phase_rule(
     rules: list[PageNumberPhaseRule],
-    section_type: str,
+    scope_keys: str | Iterable[str],
 ) -> PageNumberPhaseRule | None:
+    keys = (
+        {scope_keys}
+        if isinstance(scope_keys, str)
+        else {
+            str(scope_key or "").strip()
+            for scope_key in scope_keys
+            if str(scope_key or "").strip()
+        }
+    )
+    dynamic_keys = {
+        key
+        for key in keys
+        if parse_special_title_selector(key) is not None
+    }
+    if dynamic_keys:
+        for rule in rules:
+            if dynamic_keys.intersection(rule.matched_section_types):
+                return rule
     for rule in rules:
-        if section_type in rule.matched_section_types:
+        if keys.intersection(rule.matched_section_types):
             return rule
     return None
 
 
-def _match_phase_id(rules: list[PageNumberPhaseRule], section_type: str) -> str | None:
-    rule = _match_phase_rule(rules, section_type)
+def _scope_is_hidden(
+    scope_keys: Iterable[str],
+    hidden_scope_keys: Iterable[str],
+) -> bool:
+    """Give a matched user rule precedence over its underlying base range."""
+
+    keys = {
+        str(scope_key or "").strip()
+        for scope_key in scope_keys
+        if str(scope_key or "").strip()
+    }
+    hidden = {
+        str(scope_key or "").strip()
+        for scope_key in hidden_scope_keys
+        if str(scope_key or "").strip()
+    }
+    dynamic_keys = {
+        key
+        for key in keys
+        if parse_special_title_selector(key) is not None
+    }
+    if dynamic_keys:
+        return bool(dynamic_keys.intersection(hidden))
+    return bool(keys.intersection(hidden))
+
+
+def _match_phase_id(
+    rules: list[PageNumberPhaseRule],
+    scope_keys: str | Iterable[str],
+) -> str | None:
+    rule = _match_phase_rule(rules, scope_keys)
     return rule.phase_id if rule is not None else None
 
 

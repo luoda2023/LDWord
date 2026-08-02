@@ -3,18 +3,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-
-from scripts.verify_scene_matrix_release_gate import (  # noqa: E402
+from scripts.verify_scene_matrix_release_gate import (
     build_scene_matrix_release_gate_payload,
 )
-from src.config.scene_delivery_preset_execution_audit import (  # noqa: E402
+from src.config.scene_delivery_preset_execution_audit import (
     N2_176_DELIVERY_PRESET_EXECUTION_SPECS,
     audit_scene_delivery_preset_execution_report,
     build_scene_delivery_preset_execution_audit_report,
 )
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_scene_delivery_preset_execution_audit_locks_n2_176_channels():
@@ -78,22 +76,22 @@ def test_scene_delivery_preset_execution_audit_locks_n2_176_channels():
     assert "failed_run_material_package" in failed_package.required_output_signal_ids
     assert "failed_count" in failed_package.payload_keys
     assert (
-        "test_workbench_runner_writes_material_package_for_failed_delivery_run"
+        "test_failed_run_still_publishes_reports_and_material_package"
         in failed_package.test_ids
     )
 
     batch = rows["batch_failure_isolation_artifacts"]
     assert batch.pack_ids == ("batch_forms",)
     assert batch.family_ids == ("hr_batch_documents", "form_batch_documents")
-    assert "batch_failure_isolation" in batch.required_output_signal_ids
-    assert "batch_issue_items" in batch.payload_keys
+    assert "batch_atomic_set" in batch.required_output_signal_ids
+    assert "rolled_back_paths" in batch.payload_keys
     batch_evidence = next(
         item
         for item in report.source_evidence
         if item.evidence_id == "runtime.batch_isolation"
     )
     assert batch_evidence.source_path == (
-        "src/services/production_runtime/batch_reporting.py"
+        "src/document_batch/recipe.py"
     )
 
     ui_surface = rows["artifact_surface_state_and_logs"]

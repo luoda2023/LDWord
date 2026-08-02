@@ -1,11 +1,14 @@
 """Centralized application naming metadata."""
 
 APP_DISPLAY_NAME = "Alavette Form"
-APP_DISPLAY_NAME_FULL = "Alavette Form V1.0"
-APP_VERSION = "V1.0"
+APP_SEMVER = "1.0.0"
+APP_RELEASE_LINE = "V" + ".".join(APP_SEMVER.split(".")[:2])
+APP_VERSION = f"V{APP_SEMVER}"
+APP_FILE_VERSION = (*tuple(int(part) for part in APP_SEMVER.split(".")), 0)
+APP_DISPLAY_NAME_FULL = f"{APP_DISPLAY_NAME} {APP_VERSION}"
 
 APP_CLI_NAME = "alavette-form"
-APP_PACKAGE_NAME = "Alavette-Form_V1.0"
+APP_PACKAGE_NAME = "Alavette-Form"
 
 APP_LOG_FILE = "alavette_form.log"
 APP_TEMP_DIR_NAME = "alavette_form_refresh"

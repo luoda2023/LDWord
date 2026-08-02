@@ -12,6 +12,7 @@ from src.services.execution_result_contract import (
     normalize_dict_payload,
     normalize_execution_result,
 )
+from src.services.execution_run_log import append_execution_run
 from src.services.execution_session_result import (
     attach_cleanup_issues,
     attach_execution_session,
@@ -47,6 +48,9 @@ class ExecutionWorker(QObject):
     def cleanup_execution_resources(self) -> list[str]:
         """Release a frozen session even when this worker never gets to run."""
 
+        runner_cleanup = getattr(self._runner, "cleanup_execution_resources", None)
+        if callable(runner_cleanup):
+            return list(runner_cleanup() or [])
         snapshot = getattr(self._runner, "execution_session_snapshot", None)
         if not isinstance(snapshot, ExecutionSessionSnapshot):
             return []
@@ -94,6 +98,7 @@ class ExecutionWorker(QObject):
             status = self._result_status(result)
             payload = self._normalize_result(result, status)
             _cleanup_session_resources(payload, worker=self)
+            _record_execution_run(payload)
             status = str(payload["status"])
             if status == "cancelled":
                 self.execution_cancelled.emit(payload)
@@ -109,6 +114,7 @@ class ExecutionWorker(QObject):
             if isinstance(snapshot, ExecutionSessionSnapshot):
                 attach_execution_session(payload, snapshot=snapshot)
             _cleanup_session_resources(payload, worker=self)
+            _record_execution_run(payload)
             self.execution_failed.emit(payload)
         finally:
             self._cancel_requested = False
@@ -128,3 +134,11 @@ def _cleanup_session_resources(
     if not issues:
         return
     attach_cleanup_issues(payload, issues, snapshot=snapshot)
+
+
+def _record_execution_run(payload: dict[str, object]) -> None:
+    try:
+        append_execution_run(payload)
+    except (OSError, TypeError, ValueError):
+        # Logging is diagnostic-only and must not change the terminal result.
+        return

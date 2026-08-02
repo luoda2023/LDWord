@@ -22,14 +22,14 @@ def test_registry_completeness():
     """注册表包含 22 个模块且名称唯一"""
     from src.modules.registry import ALL_MODULES, create_all_modules, list_module_names
 
-    assert len(ALL_MODULES) == 22, f"期望 22 个模块, 实际 {len(ALL_MODULES)}"
+    assert len(ALL_MODULES) == 23, f"期望 23 个模块, 实际 {len(ALL_MODULES)}"
 
     modules = create_all_modules()
-    assert len(modules) == 22
+    assert len(modules) == 23
 
     names = list_module_names()
-    assert len(names) == 22
-    assert len(set(names)) == 22, f"名称不唯一: {names}"
+    assert len(names) == 23
+    assert len(set(names)) == 23, f"名称不唯一: {names}"
 
     # 检查分类覆盖
     categories = set(m.meta.category for m in modules)

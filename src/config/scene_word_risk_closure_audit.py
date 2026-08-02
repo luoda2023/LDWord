@@ -20,7 +20,6 @@ from src.config.scene_coverage_manifest import (
 from src.config.scene_sample_fixture_registry import list_scene_sample_fixtures
 from src.shared.engine.object_preflight import OBJECT_PREFLIGHT_SCAN_TARGETS
 
-
 N2_157D_WORD_RISK_SURFACE_IDS: tuple[str, ...] = tuple(
     surface.surface_id for surface in list_word_risk_surfaces()
 )
@@ -294,7 +293,7 @@ WORD_RISK_SOURCE_EVIDENCE: dict[str, tuple[WordRiskSourceEvidenceSpec, ...]] = {
         _evidence(
             "drawing_media_rels.tests",
             "test",
-            "tests/test_material_execution_context.py",
+            "tests/test_media_ops.py",
             "paragraph_has_image",
             "image_rules",
         ),

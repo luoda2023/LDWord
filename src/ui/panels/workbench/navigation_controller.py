@@ -5,8 +5,14 @@ from typing import TYPE_CHECKING
 
 from src.shared.ui import NavigationCard
 
+from .release_policy import (
+    MATERIAL_SUITE_DELIVERY_CARD_ID,
+    is_workbench_card_released,
+)
+
 if TYPE_CHECKING:
     from src.shared.ui import DynamicNavigationRail
+
     from .quick_execution_detail import QuickExecutionDetail
     from .state import StrategySummaryState
 
@@ -22,6 +28,7 @@ class WorkbenchNavigationController:
         quick_execution_detail: "QuickExecutionDetail",
         batch_generation_detail: object | None,
         suite_generation_detail: object | None = None,
+        document_execution_detail: object | None = None,
         *,
         card_definitions: dict[str, tuple[str, str]],
         feature_card_order: tuple[str, ...],
@@ -30,6 +37,7 @@ class WorkbenchNavigationController:
         self._quick_execution_detail = quick_execution_detail
         self._batch_generation_detail = batch_generation_detail
         self._suite_generation_detail = suite_generation_detail
+        self._document_execution_detail = document_execution_detail
         self._card_definitions = dict(card_definitions)
         self._feature_card_order = tuple(feature_card_order)
         self.navigation_cards: dict[str, NavigationCard] = {}
@@ -38,12 +46,18 @@ class WorkbenchNavigationController:
 
     def add_fixed_cards(self) -> None:
         self.add_navigation_card("quick_execute")
-        if self._batch_generation_detail is not None:
-            self.add_navigation_card("batch_generate")
-        if self._suite_generation_detail is not None:
-            self.add_navigation_card("material_suite_generate")
+        if (
+            self._suite_generation_detail is not None
+            and is_workbench_card_released(MATERIAL_SUITE_DELIVERY_CARD_ID)
+        ):
+            self.add_navigation_card(MATERIAL_SUITE_DELIVERY_CARD_ID)
+
+    def set_suite_generation_detail(self, detail) -> None:
+        self._suite_generation_detail = detail
 
     def add_navigation_card(self, card_id: str) -> NavigationCard:
+        if not is_workbench_card_released(card_id):
+            raise ValueError(f"Workbench card is not released: {card_id}")
         title, icon_name = self._card_definitions.get(card_id, (card_id, ""))
         card = NavigationCard(card_id, title, icon_name=icon_name, parent=self._nav_rail)
         self.navigation_cards[card_id] = card
@@ -64,6 +78,15 @@ class WorkbenchNavigationController:
         strategy_state: "StrategySummaryState",
         execution_worker,
     ) -> dict[str, str]:
+        if self._document_execution_detail is not None:
+            snapshot = self._document_execution_detail.navigation_snapshot()
+            if execution_worker is not None:
+                snapshot = {
+                    **snapshot,
+                    "badge_text": "执行中",
+                    "badge_variant": "info",
+                }
+            return snapshot
         fallback = self._quick_execution_detail.navigation_snapshot()
         document_label = Path(cached_document_path).name if cached_document_path else "未选择文档"
         strategy_name = strategy_state.name if strategy_state.source_type == "scene" else strategy_state.template_label
@@ -90,19 +113,11 @@ class WorkbenchNavigationController:
             ),
         )
 
-    def refresh_batch_generate_card(self) -> None:
-        if self._batch_generation_detail is None:
-            return
-        self.update_navigation_card(
-            "batch_generate",
-            self._batch_generation_detail.navigation_snapshot(),
-        )
-
     def refresh_suite_generate_card(self) -> None:
         if self._suite_generation_detail is None:
             return
         self.update_navigation_card(
-            "material_suite_generate",
+            MATERIAL_SUITE_DELIVERY_CARD_ID,
             self._suite_generation_detail.navigation_snapshot(),
         )
 
@@ -112,7 +127,6 @@ class WorkbenchNavigationController:
             strategy_state=strategy_state,
             execution_worker=execution_worker,
         )
-        self.refresh_batch_generate_card()
         self.refresh_suite_generate_card()
 
     def sync_dynamic_cards(self) -> None:

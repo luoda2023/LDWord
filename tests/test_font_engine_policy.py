@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -14,7 +14,6 @@ from src.shared.ui.font_engine_policy import (
     configure_windows_font_engine,
     requested_font_engine_from_argv,
 )
-
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -131,9 +130,7 @@ def test_directwrite_removes_freetype_and_nodirectwrite_options():
         platform="win32",
     )
 
-    assert environment[QT_PLATFORM_ENV_VAR] == (
-        "windows:darkmode=2,nocolorfonts"
-    )
+    assert environment[QT_PLATFORM_ENV_VAR] == ("windows:darkmode=2,nocolorfonts")
 
 
 @pytest.mark.parametrize(
@@ -224,17 +221,15 @@ def test_policy_module_has_no_qt_import_and_frozen_build_uses_runtime_hook():
     policy_source = (
         ROOT / "src" / "shared" / "ui" / "font_engine_policy.py"
     ).read_text(encoding="utf-8")
-    package_source = (
-        ROOT / "scripts" / "windows" / "package_release.bat"
-    ).read_text(encoding="utf-8")
+    spec_source = (ROOT / "Alavette-Form_V1.0.spec").read_text(encoding="utf-8")
     hook_source = (
         ROOT / "scripts" / "windows" / "pyinstaller_font_engine_hook.py"
     ).read_text(encoding="utf-8")
 
     assert "import PySide6" not in policy_source
     assert "from PySide6" not in policy_source
-    assert '--runtime-hook "scripts\\windows\\pyinstaller_font_engine_hook.py"' in (
-        package_source
+    assert r"runtime_hooks=['scripts\\windows\\pyinstaller_font_engine_hook.py']" in (
+        spec_source
     )
     assert "configure_application_windows_font_engine(" in hook_source
     assert "requested_font_engine_from_argv(sys.argv[1:])" in hook_source
@@ -259,8 +254,8 @@ def test_importing_startup_policy_through_ui_package_does_not_import_qt():
 
 @pytest.mark.parametrize("script_name", ["start_app.bat", "start_app_debug.bat"])
 def test_windows_launchers_forward_font_engine_override(script_name):
-    launcher_source = (
-        ROOT / "scripts" / "windows" / script_name
-    ).read_text(encoding="utf-8")
+    launcher_source = (ROOT / "scripts" / "windows" / script_name).read_text(
+        encoding="utf-8"
+    )
 
     assert "main.py --gui %*" in launcher_source

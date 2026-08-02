@@ -18,7 +18,6 @@ from src.config.scene_coverage_manifest import (
 )
 from src.config.scene_source_evidence import scan_scene_source_markers
 
-
 SCENE_FIXED_LAYOUT_PROFILE_AUDIT_ID = "scene_fixed_layout_profile_audit"
 
 FIXED_LAYOUT_PROFILE_FAMILY_IDS: tuple[str, ...] = ("form_batch_documents",)
@@ -396,8 +395,8 @@ N2_178_FIXED_LAYOUT_PROFILE_SPECS: tuple[SceneFixedLayoutProfileSpec, ...] = (
         ),
         ("fixed_layout", "row_height"),
         (
-            "test_exam_delivery_runtime_renders_markdown_preview_and_word_versions",
-            "test_pipeline_records_exam_delivery_runtime_and_reports",
+            "test_exam_answer_sheet_delivery_preserves_fixed_layout_evidence",
+            "test_report_writer_emits_exam_delivery_runtime_evidence",
         ),
         (
             _evidence(
@@ -419,11 +418,11 @@ N2_178_FIXED_LAYOUT_PROFILE_SPECS: tuple[SceneFixedLayoutProfileSpec, ...] = (
             ),
             _evidence(
                 "test.exam_answer_sheet_fixed_layout",
-                "tests/test_exam_question_schema_runtime.py",
+                "tests/test_exam_delivery_transaction.py",
                 "test",
                 "row_height_state(sheet_doc.tables[0].rows[1]).height_twips == 440",
-                "versions[\"answer_sheet\"].fixed_layout_kind == \"answer_sheet\"",
-                "fixed_layout=answer_sheet",
+                'answer_sheet.fixed_layout_kind == "answer_sheet"',
+                "answer_sheet.fixed_layout_row_height_twips == 440",
             ),
         ),
     ),
@@ -660,17 +659,17 @@ N2_178_FIXED_LAYOUT_PROFILE_SPECS: tuple[SceneFixedLayoutProfileSpec, ...] = (
     ),
     _spec(
         "fixed_layout_repair_route",
-        "Fixed-layout issues route to the scene/fixed-layout repair surface",
+        "Fixed-layout issues remain on the execution diagnostics surface",
         "fixed_layout_profile",
         ("fixed_row_height", "content_controls", "textbox_shape", "placeholder_residue"),
         ("w:trHeight", "w:sdt", "w:txbxContent"),
         ("repair_route_for_target", "WorkbenchPanel._open_issue_repair_target"),
-        ("ScenePanel fixed-layout profile", "Object preflight details"),
+        ("Workbench execution diagnostics", "Object preflight details"),
         ("repair_route.fixed_layout",),
         ("fixed_layout", "row_height", "content_controls", "textboxes"),
         (
-            "test_scene_repair_routing_registry_covers_n2_131_required_targets",
-            "test_workbench_panel_routes_issue_repair_targets_to_existing_surfaces",
+            "test_scene_repair_routing_registry_covers_fixed_layout_targets",
+            "test_workbench_fixed_layout_repairs_stay_on_execution_surface",
         ),
         (
             _evidence(
@@ -686,25 +685,26 @@ N2_178_FIXED_LAYOUT_PROFILE_SPECS: tuple[SceneFixedLayoutProfileSpec, ...] = (
                 "ui.workbench.fixed_layout_repair_route",
                 "src/ui/adapters/workbench_product_issue_navigation.py",
                 "ui",
-                "SCENE_TARGET_CARD_MAP",
-                '"row_height": "scn_cleanup"',
-                '"content_controls": "scn_cleanup"',
-                '"textboxes": "scn_cleanup"',
+                "EXECUTION_DIAGNOSTIC_TARGET_TYPES",
+                '"row_height"',
+                '"content_controls"',
+                '"textboxes"',
                 "workbench_issue_navigation_for_target",
             ),
             _evidence(
                 "test.fixed_layout_repair_route",
-                "tests/test_scene_repair_routing.py",
+                "tests/test_workbench_issue_navigation.py",
                 "test",
-                "def test_scene_repair_routing_registry_covers_n2_131_required_targets",
+                "def test_scene_repair_routing_registry_covers_fixed_layout_targets",
                 "repair_route_for_target(\"row_height\")",
             ),
             _evidence(
                 "test.workbench_fixed_layout_repair_route",
-                "tests/test_workbench_detail_architecture.py",
+                "tests/test_workbench_issue_navigation.py",
                 "test",
-                "form_batch_documents.table.row_height_pt",
+                "def test_workbench_fixed_layout_repairs_stay_on_execution_surface",
                 "content_controls",
+                "quick_execute",
             ),
         ),
     ),

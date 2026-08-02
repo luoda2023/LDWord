@@ -2,25 +2,29 @@
 
 from __future__ import annotations
 
+import math
+from copy import deepcopy
 from dataclasses import dataclass
 
-from src.config.template import TemplateConfig
+from src.config.template import SectionMarginConfig, TemplateConfig
 from src.qt_api import (
     QButtonGroup,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSize,
-    QVBoxLayout,
-    QWidget,
     QSizePolicy,
     Qt,
+    QVBoxLayout,
+    QWidget,
     Signal,
 )
 from src.shared.ui.button_style import build_button_stylesheet
 from src.shared.ui.card import Card
-from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.inline_alert import InlineAlert
+from src.shared.ui.input_style import build_text_input_stylesheet
+from src.shared.ui.inspector_form import InspectorForm
 from src.shared.ui.navigation_highlight import NavigationHighlighter
 from src.shared.ui.spacing_input import SpacingInput
 from src.shared.ui.styled_combo_box import StyledComboBox
@@ -30,11 +34,12 @@ from src.shared.ui.template_summary_card import (
     TemplateSummaryCard,
     apply_template_summary_action_button,
 )
-from src.shared.ui.themed_radio_button import ThemedRadioButton
 from src.shared.ui.theme import bind_theme, get_theme
+from src.shared.ui.themed_radio_button import ThemedRadioButton
 from src.ui.adapters.field_display_names import field_display_name
-from src.ui.panels.template_summary_projection import build_template_detail_summary_items
-
+from src.ui.panels.template_summary_projection import (
+    build_template_detail_summary_items,
+)
 
 _PAPER_OPTIONS: tuple[tuple[str, str], ...] = (
     ("A4", "A4"),
@@ -49,6 +54,42 @@ _SECTION_BREAK_OPTIONS: tuple[tuple[str, str], ...] = (
     ("", "不设置"),
     ("nextPage", "下一页分节"),
     ("continuous", "连续分节"),
+    ("oddPage", "下一奇数页分节"),
+    ("evenPage", "下一偶数页分节"),
+)
+
+_BOUNDARY_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("preserve_source", "保留源分节"),
+    ("semantic_rebuild", "按语义补充分节"),
+    ("normalize_all", "统一全部分节"),
+)
+
+_PAPER_SIZE_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("force_template", "使用模板纸张"),
+    ("preserve_source", "保留源纸张"),
+    ("per_section", "按分节配置"),
+)
+
+_ORIENTATION_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("preserve_source", "保留源方向"),
+    ("force_template", "使用模板方向"),
+    ("per_section", "按分节配置"),
+)
+
+_MARGIN_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("force_template", "使用模板边距"),
+    ("preserve_source", "保留源边距"),
+    ("per_section", "按分节配置"),
+)
+
+_CLEANUP_POLICY_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("preserve", "保留"),
+    ("remove_proven_redundant", "仅删除已证明冗余项"),
+)
+
+_HEADER_FOOTER_LINK_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("semantic_rebuild", "按语义重建链接"),
+    ("preserve_source", "保留源链接"),
 )
 
 _PAPER_DIMENSIONS_CM: dict[str, tuple[float, float]] = {
@@ -67,6 +108,12 @@ class _PageSetupSnapshot:
 
     paper_size: str
     orientation: str
+    paper_size_mode: str
+    orientation_mode: str
+    margin_mode: str
+    paper_size_by_section: dict[str, str]
+    orientation_by_section: dict[str, str]
+    margin_by_section: dict[str, SectionMarginConfig]
     top_cm: float
     bottom_cm: float
     left_cm: float
@@ -75,6 +122,10 @@ class _PageSetupSnapshot:
     header_distance_cm: float
     footer_distance_cm: float
     section_break_type: str | None
+    boundary_mode: str
+    empty_break_policy: str
+    caption_table_break_policy: str
+    header_footer_link_mode: str
 
     @classmethod
     def from_template(cls, template: TemplateConfig) -> _PageSetupSnapshot:
@@ -82,6 +133,12 @@ class _PageSetupSnapshot:
         return cls(
             paper_size=page.paper_size,
             orientation=getattr(page, "orientation", "portrait"),
+            paper_size_mode=page.paper_size_mode,
+            orientation_mode=page.orientation_mode,
+            margin_mode=page.margin_mode,
+            paper_size_by_section=dict(page.paper_size_by_section),
+            orientation_by_section=dict(page.orientation_by_section),
+            margin_by_section=deepcopy(page.margin_by_section),
             top_cm=page.margin.top_cm,
             bottom_cm=page.margin.bottom_cm,
             left_cm=page.margin.left_cm,
@@ -90,6 +147,10 @@ class _PageSetupSnapshot:
             header_distance_cm=page.header_distance_cm,
             footer_distance_cm=page.footer_distance_cm,
             section_break_type=template.section.section_break_type,
+            boundary_mode=template.section.boundary_mode,
+            empty_break_policy=template.section.empty_break_policy,
+            caption_table_break_policy=template.section.caption_table_break_policy,
+            header_footer_link_mode=template.section.header_footer_link_mode,
         )
 
     @classmethod
@@ -101,6 +162,12 @@ class _PageSetupSnapshot:
         page = template.page_setup
         page.paper_size = self.paper_size
         page.orientation = self.orientation
+        page.paper_size_mode = self.paper_size_mode
+        page.orientation_mode = self.orientation_mode
+        page.margin_mode = self.margin_mode
+        page.paper_size_by_section = dict(self.paper_size_by_section)
+        page.orientation_by_section = dict(self.orientation_by_section)
+        page.margin_by_section = deepcopy(self.margin_by_section)
         page.margin.top_cm = self.top_cm
         page.margin.bottom_cm = self.bottom_cm
         page.margin.left_cm = self.left_cm
@@ -109,6 +176,10 @@ class _PageSetupSnapshot:
         page.header_distance_cm = self.header_distance_cm
         page.footer_distance_cm = self.footer_distance_cm
         template.section.section_break_type = self.section_break_type or None
+        template.section.boundary_mode = self.boundary_mode
+        template.section.empty_break_policy = self.empty_break_policy
+        template.section.caption_table_break_policy = self.caption_table_break_policy
+        template.section.header_footer_link_mode = self.header_footer_link_mode
 
 
 def _set_combo_by_data(combo: StyledComboBox, target) -> None:
@@ -139,6 +210,8 @@ def _section_break_label(value: str | None) -> str:
     mapping = {
         "nextPage": "下一页分节",
         "continuous": "连续分节",
+        "oddPage": "下一奇数页分节",
+        "evenPage": "下一偶数页分节",
         "": "不设置",
         None: "不设置",
     }
@@ -147,6 +220,102 @@ def _section_break_label(value: str | None) -> str:
 
 def _cm_text(value: float) -> str:
     return f"{value:g} cm"
+
+
+def _format_orientation_overrides(values: dict[str, str]) -> str:
+    return ", ".join(f"{key}={value}" for key, value in values.items())
+
+
+def _parse_orientation_overrides(raw: str) -> tuple[dict[str, str], str]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}, ""
+    normalized = text.replace("，", ",").replace("；", ",").replace(";", ",")
+    values: dict[str, str] = {}
+    for token in normalized.replace("\n", ",").split(","):
+        item = token.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            return {}, f"“{item}”缺少 ="
+        key, value = (part.strip() for part in item.split("=", 1))
+        if not key:
+            return {}, "分节编号或语义角色不能为空"
+        if value not in {"portrait", "landscape"}:
+            return {}, f"“{key}”的方向必须是 portrait 或 landscape"
+        values[key] = value
+    return values, ""
+
+
+def _format_paper_overrides(values: dict[str, str]) -> str:
+    return ", ".join(f"{key}={value}" for key, value in values.items())
+
+
+def _parse_paper_overrides(raw: str) -> tuple[dict[str, str], str]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}, ""
+    normalized = text.replace("，", ",").replace("；", ",").replace(";", ",")
+    values: dict[str, str] = {}
+    for token in normalized.replace("\n", ",").split(","):
+        item = token.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            return {}, f"“{item}”缺少 ="
+        key, value = (part.strip() for part in item.split("=", 1))
+        paper = value.upper()
+        if not key:
+            return {}, "分节编号或语义角色不能为空"
+        if paper not in _PAPER_DIMENSIONS_CM:
+            return {}, f"“{key}”的纸张必须是 {', '.join(_PAPER_DIMENSIONS_CM)} 之一"
+        values[key] = paper
+    return values, ""
+
+
+def _format_margin_overrides(values: dict[str, SectionMarginConfig]) -> str:
+    parts: list[str] = []
+    for key, value in values.items():
+        numbers = (
+            value.top_cm,
+            value.bottom_cm,
+            value.left_cm,
+            value.right_cm,
+            value.gutter_cm,
+            value.header_distance_cm,
+            value.footer_distance_cm,
+        )
+        parts.append(f"{key}=" + ",".join(f"{number:g}" for number in numbers))
+    return "; ".join(parts)
+
+
+def _parse_margin_overrides(
+    raw: str,
+) -> tuple[dict[str, SectionMarginConfig], str]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}, ""
+    values: dict[str, SectionMarginConfig] = {}
+    for token in text.replace("；", ";").replace("\n", ";").split(";"):
+        item = token.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            return {}, f"“{item}”缺少 ="
+        key, raw_numbers = (part.strip() for part in item.split("=", 1))
+        if not key:
+            return {}, "分节编号或语义角色不能为空"
+        parts = [part.strip() for part in raw_numbers.replace("，", ",").split(",")]
+        if len(parts) != 7:
+            return {}, f"“{key}”必须填写 7 个数值：上、下、左、右、装订、页眉、页脚"
+        try:
+            numbers = [float(part) for part in parts]
+        except ValueError:
+            return {}, f"“{key}”包含非数值边距"
+        if any(not math.isfinite(number) or number < 0 for number in numbers):
+            return {}, f"“{key}”的边距必须是非负有限数值"
+        values[key] = SectionMarginConfig(*numbers)
+    return values, ""
 
 
 class PageSetupDetail(QWidget):
@@ -167,6 +336,9 @@ class PageSetupDetail(QWidget):
         self._navigation_highlighter = NavigationHighlighter()
         self._is_syncing = False
         self._save_enabled = False
+        self._paper_map_error = ""
+        self._orientation_map_error = ""
+        self._margin_map_error = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -252,6 +424,30 @@ class PageSetupDetail(QWidget):
             self._paper_combo.addItem(label, value)
         self._paper_combo.currentIndexChanged.connect(self._on_form_edited)
 
+        self._paper_mode_combo = StyledComboBox(self)
+        self._configure_expanding_combo(self._paper_mode_combo)
+        for value, label in _PAPER_SIZE_MODE_OPTIONS:
+            self._paper_mode_combo.addItem(label, value)
+        self._paper_mode_combo.currentIndexChanged.connect(self._on_form_edited)
+
+        self._paper_by_section_edit = QLineEdit(self._paper_card)
+        self._paper_by_section_edit.setPlaceholderText(
+            "例如：body=A4, appendix=A3, 3=LETTER"
+        )
+        self._paper_by_section_edit.textChanged.connect(self._on_form_edited)
+
+        self._orientation_mode_combo = StyledComboBox(self)
+        self._configure_expanding_combo(self._orientation_mode_combo)
+        for value, label in _ORIENTATION_MODE_OPTIONS:
+            self._orientation_mode_combo.addItem(label, value)
+        self._orientation_mode_combo.currentIndexChanged.connect(self._on_form_edited)
+
+        self._orientation_by_section_edit = QLineEdit(self._paper_card)
+        self._orientation_by_section_edit.setPlaceholderText(
+            "例如：body=portrait, appendix=landscape, 3=landscape"
+        )
+        self._orientation_by_section_edit.textChanged.connect(self._on_form_edited)
+
         self._orientation_group = QButtonGroup(self)
         self._orientation_group.setExclusive(True)
         self._orient_portrait_btn = ThemedRadioButton("纵向", self._paper_card)
@@ -266,25 +462,100 @@ class PageSetupDetail(QWidget):
         for value, label in _SECTION_BREAK_OPTIONS:
             self._section_break_combo.addItem(label, value)
         self._section_break_combo.currentIndexChanged.connect(self._on_form_edited)
+        self._boundary_mode_combo = StyledComboBox(self)
+        self._configure_expanding_combo(self._boundary_mode_combo)
+        for value, label in _BOUNDARY_MODE_OPTIONS:
+            self._boundary_mode_combo.addItem(label, value)
+        self._boundary_mode_combo.currentIndexChanged.connect(self._on_form_edited)
+
+        self._empty_break_policy_combo = StyledComboBox(self)
+        self._caption_table_break_policy_combo = StyledComboBox(self)
+        for combo in (
+            self._empty_break_policy_combo,
+            self._caption_table_break_policy_combo,
+        ):
+            self._configure_expanding_combo(combo)
+            for value, label in _CLEANUP_POLICY_OPTIONS:
+                combo.addItem(label, value)
+            combo.currentIndexChanged.connect(self._on_form_edited)
+
+        self._header_footer_link_mode_combo = StyledComboBox(self)
+        self._configure_expanding_combo(self._header_footer_link_mode_combo)
+        for value, label in _HEADER_FOOTER_LINK_OPTIONS:
+            self._header_footer_link_mode_combo.addItem(label, value)
+        self._header_footer_link_mode_combo.currentIndexChanged.connect(
+            self._on_form_edited
+        )
         self._paper_form = InspectorForm(parent=self._paper_card)
         self._paper_form.add_grid(
             [
                 [
                     self._build_form_row("纸张", self._paper_combo, parent=self._paper_form),
+                    self._build_form_row("纸张策略", self._paper_mode_combo, parent=self._paper_form),
+                ],
+                [
+                    self._build_form_row("分节策略", self._boundary_mode_combo, parent=self._paper_form),
                     self._build_form_row("分节方式", self._section_break_combo, parent=self._paper_form),
                 ],
             ],
         )
         self._paper_form.add_field(
+            "分节纸张映射",
+            self._paper_by_section_edit,
+        )
+        self._paper_form.add_field(
             "方向",
             self._build_direction_selector(parent=self._paper_form),
+        )
+        self._paper_form.add_field("方向策略", self._orientation_mode_combo)
+        self._paper_form.add_field(
+            "分节方向映射",
+            self._orientation_by_section_edit,
+        )
+        self._paper_form.add_grid(
+            [
+                [
+                    self._build_form_row(
+                        "空分节清理",
+                        self._empty_break_policy_combo,
+                        parent=self._paper_form,
+                    ),
+                    self._build_form_row(
+                        "题注-表格清理",
+                        self._caption_table_break_policy_combo,
+                        parent=self._paper_form,
+                    ),
+                ],
+                [
+                    self._build_form_row(
+                        "页眉页脚链接",
+                        self._header_footer_link_mode_combo,
+                        parent=self._paper_form,
+                    ),
+                    self._paper_form.placeholder_cell(),
+                ],
+            ]
         )
         self._paper_card.add_widget(self._paper_form)
 
     def _build_margin_controls(self) -> None:
+        self._margin_mode_combo = StyledComboBox(self)
+        self._configure_expanding_combo(self._margin_mode_combo)
+        for value, label in _MARGIN_MODE_OPTIONS:
+            self._margin_mode_combo.addItem(label, value)
+        self._margin_mode_combo.currentIndexChanged.connect(self._on_form_edited)
+        self._margin_by_section_edit = QLineEdit(self._margin_card)
+        self._margin_by_section_edit.setPlaceholderText(
+            "例如：appendix=3.8,3.8,3.2,3.2,0,3,3（上/下/左/右/装订/页眉/页脚）"
+        )
+        self._margin_by_section_edit.textChanged.connect(self._on_form_edited)
         self._margin_form = InspectorForm(parent=self._margin_card)
         self._margin_form.add_grid(
             [
+                [
+                    self._build_form_row("边距策略", self._margin_mode_combo, parent=self._margin_form),
+                    self._margin_form.placeholder_cell(),
+                ],
                 [
                     self._build_spacing_form_row("上边距", "top_cm", parent=self._margin_form),
                     self._build_spacing_form_row("下边距", "bottom_cm", parent=self._margin_form),
@@ -299,6 +570,7 @@ class PageSetupDetail(QWidget):
                 ],
             ]
         )
+        self._margin_form.add_field("分节边距映射", self._margin_by_section_edit)
         self._margin_card.add_widget(self._margin_form)
 
     def _build_header_footer_controls(self) -> None:
@@ -450,7 +722,41 @@ class PageSetupDetail(QWidget):
 
             self._orient_landscape_btn.setChecked(template.page_setup.orientation == "landscape")
             self._orient_portrait_btn.setChecked(template.page_setup.orientation != "landscape")
+            _set_combo_by_data(self._paper_mode_combo, template.page_setup.paper_size_mode)
+            _set_combo_by_data(self._orientation_mode_combo, template.page_setup.orientation_mode)
+            _set_combo_by_data(self._margin_mode_combo, template.page_setup.margin_mode)
+            _set_combo_by_data(self._boundary_mode_combo, template.section.boundary_mode)
             _set_combo_by_data(self._section_break_combo, template.section.section_break_type or "")
+            _set_combo_by_data(
+                self._empty_break_policy_combo,
+                template.section.empty_break_policy,
+            )
+            _set_combo_by_data(
+                self._caption_table_break_policy_combo,
+                template.section.caption_table_break_policy,
+            )
+            _set_combo_by_data(
+                self._header_footer_link_mode_combo,
+                template.section.header_footer_link_mode,
+            )
+            self._paper_by_section_edit.setText(
+                _format_paper_overrides(
+                    dict(template.page_setup.paper_size_by_section)
+                )
+            )
+            self._orientation_by_section_edit.setText(
+                _format_orientation_overrides(
+                    dict(template.page_setup.orientation_by_section)
+                )
+            )
+            self._margin_by_section_edit.setText(
+                _format_margin_overrides(
+                    dict(template.page_setup.margin_by_section)
+                )
+            )
+            self._paper_map_error = ""
+            self._orientation_map_error = ""
+            self._margin_map_error = ""
 
             values = {
                 "top_cm": template.page_setup.margin.top_cm,
@@ -465,6 +771,7 @@ class PageSetupDetail(QWidget):
                 self._page_inputs[field_name].set_value(float(value), "cm")
         finally:
             self._is_syncing = False
+        self._refresh_policy_control_state()
 
     def _on_form_edited(self, *_args) -> None:
         if self._is_syncing or self._current_template is None:
@@ -482,6 +789,30 @@ class PageSetupDetail(QWidget):
         page_setup = template.page_setup
         page_setup.paper_size = str(self._paper_combo.currentData() or "A4").upper()
         page_setup.orientation = "landscape" if self._orient_landscape_btn.isChecked() else "portrait"
+        page_setup.paper_size_mode = str(
+            self._paper_mode_combo.currentData() or "force_template"
+        )
+        page_setup.orientation_mode = str(
+            self._orientation_mode_combo.currentData() or "preserve_source"
+        )
+        page_setup.margin_mode = str(
+            self._margin_mode_combo.currentData() or "force_template"
+        )
+        paper_overrides, self._paper_map_error = _parse_paper_overrides(
+            self._paper_by_section_edit.text()
+        )
+        if not self._paper_map_error:
+            page_setup.paper_size_by_section = paper_overrides
+        orientation_overrides, self._orientation_map_error = (
+            _parse_orientation_overrides(self._orientation_by_section_edit.text())
+        )
+        if not self._orientation_map_error:
+            page_setup.orientation_by_section = orientation_overrides
+        margin_overrides, self._margin_map_error = _parse_margin_overrides(
+            self._margin_by_section_edit.text()
+        )
+        if not self._margin_map_error:
+            page_setup.margin_by_section = margin_overrides
         page_setup.margin.top_cm = self._page_inputs["top_cm"].value()
         page_setup.margin.bottom_cm = self._page_inputs["bottom_cm"].value()
         page_setup.margin.left_cm = self._page_inputs["left_cm"].value()
@@ -489,7 +820,43 @@ class PageSetupDetail(QWidget):
         page_setup.gutter_cm = self._page_inputs["gutter_cm"].value()
         page_setup.header_distance_cm = self._page_inputs["header_distance_cm"].value()
         page_setup.footer_distance_cm = self._page_inputs["footer_distance_cm"].value()
-        template.section.section_break_type = str(self._section_break_combo.currentData() or "").strip() or None
+        template.section.boundary_mode = str(
+            self._boundary_mode_combo.currentData() or "preserve_source"
+        )
+        template.section.section_break_type = (
+            str(self._section_break_combo.currentData() or "").strip() or None
+            if template.section.boundary_mode == "normalize_all"
+            else None
+        )
+        template.section.empty_break_policy = str(
+            self._empty_break_policy_combo.currentData() or "preserve"
+        )
+        template.section.caption_table_break_policy = str(
+            self._caption_table_break_policy_combo.currentData() or "preserve"
+        )
+        template.section.header_footer_link_mode = str(
+            self._header_footer_link_mode_combo.currentData()
+            or "semantic_rebuild"
+        )
+        self._refresh_policy_control_state()
+
+    def _refresh_policy_control_state(self) -> None:
+        boundary_mode = str(self._boundary_mode_combo.currentData() or "preserve_source")
+        self._section_break_combo.setEnabled(boundary_mode == "normalize_all")
+        paper_mode = str(
+            self._paper_mode_combo.currentData() or "preserve_source"
+        )
+        self._paper_by_section_edit.setEnabled(paper_mode == "per_section")
+        orientation_mode = str(
+            self._orientation_mode_combo.currentData() or "preserve_source"
+        )
+        self._orientation_by_section_edit.setEnabled(
+            orientation_mode == "per_section"
+        )
+        margin_mode = str(
+            self._margin_mode_combo.currentData() or "preserve_source"
+        )
+        self._margin_by_section_edit.setEnabled(margin_mode == "per_section")
 
     def _on_restore_entry(self) -> None:
         if self._current_template is None or self._snapshot is None:
@@ -538,6 +905,48 @@ class PageSetupDetail(QWidget):
             return ("info", "")
 
         page = template.page_setup
+        if self._paper_map_error:
+            return (
+                "error",
+                f"分节纸张映射格式错误：{self._paper_map_error}。",
+            )
+        if self._orientation_map_error:
+            return (
+                "error",
+                f"分节方向映射格式错误：{self._orientation_map_error}。",
+            )
+        if self._margin_map_error:
+            return (
+                "error",
+                f"分节边距映射格式错误：{self._margin_map_error}。",
+            )
+        if page.paper_size_mode == "per_section" and not page.paper_size_by_section:
+            return (
+                "error",
+                "纸张策略为“按分节配置”时，至少填写一个分节编号或语义角色映射。",
+            )
+        if page.orientation_mode == "per_section" and not page.orientation_by_section:
+            return (
+                "error",
+                "方向策略为“按分节配置”时，至少填写一个分节编号或语义角色映射。",
+            )
+        if page.margin_mode == "per_section" and not page.margin_by_section:
+            return (
+                "error",
+                "边距策略为“按分节配置”时，至少填写一个分节编号或语义角色映射。",
+            )
+        for key, margin in page.margin_by_section.items():
+            paper = page.paper_size_by_section.get(key, page.paper_size)
+            orientation = page.orientation_by_section.get(key, page.orientation)
+            width_cm, height_cm = _paper_dimensions_cm(paper, orientation)
+            if (
+                width_cm - margin.left_cm - margin.right_cm - margin.gutter_cm <= 0
+                or height_cm - margin.top_cm - margin.bottom_cm <= 0
+            ):
+                return (
+                    "error",
+                    f"分节“{key}”的纸张与边距组合会导致版心尺寸无效。",
+                )
         paper_width_cm, paper_height_cm = _paper_dimensions_cm(page.paper_size, page.orientation)
         content_width_cm = paper_width_cm - page.margin.left_cm - page.margin.right_cm - page.gutter_cm
         content_height_cm = paper_height_cm - page.margin.top_cm - page.margin.bottom_cm
@@ -569,7 +978,11 @@ class PageSetupDetail(QWidget):
 
         current = _PageSetupSnapshot.from_template(template)
         self._restore_entry_btn.setEnabled(self._snapshot is not None and current != self._snapshot)
-        self._save_btn.setEnabled(self._save_enabled)
+        validation_variant, validation_message = self._build_validation_message()
+        self._save_btn.setEnabled(
+            self._save_enabled
+            and not (validation_variant == "error" and bool(validation_message))
+        )
         self._refresh_action_icons()
 
     def _refresh_action_icons(self) -> None:
@@ -612,6 +1025,12 @@ class PageSetupDetail(QWidget):
             label.setStyleSheet(desc_ss)
         for label in self._unit_labels:
             label.setStyleSheet(unit_ss)
+        for editor in (
+            self._paper_by_section_edit,
+            self._orientation_by_section_edit,
+            self._margin_by_section_edit,
+        ):
+            editor.setStyleSheet(build_text_input_stylesheet(theme))
 
         apply_template_summary_action_button(self._restore_entry_btn, "ghost-primary")
         apply_template_summary_action_button(self._save_btn, "primary")
@@ -635,9 +1054,19 @@ class PageSetupDetail(QWidget):
             "paper_size": "paper_size",
             "page.paper_size": "paper_size",
             "page_setup.paper_size": "paper_size",
+            "page_setup.paper_size_mode": "paper_size_mode",
+            "page_setup.paper_size_by_section": "paper_size_by_section",
             "orientation": "orientation",
             "page.orientation": "orientation",
             "page_setup.orientation": "orientation",
+            "page_setup.orientation_mode": "orientation_mode",
+            "page_setup.orientation_by_section": "orientation_by_section",
+            "page_setup.margin_mode": "margin_mode",
+            "page_setup.margin_by_section": "margin_by_section",
+            "section.boundary_mode": "boundary_mode",
+            "section.empty_break_policy": "empty_break_policy",
+            "section.caption_table_break_policy": "caption_table_break_policy",
+            "section.header_footer_link_mode": "header_footer_link_mode",
             "section_break_type": "section_break_type",
             "section.section_break_type": "section_break_type",
             "page_setup.section_break_type": "section_break_type",
@@ -676,12 +1105,32 @@ class PageSetupDetail(QWidget):
     def _page_focus_widget(self, field_name: str) -> QWidget | None:
         if field_name == "paper_size":
             return self._paper_combo
+        if field_name == "paper_size_mode":
+            return self._paper_mode_combo
+        if field_name == "paper_size_by_section":
+            return self._paper_by_section_edit
         if field_name == "orientation":
             if self._orient_landscape_btn.isChecked():
                 return self._orient_landscape_btn
             return self._orient_portrait_btn
+        if field_name == "orientation_mode":
+            return self._orientation_mode_combo
+        if field_name == "orientation_by_section":
+            return self._orientation_by_section_edit
+        if field_name == "margin_mode":
+            return self._margin_mode_combo
+        if field_name == "margin_by_section":
+            return self._margin_by_section_edit
+        if field_name == "boundary_mode":
+            return self._boundary_mode_combo
         if field_name == "section_break_type":
             return self._section_break_combo
+        if field_name == "empty_break_policy":
+            return self._empty_break_policy_combo
+        if field_name == "caption_table_break_policy":
+            return self._caption_table_break_policy_combo
+        if field_name == "header_footer_link_mode":
+            return self._header_footer_link_mode_combo
         return self._page_inputs.get(field_name)
 
 

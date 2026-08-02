@@ -10,6 +10,8 @@ Alavette Form 使用并随发行包提供以下第三方软件与资源。
 | Qt for Python (PySide6) | 6.11.1 | 桌面界面与窗口组件 | LGPL-3.0 |
 | python-docx | 1.2.0 | Word 文档读写 | MIT |
 | lxml | 6.1.1 | XML 文档处理 | BSD-3-Clause |
+| latex2mathml | 3.79.0 | LaTeX 公式转换为 MathML | MIT |
+| olefile | 0.47 | MathType/OLE 复合文档解析 | BSD-2-Clause + PIL |
 | typing_extensions | 4.16.0 | Python 类型兼容支持 | PSF-2.0 |
 | Pillow | 12.3.0 | 图片读取与处理 | MIT-CMU |
 | markdown-it-py | 4.2.0 | Markdown 内容解析 | MIT |

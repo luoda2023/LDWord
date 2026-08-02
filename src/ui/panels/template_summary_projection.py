@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.config.special_title_rules import special_title_selector_label
 from src.config.style_semantics import (
     format_spacing_value,
     line_spacing_display_label,
@@ -11,8 +12,15 @@ from src.config.style_semantics import (
     resolve_line_spacing_value,
     resolve_style_special_indent,
 )
-from src.config.style_variant_semantics import get_effective_style, is_variant_overridden
-from src.config.table_style_presets import color_palette, color_variant, table_style_label
+from src.config.style_variant_semantics import (
+    get_effective_style,
+    is_variant_overridden,
+)
+from src.config.table_style_presets import (
+    color_palette,
+    color_variant,
+    table_style_label,
+)
 from src.config.template import StyleConfig, TemplateConfig
 from src.shared.engine.toc_style_ops import resolve_toc_style_config
 from src.shared.ui.summary_grid import SummaryGridItem
@@ -108,9 +116,35 @@ def _section_break_label(value: str | None) -> str:
     return {
         "nextPage": "下一页分节",
         "continuous": "连续分节",
+        "oddPage": "下一奇数页分节",
+        "evenPage": "下一偶数页分节",
         "": "不设置",
         None: "不设置",
     }.get(value, str(value))
+
+
+def _page_policy_detail(cfg: TemplateConfig) -> str:
+    page = cfg.page_setup
+    if page.paper_size_mode == "force_template":
+        paper_policy = "模板纸张"
+    elif page.paper_size_mode == "per_section":
+        paper_policy = f"分节纸张 {len(page.paper_size_by_section)} 项"
+    else:
+        paper_policy = "保留源纸张"
+    if page.orientation_mode == "force_template":
+        orientation_policy = "模板方向"
+    elif page.orientation_mode == "per_section":
+        orientation_policy = f"分节方向 {len(page.orientation_by_section)} 项"
+    else:
+        orientation_policy = "保留源方向"
+    boundary_mode = str(cfg.section.boundary_mode or "preserve_source")
+    if boundary_mode == "semantic_rebuild":
+        boundary_policy = "语义分节"
+    elif boundary_mode == "normalize_all":
+        boundary_policy = f"统一 {_section_break_label(cfg.section.section_break_type)}"
+    else:
+        boundary_policy = "保留源分节"
+    return f"{paper_policy} / {orientation_policy} / {boundary_policy}"
 
 
 def _cm_text(value: float) -> str:
@@ -221,19 +255,64 @@ def _toc_role_style(cfg: TemplateConfig, role_key: str) -> StyleConfig:
 
 
 def _page_number_phase_scope_label(selectors: list[str]) -> str:
+    normalized = [
+        str(selector or "").strip()
+        for selector in selectors
+        if str(selector or "").strip()
+    ]
+    selector_set = set(normalized)
+    compact_scopes = (
+        ({"abstract_cn", "abstract_en"}, "摘要"),
+        ({"abstract_cn", "abstract_en", "toc"}, "前置部分"),
+        (
+            {
+                "body",
+                "references",
+                "errata",
+                "appendix",
+                "acknowledgment",
+                "resume",
+            },
+            "正文及后置",
+        ),
+        (
+            {
+                "abstract_cn",
+                "abstract_en",
+                "toc",
+                "body",
+                "references",
+                "errata",
+                "appendix",
+                "acknowledgment",
+                "resume",
+            },
+            "前置、正文及后置",
+        ),
+    )
+    for members, label in compact_scopes:
+        if selector_set == members and len(normalized) == len(members):
+            return label
+
     selector_map = {
         "all_numbered_content": "全文",
         "front_matter": "前置部分",
-        "body": "正文部分",
+        "body": "其余正文",
         "back_matter": "后置部分",
+        "pre_numbering": "封面",
+        "cover": "封面",
+        "abstract_cn": "中文摘要",
+        "abstract_en": "英文摘要",
         "appendix": "附录",
         "references": "参考文献",
+        "errata": "勘误",
+        "acknowledgment": "致谢",
+        "resume": "简历",
         "toc": "目录",
     }
     labels = [
-        selector_map.get(str(selector or ""), str(selector or ""))
-        for selector in selectors
-        if str(selector or "").strip()
+        selector_map.get(selector, special_title_selector_label(selector))
+        for selector in normalized
     ]
     if not labels:
         return "未设置范围"
@@ -261,45 +340,45 @@ def _default_page_number_phases(header) -> list:
     ]
 
 
-def _suppress_header_footer_summary(header) -> str:
+def _hidden_channel_summary(channel, label: str) -> str:
     selector_map = {
-        "pre_numbering": "封面及声明页",
+        "pre_numbering": "封面",
         "cover": "封面",
-        "statement": "声明页",
-        "authorization": "授权书",
-        "front_note": "说明页",
         "front_matter": "前置部分",
         "toc": "目录",
-        "body": "正文部分",
+        "body": "其余正文",
         "back_matter": "后置部分",
         "references": "参考文献",
         "appendix": "附录",
         "abstracts": "摘要",
+        "abstract_cn": "中文摘要",
+        "abstract_en": "英文摘要",
         "acknowledgment": "致谢",
         "errata": "勘误",
         "resume": "简历",
     }
     selectors = [
         str(selector or "").strip()
-        for selector in (getattr(header, "suppress_header_footer_selectors", []) or [])
+        for selector in (getattr(channel, "hidden_selectors", []) or [])
         if str(selector or "").strip()
     ]
-    if not selectors and getattr(header, "hide_cover_header_footer", False):
-        selectors = ["pre_numbering"]
-    labels = [selector_map.get(selector, selector) for selector in selectors]
-    return f"排除：{'+'.join(labels)}" if labels else ""
+    labels = [
+        selector_map.get(selector, special_title_selector_label(selector))
+        for selector in selectors
+    ]
+    return f"{label}隐藏：{'+'.join(labels)}" if labels else f"{label}全程显示"
 
 
 def _footer_content_summary(header) -> str:
     if not bool(getattr(getattr(header, "footer", None), "enabled", True)):
-        return "页脚关闭"
+        return "页脚文字关闭"
     mode = str(getattr(header.footer, "content_mode", "page_number") or "page_number")
     footer_text = str(getattr(header, "footer_text", "") or "").strip()
     if mode in {"none", "page_number"}:
-        return "底部文字：不显示"
+        return "页脚文字：不显示"
     if mode in {"fixed", "page_number_with_text"}:
-        return f"底部文字：{footer_text or '未填写'}"
-    return "底部文字：不显示"
+        return f"页脚文字：{footer_text or '未填写'}"
+    return "页脚文字：不显示"
 
 
 def _page_number_position_label(header) -> str:
@@ -307,7 +386,10 @@ def _page_number_position_label(header) -> str:
         "left": "页脚左侧",
         "center": "页脚居中",
         "right": "页脚右侧",
-    }.get(str(getattr(header, "footer_alignment", "center") or "center"), "页脚居中")
+    }.get(
+        str(getattr(header, "page_number_alignment", "center") or "center"),
+        "页脚居中",
+    )
 
 
 def _header_position_label(header) -> str:
@@ -337,10 +419,39 @@ def _page_number_summary_detail(header) -> str:
     if not bool(getattr(header, "page_number_enabled", True)):
         return "页码暂不输出"
     parts = [_page_number_template_label(header), _phase_result_summary(header).replace("页码：", "", 1)]
-    suppress_summary = _suppress_header_footer_summary(header)
-    if suppress_summary:
-        parts.append(suppress_summary)
+    behavior = getattr(header, "behavior", None)
+    if bool(getattr(behavior, "different_first_page", False)):
+        parts.append(_page_number_variant_summary(header, "first", "首页"))
+    if bool(getattr(behavior, "different_odd_even_pages", False)):
+        parts.append(_page_number_variant_summary(header, "even", "偶数页"))
     return "；".join(part for part in parts if part)
+
+
+def _page_number_variant_summary(header, variant_name: str, label: str) -> str:
+    page_number_plan = getattr(header, "page_number_plan", None)
+    variant = getattr(page_number_plan, variant_name, None)
+    visibility = str(getattr(variant, "visibility", "inherit") or "inherit")
+    if visibility == "hide":
+        return f"{label}隐藏"
+    parts = ["强制显示" if visibility == "show" else "跟随编号阶段"]
+    template = str(getattr(variant, "template", "") or "")
+    if template:
+        parts.append(
+            {
+                "{page}": "1",
+                "第 {page} 页": "第 1 页",
+                "第 {page} 页 / 共 {pages} 页": "第 1 页 / 共 10 页",
+            }.get(template, "自定义样式")
+        )
+    alignment = str(getattr(variant, "alignment", "inherit") or "inherit")
+    if alignment != "inherit":
+        parts.append(
+            {"left": "页脚左侧", "center": "页脚居中", "right": "页脚右侧"}.get(
+                alignment,
+                "页脚居中",
+            )
+        )
+    return f"{label}{'/'.join(parts)}"
 
 
 def _phase_result_summary(header) -> str:
@@ -348,7 +459,7 @@ def _phase_result_summary(header) -> str:
         return "页码：不显示"
     phases = _default_page_number_phases(header)
     results: list[str] = []
-    for phase in phases[:2]:
+    for phase in phases:
         scope = _page_number_phase_scope_label(list(getattr(phase, "selectors", []) or []))
         if not bool(getattr(phase, "visible", True)):
             results.append(f"{scope}不显示页码")
@@ -363,8 +474,6 @@ def _phase_result_summary(header) -> str:
         else:
             start_value = max(1, int(getattr(phase, "start_value", 1) or 1))
             results.append(f"{scope}{fmt}从 {start_value} 起")
-    if len(phases) > 2:
-        results.append(f"另 {len(phases) - 2} 项")
     return "页码：" + " / ".join(results)
 
 
@@ -373,7 +482,7 @@ def _header_summary_value(header_footer) -> str:
         return "页眉关闭"
     mode = str(header_footer.header_mode or "styleref")
     if mode == "none":
-        return "不显示顶部"
+        return "不显示页眉"
     if mode == "fixed":
         return "固定文字"
     return f"跟随 {header_footer.styleref_level} 级标题"
@@ -386,7 +495,7 @@ def _header_summary_detail(header_footer) -> str:
     typography_detail = _typography_detail_text(getattr(header_footer.header, "typography", None))
     position = _header_position_label(header_footer)
     if mode == "none":
-        return "不输出顶部横线"
+        return "不输出页眉和横线"
     if mode == "fixed":
         text = str(header_footer.header_text or "").strip() or "未填写固定文字"
         return f"{text} / {position} / {'顶部横线开启' if header_footer.header_border else '顶部横线关闭'} / {typography_detail}"
@@ -395,11 +504,11 @@ def _header_summary_detail(header_footer) -> str:
 
 def _footer_summary_value(header_footer) -> str:
     if not bool(getattr(getattr(header_footer, "footer", None), "enabled", True)):
-        return "页脚关闭"
+        return "页脚文字关闭"
     mode = str(getattr(header_footer.footer, "content_mode", "page_number") or "page_number")
     if mode in {"fixed", "page_number_with_text"}:
         return "固定文字"
-    return "不显示底部文字"
+    return "不显示页脚文字"
 
 
 def _page_number_phase_result_brief(phase) -> str:
@@ -425,7 +534,7 @@ def _footer_summary_detail(header_footer) -> str:
     typography_detail = _typography_detail_text(getattr(header_footer.footer, "typography", None))
     if mode in {"fixed", "page_number_with_text"}:
         return f"{footer_text or '未填写固定文字'} / {typography_detail}"
-    return f"页面底部不输出固定文字 / {typography_detail}"
+    return f"不输出页脚固定文字 / {typography_detail}"
 
 
 def _toc_summary_value(toc) -> str:
@@ -570,27 +679,36 @@ def _heading_special_rule_text(adapter: HeadingNumberingAdapter) -> tuple[str, s
     samples = texts + [f"{item}*" for item in prefixes]
     total = len(texts) + len(prefixes)
     if not samples:
-        return "未设置跳过规则", "所有识别标题都会按级别编号", ""
+        return "未设置特殊标题", "所有识别标题都会按级别编号", ""
     detail = "、".join(samples[:2])
     if total > 2:
         detail = f"{detail}、..."
     tooltip = "、".join(texts + [f"{item}*" for item in prefixes])
-    return f"共{total}项非编号标题", detail, tooltip
+    return f"共{total}项特殊标题", detail, tooltip
 
 
 def _page_margin_detail(page) -> str:
     detail = f"左右 {page.margin.left_cm:g}/{page.margin.right_cm:g} cm"
     if float(page.gutter_cm or 0) > 0:
         detail = f"{detail} / 装订 {page.gutter_cm:g} cm"
-    return detail
+    if page.margin_mode == "force_template":
+        policy = "模板边距"
+    elif page.margin_mode == "per_section":
+        policy = f"分节边距 {len(page.margin_by_section)} 项"
+    else:
+        policy = "保留源边距"
+    return f"{detail} / {policy}"
 
 
 def _page_margin_tooltip(page) -> str:
-    return (
+    base = (
         f"上 {page.margin.top_cm:g} cm / 下 {page.margin.bottom_cm:g} cm\n"
         f"左 {page.margin.left_cm:g} cm / 右 {page.margin.right_cm:g} cm\n"
         f"装订线 {page.gutter_cm:g} cm"
     )
+    if page.margin_mode == "per_section":
+        return f"{base}\n按节覆盖 {len(page.margin_by_section)} 项"
+    return base
 
 
 def _page_tiles(cfg: TemplateConfig) -> tuple[TemplateSummaryTileSpec, ...]:
@@ -600,7 +718,7 @@ def _page_tiles(cfg: TemplateConfig) -> tuple[TemplateSummaryTileSpec, ...]:
             key="paper_layout",
             label="纸张与版面",
             value=f"{_paper_label(page.paper_size)} / {_orientation_label(page.orientation)}",
-            detail=f"分节 {_section_break_label(cfg.section.section_break_type)}",
+            detail=_page_policy_detail(cfg),
             icon_name="layout",
             preferred_span=4,
         ),
@@ -617,7 +735,11 @@ def _page_tiles(cfg: TemplateConfig) -> tuple[TemplateSummaryTileSpec, ...]:
             key="header_footer",
             label="页眉页脚",
             value=f"页眉/页脚 {page.header_distance_cm:g}/{page.footer_distance_cm:g} cm",
-            detail="距离页面边缘",
+            detail=(
+                "链接按语义重建"
+                if cfg.section.header_footer_link_mode == "semantic_rebuild"
+                else "保留源链接"
+            ),
             icon_name="panel-top",
             preferred_span=4,
         ),
@@ -760,7 +882,7 @@ def _header_footer_tiles(cfg: TemplateConfig) -> tuple[TemplateSummaryTileSpec, 
     return (
         TemplateSummaryTileSpec(
             key="header",
-            label="顶部",
+            label="页眉",
             value=_header_summary_value(header_footer),
             detail=_header_summary_detail(header_footer),
             icon_name="panel-top",
@@ -768,7 +890,7 @@ def _header_footer_tiles(cfg: TemplateConfig) -> tuple[TemplateSummaryTileSpec, 
         ),
         TemplateSummaryTileSpec(
             key="footer_text",
-            label="底部文字",
+            label="页脚文字",
             value=_footer_summary_value(header_footer),
             detail=_footer_summary_detail(header_footer),
             icon_name="panel-bottom",
@@ -942,9 +1064,8 @@ def _header_footer_nav_summary(cfg: TemplateConfig) -> str:
     parts.append("顶部横线" if header.header_border and header_outputs else "无顶部横线")
     parts.append(_footer_content_summary(header))
     parts.append(_phase_result_summary(header))
-    suppress_summary = _suppress_header_footer_summary(header)
-    if suppress_summary:
-        parts.append(suppress_summary)
+    parts.append(_hidden_channel_summary(header.header, "页眉"))
+    parts.append(_hidden_channel_summary(header.footer, "页脚文字"))
     return " / ".join(parts)
 
 
@@ -977,57 +1098,6 @@ def _caption_nav_summary(cfg: TemplateConfig) -> str:
             "缺失时自动补齐" if caption.auto_insert else "缺失时不补齐",
             "Word 可更新编号" if caption.format_inserted else "固定文本编号",
         ]
-    )
-
-
-def _formula_nav_summary(cfg: TemplateConfig) -> str:
-    formula = cfg.formula_table
-    numbering = cfg.equation_numbering
-    return " / ".join(
-        [
-            str(formula.formula_font_name or "跟随原文"),
-            f"{float(formula.formula_font_size_pt or 0):g} 磅",
-            str(numbering.numbering_format or "global"),
-        ]
-    )
-
-
-def _formula_tiles(cfg: TemplateConfig) -> tuple[TemplateSummaryTileSpec, ...]:
-    formula = cfg.formula_table
-    style = cfg.formula_style
-    return (
-        TemplateSummaryTileSpec(
-            key="formula_typography",
-            label="公式字体",
-            value=f"{formula.formula_font_name or '-'} / {formula.formula_font_size_pt:g} 磅",
-            detail=f"编号 {formula.number_font_name or '-'} / {formula.number_font_size_pt:g} 磅",
-            icon_name="sigma",
-            preferred_span=4,
-        ),
-        TemplateSummaryTileSpec(
-            key="formula_layout",
-            label="对齐与间距",
-            value=f"块{ALIGNMENT_LABELS.get(formula.block_alignment, formula.block_alignment)} / 编号{ALIGNMENT_LABELS.get(formula.number_alignment, formula.number_alignment)}",
-            detail=(
-                f"行距 {formula.formula_line_spacing:g} 倍  "
-                f"段前 {format_spacing_value(formula.formula_space_before_pt, formula.formula_space_before_unit)}  "
-                f"段后 {format_spacing_value(formula.formula_space_after_pt, formula.formula_space_after_unit)}"
-            ),
-            icon_name="sliders-horizontal",
-            preferred_span=4,
-        ),
-        TemplateSummaryTileSpec(
-            key="formula_numbering",
-            label="公式编号",
-            value=str(cfg.equation_numbering.numbering_format or "global"),
-            detail=(
-                f"统一字体 {'是' if style.unify_font else '否'}  "
-                f"统一字号 {'是' if style.unify_size else '否'}  "
-                f"统一间距 {'是' if style.unify_spacing else '否'}"
-            ),
-            icon_name="list-ordered",
-            preferred_span=4,
-        ),
     )
 
 
@@ -1122,19 +1192,6 @@ def _spec_data(cfg: TemplateConfig) -> dict[str, TemplateDetailSummarySpec]:
             nav_summary=_caption_nav_summary(cfg),
             field_names=("caption", "styles"),
             tiles=_caption_tiles(cfg),
-        ),
-        # Retained as internal editors for a future mode-specific surface.
-        # They are intentionally absent from DETAIL_ORDER and the public
-        # template feature registry, so the general workbench cannot expose
-        # them accidentally.
-        "tpl_formula": TemplateDetailSummarySpec(
-            detail_card_id="tpl_formula",
-            title="公式",
-            icon_name="sigma",
-            nav_label="公式",
-            nav_summary=_formula_nav_summary(cfg),
-            field_names=("formula_table", "formula_style", "equation_numbering"),
-            tiles=_formula_tiles(cfg),
         ),
         "tpl_reference": TemplateDetailSummarySpec(
             detail_card_id="tpl_reference",

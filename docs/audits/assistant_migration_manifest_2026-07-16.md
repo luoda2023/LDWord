@@ -1,4 +1,4 @@
-# AI 文档助手迁移来源清单
+﻿# AI 文档助手迁移来源清单
 
 > 日期：2026-07-16  
 > 目标仓库：Alavette Form  
@@ -8,8 +8,8 @@
 
 | 来源 | 本地参考目录 | Git 基线 | 使用方式 |
 |---|---|---|---|
-| Alavette Design | `C:\Users\70768\Desktop\Alavette Design` | `cb51361710c3edd853144c310b3f7636e9833df1` | 迁移 ConversationPanel / SessionSidebar 的信息架构、控件层级、布局比例与交互合同；以 Form 类型和状态源重写，未逐行复制源码 |
-| Alavette Flow | `C:\Users\70768\Desktop\Alavette Flow` | `80560581b54f0817ab05f1efa3536253477cc755` | 在 MIT 许可下裁剪、改名并重构中立运行时基础 |
+| Alavette Design | `<LOCAL_PATH>` | `cb51361710c3edd853144c310b3f7636e9833df1` | 迁移 ConversationPanel / SessionSidebar 的信息架构、控件层级、布局比例与交互合同；以 Form 类型和状态源重写，未逐行复制源码 |
+| Alavette Flow | `<LOCAL_PATH>` | `80560581b54f0817ab05f1efa3536253477cc755` | 在 MIT 许可下裁剪、改名并重构中立运行时基础 |
 
 迁移时 Alavette Flow 工作区存在未提交变更，因此下表同时记录实际读取文件的 SHA-256。Git 基线用于标识仓库历史位置，文件哈希用于标识本次实际参考快照。
 

@@ -152,6 +152,55 @@ def test_recovery_turns_interrupted_preflight_into_actionable_retry(tmp_path):
     ]
 
 
+def test_recovery_reopens_authorized_generation_that_never_started(tmp_path):
+    coordinator = _coordinator(tmp_path)
+    session = coordinator.create_session()
+    session = coordinator.update_state(
+        session,
+        document_job={"status": "content_generation_ready"},
+    )
+    recovery = AssistantSessionRecovery(
+        coordinator,
+        ExecutionJournalStore(tmp_path / "executions"),
+        ExecutionLeaseManager(),
+    )
+
+    summary = recovery.reconcile()
+    restored = coordinator.load_session(session.session_id)
+
+    assert summary.interrupted_jobs == 1
+    assert restored.document_job["status"] == "plan_ready"
+    assert restored.messages[-1].blocks[0].data["actions"] == [
+        {
+            "id": "generate_content_draft",
+            "label": "继续生成内容草稿",
+        }
+    ]
+
+
+def test_recovery_closes_incomplete_official_field_continuation(tmp_path):
+    coordinator = _coordinator(tmp_path)
+    session = coordinator.create_session()
+    session = coordinator.update_state(
+        session,
+        document_job={"status": "needs_official_field_completion"},
+    )
+    recovery = AssistantSessionRecovery(
+        coordinator,
+        ExecutionJournalStore(tmp_path / "executions"),
+        ExecutionLeaseManager(),
+    )
+
+    summary = recovery.reconcile()
+    restored = coordinator.load_session(session.session_id)
+
+    assert summary.interrupted_jobs == 1
+    assert restored.document_job["status"] == "failed"
+    assert restored.document_job["error_text"] == (
+        "assistant_official_field_completion_interrupted"
+    )
+
+
 def test_execution_journal_never_overwrites_an_existing_execution(tmp_path):
     journals = ExecutionJournalStore(tmp_path / "executions")
     record = ExecutionJournalRecord(

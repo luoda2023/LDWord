@@ -2,23 +2,29 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
 import json
 import os
-from pathlib import Path
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from src.assistant.contracts.serialization import plain_data
+from src.assistant.runtime.providers.endpoint_security import (
+    validate_provider_endpoint,
+)
 from src.assistant.storage.paths import assistant_storage_root
-
 
 PROVIDER_PROFILE_STORE_SCHEMA_VERSION = "form-provider-profiles-v1"
 PROVIDER_KINDS = frozenset({"mock", "openai_compatible"})
 PROVIDER_CONNECTION_STATUSES = frozenset({"local", "untested", "success", "failed"})
+GLM_5_2_MAX_OUTPUT_TOKENS = 131_072
 _SAFE_PROFILE_ID = re.compile(r"^[A-Za-z0-9_-]{1,96}$")
+_SECRET_LIKE_EXTRA_BODY_KEY = re.compile(
+    r"(?:^|[_-])(?:api[_-]?key|authorization|access[_-]?token|token|secret|password)(?:$|[_-])",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,19 +55,14 @@ class ProviderProfile:
                 f"Unsupported provider connection status: {self.connection_status!r}"
             )
         if self.kind == "mock" and self.connection_status not in {"local", "success"}:
-            raise ValueError("Mock providers must use a local or success connection status")
+            raise ValueError(
+                "Mock providers must use a local or success connection status"
+            )
         if self.kind == "openai_compatible":
-            parsed = urlparse(str(self.base_url or "").strip())
-            if (
-                parsed.scheme not in {"http", "https"}
-                or not parsed.netloc
-                or parsed.username is not None
-                or parsed.password is not None
-                or parsed.query
-                or parsed.fragment
-            ):
-                raise ValueError("Provider base_url must be an HTTP(S) endpoint without credentials, query, or fragment")
-        object.__setattr__(self, "extra_body", dict(plain_data(self.extra_body)))
+            validate_provider_endpoint(self.base_url)
+        normalized_extra_body = dict(plain_data(self.extra_body))
+        _reject_secret_like_extra_body(normalized_extra_body)
+        object.__setattr__(self, "extra_body", normalized_extra_body)
 
     @property
     def requires_secret(self) -> bool:
@@ -83,7 +84,7 @@ class ProviderProfile:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "ProviderProfile":
+    def from_dict(cls, value: Mapping[str, Any]) -> ProviderProfile:
         return cls(
             profile_id=str(value.get("profile_id") or ""),
             label=str(value.get("label") or ""),
@@ -92,7 +93,9 @@ class ProviderProfile:
             base_url=str(value.get("base_url") or ""),
             timeout_seconds=float(value.get("timeout_seconds") or 60.0),
             enabled=bool(value.get("enabled", True)),
-            extra_body=value.get("extra_body") if isinstance(value.get("extra_body"), Mapping) else {},
+            extra_body=value.get("extra_body")
+            if isinstance(value.get("extra_body"), Mapping)
+            else {},
             connection_status=str(
                 value.get("connection_status")
                 or ("local" if str(value.get("kind") or "") == "mock" else "untested")
@@ -112,9 +115,44 @@ def default_mock_profile() -> ProviderProfile:
     )
 
 
+def provider_extra_body_with_model_defaults(
+    model_id: str,
+    extra_body: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Apply official model defaults without replacing explicit user values."""
+
+    defaults: dict[str, Any] = {}
+    if str(model_id or "").strip().casefold() == "glm-5.2":
+        defaults["max_tokens"] = GLM_5_2_MAX_OUTPUT_TOKENS
+    defaults.update(dict(plain_data(extra_body or {})))
+    return defaults
+
+
+def _reject_secret_like_extra_body(
+    value: Mapping[str, Any],
+    *,
+    prefix: str = "extra_body",
+) -> None:
+    for key, item in value.items():
+        normalized_key = str(key or "")
+        if _SECRET_LIKE_EXTRA_BODY_KEY.search(normalized_key):
+            raise ValueError(
+                f"Provider {prefix} cannot persist secret-like key: {normalized_key}"
+            )
+        if isinstance(item, Mapping):
+            _reject_secret_like_extra_body(
+                item,
+                prefix=f"{prefix}.{normalized_key}",
+            )
+
+
 class ProviderProfileStore:
     def __init__(self, path: Path | None = None) -> None:
-        self.path = Path(path) if path is not None else assistant_storage_root() / "providers.json"
+        self.path = (
+            Path(path)
+            if path is not None
+            else assistant_storage_root() / "providers.json"
+        )
 
     def list_profiles(self) -> tuple[ProviderProfile, ...]:
         if not self.path.is_file():
@@ -151,7 +189,9 @@ class ProviderProfileStore:
     def delete(self, profile_id: str) -> bool:
         if profile_id == "mock-default":
             raise ValueError("The built-in mock profile cannot be deleted")
-        profiles = [item for item in self.list_profiles() if item.profile_id != profile_id]
+        profiles = [
+            item for item in self.list_profiles() if item.profile_id != profile_id
+        ]
         if len(profiles) == len(self.list_profiles()):
             return False
         self._write_profiles(profiles)
@@ -177,7 +217,13 @@ class ProviderProfileStore:
         temporary = self.path.with_suffix(f".json.{os.getpid()}.tmp")
         try:
             with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-                json.dump(plain_data(payload), handle, ensure_ascii=False, indent=2, sort_keys=True)
+                json.dump(
+                    plain_data(payload),
+                    handle,
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -190,10 +236,12 @@ class ProviderProfileStore:
 
 
 __all__ = [
-    "PROVIDER_KINDS",
+    "GLM_5_2_MAX_OUTPUT_TOKENS",
     "PROVIDER_CONNECTION_STATUSES",
+    "PROVIDER_KINDS",
     "PROVIDER_PROFILE_STORE_SCHEMA_VERSION",
     "ProviderProfile",
     "ProviderProfileStore",
     "default_mock_profile",
+    "provider_extra_body_with_model_defaults",
 ]

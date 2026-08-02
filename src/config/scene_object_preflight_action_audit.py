@@ -34,7 +34,6 @@ from src.shared.engine.object_preflight import (
     object_preflight_targets_for_touchpoints,
 )
 
-
 SCENE_OBJECT_PREFLIGHT_ACTION_AUDIT_SOURCE_ID = (
     "scene_object_preflight_action_audit"
 )
@@ -127,7 +126,7 @@ SCENE_OBJECT_PREFLIGHT_ACTION_SOURCE_MARKERS: tuple[
     ),
     (
         "workbench_confirmation_tests",
-        "tests/test_workbench_execution_session_architecture.py",
+        "tests/test_workbench_panel.py",
         (
             "test_start_execution_requires_object_preflight_confirmation_before_worker",
             "test_start_execution_blocks_on_strict_object_preflight_findings",

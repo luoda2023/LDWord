@@ -43,7 +43,7 @@ SCENE_FORMULA_OUTPUT_WATERMARK_SOURCE_MARKERS: tuple[
         "scene_parameter_ownership",
         "src/config/scene_parameter_ownership.py",
         (
-            "formula_convert.output_mode",
+            "thesis_formula_rules.formula_convert.output_mode",
             "watermark.enabled",
             "delivery_presets.*.artifacts.final_docx",
         ),
@@ -59,13 +59,13 @@ SCENE_FORMULA_OUTPUT_WATERMARK_SOURCE_MARKERS: tuple[
     ),
     (
         "scene_model",
-        "src/config/scene.py",
-        ("class FormulaConvertOptions", "class DeliveryPreset", "watermark"),
+        "src/config/formula_policy.py",
+        ("class ThesisFormulaRules", "formula_table", "chem_typography"),
     ),
     (
         "resolver_scene_feature_overrides",
         "src/config/resolver.py",
-        ("formula_convert=copy.deepcopy", "_SCENE_FEATURE_FIELDS", "watermark"),
+        ("_resolved_formula_rules", "THESIS_FORMULA_MODULE_NAMES", "watermark"),
     ),
     (
         "formula_execution",
@@ -460,15 +460,7 @@ def audit_scene_formula_output_watermark_report(
 
 
 def _formula_relevant(family: PlannedSceneFamily) -> bool:
-    haystack = " ".join(
-        (
-            *family.capability_domains,
-            *family.workflow_archetypes,
-            *family.required_closures,
-            family.first_closed_slice,
-        )
-    ).lower()
-    return "formula" in haystack
+    return family.family_id == "thesis_cn"
 
 
 def _output_relevant(family: PlannedSceneFamily) -> bool:
@@ -487,19 +479,30 @@ _CAPABILITY_SPECS: tuple[FormulaOutputWatermarkCapabilitySpec, ...] = (
         label="Formula conversion and formula style policy",
         expected_owner_layer="scene",
         parameter_paths=(
-            "formula_convert.output_mode",
-            "formula_convert.low_confidence_policy",
-            "formula_convert.office_fallback_enabled",
-            "formula_style.unify_font",
-            "formula_style.unify_size",
-            "formula_style.unify_spacing",
-            "equation_numbering.numbering_format",
+            "thesis_formula_rules.formula_enabled",
+            "thesis_formula_rules.formula_convert.enabled",
+            "thesis_formula_rules.formula_convert.output_mode",
+            "thesis_formula_rules.formula_convert.low_confidence_policy",
+            "thesis_formula_rules.formula_convert.office_fallback_enabled",
+            "thesis_formula_rules.formula_to_table.enabled",
+            "thesis_formula_rules.formula_to_table.block_only",
+            "thesis_formula_rules.formula_table.formula_font_name",
+            "thesis_formula_rules.formula_table.formula_font_size_pt",
+            "thesis_formula_rules.formula_style.unify_font",
+            "thesis_formula_rules.formula_style.enabled",
+            "thesis_formula_rules.formula_style.unify_size",
+            "thesis_formula_rules.formula_style.unify_spacing",
+            "thesis_formula_rules.equation_numbering.numbering_format",
+            "thesis_formula_rules.equation_numbering.enabled",
+            "thesis_formula_rules.chem_typography.enabled",
+            "thesis_formula_rules.chem_typography.scopes",
         ),
-        template_baseline_paths=("formula_table.formula_font_name",),
+        template_baseline_paths=(),
         control_contract_ids=("scene.formula_conversion_strategy",),
         execution_consumers=(
             "formula conversion",
             "formula module",
+            "formula table module",
             "equation numbering module",
         ),
         family_predicate=_formula_relevant,
@@ -509,7 +512,7 @@ _CAPABILITY_SPECS: tuple[FormulaOutputWatermarkCapabilitySpec, ...] = (
             "ai_content_quality",
         ),
         boundary_note=(
-            "Formula fragments are scene policy; full LaTeX/OCR/AI quality remains plugin/manual gated."
+            "The thesis plan exclusively owns formula and script-recovery policy; full LaTeX/OCR/AI quality remains plugin/manual gated."
         ),
     ),
     FormulaOutputWatermarkCapabilitySpec(

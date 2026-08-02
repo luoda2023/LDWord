@@ -4,35 +4,27 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from src.config.delivery_preset_display import (
-    DELIVERY_PRESET_DISPLAY_LABELS,
-    delivery_preset_display_name,
-)
-
 from src.config.default_delivery_identity import (
     DefaultDeliveryIdentity,
     project_default_delivery_identity,
 )
-
+from src.config.delivery_preset_display import (
+    DELIVERY_PRESET_DISPLAY_LABELS,
+    delivery_preset_display_name,
+)
 from src.config.material_schema_registry import (
     build_material_requirements,
     list_material_schemas,
 )
-
+from src.config.scene import SceneWorkspace
+from src.config.scene_family_registry import get_planned_scene_family
 from src.config.scene_product_coverage_manifest import (
     SceneCoveragePack,
     coverage_candidate_keys_for_config,
     coverage_packs_for_config,
 )
-
-from src.config.scene_family_registry import get_planned_scene_family
-
-from src.config.scene import SceneWorkspace
-
 from src.shared.engine.count_engine import get_count_profile
-
 from src.shared.engine.object_preflight import object_preflight_targets_for_touchpoints
-
 from src.shared.ui.summary_grid import SummaryGridItem
 
 MARKDOWN_POLICY_LABELS = {
@@ -94,6 +86,9 @@ MATERIAL_SCHEMA_DISPLAY_LABELS = {
     "regulated_disclosure_materials_v1": "披露材料资料",
 }
 
+# Scene/contract summary localization only. Material-package previews must use
+# labels explicitly owned by a package domain object and must never extend or
+# consume this registry to manufacture field metadata.
 MATERIAL_FIELD_DISPLAY_LABELS = {
     "company_name": "公司名称",
     "project_name": "项目名称",
@@ -286,7 +281,7 @@ FAMILY_DISPLAY_LABELS = {
 DOCUMENT_SCOPE_DISPLAY_LABELS = {
     "all": "全部内容",
     "body": "仅正文",
-    "selected": "指定区域",
+    "selected": "自选区域",
 }
 
 OOXML_TOUCHPOINT_DISPLAY_LABELS = {
@@ -365,6 +360,7 @@ BOUNDARY_TEXT_DISPLAY_LABELS = {
     ): "证照或归档资料缺失时，会降级为附件清单和缺项报告",
 }
 
+
 def _build_scene_core_summary_items(
     scene: SceneWorkspace,
 ) -> tuple[SummaryGridItem, ...]:
@@ -408,6 +404,7 @@ def _build_scene_core_summary_items(
         ),
     )
 
+
 def build_product_scene_overview_summary_items(
     scene: SceneWorkspace,
 ) -> tuple[SummaryGridItem, ...]:
@@ -419,6 +416,7 @@ def build_product_scene_overview_summary_items(
         if item.key in {"coverage_pack", "coverage_plugin_boundary"}
     )
     return (*_build_scene_core_summary_items(scene), *coverage_items)
+
 
 def build_scene_scope_summary_items(
     scene: SceneWorkspace | None,
@@ -444,6 +442,7 @@ def build_scene_scope_summary_items(
         ),
     )
 
+
 def build_coverage_summary_items(scene: SceneWorkspace) -> tuple[SummaryGridItem, ...]:
     packs = _coverage_packs_for_scene(scene)
     if not packs:
@@ -457,7 +456,9 @@ def build_coverage_summary_items(scene: SceneWorkspace) -> tuple[SummaryGridItem
             label="适用方案",
             value=_coverage_pack_value(packs),
             detail=_coverage_pack_detail(packs),
-            variant="warning" if any(pack.missing_closures for pack in packs) else "success",
+            variant="warning"
+            if any(pack.missing_closures for pack in packs)
+            else "success",
             icon_name="grid-2x2",
             tooltip=_coverage_pack_tooltip(packs),
         )
@@ -491,7 +492,10 @@ def build_coverage_summary_items(scene: SceneWorkspace) -> tuple[SummaryGridItem
         )
     return tuple(items)
 
-def build_input_profile_summary_items(scene: SceneWorkspace) -> tuple[SummaryGridItem, ...]:
+
+def build_input_profile_summary_items(
+    scene: SceneWorkspace,
+) -> tuple[SummaryGridItem, ...]:
     profile = scene.input_source_profile
     requirements = build_material_requirements(
         profile.material_schema_id,
@@ -500,7 +504,9 @@ def build_input_profile_summary_items(scene: SceneWorkspace) -> tuple[SummaryGri
         extra_required_asset_roles=profile.required_image_roles,
     )
     accepted_formats = _display_list(profile.accepted_formats, FORMAT_DISPLAY_LABELS)
-    structured_formats = _display_list(profile.structured_formats, FORMAT_DISPLAY_LABELS)
+    structured_formats = _display_list(
+        profile.structured_formats, FORMAT_DISPLAY_LABELS
+    )
     material_fields = list(getattr(requirements, "required_field_keys", ()) or ())
     image_roles = list(getattr(requirements, "required_asset_roles", ()) or ())
     return (
@@ -548,13 +554,18 @@ def build_input_profile_summary_items(scene: SceneWorkspace) -> tuple[SummaryGri
         SummaryGridItem(
             key="input_failure",
             label="失败策略",
-            value=FAILURE_POLICY_LABELS.get(profile.failure_policy, profile.failure_policy),
+            value=FAILURE_POLICY_LABELS.get(
+                profile.failure_policy, profile.failure_policy
+            ),
             detail="资料或输入不满足时的方案级处理方式",
             variant=_failure_variant(profile.failure_policy),
         ),
     )
 
-def build_compliance_summary_items(scene: SceneWorkspace) -> tuple[SummaryGridItem, ...]:
+
+def build_compliance_summary_items(
+    scene: SceneWorkspace,
+) -> tuple[SummaryGridItem, ...]:
     profile = scene.compliance_profile
     preflight = profile.object_preflight
     items = (
@@ -601,12 +612,15 @@ def build_compliance_summary_items(scene: SceneWorkspace) -> tuple[SummaryGridIt
             key="report_level",
             label="报告粒度",
             value=profile.report_level or "summary",
-            detail=FAILURE_POLICY_LABELS.get(profile.failure_policy, profile.failure_policy),
+            detail=FAILURE_POLICY_LABELS.get(
+                profile.failure_policy, profile.failure_policy
+            ),
             variant=_failure_variant(profile.failure_policy),
         ),
     )
     recommendation = _planning_preflight_recommendation_item(scene)
     return items if recommendation is None else (*items, recommendation)
+
 
 def recommended_object_preflight_targets_for_scene(
     scene: SceneWorkspace,
@@ -615,6 +629,7 @@ def recommended_object_preflight_targets_for_scene(
     if family is None:
         return ()
     return object_preflight_targets_for_touchpoints(family.ooxml_touchpoints)
+
 
 def build_delivery_summary_items(scene: SceneWorkspace) -> tuple[SummaryGridItem, ...]:
     presets = list(scene.delivery_presets)
@@ -650,10 +665,13 @@ def build_delivery_summary_items(scene: SceneWorkspace) -> tuple[SummaryGridItem
         SummaryGridItem(
             key="structured",
             label="结构化中间产物",
-            value="保留" if bool(getattr(default, "include_structured_intermediate", False)) else "不保留",
+            value="保留"
+            if bool(getattr(default, "include_structured_intermediate", False))
+            else "不保留",
             detail=f"报告：{_report_level_display(getattr(default, 'report_level', 'summary') if default is not None else 'summary')}",
         ),
     )
+
 
 def _input_policy_detail(scene: SceneWorkspace) -> str:
     profile = scene.input_source_profile
@@ -679,11 +697,15 @@ def _input_policy_detail(scene: SceneWorkspace) -> str:
         )
     return " / ".join(part for part in parts if part)
 
+
 def _material_schema_detail(requirements) -> str:
     schema_ids = _material_schema_ids_from_requirements(requirements)
     if not schema_ids:
         return "未绑定资料规则"
-    return _join_values(_material_schema_display_name(schema_id) for schema_id in schema_ids)
+    return _join_values(
+        _material_schema_display_name(schema_id) for schema_id in schema_ids
+    )
+
 
 def _material_schema_tooltip(requirements) -> str:
     schema_ids = _material_schema_ids_from_requirements(requirements)
@@ -698,6 +720,7 @@ def _material_schema_tooltip(requirements) -> str:
         parts.append("注册表标签：" + labels)
     return "\n".join(part for part in parts if part)
 
+
 def _material_schema_ids_from_requirements(requirements) -> tuple[str, ...]:
     schema_ids = [
         str(value or "").strip()
@@ -709,6 +732,7 @@ def _material_schema_ids_from_requirements(requirements) -> tuple[str, ...]:
         schema_ids.insert(0, primary_id)
     return tuple(dict.fromkeys(schema_ids))
 
+
 def _material_schema_display_name(schema_id: object) -> str:
     normalized = str(schema_id or "").strip()
     if not normalized:
@@ -717,17 +741,25 @@ def _material_schema_display_name(schema_id: object) -> str:
         return MATERIAL_SCHEMA_DISPLAY_LABELS[normalized]
     for schema in list_material_schemas():
         if schema.schema_id == normalized:
-            return schema.label or _display_id(normalized, MATERIAL_SCHEMA_DISPLAY_LABELS)
+            return schema.label or _display_id(
+                normalized, MATERIAL_SCHEMA_DISPLAY_LABELS
+            )
     return _display_id(normalized, MATERIAL_SCHEMA_DISPLAY_LABELS)
+
 
 def material_schema_display_name(schema_id: object) -> str:
     return _material_schema_display_name(schema_id)
 
+
 def _material_field_detail(field_keys: Sequence[object]) -> str:
     return _display_named_values(field_keys, _material_field_display_name, unit="字段")
 
+
 def _material_asset_role_detail(role_keys: Sequence[object]) -> str:
-    return _display_named_values(role_keys, _material_asset_role_display_name, unit="角色")
+    return _display_named_values(
+        role_keys, _material_asset_role_display_name, unit="角色"
+    )
+
 
 def _material_field_display_name(field_key: object) -> str:
     normalized = str(field_key or "").strip()
@@ -738,11 +770,15 @@ def _material_field_display_name(field_key: object) -> str:
     for schema in list_material_schemas():
         for field in schema.fields:
             if field.key == normalized:
-                return field.label or _display_id(normalized, MATERIAL_FIELD_DISPLAY_LABELS)
+                return field.label or _display_id(
+                    normalized, MATERIAL_FIELD_DISPLAY_LABELS
+                )
     return _display_id(normalized, MATERIAL_FIELD_DISPLAY_LABELS)
+
 
 def material_field_display_name(field_key: object) -> str:
     return _material_field_display_name(field_key)
+
 
 def _material_asset_role_display_name(role_key: object) -> str:
     normalized = str(role_key or "").strip()
@@ -753,11 +789,15 @@ def _material_asset_role_display_name(role_key: object) -> str:
     for schema in list_material_schemas():
         for role in schema.asset_roles:
             if role.role == normalized:
-                return role.label or _display_id(normalized, MATERIAL_ASSET_ROLE_DISPLAY_LABELS)
+                return role.label or _display_id(
+                    normalized, MATERIAL_ASSET_ROLE_DISPLAY_LABELS
+                )
     return _display_id(normalized, MATERIAL_ASSET_ROLE_DISPLAY_LABELS)
+
 
 def material_asset_role_display_name(role_key: object) -> str:
     return _material_asset_role_display_name(role_key)
+
 
 def _display_named_values(
     values: Sequence[object],
@@ -777,8 +817,10 @@ def _display_named_values(
         return _join_values(labels)
     return _join_values(labels[:limit]) + f" 等 {len(labels)} 个{unit}"
 
+
 def _raw_list_tooltip(label: str, values: Sequence[object]) -> str:
     return f"{label}：" + _join_values(values)
+
 
 def _object_policy_detail(scene: SceneWorkspace) -> str:
     preflight = scene.compliance_profile.object_preflight
@@ -786,7 +828,11 @@ def _object_policy_detail(scene: SceneWorkspace) -> str:
         list(getattr(preflight, "scan_targets", []) or [])[:4],
         OOXML_TOUCHPOINT_DISPLAY_LABELS,
     )
-    skip = "高风险模块会先跳过" if preflight.skip_high_risk_modules else "高风险模块不自动跳过"
+    skip = (
+        "高风险模块会先跳过"
+        if preflight.skip_high_risk_modules
+        else "高风险模块不自动跳过"
+    )
     block = _display_list(preflight.block_on, OOXML_TOUCHPOINT_DISPLAY_LABELS)
     parts = [
         _object_policy_value(preflight),
@@ -797,11 +843,13 @@ def _object_policy_detail(scene: SceneWorkspace) -> str:
         parts.append(f"{block} 会阻断")
     return "；".join(parts)
 
+
 def _count_profile_detail(profile_id: str) -> str:
     normalized = str(profile_id or "").strip()
     if not normalized:
         return "未配置计数 profile"
     return get_count_profile(normalized).label
+
 
 def _format_list_label(values: Sequence[object]) -> str:
     labels = [_display_id(value, FORMAT_DISPLAY_LABELS) for value in values]
@@ -812,21 +860,27 @@ def _format_list_label(values: Sequence[object]) -> str:
         return " / ".join(labels)
     return f"{len(labels)} 种输入"
 
+
 def _compliance_overview_value(profile) -> str:
     if str(getattr(profile, "failure_policy", "") or "") == "block":
         return "风险会阻断"
     profile_id = str(getattr(profile, "profile_id", "") or "").strip()
     return PROFILE_DISPLAY_LABELS.get(profile_id, "发现问题先提醒")
 
+
 def _compliance_overview_detail(profile) -> str:
     rule_family = str(getattr(profile, "rule_family", "") or "").strip()
-    rule_label = PROFILE_DISPLAY_LABELS.get(rule_family, PROFILE_DISPLAY_LABELS.get(rule_family.replace("_format", ""), "基础格式规则"))
+    rule_label = PROFILE_DISPLAY_LABELS.get(
+        rule_family,
+        PROFILE_DISPLAY_LABELS.get(rule_family.replace("_format", ""), "基础格式规则"),
+    )
     policy = (
         "遇到问题会停止执行"
         if str(getattr(profile, "failure_policy", "") or "") == "block"
         else "发现问题先提醒"
     )
     return f"{rule_label}；{policy}"
+
 
 def _object_policy_value(preflight) -> str:
     if not bool(getattr(preflight, "enabled", True)):
@@ -835,12 +889,14 @@ def _object_policy_value(preflight) -> str:
         return "严格保护"
     return "发现风险先提醒"
 
+
 def _default_delivery_identity_display(identity: DefaultDeliveryIdentity) -> str:
     if identity.is_ok:
         return _delivery_preset_display_name(identity.preset)
     if identity.status == "invalid":
         return f"无效引用：{identity.requested_id}"
     return "未设置"
+
 
 def _delivery_identity_detail(identity: DefaultDeliveryIdentity) -> str:
     if identity.is_ok:
@@ -849,20 +905,26 @@ def _delivery_identity_detail(identity: DefaultDeliveryIdentity) -> str:
         return "默认交付引用无效，请先选择有效输出版本"
     return "未设置默认交付版本"
 
+
 def _delivery_preset_display_name(preset_or_id: object) -> str:
     return delivery_preset_display_name(preset_or_id)
+
 
 def _delivery_preset_tooltip(preset: object | None, fallback_id: object = "") -> str:
     preset_id = str(
         getattr(preset, "preset_id", "") if preset is not None else fallback_id
     ).strip()
     label = str(getattr(preset, "label", "") if preset is not None else "").strip()
-    parts = ["默认交付", _delivery_preset_display_name(preset if preset is not None else preset_id)]
+    parts = [
+        "默认交付",
+        _delivery_preset_display_name(preset if preset is not None else preset_id),
+    ]
     if preset_id:
         parts.append("版本 ID：" + preset_id)
     if label:
         parts.append("原始标签：" + label)
     return "\n".join(part for part in parts if part)
+
 
 def _delivery_default_detail(preset: object | None) -> str:
     if preset is None:
@@ -874,6 +936,7 @@ def _delivery_default_detail(preset: object | None) -> str:
         return label_display
     return "执行时默认生成"
 
+
 def _delivery_preset_list_tooltip(presets: Sequence[object]) -> str:
     preset_ids = [
         str(getattr(preset, "preset_id", "") or "").strip()
@@ -882,9 +945,13 @@ def _delivery_preset_list_tooltip(presets: Sequence[object]) -> str:
     ]
     return "输出版本 ID：" + _join_values(preset_ids)
 
+
 def _report_level_display(report_level: object) -> str:
     normalized = str(report_level or "").strip()
-    return REPORT_LEVEL_DISPLAY_LABELS.get(normalized, _display_id(normalized, REPORT_LEVEL_DISPLAY_LABELS))
+    return REPORT_LEVEL_DISPLAY_LABELS.get(
+        normalized, _display_id(normalized, REPORT_LEVEL_DISPLAY_LABELS)
+    )
+
 
 def _delivery_overview_detail(scene: SceneWorkspace) -> str:
     presets = list(getattr(scene, "delivery_presets", []) or [])
@@ -893,6 +960,7 @@ def _delivery_overview_detail(scene: SceneWorkspace) -> str:
     names = [_delivery_preset_display_name(preset) for preset in presets[:3]]
     suffix = " 等" if len(presets) > 3 else ""
     return f"共 {len(presets)} 个输出版本：{_join_values(names)}{suffix}"
+
 
 def _markdown_policy_sentence(policy: object) -> str:
     normalized = str(policy or "").strip()
@@ -904,6 +972,7 @@ def _markdown_policy_sentence(policy: object) -> str:
         return "Markdown 可预览并清理"
     return f"Markdown {MARKDOWN_POLICY_LABELS.get(normalized, normalized)}"
 
+
 def _latex_policy_sentence(policy: object) -> str:
     normalized = str(policy or "").strip()
     if normalized == "disabled":
@@ -912,14 +981,17 @@ def _latex_policy_sentence(policy: object) -> str:
         return "LaTeX 只处理公式片段"
     return f"LaTeX {LATEX_POLICY_LABELS.get(normalized, normalized)}"
 
+
 def _display_id(value: object, mapping: dict[str, str]) -> str:
     normalized = str(value or "").strip()
     if not normalized:
         return ""
     return mapping.get(normalized, normalized.replace("_", " "))
 
+
 def _display_list(values: Sequence[object], mapping: dict[str, str]) -> str:
     return _join_values(_display_id(value, mapping) for value in values)
+
 
 def _boundary_text_display(text: object) -> str:
     normalized = str(text or "").strip()
@@ -932,6 +1004,7 @@ def _boundary_text_display(text: object) -> str:
             return replacement
     return normalized
 
+
 def _planning_preflight_recommendation_item(
     scene: SceneWorkspace,
 ) -> SummaryGridItem | None:
@@ -940,7 +1013,9 @@ def _planning_preflight_recommendation_item(
         return None
     configured = {
         str(target or "").strip()
-        for target in getattr(scene.compliance_profile.object_preflight, "scan_targets", [])
+        for target in getattr(
+            scene.compliance_profile.object_preflight, "scan_targets", []
+        )
         if str(target or "").strip()
     }
     target_set = set(targets)
@@ -961,6 +1036,7 @@ def _planning_preflight_recommendation_item(
         variant=variant,
     )
 
+
 def _planned_family_for_scene(scene: SceneWorkspace):
     for candidate in coverage_candidate_keys_for_config(scene):
         try:
@@ -969,14 +1045,17 @@ def _planned_family_for_scene(scene: SceneWorkspace):
             continue
     return None
 
+
 def _coverage_packs_for_scene(scene: SceneWorkspace) -> tuple[SceneCoveragePack, ...]:
     return coverage_packs_for_config(scene)
+
 
 def _first_closure_task(packs: Sequence[SceneCoveragePack]):
     for pack in packs:
         if pack.closure_tasks:
             return pack.closure_tasks[0]
     return None
+
 
 def _coverage_pack_tooltip(packs: Sequence[SceneCoveragePack]) -> str:
     lines: list[str] = []
@@ -987,12 +1066,14 @@ def _coverage_pack_tooltip(packs: Sequence[SceneCoveragePack]) -> str:
             lines.append("未闭合：" + "；".join(pack.missing_closures[:3]))
     return "\n".join(lines)
 
+
 def _coverage_pack_value(packs: Sequence[SceneCoveragePack]) -> str:
     if not packs:
         return "未匹配"
     if len(packs) == 1:
         return _coverage_pack_display_name(packs[0].pack_id)
     return f"{len(packs)} 类方案"
+
 
 def _coverage_pack_detail(packs: Sequence[SceneCoveragePack]) -> str:
     if not packs:
@@ -1002,8 +1083,10 @@ def _coverage_pack_detail(packs: Sequence[SceneCoveragePack]) -> str:
         return f"处理：{_coverage_pack_display_name(pack.pack_id)}；注意：{_boundary_text_display(pack.boundary)}"
     return _join_values(_coverage_pack_display_name(pack.pack_id) for pack in packs)
 
+
 def _coverage_pack_display_name(pack_id: object) -> str:
     return _display_id(pack_id, COVERAGE_PACK_DISPLAY_LABELS)
+
 
 def _closure_task_tooltip(task) -> str:
     lines = [
@@ -1014,6 +1097,7 @@ def _closure_task_tooltip(task) -> str:
     ]
     lines.extend("验收：" + command for command in task.validation_commands)
     return "\n".join(lines)
+
 
 def _artifact_summary(artifacts) -> str:
     if artifacts is None:
@@ -1035,6 +1119,7 @@ def _artifact_summary(artifacts) -> str:
         names.append("资料包")
     return " / ".join(names) if names else "仅运行不输出"
 
+
 def _delivery_artifact_detail(preset) -> str:
     rule_count = (
         len(list(getattr(preset, "content_visibility_rules", []) or []))
@@ -1045,12 +1130,15 @@ def _delivery_artifact_detail(preset) -> str:
         return f"显隐规则 {rule_count} 条 / 由当前输出版本决定"
     return "由当前输出版本决定"
 
+
 def _failure_variant(policy: str) -> str:
     return "warning" if policy == "block" else "neutral"
+
 
 def _join_values(values: Sequence[object]) -> str:
     normalized = [str(value).strip() for value in values if str(value or "").strip()]
     return " / ".join(normalized) if normalized else "无"
+
 
 def scene_document_scope_mode(scene: SceneWorkspace | None) -> str:
     scope = getattr(scene, "document_scope", None)
@@ -1059,9 +1147,11 @@ def scene_document_scope_mode(scene: SceneWorkspace | None) -> str:
         return mode
     return "all"
 
+
 def scene_document_scope_display_name(scene: SceneWorkspace | None) -> str:
     mode = scene_document_scope_mode(scene)
     return DOCUMENT_SCOPE_DISPLAY_LABELS[mode]
+
 
 def scene_document_scope_detail(scene: SceneWorkspace | None) -> str:
     if scene is None or scene_document_scope_mode(scene) != "selected":

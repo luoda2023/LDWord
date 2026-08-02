@@ -1,0 +1,42 @@
+version: "Alavette Form V1.0"
+capture:
+  dpi_scale: "100%"
+  viewport: "1224x824"
+  theme: "light"
+  language: "zh-CN"
+  privacy: "demo-only"
+screenshots:
+  - id: S01
+    file: "../screenshots/01-workbench-overview.png"
+    purpose: "工作台、左侧导航和通用版入口"
+    source: "native-ui"
+    required_text:
+      - "工作台"
+      - "文档执行"
+      - "通用版"
+  - id: S02
+    file: "../screenshots/02-document-selected.png"
+    purpose: "已选择快速开始示例 DOCX"
+    source: "native-ui"
+    required_text:
+      - "快速开始示例.docx"
+      - "处理方案与模板"
+  - id: S03
+    file: "../screenshots/03-output-and-generate.png"
+    purpose: "输出目录、预检状态和生成入口"
+    source: "native-ui"
+    required_text:
+      - "输出目录"
+      - "生成文档"
+  - id: S04
+    file: "../screenshots/04-ai-assistant-overview.png"
+    purpose: "AI 文档助手的材料、对话、计划和确认流程"
+    source: "native-ui"
+    required_text:
+      - "AI 文档助手"
+      - "七年级数学"
+quality_gates:
+  - "中文无方框或乱码"
+  - "没有真实用户名、目录、密钥或业务资料"
+  - "目标控件未被裁切"
+  - "截图与 V1.0 最终界面一致"

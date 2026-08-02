@@ -1015,6 +1015,8 @@ def apply_planned_scene_family_defaults(
 
 def _apply_thesis_cn_defaults(scene: SceneWorkspace) -> SceneFamilyApplicationResult:
     family = get_planned_scene_family("thesis_cn")
+    scene.mode_id = "thesis"
+    scene.ensure_thesis_formula_rules()
     profile = scene.input_source_profile
     profile.accepted_formats = _merged_values(profile.accepted_formats, family.input_formats)
     profile.structured_formats = _merged_values(profile.structured_formats, ("json",))
@@ -1072,7 +1074,6 @@ def _apply_thesis_cn_defaults(scene: SceneWorkspace) -> SceneFamilyApplicationRe
             "validation",
             "citation_link",
             "reference_format",
-            "equation_table_format",
             "caption",
             "toc",
         ),
@@ -1147,7 +1148,6 @@ def _apply_journal_en_defaults(scene: SceneWorkspace) -> SceneFamilyApplicationR
             "validation",
             "citation_link",
             "reference_format",
-            "equation_table_format",
             "caption",
             "figure_table_center",
             "toc",
@@ -1348,7 +1348,6 @@ def _apply_exam_teaching_defaults(scene: SceneWorkspace) -> SceneFamilyApplicati
             "placeholder_replace",
             "image_insertion",
             "validation",
-            "equation_table_format",
             "caption",
             "figure_table_center",
         ),
@@ -1435,7 +1434,6 @@ def _apply_long_document_publishing_defaults(
             "caption",
             "table_format",
             "figure_table_center",
-            "equation_table_format",
             "md_cleanup",
             "whitespace_normalize",
         ),

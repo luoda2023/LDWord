@@ -1,8 +1,10 @@
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,8 +22,11 @@ from src.config.style_semantics import resolve_style_size_pt
 from src.config.template import StyleConfig, TemplateConfig
 from src.modules.basic.paragraph_style import ParagraphStyleModule
 from src.modules.registry import create_all_modules
+from src.pipeline.context import PipelineContext
 from src.pipeline.module_selection import build_module_selection_plan
 from src.pipeline.runner import Pipeline
+from src.pipeline.tracker import ChangeTracker
+from src.shared.engine.ooxml_ops import qn
 from src.ui.adapters.heading_numbering_adapter import HeadingNumberingAdapter
 from src.ui.panels.template_preview.model import PreviewBlockKind, TemplatePreviewMode
 from src.ui.panels.template_preview.projector import build_template_preview_projection
@@ -93,6 +98,93 @@ def test_non_numbered_heading_style_accepts_resolved_config():
     assert style is not None
     assert resolve_style_size_pt(style) == 13.0
     assert style.italic is True
+
+
+def test_non_numbered_heading_gets_the_word_style_used_by_styleref():
+    document = Document()
+    paragraph = document.add_heading("参考文献", level=1)
+    template = TemplateConfig()
+    template.styles["heading1"] = StyleConfig(size_pt=16, bold=True)
+    config = resolve_config(template, SceneWorkspace())
+    context = PipelineContext(
+        doc_tree=SimpleNamespace(
+            get_special_title_match=lambda index: (
+                "special-title:exact:test" if index == 0 else None
+            ),
+            get_section_for_paragraph=lambda _index: "references",
+        )
+    )
+
+    ParagraphStyleModule().apply(
+        document,
+        config,
+        ChangeTracker(),
+        context,
+    )
+
+    expected_style = config.heading_model.non_numbered_heading_style_name
+    assert paragraph.style.name == expected_style
+    assert document.styles[expected_style].base_style.name == "Heading 1"
+
+
+def test_next_page_section_setting_applies_page_break_to_body_chapters_only():
+    document = Document()
+    chapter = document.add_heading("第一章 绪论", level=1)
+    references = document.add_heading("参考文献", level=1)
+    template = TemplateConfig()
+    template.styles["heading1"] = StyleConfig(size_pt=16, bold=True)
+    template.section.section_break_type = "nextPage"
+    config = resolve_config(template, SceneWorkspace())
+    context = PipelineContext(
+        doc_tree=SimpleNamespace(
+            get_special_title_match=lambda index: (
+                "special-title:exact:test" if index == 1 else None
+            ),
+            get_section_for_paragraph=lambda index: (
+                "body" if index == 0 else "references"
+            ),
+        )
+    )
+
+    ParagraphStyleModule().apply(
+        document,
+        config,
+        ChangeTracker(),
+        context,
+    )
+
+    assert chapter.paragraph_format.page_break_before is True
+    assert references.paragraph_format.page_break_before is not True
+
+
+def test_paragraph_formatting_keeps_section_properties_as_the_last_ppr_child():
+    document = Document()
+    paragraph = document.add_paragraph("摘要正文")
+    paragraph_properties = paragraph._p.get_or_add_pPr()
+    paragraph_properties.append(OxmlElement("w:sectPr"))
+    paragraph_properties.append(OxmlElement("w:pPrChange"))
+    template = TemplateConfig()
+    template.styles["normal"] = StyleConfig(
+        size_pt=12,
+        space_before_pt=6,
+        space_after_pt=6,
+    )
+    config = resolve_config(template, SceneWorkspace())
+
+    ParagraphStyleModule().apply(
+        document,
+        config,
+        ChangeTracker(),
+        PipelineContext(),
+    )
+
+    children = list(paragraph._p.get_or_add_pPr())
+    child_tags = [child.tag for child in children]
+    assert paragraph._p[0] is paragraph._p.pPr
+    assert child_tags.index(qn("w:spacing")) < child_tags.index(qn("w:ind"))
+    assert child_tags.index(qn("w:ind")) < child_tags.index(qn("w:jc"))
+    assert child_tags.index(qn("w:jc")) < child_tags.index(qn("w:sectPr"))
+    assert child_tags.index(qn("w:sectPr")) < child_tags.index(qn("w:pPrChange"))
 
 
 def test_preview_adapter_and_runtime_share_heading_body_fallback(tmp_path):

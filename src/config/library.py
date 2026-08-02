@@ -8,39 +8,45 @@ The runtime library has one mode-scoped source of truth:
 
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 import os
-from pathlib import Path
 import tempfile
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
-from src.config.builtin_templates import (
-    canonical_template_root,
-    create_builtin_template,
-    list_builtin_template_resources,
-)
+from src.app_paths import config_library_data_root
+from src.config.atomic_io import atomic_write_bytes
 from src.config.builtin_scenes import (
     canonical_scene_root,
     create_builtin_scene,
     list_builtin_scene_resources,
 )
+from src.config.builtin_templates import (
+    canonical_template_root,
+    create_builtin_template,
+    list_builtin_template_resources,
+)
 from src.config.canonical_resource import assert_non_symbolic_resource_path
-from src.config.atomic_io import atomic_write_bytes
 from src.config.loader import (
     ConfigLoadError,
+    load_compatible_user_template,
     load_scene,
     load_template,
     save_scene,
     save_template,
 )
+
 DEFAULT_TEMPLATE_ID = "default"
 DEFAULT_SCENE_ID = "custom"
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CONFIG_LIBRARY_ROOT = _PROJECT_ROOT / "config_library"
+CONFIG_LIBRARY_ROOT = config_library_data_root()
 TEMPLATE_LIBRARY_DIR = CONFIG_LIBRARY_ROOT / "templates"
 SCENE_LIBRARY_DIR = CONFIG_LIBRARY_ROOT / "plans"
 _TEMPLATE_CONFIG_SUFFIXES: tuple[str, ...] = (".json", ".yaml", ".yml")
@@ -52,6 +58,10 @@ _IN_PLACE_SCENE_VALIDATION_DIGESTS: dict[str, str] = {}
 _SCENE_CREATE_LOCKS_GUARD = threading.Lock()
 _SCENE_CREATE_LOCKS: dict[str, threading.RLock] = {}
 _SCENE_RECOVERY_PREFIX = ".scene-recovery-"
+_LIBRARY_ENSURE_SESSION: ContextVar[set[str] | None] = ContextVar(
+    "config_library_ensure_session",
+    default=None,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,20 +168,45 @@ def ensure_config_library() -> None:
     ensure_scene_library()
 
 
+@contextmanager
+def library_read_session() -> Iterator[None]:
+    """Share successful library materialization within one bounded read flow."""
+
+    active = _LIBRARY_ENSURE_SESSION.get()
+    if active is not None:
+        yield
+        return
+    token = _LIBRARY_ENSURE_SESSION.set(set())
+    try:
+        yield
+    finally:
+        _LIBRARY_ENSURE_SESSION.reset(token)
+
+
 def ensure_template_library() -> None:
     """Materialize only the template runtime library."""
 
+    session = _LIBRARY_ENSURE_SESSION.get()
+    if session is not None and "template" in session:
+        return
     _seed_template_library()
+    if session is not None:
+        session.add("template")
 
 
 def ensure_scene_library() -> None:
     """Materialize only the plan runtime library."""
 
+    session = _LIBRARY_ENSURE_SESSION.get()
+    if session is not None and "scene" in session:
+        return
     # A plan cannot be seeded or normalized before its exact template
     # identities exist.  Keep this ordering local so direct scene-library
     # callers cannot create half-resolved plans.
-    _seed_template_library()
+    ensure_template_library()
     _seed_scene_library()
+    if session is not None:
+        session.add("scene")
 
 
 def list_template_entries(mode_id: str | None = None) -> list[ConfigLibraryEntry]:
@@ -299,7 +334,9 @@ def _load_template_entry_config(
 ):
     """Load the exact library resource without applying a second source."""
 
-    del template_id, source_type
+    del template_id
+    if source_type == "user":
+        return load_compatible_user_template(path)
     return load_template(path)
 
 
@@ -2411,14 +2448,18 @@ def _seed_template_library() -> None:
             # strict factory load above is sufficient; comparing the same
             # bytes after a second materialization cannot add evidence.
             pass
-        elif target.exists():
-            if asdict(load_template(target)) != asdict(canonical_template):
-                raise ConfigLoadError(
-                    "Built-in template differs from its canonical resource: "
-                    f"{mode_id}/{template_id}"
-                )
-        else:
+        elif not target.exists():
             save_template(canonical_template, target)
+        else:
+            try:
+                target_matches = asdict(load_template(target)) == asdict(canonical_template)
+            except ConfigLoadError:
+                # Runtime builtin copies are application-owned cache.  A schema
+                # expansion must replace an older canonical copy instead of
+                # failing before the new builtin can be seeded.
+                target_matches = False
+            if not target_matches:
+                save_template(canonical_template, target)
         _IN_PLACE_TEMPLATE_VALIDATION_DIGESTS[cache_key] = _builtin_pair_digest(
             canonical_path,
             target,
@@ -2453,13 +2494,9 @@ def _seed_scene_library() -> None:
         canonical_scene = create_builtin_scene(scene_id, mode_id=mode_id)
         if _is_same_lexical_path(canonical_path, target):
             pass
-        elif target.exists():
-            if asdict(load_scene(target)) != asdict(canonical_scene):
-                raise ConfigLoadError(
-                    "Built-in plan differs from its canonical resource: "
-                    f"{mode_id}/{scene_id}"
-                )
-        else:
+        elif not target.exists() or asdict(load_scene(target)) != asdict(
+            canonical_scene
+        ):
             save_scene(canonical_scene, target)
         _IN_PLACE_SCENE_VALIDATION_DIGESTS[cache_key] = _builtin_pair_digest(
             canonical_path,
@@ -2578,7 +2615,6 @@ def _normalize_scene_templates(scene, *, mode_id: str | None = None):
     )
     normalized_scene.compatible_template_ids = compatible_ids
     _set_scene_mode(normalized_scene, mode)
-    _validate_scene_material_contract(normalized_scene, mode_id=mode)
     _validate_scene_master_id(normalized_scene, mode_id=mode)
     return normalized_scene
 
@@ -2619,83 +2655,6 @@ def _set_scene_mode(scene, mode_id: str) -> None:
     if not normalized:
         return
     scene.mode_id = normalized
-
-
-def _validate_scene_material_contract(scene, *, mode_id: str) -> None:
-    if _normalize_mode_id(mode_id) != "official":
-        return
-    raw_profile_id = str(
-        getattr(scene, "default_material_profile_id", "") or ""
-    ).strip()
-    if not raw_profile_id:
-        raise ConfigReferenceResolutionError(
-            "plan_official_profile_ref_missing:"
-            " field=default_material_profile_id"
-        )
-    if not raw_profile_id.startswith("official:") or raw_profile_id.count(":") != 1:
-        raise ConfigReferenceResolutionError(
-            "plan_official_profile_ref_invalid:"
-            f" profile_id={raw_profile_id}"
-        )
-    profile_id = raw_profile_id.split(":", 1)[1].strip()
-    if not profile_id:
-        raise ConfigReferenceResolutionError(
-            "plan_official_profile_ref_missing:"
-            " field=default_material_profile_id"
-        )
-    from src.config.official_document_profiles import (
-        get_official_document_assembly_contract,
-    )
-    contract = get_official_document_assembly_contract(profile_id)
-    if contract is None:
-        raise ConfigReferenceResolutionError(
-            "plan_official_profile_ref_unresolved:"
-            f" profile_id={profile_id}"
-        )
-
-    profile = getattr(scene, "input_source_profile", None)
-    if profile is None:
-        raise ConfigReferenceResolutionError(
-            "plan_official_material_contract_missing:"
-            " field=input_source_profile"
-        )
-
-    expected_schema_ids = tuple(contract.material_schema_ids)
-    declared_schema_id = str(
-        getattr(profile, "material_schema_id", "") or ""
-    ).strip()
-    declared_schema_ids = tuple(
-        str(item or "").strip()
-        for item in getattr(profile, "material_schema_ids", []) or []
-    )
-    if (
-        declared_schema_id != expected_schema_ids[0]
-        or declared_schema_ids != expected_schema_ids
-    ):
-        raise ConfigReferenceResolutionError(
-            "plan_official_material_schema_mismatch:"
-            f" profile_id={profile_id};"
-            f" expected={','.join(expected_schema_ids)};"
-            f" actual_primary={declared_schema_id or '<empty>'};"
-            f" actual={','.join(declared_schema_ids) or '<empty>'}"
-        )
-
-    expected_required_fields = tuple(
-        str(getattr(binding, "field_key", "") or "").strip()
-        for binding in contract.field_bindings
-        if bool(getattr(binding, "required", False))
-    )
-    declared_required_fields = tuple(
-        str(item or "").strip()
-        for item in getattr(profile, "required_material_fields", []) or []
-    )
-    if declared_required_fields != expected_required_fields:
-        raise ConfigReferenceResolutionError(
-            "plan_official_required_material_fields_mismatch:"
-            f" profile_id={profile_id};"
-            f" expected={','.join(expected_required_fields)};"
-            f" actual={','.join(declared_required_fields) or '<empty>'}"
-        )
 
 
 def _available_scene_template_ids(
@@ -2741,7 +2700,11 @@ def _template_id_is_available(template_id: str, *, mode_id: str | None = None) -
     if path is None:
         return False
     try:
-        load_template(path)
+        source_type = _source_type_from_scoped_path(path, TEMPLATE_LIBRARY_DIR)
+        if source_type == "user":
+            load_compatible_user_template(path)
+        else:
+            load_template(path)
     except ConfigLoadError:
         return False
     return True
@@ -2968,7 +2931,12 @@ def _list_entries(
         load_error = ""
         resolved_source_type = _source_type_from_scoped_path(path, directory)
         try:
-            cfg = loader(path)
+            cfg = _load_discovered_config(
+                kind,
+                path,
+                resolved_source_type,
+                loader,
+            )
         except _EXTERNAL_CONFIG_LOAD_ERRORS as exc:
             cfg = None
             load_error = f"{type(exc).__name__}: {exc}"
@@ -3017,7 +2985,12 @@ def _get_entry(
     load_error = ""
     resolved_source_type = _source_type_from_scoped_path(path, directory)
     try:
-        cfg = loader(path)
+        cfg = _load_discovered_config(
+            kind,
+            path,
+            resolved_source_type,
+            loader,
+        )
     except _EXTERNAL_CONFIG_LOAD_ERRORS as exc:
         cfg = None
         load_error = f"{type(exc).__name__}: {exc}"
@@ -3031,6 +3004,12 @@ def _get_entry(
         source_type=resolved_source_type,
         load_error=load_error,
     )
+
+
+def _load_discovered_config(kind: str, path: Path, source_type: str, loader):
+    if kind == "template" and source_type == "user":
+        return load_compatible_user_template(path)
+    return loader(path)
 
 
 def _find_config_path(
@@ -3235,7 +3214,7 @@ def _mode_id_for_scene_id(scene_id: str) -> str:
 
 
 def _default_scene_id_for_mode(mode_id: str | None = None) -> str:
-    from src.config.work_mode import get_work_mode, default_work_mode
+    from src.config.work_mode import default_work_mode, get_work_mode
 
     requested = str(mode_id or "").strip()
     mode = get_work_mode(requested) if requested else default_work_mode()
@@ -3245,7 +3224,7 @@ def _default_scene_id_for_mode(mode_id: str | None = None) -> str:
 
 
 def _default_template_id_for_mode(mode_id: str | None = None) -> str:
-    from src.config.work_mode import get_work_mode, default_work_mode
+    from src.config.work_mode import default_work_mode, get_work_mode
 
     requested = str(mode_id or "").strip()
     mode = get_work_mode(requested) if requested else default_work_mode()

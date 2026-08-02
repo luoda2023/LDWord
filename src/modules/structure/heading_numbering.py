@@ -17,14 +17,23 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from src.config.special_title_rules import match_special_title
 from src.modules.base import BaseModule, ModuleMeta
 from src.shared.engine.document_scope_runtime import document_scope_allows_paragraph
-from src.shared.engine.heading_numbering_format import format_heading_level_number
-from src.shared.engine.ooxml_ops import qn, find_or_create
+from src.shared.engine.heading_numbering_ooxml import (
+    clear_paragraph_numbering,
+    disable_paragraph_numbering,
+    ensure_heading_numbering_definition,
+    link_style_to_numbering,
+    set_paragraph_numbering,
+    unlink_style_numbering,
+)
+from src.shared.engine.ooxml_ops import find_or_create, qn
 
 if TYPE_CHECKING:
     from docx import Document
     from docx.text.paragraph import Paragraph
+
     from src.config.resolved import ResolvedConfig
     from src.config.template import HeadingLevelBindingConfig
     from src.pipeline.context import PipelineContext
@@ -45,6 +54,12 @@ _EXISTING_NUMBER_RE = re.compile(
     r"|[a-zA-Z][.)]\s*"
     r")"
 )
+
+
+def has_literal_heading_number_prefix(text: str) -> bool:
+    """Return whether visible paragraph text starts with a heading number."""
+
+    return _EXISTING_NUMBER_RE.match(str(text or "")) is not None
 
 # ── 模块主体 ────────────────────────────────────
 
@@ -99,8 +114,43 @@ class HeadingNumberingModule(BaseModule):
                 after="no enabled heading levels in the committed template",
             )
             return
-        counters: list[int] = [0] * 10
-        counter_started: list[bool] = [False] * 10
+        num_id = ensure_heading_numbering_definition(
+            doc,
+            level_bindings,
+            max_levels=max_levels,
+        )
+        style_map = getattr(config.heading_model, "level_to_word_style", {}) or {}
+        whole_document = (
+            str(getattr(context.document_scope, "mode", "all") or "all") == "all"
+        )
+        numbered_style_names: set[str] = set()
+        if whole_document:
+            for level in range(1, 9):
+                style_name = str(
+                    style_map.get(f"heading{level}") or f"Heading {level}"
+                )
+                try:
+                    style = doc.styles[style_name]
+                except KeyError:
+                    continue
+                binding = level_bindings.get(f"heading{level}")
+                if (
+                    level <= max_levels
+                    and binding is not None
+                    and bool(getattr(binding, "enabled", False))
+                ):
+                    link_style_to_numbering(style, num_id, level)
+                    numbered_style_names.add(style_name)
+                else:
+                    unlink_style_numbering(style)
+            for paragraph in doc.paragraphs:
+                paragraph_style_name = paragraph.style.name if paragraph.style else ""
+                if (
+                    paragraph_style_name in numbered_style_names
+                    and not (paragraph.text or "").strip()
+                ):
+                    disable_paragraph_numbering(paragraph)
+
         count = 0
 
         for i, para in enumerate(doc.paragraphs):
@@ -113,40 +163,43 @@ class HeadingNumberingModule(BaseModule):
             binding_key = f"heading{level}"
             binding = level_bindings.get(binding_key)
 
+            if not (para.text or "").strip():
+                disable_paragraph_numbering(para)
+                _set_toc_outline_level(para, level, binding)
+                continue
+
             # 超出级数上限 → 只设 outline level, 不编号
             if level > max_levels:
+                disable_paragraph_numbering(para)
                 _set_toc_outline_level(para, level, binding)
                 continue
 
             if _should_skip_numbering(para, non_numbered, non_numbered_pfx):
+                disable_paragraph_numbering(para)
                 _set_toc_outline_level(para, level, binding)
                 continue
 
             if not binding or not binding.enabled:
+                disable_paragraph_numbering(para)
                 _set_toc_outline_level(para, level, binding)
                 continue
 
-            if not counter_started[level]:
-                start_at = getattr(binding, "start_at", 1)
-                counters[level] = 1 if start_at is None else int(start_at)
-                counter_started[level] = True
-            else:
-                counters[level] += 1
-
-            number_text = format_heading_level_number(
-                level,
-                counters,
-                binding,
-                level_bindings,
-            )
             _strip_existing_number(para)
+            style_name = str(
+                style_map.get(f"heading{level}") or f"Heading {level}"
+            )
+            try:
+                para.style = doc.styles[style_name]
+            except KeyError:
+                pass
 
-            if number_text:
-                _prepend_number(para, number_text)
-                count += 1
+            if whole_document:
+                clear_paragraph_numbering(para)
+            else:
+                set_paragraph_numbering(para, num_id, level)
+            count += 1
 
             _set_toc_outline_level(para, level, binding)
-            _reset_deeper_counters(level, counters, counter_started, level_bindings)
 
         if not count:
             recognized_levels = sorted(set(heading_map.values()))
@@ -165,8 +218,8 @@ class HeadingNumberingModule(BaseModule):
                 target=f"{count} 个标题",
                 section="global",
                 change_type="format",
-                before="(mixed/无编号)",
-                after="已添加编号",
+                before="(文字编号/旧自动编号/无编号)",
+                after="已应用 Word 原生多级编号",
             )
 
 
@@ -188,18 +241,14 @@ def _should_skip_numbering(
     style_name = para.style.name if para.style else ""
     if "unnumbered" in style_name.lower():
         return True
-    # 清除旧编号后的纯文本
-    text = (para.text or "").strip()
-    match = _EXISTING_NUMBER_RE.match(text)
-    clean_text = text[match.end():].strip() if match else text
-    # 第2层: 精确匹配
-    if clean_text in non_numbered:
-        return True
-    # 第3层: 前缀匹配
-    for prefix in non_numbered_prefixes:
-        if clean_text.startswith(prefix):
-            return True
-    return False
+    return (
+        match_special_title(
+            para.text,
+            exact_values=non_numbered,
+            prefix_values=non_numbered_prefixes,
+        )
+        is not None
+    )
 
 
 def _strip_existing_number(para: Paragraph) -> None:

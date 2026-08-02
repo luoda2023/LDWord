@@ -18,7 +18,6 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from src.assistant.runtime.provider_contract import (
-    MAX_PROVIDER_OUTPUT_CHARACTERS,
     PROVIDER_DONE,
     PROVIDER_ERROR,
     PROVIDER_START,
@@ -26,7 +25,10 @@ from src.assistant.runtime.provider_contract import (
     ProviderRequest,
     ProviderStreamEvent,
 )
-
+from src.assistant.runtime.providers.endpoint_security import (
+    provider_origin,
+    validate_provider_endpoint,
+)
 
 DEFAULT_OPENAI_COMPATIBLE_BASE_URL = "https://api.openai.com/v1"
 _MAX_SSE_PENDING_CHARACTERS = 1_000_000
@@ -92,7 +94,9 @@ class OpenAICompatibleModelGateway:
         self.config = OpenAICompatibleConfig(
             model=str(model),
             api_key=str(api_key),
-            base_url=str(base_url or DEFAULT_OPENAI_COMPATIBLE_BASE_URL),
+            base_url=validate_provider_endpoint(
+                str(base_url or DEFAULT_OPENAI_COMPATIBLE_BASE_URL)
+            ),
             timeout_seconds=float(timeout_seconds),
             extra_body=dict(extra_body or {}),
             retry_max_attempts=max(1, int(retry_max_attempts)),
@@ -111,7 +115,6 @@ class OpenAICompatibleModelGateway:
         yield ProviderStreamEvent(PROVIDER_START, metadata=metadata)
         emitted_delta = False
         parts: list[str] = []
-        output_character_count = 0
         for attempt in range(1, self.config.retry_max_attempts + 1):
             response: Any = None
             try:
@@ -132,11 +135,6 @@ class OpenAICompatibleModelGateway:
                     done_metadata.update(_usage_metadata(payload))
                     text = _extract_delta_text(payload)
                     if text:
-                        output_character_count += len(text)
-                        if output_character_count > MAX_PROVIDER_OUTPUT_CHARACTERS:
-                            raise OpenAICompatibleProtocolError(
-                                "Provider output exceeded the configured character limit"
-                            )
                         emitted_delta = True
                         parts.append(text)
                         yield ProviderStreamEvent(
@@ -244,7 +242,8 @@ def _post_sse(http_request: OpenAICompatibleHttpRequest) -> Iterable[str | bytes
         method="POST",
     )
     try:
-        return urllib_request.urlopen(request, timeout=http_request.timeout_seconds)
+        opener = urllib_request.build_opener(_CredentialSafeRedirectHandler())
+        return opener.open(request, timeout=http_request.timeout_seconds)
     except urllib_error.HTTPError as exc:
         text = exc.read().decode("utf-8", errors="replace")
         raise OpenAICompatibleTransportError(
@@ -252,12 +251,32 @@ def _post_sse(http_request: OpenAICompatibleHttpRequest) -> Iterable[str | bytes
             status_code=int(exc.code),
             retryable=_retryable_status(int(exc.code)),
         ) from exc
-    except (TimeoutError, socket.timeout) as exc:
+    except TimeoutError as exc:
         raise OpenAICompatibleTransportError("Provider request timed out", retryable=True) from exc
     except urllib_error.URLError as exc:
         raise OpenAICompatibleTransportError(
             f"Provider connection failed: {exc.reason}", retryable=True
         ) from exc
+
+
+class _CredentialSafeRedirectHandler(urllib_request.HTTPRedirectHandler):
+    """Reject redirects that could move a Bearer credential to another origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            source_origin = provider_origin(req.full_url)
+            target_origin = provider_origin(newurl)
+        except ValueError as exc:
+            raise OpenAICompatibleTransportError(
+                f"Provider redirect was rejected: {exc}",
+                retryable=False,
+            ) from exc
+        if req.has_header("Authorization") and source_origin != target_origin:
+            raise OpenAICompatibleTransportError(
+                "Provider redirect changed origin while authorization was present",
+                retryable=False,
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 _SSE_DONE = object()
@@ -275,7 +294,7 @@ def _iter_sse_payloads(response: Iterable[str | bytes]) -> Iterator[Mapping[str,
             continue
         if line.startswith("data:"):
             value = line[5:]
-            data_lines.append(value[1:] if value.startswith(" ") else value)
+            data_lines.append(value.removeprefix(" "))
             continue
         raise OpenAICompatibleProtocolError(f"Malformed SSE field: {line[:80]}")
     if data_lines:
@@ -298,9 +317,9 @@ def _decoded_sse_lines(chunks: Iterable[str | bytes]) -> Iterator[str]:
             )
         while "\n" in pending:
             line, pending = pending.split("\n", 1)
-            yield line[:-1] if line.endswith("\r") else line
+            yield line.removesuffix("\r")
     if pending:
-        yield pending[:-1] if pending.endswith("\r") else pending
+        yield pending.removesuffix("\r")
 
 
 def _parse_sse_data(data: str) -> Mapping[str, Any] | object:
@@ -370,6 +389,11 @@ def _retryable_status(status: int) -> bool:
 def _is_retryable(exc: Exception) -> bool:
     if isinstance(exc, OpenAICompatibleTransportError):
         return exc.retryable
+    if (
+        isinstance(exc, OpenAICompatibleProtocolError)
+        and str(exc) == "Provider stream ended before [DONE]"
+    ):
+        return True
     return isinstance(exc, (TimeoutError, socket.timeout, ConnectionError, urllib_error.URLError))
 
 

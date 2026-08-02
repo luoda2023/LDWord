@@ -1,0 +1,45 @@
+# -*- mode: python ; coding: utf-8 -*-
+
+
+a = Analysis(
+    ['main.py'],
+    pathex=[],
+    binaries=[],
+    datas=[('defaults', 'defaults'), ('build\\release_config_library', 'config_library'), ('count_profiles', 'count_profiles'), ('src\\shared\\ui\\icons', 'src\\shared\\ui\\icons'), ('LICENSE', '.'), ('THIRD_PARTY_NOTICES.md', '.'), ('RELEASE_NOTES.md', '.'), ('SECURITY.md', '.'), ('licenses', 'licenses')],
+    hiddenimports=['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtSvg', 'shiboken6', 'latex2mathml', 'olefile', 'pythoncom', 'win32com.client', 'src.shared.io.mathtype_office_fallback', 'src.ui.panels.workbench', 'src.ui.panels.workbench.panel_v2', 'src.ui.panels.workbench.batch_generation_source_area', 'src.ui.panels.scene_panel', 'src.ui.panels.template_panel', 'src.ui.panels.theme_panel', 'src.ui.panels.assets_panel', 'src.assistant.ui.assistant_panel', 'src.ui.panels.preferences_panel', 'src.domain.materials', 'src.application.materials', 'src.infrastructure.materials.repository', 'src.document_batch.plan', 'src.material_suite.plan', 'src.material_suite.runner', 'src.shared.ui.button_style', 'src.shared.ui.dashed_separator', 'src.shared.ui.detail_pane_controller', 'src.shared.ui.dialogs', 'src.shared.ui.dynamic_navigation_rail', 'src.shared.ui.flow_layout', 'src.shared.ui.flow_section', 'src.shared.ui.input_style', 'src.shared.ui.library_action_row', 'src.shared.ui.master_detail_shell', 'src.shared.ui.navigation_card', 'src.shared.ui.preview_dialog', 'src.shared.ui.selection_control_style', 'src.shared.ui.styled_combo_box', 'src.shared.ui.summary_grid', 'src.shared.ui.template_summary_card', 'src.shared.ui.themed_radio_button', 'src.shared.ui.theme', 'src.shared.ui.toast'],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=['scripts\\windows\\pyinstaller_font_engine_hook.py'],
+    excludes=['PySide6.Qt3DAnimation', 'PySide6.Qt3DCore', 'PySide6.Qt3DExtras', 'PySide6.Qt3DInput', 'PySide6.Qt3DLogic', 'PySide6.Qt3DRender', 'PySide6.QtBluetooth', 'PySide6.QtCharts', 'PySide6.QtDataVisualization', 'PySide6.QtDesigner', 'PySide6.QtHelp', 'PySide6.QtGraphs', 'PySide6.QtGraphsWidgets', 'PySide6.QtHttpServer', 'PySide6.QtLocation', 'PySide6.QtMultimedia', 'PySide6.QtMultimediaWidgets', 'PySide6.QtNetworkAuth', 'PySide6.QtNfc', 'PySide6.QtOpenGL', 'PySide6.QtOpenGLWidgets', 'PySide6.QtPdf', 'PySide6.QtPdfWidgets', 'PySide6.QtPositioning', 'PySide6.QtQml', 'PySide6.QtQuick', 'PySide6.QtQuick3D', 'PySide6.QtQuickWidgets', 'PySide6.QtRemoteObjects', 'PySide6.QtScxml', 'PySide6.QtSensors', 'PySide6.QtSerialBus', 'PySide6.QtSerialPort', 'PySide6.QtSpatialAudio', 'PySide6.QtSql', 'PySide6.QtStateMachine', 'PySide6.QtTextToSpeech', 'PySide6.QtWebChannel', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineQuick', 'PySide6.QtWebEngineWidgets', 'PySide6.QtWebSockets', 'PIL.AvifImagePlugin', 'PIL._avif'],
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='Alavette-Form',
+    version='build\\windows_version_info.txt',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='Alavette-Form',
+)

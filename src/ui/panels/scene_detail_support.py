@@ -5,10 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.qt_api import QDesktopServices, QLineEdit, QPushButton, Qt, QUrl
-from src.shared.engine.official_document_material_package import (
-    load_official_document_material_package,
-    load_official_document_material_table,
-)
 from src.shared.ui import (
     apply_button_variant,
     build_button_stylesheet,
@@ -23,20 +19,6 @@ def open_local_path(path: Path) -> bool:
     """Open a local file or directory through Qt's desktop integration."""
 
     return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve()))))
-
-
-def _load_official_material_source(
-    path: Path | str,
-    *,
-    profile_id: str,
-):
-    source = Path(path)
-    if source.suffix.lower() == ".json":
-        return load_official_document_material_package(source)
-    return load_official_document_material_table(
-        source,
-        profile_id=profile_id,
-    )
 
 
 def _set_combo_by_data(combo: StyledComboBox, target) -> None:

@@ -16,7 +16,7 @@ class PreflightReceipt:
     plan_revision: int
     plan_fingerprint: str
     input_hash: str
-    material_context_digest: str
+    material_snapshot_digest: str
     output_root: str
     ready: bool
     issues: tuple[str, ...] = ()
@@ -43,7 +43,7 @@ class PreflightReceipt:
             "plan_revision": self.plan_revision,
             "plan_fingerprint": self.plan_fingerprint,
             "input_hash": self.input_hash,
-            "material_context_digest": self.material_context_digest,
+            "material_snapshot_digest": self.material_snapshot_digest,
             "output_root": self.output_root,
             "ready": self.ready,
             "issues": list(self.issues),
@@ -70,8 +70,8 @@ class PreflightReceipt:
             plan_revision=int(value.get("plan_revision") or 0),
             plan_fingerprint=str(value.get("plan_fingerprint") or ""),
             input_hash=str(value.get("input_hash") or ""),
-            material_context_digest=str(
-                value.get("material_context_digest") or ""
+            material_snapshot_digest=str(
+                value.get("material_snapshot_digest") or ""
             ),
             output_root=str(value.get("output_root") or ""),
             ready=bool(value.get("ready", False)),

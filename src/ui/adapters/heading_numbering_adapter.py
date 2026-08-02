@@ -20,6 +20,15 @@ from src.config.heading_style_semantics import (
     resolve_non_numbered_heading_style,
     resolve_non_numbered_heading_style_source,
 )
+from src.config.special_title_rules import (
+    EXACT_RULE_KIND,
+    PREFIX_RULE_KIND,
+    capture_special_title_reference_snapshot,
+    match_special_title,
+    reconcile_special_title_references,
+    restore_special_title_reference_snapshot,
+    validate_special_title_values,
+)
 from src.config.style_semantics import display_font_size_with_name, resolve_style_size_pt
 from src.qt_api import QObject, Signal
 from src.shared.engine.numbering import format_number
@@ -29,12 +38,6 @@ from src.shared.engine.heading_numbering_format import (
 )
 from src.ui.heading_numbering_logic import default_chain_value
 
-_EXISTING_NUMBER_RE = __import__("re").compile(
-    r"^\s*(?:第[一二三四五六七八九十百千万\d]+[章节篇部]\s*|"
-    r"\d+(?:[.\-]\d+)*[.)、]?\s*|"
-    r"[一二三四五六七八九十]+[、.．]\s*|"
-    r"[（(]?[一二三四五六七八九十]+[）)]\s*)"
-)
 DEFAULT_HEADING_PRESET_KEY = "thesis_standard"
 
 if TYPE_CHECKING:
@@ -55,6 +58,7 @@ class HeadingNumberingAdapter(QObject):
         self._snapshot_bindings: dict | None = None
         self._snapshot_styles: dict | None = None
         self._snapshot_model_fields: dict | None = None
+        self._snapshot_special_title_references = None
         self._last_applied_preset_key: str | None = None
 
     def set_template(self, template: TemplateConfig) -> None:
@@ -77,10 +81,14 @@ class HeadingNumberingAdapter(QObject):
             self._snapshot_bindings = None
             self._snapshot_styles = None
             self._snapshot_model_fields = None
+            self._snapshot_special_title_references = None
             return
         self._snapshot_bindings = deepcopy(self.template.heading_numbering.level_bindings)
         self._snapshot_styles = self._current_heading_styles_snapshot()
         self._snapshot_model_fields = self._current_model_fields_snapshot()
+        self._snapshot_special_title_references = (
+            capture_special_title_reference_snapshot(self.template)
+        )
 
     def restore_snapshot(self) -> bool:
         if not self.has_template or self._snapshot_bindings is None:
@@ -107,7 +115,11 @@ class HeadingNumberingAdapter(QObject):
             model.non_numbered_heading_style_mode = self._snapshot_model_fields[
                 "non_numbered_heading_style_mode"
             ]
-
+        if self._snapshot_special_title_references is not None:
+            restore_special_title_reference_snapshot(
+                self.template,
+                self._snapshot_special_title_references,
+            )
         self.numbering_changed.emit()
         return True
 
@@ -121,7 +133,10 @@ class HeadingNumberingAdapter(QObject):
             return True
         if self._snapshot_model_fields != self._current_model_fields_snapshot():
             return True
-        return False
+        return (
+            self._snapshot_special_title_references
+            != capture_special_title_reference_snapshot(self.template)
+        )
 
     def _current_heading_styles_snapshot(self) -> dict:
         return {
@@ -369,20 +384,44 @@ class HeadingNumberingAdapter(QObject):
             self.numbering_changed.emit()
 
     def set_non_numbered_texts(self, texts: list[str]) -> None:
-        self.template.heading_model.non_numbered_title_texts = list(texts)
+        model = self.template.heading_model
+        exact, _prefixes = validate_special_title_values(
+            texts,
+            model.non_numbered_prefixes,
+        )
+        reconcile_special_title_references(
+            self.template,
+            kind=EXACT_RULE_KIND,
+            old_values=model.non_numbered_title_texts,
+            new_values=exact,
+        )
+        model.non_numbered_title_texts = exact
         self.numbering_changed.emit()
 
     def set_non_numbered_prefixes(self, prefixes: list[str]) -> None:
-        self.template.heading_model.non_numbered_prefixes = list(prefixes)
+        model = self.template.heading_model
+        _exact, normalized_prefixes = validate_special_title_values(
+            model.non_numbered_title_texts,
+            prefixes,
+        )
+        reconcile_special_title_references(
+            self.template,
+            kind=PREFIX_RULE_KIND,
+            old_values=model.non_numbered_prefixes,
+            new_values=normalized_prefixes,
+        )
+        model.non_numbered_prefixes = normalized_prefixes
         self.numbering_changed.emit()
 
     def preview_should_skip_numbering(self, title: str) -> bool:
-        text = str(title or "").strip()
-        match = _EXISTING_NUMBER_RE.match(text)
-        clean_text = text[match.end():].strip() if match else text
-        if clean_text in set(self.get_non_numbered_texts()):
-            return True
-        return any(clean_text.startswith(prefix) for prefix in self.get_non_numbered_prefixes())
+        return (
+            match_special_title(
+                title,
+                exact_values=self.get_non_numbered_texts(),
+                prefix_values=self.get_non_numbered_prefixes(),
+            )
+            is not None
+        )
 
     def preview_number(self, level: int, counter_value: int = 1) -> str:
         binding = self.get_binding(level)

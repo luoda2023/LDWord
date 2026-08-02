@@ -3,14 +3,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from scripts.verify_scene_matrix_release_gate import (  # noqa: E402
+from scripts.verify_scene_matrix_release_gate import (
     build_scene_matrix_release_gate_payload,
 )
-from src.config.scene_material_repair_flow_audit import (  # noqa: E402
+from src.config.scene_material_repair_flow_audit import (
     N2_177_MATERIAL_REPAIR_FLOW_SPECS,
     audit_scene_material_repair_flow_report,
     build_scene_material_repair_flow_audit_report,
@@ -45,57 +44,59 @@ def test_scene_material_repair_flow_audit_locks_n2_177_channels():
 
     schema_projection = rows["schema_requirements_to_assets_panel"]
     assert schema_projection.pack_ids
-    assert "material_schema_projection" in schema_projection.capability_ids
-    assert "required_material_fields" in schema_projection.material_signal_ids
-    assert "SceneSpecPresenterMixin._attachment_roles_from_scene" in (
+    assert "schema_contract_adapter" in schema_projection.capability_ids
+    assert "contract_fields" in schema_projection.material_signal_ids
+    assert "get_package_material_contract" in (
         schema_projection.runtime_surface_ids
     )
 
     preview = rows["assets_panel_preview_missing_detection"]
-    assert "package_field_inventory" in preview.material_signal_ids
-    assert "preview" in preview.repair_target_types
+    assert "package_revision" in preview.material_signal_ids
+    assert "record" in preview.repair_target_types
 
     workbench_groups = rows["workbench_material_readiness_groups"]
-    assert "schema" in workbench_groups.repair_target_types
-    assert "recommend_material_schema_replacement" in (
+    assert "material_package" in workbench_groups.repair_target_types
+    assert "choose_material_package" in (
         workbench_groups.runtime_surface_ids
     )
 
     gate = rows["execution_gate_policy_semantics"]
     assert "can_run" in gate.material_signal_ids
     assert "blocking_reasons" in gate.material_signal_ids
-    assert "material_readiness_gate_decision" in gate.runtime_surface_ids
-    assert {"field", "asset", "schema"}.issubset(gate.repair_target_types)
+    assert "material_execution_gate" in gate.runtime_surface_ids
+    assert {"material_package", "selection", "record"}.issubset(
+        gate.repair_target_types
+    )
 
     result_detail = rows["execution_result_detail_access"]
-    assert "profile_schema" in result_detail.repair_target_types
-    assert "execution_log" in result_detail.material_signal_ids
+    assert "artifact" in result_detail.repair_target_types
+    assert "material_receipt_paths" in result_detail.material_signal_ids
 
     bridge = rows["panel_bridge_material_routing"]
-    assert "schema_scene_content_route" in bridge.capability_ids
-    assert "Scene content detail" in bridge.ui_surface_ids
+    assert "direct_assets_navigation" in bridge.capability_ids
+    assert "Assets panel navigation" in bridge.ui_surface_ids
 
     focus = rows["assets_panel_target_focus"]
-    assert "profile_field" in focus.repair_target_types
-    assert "AssetsPanel.focus_material_profile_repair_target" in (
+    assert "record" in focus.repair_target_types
+    assert "AssetsPanel.rollback_prepared_material_changes" in (
         focus.runtime_surface_ids
     )
 
     schema_replacement = rows["schema_replacement_recommendation_flow"]
-    assert "schema_alias_recommendation" in schema_replacement.capability_ids
-    assert "content_fill" in schema_replacement.repair_target_types
+    assert "contract_identity_guard" in schema_replacement.capability_ids
+    assert "revision" in schema_replacement.repair_target_types
 
     batch = rows["batch_profile_material_repair_targets"]
     assert batch.coverage_selector == "batch_material"
     assert "hr_batch_documents" in batch.family_ids
-    assert "profile_field" in batch.repair_target_types
-    assert "QuickExecutionDetail.set_execution_result" in (
+    assert "selection" in batch.repair_target_types
+    assert "compile_document_batch_plan" in (
         batch.runtime_surface_ids
     )
 
     manifest = rows["material_manifest_feedback"]
     assert "material_manifest_paths" in manifest.material_signal_ids
-    assert "_material_manifest_payload" in manifest.runtime_surface_ids
+    assert "publish_material_artifacts" in manifest.runtime_surface_ids
 
     assert counts["flow_count"] == report.flow_count
     assert counts["missing_source_evidence_count"] == 0
@@ -125,7 +126,7 @@ def test_scene_material_repair_flow_export_script_writes_json(tmp_path):
     assert payload["status"] == "passed"
     assert payload["counts"]["flow_count"] == 1
     assert payload["rows"][0]["flow_id"] == "schema_replacement_recommendation_flow"
-    assert "recommendation_schema_id" in (
+    assert "contract_mismatch" in (
         payload["rows"][0]["material_signal_ids"]
     )
 
@@ -148,7 +149,7 @@ def test_scene_material_repair_flow_export_script_prints_markdown():
     assert "# MaterialSchema Input and Repair Flow Audit" in result.stdout
     assert "| Flow | Status | Coverage | Packs | Families | Signals |" in result.stdout
     assert "execution_result_detail_access" in result.stdout
-    assert "execution_log" in result.stdout
+    assert "material_receipt_paths" in result.stdout
     assert "## Source Evidence" in result.stdout
 
 

@@ -137,7 +137,7 @@ def test_product_entrypoint_excludes_internal_scene_governance():
     assert forbidden == []
 
 
-def test_product_entrypoint_excludes_optional_workbench_surfaces():
+def test_product_entrypoint_keeps_specialist_workbenches_lazy():
     reachable, _ = _main_reachable_modules()
 
     optional_batch_modules = {

@@ -30,6 +30,8 @@ from src.shared.ui.icons.catalog import get_icon
 _MESSAGE_COLUMN_WIDTH = 860
 _ASSISTANT_CONTENT_WIDTH = 820
 _USER_BUBBLE_WIDTH = 640
+_USER_BUBBLE_HORIZONTAL_MARGIN = 13
+_USER_BUBBLE_BORDER_WIDTH = 1
 _MESSAGE_SIDE_MARGIN = 48
 
 
@@ -237,6 +239,29 @@ class AssistantConversationMessage(QWidget):
             right_margin,
             0,
         )
+        if self._role == "user":
+            self._sync_user_bubble_width(reading_width)
+
+    def _sync_user_bubble_width(self, available_width: int) -> None:
+        """Keep user text compact without trusting QLabel's wrapped size hint."""
+
+        if not hasattr(self, "_bubble"):
+            return
+        lines = self._text.splitlines() or [""]
+        metrics = self._body_label.fontMetrics()
+        natural_text_width = max(metrics.horizontalAdvance(line) for line in lines)
+        horizontal_chrome = 2 * (
+            _USER_BUBBLE_HORIZONTAL_MARGIN + _USER_BUBBLE_BORDER_WIDTH
+        )
+        preferred_width = min(
+            _USER_BUBBLE_WIDTH,
+            natural_text_width + horizontal_chrome,
+        )
+        target_width = max(0, min(int(available_width), preferred_width))
+        if self._bubble.width() == target_width:
+            return
+        self._bubble.setFixedWidth(target_width)
+        self._bubble.updateGeometry()
 
     def _build_user_message(self) -> None:
         layout = QVBoxLayout(self._column)
@@ -267,14 +292,22 @@ class AssistantConversationMessage(QWidget):
         self._bubble.setMaximumWidth(_USER_BUBBLE_WIDTH)
         self._bubble.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Minimum)
         bubble_layout = QVBoxLayout(self._bubble)
-        bubble_layout.setContentsMargins(13, 8, 13, 8)
+        bubble_layout.setContentsMargins(
+            _USER_BUBBLE_HORIZONTAL_MARGIN,
+            8,
+            _USER_BUBBLE_HORIZONTAL_MARGIN,
+            8,
+        )
         bubble_layout.setSpacing(0)
         self._body_label = QLabel(self._text, self._bubble)
         self._body_label.setObjectName("assistant_user_text")
         self._body_label.setTextFormat(Qt.PlainText)
         self._body_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._body_label.setWordWrap(True)
-        self._body_label.setMaximumWidth(_USER_BUBBLE_WIDTH - 26)
+        self._body_label.setMaximumWidth(
+            _USER_BUBBLE_WIDTH
+            - 2 * (_USER_BUBBLE_HORIZONTAL_MARGIN + _USER_BUBBLE_BORDER_WIDTH)
+        )
         bubble_layout.addWidget(self._body_label)
         bubble_row.addWidget(self._bubble)
         layout.addLayout(bubble_row)
@@ -366,14 +399,33 @@ class AssistantConversationMessage(QWidget):
             return
         new_text = str(text or "")
         previous = self._text
+        if new_text.startswith(previous):
+            self.append_live_delta(
+                delta=new_text[len(previous) :],
+                status_text=status_text,
+            )
+            return
         self._live = True
         self._text = new_text
         self._status_label.setText(str(status_text or "正在处理"))
         self._status_row.show()
-        if new_text.startswith(previous):
-            self._markdown.append_live_text(new_text[len(previous) :])
-        else:
-            self._markdown.set_live_text(new_text)
+        self._markdown.set_live_text(new_text)
+        self._markdown.setVisible(bool(self._text))
+        self._footer.hide()
+
+    def append_live_delta(self, *, delta: str, status_text: str) -> None:
+        if self._role == "user":
+            return
+        appended = str(delta or "")
+        self._live = True
+        if appended:
+            self._text += appended
+        status = str(status_text or "正在处理")
+        if self._status_label.text() != status:
+            self._status_label.setText(status)
+        self._status_row.show()
+        if appended:
+            self._markdown.append_live_text(appended)
         self._markdown.setVisible(bool(self._text))
         self._footer.hide()
 

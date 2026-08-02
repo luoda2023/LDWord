@@ -13,7 +13,7 @@
     "official_gbt",
     "official_custom"
   ],
-  "master_version": "official-master-family-gbt-2026-07-11",
+  "master_version": "official-master-family-gbt-2026-08-02-r5",
   "placeholder_contract": {
     "required": [
       "official_title",
@@ -57,7 +57,7 @@
     "legacy_aliases": []
   },
   "placeholder_index": {
-    "sha256": "8515c8c1356b0b371a40e20b89d0909669ad2c746d09307b40e329a75261bd81",
+    "sha256": "35d2e7937f2daf55d0f4cbd56d69d4ea1072f130e36495cd28c2fe3e136e6df5",
     "scanner_version": "master-placeholder-index-v1",
     "placeholder_ids": [
       "@text:official_security_level",
@@ -106,16 +106,16 @@
     },
     "placeholder_surfaces": {
       "@text:official_security_level": [
-        "word/document.xml:/w:document/w:body/w:p[1]"
-      ],
-      "@text:official_urgency": [
         "word/document.xml:/w:document/w:body/w:p[2]"
       ],
-      "@text:official_organization": [
+      "@text:official_urgency": [
         "word/document.xml:/w:document/w:body/w:p[3]"
       ],
-      "@text:official_document_no": [
+      "@text:official_organization": [
         "word/document.xml:/w:document/w:body/w:p[4]"
+      ],
+      "@text:official_document_no": [
+        "word/document.xml:/w:document/w:body/w:p[5]"
       ],
       "@text:official_issuer": [
         "word/document.xml:/w:document/w:body/w:tbl[1]/w:tr/w:tc[1]/w:p"
@@ -124,25 +124,25 @@
         "word/document.xml:/w:document/w:body/w:tbl[1]/w:tr/w:tc[2]/w:p"
       ],
       "@text:official_title": [
-        "word/document.xml:/w:document/w:body/w:p[6]"
-      ],
-      "@text:official_meeting_time": [
         "word/document.xml:/w:document/w:body/w:p[7]"
       ],
-      "@text:official_meeting_attendees": [
+      "@text:official_meeting_time": [
         "word/document.xml:/w:document/w:body/w:p[8]"
       ],
-      "@text:official_body": [
+      "@text:official_meeting_attendees": [
         "word/document.xml:/w:document/w:body/w:p[9]"
       ],
+      "@text:official_body": [
+        "word/document.xml:/w:document/w:body/w:p[10]"
+      ],
       "@text:official_copy_scope": [
-        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr[1]/w:tc[2]/w:p"
+        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr/w:tc/w:p[1]"
       ],
       "@text:official_printing_org": [
-        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr[2]/w:tc[2]/w:p"
+        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr/w:tc/w:p[3]"
       ],
       "@text:official_printing_date": [
-        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr[3]/w:tc[2]/w:p"
+        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr/w:tc/w:p[3]"
       ]
     },
     "reference_page_excluded": false

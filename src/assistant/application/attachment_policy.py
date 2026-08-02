@@ -25,6 +25,13 @@ def bind_policy_attachment_roles(
     for row in rows:
         explicit_role = str(row.get("semantic_role") or "")
         role_source = str(row.get("semantic_role_source") or "")
+        if bool(row.get("template_authoring_source")):
+            # Defense in depth: once the intent binder identifies the single
+            # template source, no later document policy may downgrade it into
+            # reference material or a production input.
+            row["semantic_role"] = SOURCE_ROLE_STANDARD_FORMAT_REFERENCE
+            row["semantic_role_source"] = role_source or "assistant_intent"
+            continue
         if (
             explicit_role == SOURCE_ROLE_STANDARD_FORMAT_REFERENCE
             and role_source != "assistant_intent"

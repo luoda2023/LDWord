@@ -8,6 +8,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
 from src.config.scene import ExamBlankStyleConfig, ExamPaperConfig
+from src.shared.engine.exam_markdown_content import ExamMarkdownContentError
 from src.shared.engine.exam_paper_style import (
     BUILTIN_EXAM_BLANK_STYLE_IDS,
     BUILTIN_EXAM_MASTER_DIR,
@@ -29,6 +30,7 @@ from src.shared.engine.exam_paper_style import (
     write_exam_paper_docx,
     write_exam_paper_docx_files,
 )
+from src.shared.engine.exam_question_schema import parse_exam_markdown_source
 
 
 def _all_docx_text(document: Document) -> str:
@@ -54,6 +56,102 @@ def _sealed_header_xml_from_package(path) -> str:
             if "ExamSeal" in xml and "rotation:-5898240f" in xml:
                 return xml
     raise AssertionError("sealed first-page header XML not found")
+
+
+def test_exam_markdown_semantics_render_as_native_word_content(tmp_path):
+    imported = parse_exam_markdown_source(
+        """# Markdown Semantics Exam
+## I. Rich Content
+1. Inspect **bold** and *italic* content.（5 分）
+| Item | Value |
+|---|---|
+| A | 1 |
+****
+A. ~~old~~ **new**
+B. plain
+difficulty: medium
+knowledge_points: Markdown
+## 答案速查
+1. B
+"""
+    )
+
+    outputs = write_exam_paper_docx_files(
+        "default_exam",
+        tmp_path,
+        payload=imported.payload,
+    )
+    student = Document(outputs.student_docx)
+    student_text = _all_docx_text(student)
+
+    assert "**" not in student_text
+    assert "~~" not in student_text
+    assert "|---|" not in student_text
+    assert "****" not in student_text
+    assert any(
+        run.text == "bold" and run.bold is True
+        for paragraph in student.paragraphs
+        for run in paragraph.runs
+    )
+    assert any(
+        run.text == "italic" and run.italic is True
+        for paragraph in student.paragraphs
+        for run in paragraph.runs
+    )
+    assert any(
+        run.text == "old" and run.font.strike is True
+        for paragraph in student.paragraphs
+        for run in paragraph.runs
+    )
+    assert any(
+        paragraph.text.startswith("1. Inspect bold and italic content.（5 分）")
+        for paragraph in student.paragraphs
+    )
+
+    markdown_table = next(
+        table
+        for table in student.tables
+        if [[cell.text for cell in row.cells] for row in table.rows]
+        == [["Item", "Value"], ["A", "1"]]
+    )
+    assert all(
+        run.bold is True
+        for cell in markdown_table.rows[0].cells
+        for paragraph in cell.paragraphs
+        for run in paragraph.runs
+        if run.text
+    )
+    assert all(
+        row._tr.get_or_add_trPr().find(qn("w:cantSplit")) is not None
+        for row in markdown_table.rows
+    )
+    assert any(
+        not paragraph.text
+        and paragraph._p.find("./" + qn("w:pPr") + "/" + qn("w:pBdr"))
+        is not None
+        for paragraph in student.paragraphs
+    )
+
+
+def test_exam_markdown_residue_gate_rejects_malformed_pipe_noise(tmp_path):
+    payload = {
+        "title": "Malformed Markdown Exam",
+        "sections": [
+            {
+                "title": "I. Broken Table",
+                "questions": [
+                    {
+                        "stem": "This is not a valid table.\n|||||",
+                        "answer": "N/A",
+                        "score": "1",
+                    }
+                ],
+            }
+        ],
+    }
+
+    with pytest.raises(ExamMarkdownContentError, match="pipe_noise"):
+        write_exam_paper_docx_files("default_exam", tmp_path, payload=payload)
 
 
 def test_exam_blank_style_copy_is_scene_owned_and_explicitly_resolvable():
@@ -385,6 +483,10 @@ def test_exam_default_style_sample_docx_is_generated(tmp_path):
     assert "{{af_questions}}" not in text
     assert "题目插入点" not in text
     assert "作答区" not in text
+    assert len(Document(path).tables[0].columns) == 4
+    assert [
+        cell.text for cell in Document(path).tables[0].rows[0].cells
+    ] == ["题号", "一", "二", "总分"]
     assert "答案速查" not in text
     assert "答案：C" not in text
     assert "1. C" not in text
@@ -438,6 +540,13 @@ def test_exam_paper_writer_inserts_payload_into_current_master(tmp_path):
     assert "{{af_questions}}" not in text
     assert "题目插入点" not in text
     assert "作答区" not in text
+    rendered = Document(path)
+    assert len(rendered.tables[0].columns) == 3
+    assert [cell.text for cell in rendered.tables[0].rows[0].cells] == [
+        "题号",
+        "一",
+        "总分",
+    ]
 
     first_page_header_xml = _sealed_header_xml_from_package(path)
     assert first_page_header_xml.count("AlternateContent") == 4
@@ -541,7 +650,7 @@ def test_exam_paper_writer_outputs_separate_student_and_answer_key_files(tmp_pat
     assert outputs.answer_key_docx is not None
     assert outputs.answer_key_docx.exists()
     assert outputs.student_docx.name == "五年级数学期中测试卷_学生卷.docx"
-    assert outputs.answer_key_docx.name == "五年级数学期中测试卷_答案速查.docx"
+    assert outputs.answer_key_docx.name == "五年级数学期中测试卷_答案卷.docx"
 
     student_text = _all_docx_text(Document(outputs.student_docx))
     assert "学生卷" in student_text
@@ -549,16 +658,23 @@ def test_exam_paper_writer_outputs_separate_student_and_answer_key_files(tmp_pat
     assert "1. 7 个 0.9 是（    ）。（2 分）" in student_text
     assert "1. 6.3" not in student_text
 
-    answer_text = _all_docx_text(Document(outputs.answer_key_docx))
+    answer = Document(outputs.answer_key_docx)
+    answer_text = _all_docx_text(answer)
     assert "答案速查" in answer_text
     assert "1. 6.3" in answer_text
     assert "2. B" in answer_text
     assert "7 个 0.9 是" not in answer_text
     assert "A. 3.14" not in answer_text
     assert "解析：按小数乘法计算。" in answer_text
+    section_heading = next(
+        paragraph
+        for paragraph in answer.paragraphs
+        if paragraph.style.name == "Exam Section Heading"
+    )
+    assert section_heading.paragraph_format.keep_with_next is True
 
 
-def test_exam_questions_restart_numbering_by_section_and_use_hanging_layout(tmp_path):
+def test_exam_questions_use_global_numbering_and_hanging_layout(tmp_path):
     payload = {
         "title": "Restart Numbering Exam",
         "subject": "Language",
@@ -593,9 +709,9 @@ def test_exam_questions_restart_numbering_by_section_and_use_hanging_layout(tmp_
     student_text = _all_docx_text(student)
     assert "1. Alpha question" in student_text
     assert "2. Beta question" in student_text
-    assert "1. Gamma question" in student_text
-    assert "2. Delta question" in student_text
-    assert "3. Gamma question" not in student_text
+    assert "3. Gamma question" in student_text
+    assert "4. Delta question" in student_text
+    assert "1. Gamma question" not in student_text
     question_paragraph = next(
         paragraph for paragraph in student.paragraphs if paragraph.text.startswith("1. Alpha question")
     )
@@ -610,9 +726,41 @@ def test_exam_questions_restart_numbering_by_section_and_use_hanging_layout(tmp_
     answer_text = _all_docx_text(answer)
     assert "1. A1" in answer_text
     assert "2. B2" in answer_text
-    assert "1. C3" in answer_text
-    assert "2. D4" in answer_text
-    assert "3. C3" not in answer_text
+    assert "3. C3" in answer_text
+    assert "4. D4" in answer_text
+    assert "1. C3" not in answer_text
+
+
+def test_exam_question_lead_in_renders_before_its_numbered_stem(tmp_path):
+    payload = {
+        "title": "Python Reading Exam",
+        "subject": "信息技术",
+        "grade": "高一",
+        "duration": "20 分钟",
+        "total_score": "10",
+        "sections": [
+            {
+                "title": "一、程序阅读题",
+                "questions": [
+                    {
+                        "lead_in": "程序片段一：\nn = int(input())\nprint(n + 1)",
+                        "stem": "输入 7 时，程序输出什么？",
+                        "answer": "8",
+                        "score": "10",
+                    }
+                ],
+            }
+        ],
+    }
+
+    outputs = write_exam_paper_docx_files("default_exam", tmp_path, payload=payload)
+    student = Document(outputs.student_docx)
+    body_lines = [paragraph.text for paragraph in student.paragraphs]
+
+    lead_index = body_lines.index("程序片段一：\nn = int(input())\nprint(n + 1)")
+    question_index = body_lines.index("1. 输入 7 时，程序输出什么？（10 分）")
+    assert lead_index < question_index
+    assert student.paragraphs[lead_index].style.name == "Exam Question"
 
 
 def test_exam_text_response_questions_reserve_answer_space(tmp_path):
@@ -632,6 +780,8 @@ def test_exam_text_response_questions_reserve_answer_space(tmp_path):
                         "options": ["A. One", "B. Two"],
                         "answer": "B",
                         "score": "3",
+                        "answer_area_kind": "lines",
+                        "answer_lines": 5,
                     },
                     {
                         "stem": "Complete the sentence: ____.",
@@ -671,14 +821,15 @@ def test_exam_text_response_questions_reserve_answer_space(tmp_path):
     ]
     assert len(answer_spaces) == 8
     assert all("<w:bottom" in paragraph._p.xml for paragraph in answer_spaces)
+    assert all("<w:between" in paragraph._p.xml for paragraph in answer_spaces)
     assert student.styles["Exam Answer Space"].paragraph_format.space_before.pt == 2
     assert round(student.styles["Exam Answer Space"].paragraph_format.left_indent.cm, 2) == 0.72
 
     student_text = _all_docx_text(student)
     assert "1. Choose the right answer." in student_text
     assert "2. Complete the sentence: ____." in student_text
-    assert "1. Explain the character's two actions." in student_text
-    assert "2. Write a short paragraph" in student_text
+    assert "3. Explain the character's two actions." in student_text
+    assert "4. Write a short paragraph" in student_text
 
     answer = Document(outputs.answer_key_docx)
     assert not [
@@ -686,6 +837,43 @@ def test_exam_text_response_questions_reserve_answer_space(tmp_path):
         for paragraph in answer.paragraphs
         if paragraph.style.name == "Exam Answer Space"
     ]
+
+
+def test_exam_explicit_long_answer_area_is_not_truncated_to_ten_lines(tmp_path):
+    payload = {
+        "title": "Long Answer Exam",
+        "sections": [
+            {
+                "title": "Writing",
+                "questions": [
+                    {
+                        "type": "writing",
+                        "stem": "Write an essay.",
+                        "answer": "Rubric answer",
+                        "score": "40",
+                        "answer_area_kind": "lines",
+                        "answer_lines": 25,
+                    }
+                ],
+            }
+        ],
+    }
+
+    outputs = write_exam_paper_docx_files(
+        "default_exam",
+        tmp_path,
+        payload=payload,
+    )
+    student = Document(outputs.student_docx)
+    answer_spaces = [
+        paragraph
+        for paragraph in student.paragraphs
+        if paragraph.style.name == "Exam Answer Space"
+    ]
+
+    assert len(answer_spaces) == 25
+    assert all("<w:bottom" in paragraph._p.xml for paragraph in answer_spaces)
+    assert all("<w:between" in paragraph._p.xml for paragraph in answer_spaces)
 
 
 def test_exam_math_solution_questions_use_free_answer_area(tmp_path):
@@ -747,10 +935,22 @@ def test_exam_math_solution_questions_use_free_answer_area(tmp_path):
     assert not line_spaces
     assert len(free_tables) == 2
     assert all(table.cell(0, 0).text == "" for table in free_tables)
+    assert [len(table.rows) for table in free_tables] == [1, 1]
     assert [
-        round(table.rows[0].height.cm, 2)
+        round(sum(row.height.cm for row in table.rows), 2)
         for table in free_tables
-    ] == [2.88, 4.32]
+    ] == [2.4, 3.6]
+    assert all(
+        table.rows[0]._tr.get_or_add_trPr().find(qn("w:cantSplit")) is not None
+        for table in free_tables
+    )
+    assert all(
+        table._tbl.tblPr.first_child_found_in("w:tblBorders")
+        .find(qn("w:insideH"))
+        .get(qn("w:val"))
+        == "nil"
+        for table in free_tables
+    )
     table_indent = free_tables[0]._tbl.tblPr.first_child_found_in("w:tblInd")
     assert table_indent is not None
     assert table_indent.get(qn("w:w")) == str(int(0.72 * 567))

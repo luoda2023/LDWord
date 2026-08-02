@@ -15,7 +15,13 @@ from pathlib import Path
 
 from src.config import library as config_library
 from src.config.default_delivery_identity import project_default_delivery_identity
-from src.config.master_library import OFFICIAL_USER_MASTER_DIR
+from src.config.feature_configs import OutputConfig
+from src.config.library import (
+    default_scene_descriptor,
+    default_scene_entry,
+    load_scene_from_library,
+    load_template_from_library,
+)
 from src.config.scene import (
     ContentVisibilityRule,
     DeliveryPreset,
@@ -24,7 +30,13 @@ from src.config.scene import (
     coerce_exam_paper_config,
 )
 from src.config.scene_identity import allocate_scene_id, safe_scene_file_stem
-from src.config.feature_configs import OutputConfig
+from src.config.scene_surface_registry import (
+    scene_uses_official_document_surface as _scene_uses_official_document_surface,
+)
+from src.config.scene_surface_registry import (
+    scene_uses_plan_preview_surface as _scene_uses_plan_preview_surface,
+)
+from src.config.template import TemplateConfig
 from src.qt_api import (
     QButtonGroup,
     QCheckBox,
@@ -32,19 +44,18 @@ from src.qt_api import (
     QFileSystemWatcher,
     QFrame,
     QHBoxLayout,
-    QLabel,
     QKeySequence,
+    QLabel,
     QPushButton,
-    QSizePolicy,
     QShortcut,
+    QSizePolicy,
+    Qt,
     QTimer,
     QUrl,
     QVBoxLayout,
     QWidget,
-    Qt,
     Signal,
 )
-
 from src.shared.ui import (
     DetailPaneController,
     FlowLayout,
@@ -53,6 +64,7 @@ from src.shared.ui import (
     NavigationCard,
     ThemedRadioButton,
 )
+from src.shared.ui.base_dialog import BaseDialog
 from src.shared.ui.card import Card
 from src.shared.ui.dialogs import confirm, input_text
 from src.shared.ui.layout_sync import (
@@ -62,75 +74,59 @@ from src.shared.ui.layout_sync import (
 from src.shared.ui.navigation_highlight import NavigationHighlighter
 from src.shared.ui.selection_control_style import build_checkbox_stylesheet
 from src.shared.ui.styled_combo_box import StyledComboBox
-from src.shared.ui.summary_grid import SummaryGrid
 from src.shared.ui.template_form_layout import template_form_row
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toast import Toast
-from src.shared.ui.toggle_switch import ToggleSwitch
+from src.ui.adapters.config_selector_models import (
+    plan_combo_label,
+    plan_selector_descriptors,
+    template_display_label,
+)
 from src.ui.adapters.field_display_names import (
     field_display_context,
     field_display_name,
     navigation_issue_hint,
 )
-from src.ui.adapters.config_selector_models import (
-    plan_combo_label,
-    plan_display_label,
-    plan_selector_descriptors,
-    template_display_label,
-)
 from src.ui.base_panel import BasePanel
 from src.ui.bridge import navigation_intent_value
-from src.config.library import (
-    default_scene_entry,
-    default_scene_descriptor,
-    get_scene_entry,
-    load_scene_from_library,
-    load_template_from_library,
-)
-from src.config.template import TemplateConfig
-from src.ui.panels.scene_product_summary_projection import (
-    FAILURE_POLICY_LABELS,
-    PRESERVATION_MODE_LABELS,
-    build_compliance_summary_items,
-    recommended_object_preflight_targets_for_scene,
-)
+from src.ui.panel_specs import panel_index
 from src.ui.panels.scene_card_definitions import (
     CARD_DEFINITIONS,
     FORMAT_TEMPLATE_CARDS,
-    INPUT_MATERIAL_CARDS,
     NAV_SECTION_CARD_GROUPS,
 )
-from src.ui.panels.scene_navigation_projection import (
-    build_scene_navigation_card_snapshots,
-    default_delivery_preset,
-    _normalise_scene_detail_card_id,
-)
-from src.ui.panels.scene_state_projection import (
-    builtin_scene_id_set as _builtin_scene_id_set,
-    is_scene_selector_group as _is_scene_selector_group,
-    scene_is_exam as _scene_is_exam,
-    scene_should_show_content_card as _scene_should_show_content_card,
-)
-from src.config.scene_surface_registry import (
-    scene_uses_official_document_surface as _scene_uses_official_document_surface,
-    scene_uses_plan_preview_surface as _scene_uses_plan_preview_surface,
-)
+from src.ui.panels.scene_content_detail import _ContentDetail
 from src.ui.panels.scene_delivery_helpers import (
     _scene_current_template_id,
     _template_label_with_id,
 )
-from src.ui.panels.scene_content_detail import _ContentDetail
-from src.ui.panels.scene_detail_base import _SimpleFormDetail
 from src.ui.panels.scene_detail_support import (
     _apply_template_button_contract,
-    _populate_combo,
-    _set_combo_by_data,
 )
 from src.ui.panels.scene_exam_detail import (
     ExamPaperDetail,
     ensure_exam_paper_config,
 )
+from src.ui.panels.scene_file_lifecycle_mixin import SceneFileLifecycleMixin
+from src.ui.panels.scene_formula_detail import (
+    _SceneChemTypographyDetail,
+    _SceneFormulaRulesCard,
+)
+from src.ui.panels.scene_input_cleanup_rules import SceneInputCleanupRulesCard
+from src.ui.panels.scene_navigation_projection import (
+    _normalise_scene_detail_card_id,
+    build_scene_navigation_card_snapshots,
+    default_delivery_preset,
+    scene_display_label,
+    template_navigation_context_payload,
+)
 from src.ui.panels.scene_output_detail import _OutputDetail
+from src.ui.panels.scene_overview_projection import (
+    SceneOverviewRowSpec,
+    SceneRunStepSpec,
+    build_scene_overview_spec,
+)
+from src.ui.panels.scene_scope_sections import DocumentScopeSection
 from src.ui.panels.scene_session_coordinator import (
     SCENE_PENDING_CANCEL,
     SCENE_PENDING_DISCARD,
@@ -138,20 +134,19 @@ from src.ui.panels.scene_session_coordinator import (
     SceneProjectionCallbacks,
     SceneSessionCoordinator,
 )
-from src.ui.panels.scene_scope_sections import DocumentScopeSection
-from src.ui.panels.scene_overview_projection import (
-    SceneOverviewRowSpec,
-    SceneRunStepSpec,
-    build_scene_overview_spec,
+from src.ui.panels.scene_state_projection import (
+    is_scene_selector_group as _is_scene_selector_group,
 )
+from src.ui.panels.scene_state_projection import (
+    scene_is_exam as _scene_is_exam,
+)
+from src.ui.panels.scene_watermark_rules import SceneWatermarkRulesCard
 from src.ui.panels.template_navigation_context import (
     build_template_navigation_context,
 )
-from src.shared.engine.object_preflight import OBJECT_PREFLIGHT_SCAN_TARGETS
-from src.shared.ui.base_dialog import BaseDialog
-
 
 _SCENE_TEMPLATE_UNSET = object()
+SCENE_AUTOSAVE_DELAY_MS = 800
 
 
 
@@ -167,15 +162,40 @@ ALIGNMENT_OPTIONS: tuple[tuple[str, str], ...] = (
 
 FORMULA_OUTPUT_MODE_LABELS: dict[str, str] = {
     "word_native": "Word 原生公式",
-    "image_fallback": "图片降级",
+    "latex": "LaTeX 逻辑（仍输出 Word 原生公式）",
     "keep_source": "保留原文",
 }
 
 FORMULA_LOW_CONFIDENCE_LABELS: dict[str, str] = {
     "skip_and_mark": "跳过并标记",
-    "image_fallback": "图片降级",
     "manual_review": "人工复核",
 }
+
+FORMULA_ALIGNMENT_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("left", "左对齐"),
+    ("center", "居中"),
+    ("right", "右对齐"),
+)
+
+FORMULA_NUMBERING_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("chapter.seq", "章.序"),
+    ("chapter-seq", "章-序"),
+    ("chapter:seq", "章:序"),
+    ("chapter/seq", "章/序"),
+    ("chapter_seq", "章_序"),
+    ("chapterseq", "章序"),
+    ("global", "全局序号"),
+)
+
+CHEM_TYPOGRAPHY_SCOPE_LABELS: tuple[tuple[str, str], ...] = (
+    ("body", "正文"),
+    ("headings", "标题"),
+    ("abstract_cn", "中文摘要"),
+    ("abstract_en", "英文摘要"),
+    ("tables", "表格"),
+    ("captions", "题注"),
+    ("references", "参考文献"),
+)
 
 
 def _exam_student_delivery_preset() -> DeliveryPreset:
@@ -321,20 +341,6 @@ def _project_exam_paper_config(
     if raw_policy not in _EXAM_ANSWER_POLICIES:
         return projected, "invalid", raw_policy
     return projected, "ok", raw_policy
-
-
-PREFLIGHT_TARGET_LABELS: dict[str, str] = {
-    "ole_objects": "OLE 对象",
-    "embedded_workbooks": "嵌入表格",
-    "embedded_packages": "嵌入包",
-    "visio_drawings": "Visio",
-    "macros": "宏",
-    "tracked_changes": "修订",
-    "comments": "批注",
-    "textboxes": "文本框",
-    "content_controls": "内容控件",
-    "fields": "域",
-}
 
 
 def _apply_desc_theme(widget: QWidget, t, obj_name: str = "scn_form_desc") -> None:
@@ -735,6 +741,7 @@ class _SceneOverviewDetail(QWidget):
         layout = self.layout()
         if isinstance(layout, QVBoxLayout):
             layout.removeWidget(self._scene_card)
+        self._scene_card.hide()
         self._scene_card.setParent(None)
         return self._scene_card
 
@@ -1022,7 +1029,7 @@ class _SceneOverviewDetail(QWidget):
                 label.setPixmap(get_icon(icon_name, 18, t.primary).pixmap(18, 18))
             self._execute_btn.setIcon(get_icon("play-circle", 16, t.text_on_primary))
         except Exception:
-            pass
+            return
 
 
 # ── 处理范围 ────────────────────────────────────────
@@ -1368,10 +1375,16 @@ class _SceneRulesDetail(QWidget):
         super().__init__(parent)
         self._scope = scope
         self._output = output
+        self._input_cleanup_rules = SceneInputCleanupRulesCard(self)
         self._output_rules = _SceneOutputRulesCard(self._output, self)
+        self._watermark_rules = SceneWatermarkRulesCard(self)
         self._current_scene: SceneWorkspace | None = None
         self._mode_id = ""
+        self._input_cleanup_rules.scene_edited.connect(
+            self._on_input_cleanup_rules_edited
+        )
         self._output_rules.scene_edited.connect(self._on_output_rules_edited)
+        self._watermark_rules.scene_edited.connect(self._on_watermark_rules_edited)
         if hasattr(self._output, "scene_edited"):
             self._output.scene_edited.connect(self._refresh_output_rules)
 
@@ -1379,6 +1392,8 @@ class _SceneRulesDetail(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         layout.addWidget(self._scope)
+        layout.addWidget(self._input_cleanup_rules)
+        layout.addWidget(self._watermark_rules)
         layout.addWidget(self._output_rules)
         layout.addWidget(self._output)
         layout.addStretch(1)
@@ -1398,6 +1413,8 @@ class _SceneRulesDetail(QWidget):
         )
         self._scope.set_scene(scene, template)
         self._scope.setVisible(not uses_master_assembly)
+        self._input_cleanup_rules.set_scene(scene)
+        self._watermark_rules.set_scene(scene)
         if hasattr(self._output, "set_scene"):
             self._output.set_scene(scene)
         self._output_rules.set_scene(scene, mode_id=self._mode_id)
@@ -1420,8 +1437,20 @@ class _SceneRulesDetail(QWidget):
         else:
             self._refresh_output_rules()
 
+    def _on_watermark_rules_edited(self) -> None:
+        if hasattr(self._output, "scene_edited"):
+            self._output.scene_edited.emit()
+
+    def _on_input_cleanup_rules_edited(self) -> None:
+        if hasattr(self._output, "scene_edited"):
+            self._output.scene_edited.emit()
+
     def focus_navigation_field(self, field_id: str) -> bool:
         target = str(field_id or "").strip()
+        if self._input_cleanup_rules.focus_navigation_field(target):
+            return True
+        if target.startswith(("watermark", "scene.watermark")):
+            return self._watermark_rules.focus_navigation_field(target)
         if self._is_output_target(target):
             return self.focus_output_navigation_field(target)
         return bool(
@@ -1476,6 +1505,7 @@ class _SceneRulesDetail(QWidget):
     def apply_theme(self) -> None:
         for detail in (
             self._scope,
+            self._input_cleanup_rules,
             self._output_rules,
             self._output,
         ):
@@ -1483,242 +1513,12 @@ class _SceneRulesDetail(QWidget):
                 detail.apply_theme()
 
 
-# ── 风险检查 ──────────────────────────────────────
-
-
-class _CleanupDetail(_SimpleFormDetail):
-    """Detail pane for cleanup + validation options."""
-
-    def __init__(self, parent=None):
-        super().__init__(
-            "风险检查", "scan", "编辑 Markdown 修复、对象风险和执行前校验选项。", parent
-        )
-        self._current_scene: SceneWorkspace | None = None
-
-        self._compliance_summary = SummaryGrid(columns=3, parent=self._card)
-        self._card.add_widget(self._compliance_summary)
-
-        self._fix_breaks = ToggleSwitch(self, checked=True)
-        self._fix_breaks.toggled_signal.connect(self._on_edited)
-        rows = [template_form_row("段落修复", self._fix_breaks, parent=self._card)]
-
-        self._remove_empty = ToggleSwitch(self, checked=True)
-        self._remove_empty.toggled_signal.connect(self._on_edited)
-        rows.append(
-            template_form_row("空行清理", self._remove_empty, parent=self._card)
-        )
-
-        self._normalize_spaces = ToggleSwitch(self, checked=True)
-        self._normalize_spaces.toggled_signal.connect(self._on_edited)
-        rows.append(
-            template_form_row("空格规范", self._normalize_spaces, parent=self._card)
-        )
-
-        self._validation_enabled = ToggleSwitch(self, checked=True)
-        self._validation_enabled.toggled_signal.connect(self._on_edited)
-        rows.append(
-            template_form_row("执行前校验", self._validation_enabled, parent=self._card)
-        )
-
-        self._object_preflight_enabled = ToggleSwitch(self, checked=True)
-        self._object_preflight_enabled.toggled_signal.connect(self._on_edited)
-        rows.append(
-            template_form_row(
-                "对象预检", self._object_preflight_enabled, parent=self._card
-            )
-        )
-
-        self._scan_target_checks: dict[str, QCheckBox] = {}
-        self._scan_targets_widget = QWidget(self)
-        self._scan_targets_flow = FlowLayout(
-            self._scan_targets_widget,
-            h_spacing=14,
-            v_spacing=4,
-        )
-        self._scan_targets_flow.setContentsMargins(0, 4, 0, 0)
-        for target in OBJECT_PREFLIGHT_SCAN_TARGETS:
-            checkbox = QCheckBox(
-                PREFLIGHT_TARGET_LABELS.get(target, target), self._scan_targets_widget
-            )
-            checkbox.setToolTip(target)
-            checkbox.toggled.connect(self._on_edited)
-            self._scan_target_checks[target] = checkbox
-            self._scan_targets_flow.addWidget(checkbox)
-        rows.append(
-            template_form_row("扫描目标", self._scan_targets_widget, parent=self._card)
-        )
-
-        self._preservation_mode = StyledComboBox(self)
-        _populate_combo(self._preservation_mode, PRESERVATION_MODE_LABELS)
-        self._preservation_mode.currentIndexChanged.connect(self._on_edited)
-        rows.append(
-            template_form_row("保护模式", self._preservation_mode, parent=self._card)
-        )
-
-        self._skip_high_risk = ToggleSwitch(self, checked=True)
-        self._skip_high_risk.toggled_signal.connect(self._on_edited)
-        rows.append(
-            template_form_row("高风险跳过", self._skip_high_risk, parent=self._card)
-        )
-
-        self._apply_family_preflight_btn = QPushButton("应用推荐目标", self)
-        self._apply_family_preflight_btn.clicked.connect(
-            self._apply_family_preflight_targets
-        )
-        rows.append(
-            template_form_row(
-                "方案族预检", self._apply_family_preflight_btn, parent=self._card
-            )
-        )
-
-        self._compliance_failure = StyledComboBox(self)
-        _populate_combo(self._compliance_failure, FAILURE_POLICY_LABELS)
-        self._compliance_failure.currentIndexChanged.connect(self._on_edited)
-        rows.append(
-            template_form_row("失败策略", self._compliance_failure, parent=self._card)
-        )
-
-        self._report_level = StyledComboBox(self)
-        _populate_combo(
-            self._report_level,
-            {
-                "summary": "摘要",
-                "detailed": "详细",
-                "audit": "审计",
-            },
-        )
-        self._report_level.currentIndexChanged.connect(self._on_edited)
-        rows.append(
-            template_form_row("报告粒度", self._report_level, parent=self._card)
-        )
-        self._add_form_stack(rows)
-
-    def set_scene(self, scene: SceneWorkspace) -> None:
-        self._current_scene = scene
-        self._is_syncing = True
-        try:
-            self._fix_breaks.setChecked(
-                getattr(scene.md_cleanup, "fix_paragraph_breaks", True)
-            )
-            self._remove_empty.setChecked(
-                getattr(scene.md_cleanup, "remove_empty_paragraphs", True)
-            )
-            self._normalize_spaces.setChecked(
-                getattr(scene.whitespace, "normalize_spaces", True)
-            )
-            self._validation_enabled.setChecked(
-                scene.module_switches.get("validation", False)
-            )
-            preflight = scene.compliance_profile.object_preflight
-            self._object_preflight_enabled.setChecked(preflight.enabled)
-            self._set_scan_target_checks(preflight.scan_targets)
-            _set_combo_by_data(self._preservation_mode, preflight.preservation_mode)
-            self._skip_high_risk.setChecked(preflight.skip_high_risk_modules)
-            _set_combo_by_data(
-                self._compliance_failure, scene.compliance_profile.failure_policy
-            )
-            _set_combo_by_data(
-                self._report_level, scene.compliance_profile.report_level
-            )
-            self._apply_family_preflight_btn.setEnabled(
-                bool(recommended_object_preflight_targets_for_scene(scene))
-            )
-            self._compliance_summary.set_items(build_compliance_summary_items(scene))
-        finally:
-            self._is_syncing = False
-
-    def _on_edited(self, *_args) -> None:
-        if self._is_syncing or self._current_scene is None:
-            return
-        if hasattr(self._current_scene.md_cleanup, "fix_paragraph_breaks"):
-            self._current_scene.md_cleanup.fix_paragraph_breaks = (
-                self._fix_breaks.isChecked()
-            )
-        if hasattr(self._current_scene.md_cleanup, "remove_empty_paragraphs"):
-            self._current_scene.md_cleanup.remove_empty_paragraphs = (
-                self._remove_empty.isChecked()
-            )
-        if hasattr(self._current_scene.whitespace, "normalize_spaces"):
-            self._current_scene.whitespace.normalize_spaces = (
-                self._normalize_spaces.isChecked()
-            )
-        self._current_scene.module_switches["validation"] = (
-            self._validation_enabled.isChecked()
-        )
-        profile = self._current_scene.compliance_profile
-        preflight = profile.object_preflight
-        preflight.enabled = self._object_preflight_enabled.isChecked()
-        preflight.scan_targets = [
-            target
-            for target, checkbox in self._scan_target_checks.items()
-            if checkbox.isChecked()
-        ]
-        preflight.preservation_mode = str(
-            self._preservation_mode.currentData() or preflight.preservation_mode
-        )
-        preflight.skip_high_risk_modules = self._skip_high_risk.isChecked()
-        profile.failure_policy = str(
-            self._compliance_failure.currentData() or profile.failure_policy
-        )
-        profile.report_level = str(
-            self._report_level.currentData() or profile.report_level
-        )
-        self._compliance_summary.set_items(
-            build_compliance_summary_items(self._current_scene)
-        )
-        self.scene_edited.emit()
-
-    def _apply_family_preflight_targets(self) -> None:
-        if self._current_scene is None:
-            return
-        targets = recommended_object_preflight_targets_for_scene(self._current_scene)
-        if not targets:
-            return
-        self._current_scene.compliance_profile.object_preflight.scan_targets = list(
-            targets
-        )
-        self._is_syncing = True
-        try:
-            self._set_scan_target_checks(targets)
-        finally:
-            self._is_syncing = False
-        self._compliance_summary.set_items(
-            build_compliance_summary_items(self._current_scene)
-        )
-        self.scene_edited.emit()
-
-    def _set_scan_target_checks(self, targets) -> None:
-        selected = {
-            str(target or "").strip()
-            for target in list(targets or [])
-            if str(target or "").strip()
-        }
-        for target, checkbox in self._scan_target_checks.items():
-            checkbox.setChecked(target in selected)
-
-    def _apply_theme(self) -> None:
-        super()._apply_theme()
-        if not hasattr(self, "_scan_target_checks"):
-            return
-        if hasattr(self, "_apply_family_preflight_btn"):
-            _apply_template_button_contract(
-                (self._apply_family_preflight_btn, "secondary")
-            )
-        checkbox_style = build_checkbox_stylesheet(get_theme())
-        for checkbox in self._scan_target_checks.values():
-            checkbox.setStyleSheet(checkbox_style)
-
-
-
-
-
-
 # ═══════════════════════════════════════════════════════════════════════
 #  Main Panel (Master-Detail)
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class ScenePanel(BasePanel):
+class ScenePanel(SceneFileLifecycleMixin, BasePanel):
     """Master-detail scene configuration panel."""
 
     panel_title = "方案配置"
@@ -1729,7 +1529,8 @@ class ScenePanel(BasePanel):
         "_rules": "scn_rules",
         "_scope": "scn_rules",
         "_output": "scn_rules",
-        "_cleanup": "scn_cleanup",
+        "_formula_detail": "scn_formula",
+        "_chem_typography_detail": "scn_chem_typography",
         "_content": "scn_content",
     }
 
@@ -1831,6 +1632,11 @@ class ScenePanel(BasePanel):
                 refresh_navigation_cards=self._refresh_navigation_cards,
             ),
         )
+        self._scene_autosave_state = "saved"
+        self._scene_autosave_running = False
+        self._scene_autosave_timer = QTimer(self)
+        self._scene_autosave_timer.setSingleShot(True)
+        self._scene_autosave_timer.timeout.connect(self._autosave_current_scene)
         self._current_scene_path = self.bridge.current_scene_path()
         self._current_scene_source = self.bridge.current_scene_source()
         self._current_scene_source_type = self.bridge.current_scene_source_type()
@@ -1843,6 +1649,7 @@ class ScenePanel(BasePanel):
         )
         self._scene_library_watcher = QFileSystemWatcher(self)
         self._scene_library_refresh_pending = False
+        self._scene_file_status_stale = False
         self._pending_scene_delete_receipt = None
         self._pending_scene_delete_resolution = ""
         self._scene_delete_activation_in_progress = False
@@ -1891,7 +1698,8 @@ class ScenePanel(BasePanel):
         self._detail_factories = {
             "scn_exam_paper": self._create_exam_paper_detail,
             "scn_rules": self._create_rules_detail,
-            "scn_cleanup": self._create_cleanup_detail,
+            "scn_formula": self._create_formula_detail,
+            "scn_chem_typography": self._create_chem_typography_detail,
             "scn_content": self._create_content_detail,
         }
         self._detail_attr_names = dict(self._DETAIL_ATTR_NAMES)
@@ -1929,14 +1737,10 @@ class ScenePanel(BasePanel):
             self._nav_cards[card_id] = card
             self._nav_rail.add_card(card_id, card)
 
-        for card_id in INPUT_MATERIAL_CARDS:
-            title, icon = CARD_DEFINITIONS[card_id]
-            card = NavigationCard(card_id, title, icon_name=icon, parent=self._nav_rail)
-            self._nav_cards[card_id] = card
-            self._nav_rail.add_card(card_id, card)
-
         # Initial state
         self._apply_scene(self._current_scene)
+        if not self.bridge.is_scene_dirty():
+            self._scene_session.capture_persisted_scene(self._current_scene)
         if self.bridge.current_scene() is None:
             self.bridge.set_current_scene(
                 self._current_scene,
@@ -1997,7 +1801,7 @@ class ScenePanel(BasePanel):
         raise AttributeError(f"{type(self).__name__} object has no attribute {name!r}")
 
     def _create_exam_paper_detail(self) -> QWidget:
-        self._exam_paper = ExamPaperDetail(self.bridge)
+        self._exam_paper = ExamPaperDetail()
         self._exam_paper.attach_plan_card(self._overview.take_scene_card())
         return self._exam_paper
 
@@ -2010,9 +1814,13 @@ class ScenePanel(BasePanel):
         )
         return self._rules
 
-    def _create_cleanup_detail(self) -> QWidget:
-        self._cleanup = _CleanupDetail()
-        return self._cleanup
+    def _create_formula_detail(self) -> QWidget:
+        self._formula_detail = _SceneFormulaRulesCard()
+        return self._formula_detail
+
+    def _create_chem_typography_detail(self) -> QWidget:
+        self._chem_typography_detail = _SceneChemTypographyDetail()
+        return self._chem_typography_detail
 
     def _create_content_detail(self) -> QWidget:
         self._content = _ContentDetail(self.bridge)
@@ -2042,34 +1850,41 @@ class ScenePanel(BasePanel):
     def _wire_loaded_detail_signals(self, card_id: str) -> None:
         if card_id in self._wired_detail_signal_ids:
             return
-        if card_id == "scn_exam_paper":
-            self._exam_paper.scene_edited.connect(self._mark_scene_detail_dirty)
-            self._exam_paper.execute_requested.connect(self._navigate_to_quick_execute)
-            self._exam_paper.navigate_material_requested.connect(
-                lambda: self._show_detail_from_overview("scn_content")
-            )
-        elif card_id == "scn_rules":
+        if card_id == "scn_rules":
             self._scope.scope_changed.connect(self._on_scope_changed)
             self._output.scene_edited.connect(self._mark_scene_detail_dirty)
             self._output.family_defaults_applied.connect(
                 self._on_scene_family_defaults_applied
             )
-        elif card_id in {"scn_cleanup", "scn_content"}:
+        elif card_id in {"scn_formula", "scn_chem_typography"}:
+            detail = self._detail_map.get(card_id)
+            if hasattr(detail, "scene_edited"):
+                detail.scene_edited.connect(self._mark_scene_detail_dirty)
+            if hasattr(detail, "save_requested"):
+                detail.save_requested.connect(self.save_current_scene)
+        elif card_id == "scn_content":
             detail = self._detail_map.get(card_id)
             if hasattr(detail, "scene_edited"):
                 detail.scene_edited.connect(self._mark_scene_detail_dirty)
         self._wired_detail_signal_ids.add(card_id)
 
     def _on_scene_dirty_state_changed(self, *_args) -> None:
+        dirty = bool(self.bridge.is_scene_dirty())
+        self._set_scene_detail_save_enabled(dirty)
+        if dirty:
+            self._schedule_scene_autosave()
+        elif not self._scene_autosave_running:
+            self._scene_autosave_timer.stop()
+            self._set_scene_autosave_state("saved")
+        if self.bridge.scene_change_reason() == "module_switches":
+            self._scene_file_status_stale = True
+            return
         self._refresh_navigation_cards()
         self._sync_scene_file_status()
 
     def _sync_loaded_detail_state(self, card_id: str, detail: QWidget) -> None:
         scene = getattr(self, "_current_scene", None)
         if scene is None:
-            return
-        if card_id == "scn_exam_paper" and hasattr(detail, "set_scene"):
-            detail.set_scene(scene)
             return
         if card_id == "scn_rules" and hasattr(detail, "set_scene"):
             detail.set_scene(
@@ -2078,15 +1893,47 @@ class ScenePanel(BasePanel):
                 mode_id=self._current_work_mode_id(),
             )
             return
-        if card_id in {"scn_cleanup", "scn_content"} and hasattr(detail, "set_scene"):
+        if card_id in {"scn_formula", "scn_chem_typography"} and hasattr(
+            detail, "set_scene"
+        ):
+            detail.set_scene(
+                scene,
+                getattr(self, "_current_template", None),
+                mode_id=self._current_work_mode_id(),
+            )
+            if hasattr(detail, "set_save_enabled"):
+                detail.set_save_enabled(bool(self.bridge.is_scene_dirty()))
+            return
+        if card_id == "scn_content" and hasattr(detail, "set_scene"):
             detail.set_scene(scene)
 
     def _show_detail(self, card_id: str) -> None:
         card_id = _normalise_scene_detail_card_id(card_id)
         self._ensure_detail_loaded(card_id)
         self._details.show_detail(card_id)
+        detail = self._detail_map.get(card_id)
+        if (
+            detail is not None
+            and hasattr(detail, "capture_entry_snapshot")
+            and not self.bridge.is_scene_dirty()
+        ):
+            detail.capture_entry_snapshot()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt API
+        super().showEvent(event)
+        if self._scene_file_status_stale:
+            QTimer.singleShot(0, self._flush_deferred_scene_file_status)
+
+    def _flush_deferred_scene_file_status(self) -> None:
+        if not self._scene_file_status_stale:
+            return
+        self._refresh_navigation_cards()
+        self._sync_scene_file_status()
 
     def _show_detail_from_overview(self, card_id: str) -> None:
+        if str(card_id or "").strip() in {"assets", "scn_content"}:
+            self._navigate_to_materials()
+            return
         if str(card_id or "").startswith("tpl_"):
             self.bridge.navigate_to_intent.emit(
                 {
@@ -2108,14 +1955,7 @@ class ScenePanel(BasePanel):
         self._show_detail(card_id)
 
     def _template_navigation_context_payload(self) -> dict[str, object]:
-        preview_context = self._template_preview_context_for_scene(self._current_scene)
-        return {
-            "entry_context_title": preview_context.title,
-            "entry_context_detail": preview_context.detail,
-            "entry_context_action": preview_context.action,
-            "template_preview_groups": preview_context.detail_card_ids,
-            "template_preview_coverage": preview_context.coverage_labels,
-        }
+        return template_navigation_context_payload(self._template_preview_context_for_scene(self._current_scene))
 
     def _resolve_template_for_scene(self, scene: SceneWorkspace | None):
         template_id = str(
@@ -2154,278 +1994,7 @@ class ScenePanel(BasePanel):
         )
 
     def _scene_display_label(self, scene: SceneWorkspace | None) -> str:
-        scene_id = str(getattr(scene, "scene_id", "") or "").strip()
-        for descriptor in self._scene_descriptors:
-            if descriptor.config_id == scene_id:
-                return plan_display_label(descriptor)
-        return str(getattr(scene, "name", "") or "").strip() or scene_id or "当前方案"
-
-    def _current_scene_id(self) -> str:
-        return self._scene_session.current_scene_id()
-
-    def _builtin_scene_ids(self) -> set[str]:
-        builtin_ids = {
-            str(getattr(descriptor, "config_id", "") or "").strip()
-            for descriptor in self._scene_descriptors
-            if str(getattr(descriptor, "source_type", "") or "").strip() == "builtin"
-            and str(getattr(descriptor, "config_id", "") or "").strip()
-        }
-        builtin_ids.update(_builtin_scene_id_set())
-        return builtin_ids
-
-    def _current_scene_is_builtin(self) -> bool:
-        scene_id = self._current_scene_id()
-        if not scene_id:
-            return False
-        source_type = str(self._current_scene_source_type or "").strip()
-        if source_type:
-            return source_type == "builtin"
-        descriptor = self._descriptor_for_scene_id(scene_id)
-        if descriptor is not None:
-            return (
-                str(getattr(descriptor, "source_type", "") or "").strip() == "builtin"
-            )
-        return scene_id in self._builtin_scene_ids()
-
-    def _current_scene_path_obj(self) -> Path | None:
-        path = str(self._current_scene_path or "").strip()
-        if path:
-            return Path(path)
-        scene_id = self._current_scene_id()
-        if scene_id:
-            entry = get_scene_entry(scene_id, mode_id=self._current_work_mode_id())
-            if entry is not None:
-                return entry.path
-        return None
-
-    def _current_scene_manage_path(self) -> Path | None:
-        path = self._current_scene_path_obj()
-        if path is None or not path.exists() or path.is_dir():
-            return None
-        source_type = str(self._current_scene_source_type or "").strip()
-        if not source_type:
-            descriptor = self._descriptor_for_scene_id(self._current_scene_id())
-            source_type = str(
-                getattr(descriptor, "source_type", "") or ""
-            ).strip()
-        if not source_type:
-            source_type = config_library.scene_source_type_for_path(path)
-        if source_type != "user":
-            return None
-        return path if config_library.is_scene_user_library_path(path) else None
-
-    def _current_scene_can_rename(self) -> bool:
-        return (
-            self._current_scene is not None
-            and not self._current_scene_is_builtin()
-            and self._current_scene_manage_path() is not None
-        )
-
-    def _current_scene_can_delete(self) -> bool:
-        return (
-            not self._current_scene_is_builtin()
-            and self._current_scene_manage_path() is not None
-        )
-
-    def _current_scene_folder(self) -> Path:
-        if self._current_work_mode_id() == "official":
-            return OFFICIAL_USER_MASTER_DIR
-        path = self._current_scene_path_obj()
-        if path is not None:
-            folder = path if path.is_dir() else path.parent
-            if folder.exists():
-                return folder
-        return config_library.scene_user_dir(self._current_work_mode_id())
-
-    def _sync_scene_file_status(self) -> None:
-        if not hasattr(self, "_overview"):
-            return
-        is_builtin = self._current_scene_is_builtin()
-        can_rename = self._current_scene_can_rename()
-        can_delete = self._current_scene_can_delete()
-        source_type = str(self._current_scene_source_type or "").strip()
-        unavailable_reason = (
-            "内置方案不能修改，请先创建副本"
-            if is_builtin
-            else (
-                "外部方案不能直接修改，请先创建副本"
-                if source_type == "external"
-                else "当前方案还没有保存为用户方案文件"
-            )
-        )
-        self._overview.set_scene_action_state(
-            can_rename=can_rename,
-            can_delete=can_delete,
-            rename_tooltip="" if can_rename else unavailable_reason,
-            delete_tooltip="" if can_delete else unavailable_reason,
-            folder_tooltip=str(self._current_scene_folder()),
-        )
-
-    def _scene_library_watch_directories(self) -> list[str]:
-        return [
-            str(path)
-            for path in config_library.scene_library_watch_dirs(
-                mode_id=self._current_work_mode_id()
-            )
-        ]
-
-    def _setup_scene_library_watcher(self) -> None:
-        watcher = getattr(self, "_scene_library_watcher", None)
-        if watcher is None:
-            return
-        target_dirs = set(self._scene_library_watch_directories())
-        current_dirs = set(watcher.directories())
-        remove_dirs = list(current_dirs - target_dirs)
-        add_dirs = list(target_dirs - current_dirs)
-        if remove_dirs:
-            watcher.removePaths(remove_dirs)
-        if add_dirs:
-            watcher.addPaths(add_dirs)
-
-    def _on_scene_library_path_changed(self, _path: str = "") -> None:
-        if self._scene_library_refresh_pending:
-            return
-        self._scene_library_refresh_pending = True
-        QTimer.singleShot(50, self._refresh_scene_library_from_disk)
-
-    def _current_scene_file_was_removed(self) -> bool:
-        source = str(self._current_scene_source or "").strip()
-        if source not in {"library", "file"}:
-            return False
-        path = self._current_scene_path_obj()
-        return path is not None and not path.exists()
-
-    def _refresh_scene_library_from_disk(self) -> None:
-        self._scene_library_refresh_pending = False
-        try:
-            self._setup_scene_library_watcher()
-        except Exception as exc:
-            Toast.show_error(f"刷新方案目录失败: {exc}")
-            return
-        authoritative_conflict = (
-            self._scene_session.refresh_authoritative_user_conflict()
-        )
-        if authoritative_conflict:
-            if self._scene_session.recovery_required():
-                Toast.show_warning(
-                    "上一次方案保存仍需恢复；已保留当前现场，"
-                    "恢复完成前不会重载、切换或覆盖方案文件"
-                )
-                return
-            if self._current_scene_file_was_removed():
-                if self.bridge.is_scene_dirty():
-                    Toast.show_warning(
-                        "当前方案文件已被外部删除；未保存草稿仍保留，请保存为新的用户方案"
-                    )
-                    return
-                self._switch_to_default_scene_after_missing_file()
-                return
-            if self.bridge.is_scene_dirty():
-                Toast.show_warning(
-                    "当前方案文件已被外部修改；未保存草稿仍保留，"
-                    "为避免覆盖外部版本，请保存为新的用户方案"
-                )
-                return
-            self._reload_clean_current_user_scene_from_disk()
-            return
-        if self._current_scene_file_was_removed():
-            if self.bridge.is_scene_dirty():
-                Toast.show_warning(
-                    "当前方案文件已被外部删除；未保存草稿仍保留，请保存为新的用户方案"
-                )
-                return
-            self._switch_to_default_scene_after_missing_file()
-            return
-        try:
-            self._refresh_scene_selector_options()
-        except Exception as exc:
-            Toast.show_error(f"刷新方案列表失败: {exc}")
-
-    def _reload_clean_current_user_scene_from_disk(self) -> bool:
-        scene_id = self._current_scene_id()
-        path = self._current_scene_path_obj()
-        mode_id = self._current_work_mode_id()
-        try:
-            if not scene_id or path is None:
-                raise ValueError("当前用户方案缺少可重载的身份或路径")
-            expected_path = config_library.validate_scene_library_write_path(path)
-            entry = get_scene_entry(scene_id, mode_id=mode_id)
-            if (
-                entry is None
-                or not bool(getattr(entry, "is_available", True))
-                or str(getattr(entry, "source_type", "") or "").strip() != "user"
-            ):
-                raise ValueError("当前用户方案不再是可用的权威库条目")
-            entry_path = config_library.validate_scene_library_write_path(entry.path)
-            if entry_path != expected_path:
-                raise ValueError("当前用户方案的库路径发生变化")
-            before_load = self._scene_session.capture_user_reload_candidate(
-                expected_path
-            )
-            scene = load_scene_from_library(scene_id, mode_id=mode_id)
-            if str(getattr(scene, "scene_id", "") or "").strip() != scene_id:
-                raise ValueError("外部方案内容与当前方案身份不一致")
-            after_load = self._scene_session.capture_user_reload_candidate(
-                expected_path
-            )
-            if after_load.revision != before_load.revision:
-                raise RuntimeError("方案文件在重载期间再次变化")
-        except Exception as exc:
-            Toast.show_error(f"重新加载外部修改的方案失败: {exc}")
-            return False
-        activated = self._activate_scene(
-            scene,
-            scene_id=scene_id,
-            path=str(entry_path),
-            source="library",
-            source_type="user",
-            dirty=False,
-            expected_user_revision=after_load.revision,
-        )
-        if not activated:
-            return False
-        Toast.show_info("当前方案文件已被外部更新，已重新加载")
-        return True
-
-    def _switch_to_default_scene_after_missing_file(self) -> bool:
-        message = "当前方案文件已不存在，已切换到默认方案"
-        try:
-            mode_id = self._current_work_mode_id()
-            entry = default_scene_entry(mode_id=mode_id)
-            if entry is not None:
-                scene = load_scene_from_library(
-                    entry.config_id,
-                    mode_id=mode_id,
-                )
-                activated = self._activate_scene(
-                    scene,
-                    scene_id=entry.config_id,
-                    path=str(entry.path),
-                    source="library",
-                    source_type=entry.source_type,
-                    dirty=False,
-                )
-            else:
-                scene = SceneWorkspace(
-                    scene_id="custom",
-                    mode_id=mode_id,
-                    template_id="default",
-                )
-                activated = self._activate_scene(
-                    scene,
-                    scene_id="custom",
-                    path="",
-                    source="runtime",
-                    source_type="runtime",
-                    dirty=False,
-                )
-        except Exception as exc:
-            Toast.show_error(f"当前方案缺失后加载默认方案失败: {exc}")
-            return False
-        if activated:
-            Toast.show_info(message)
-            return True
-        return False
+        return scene_display_label(scene, self._scene_descriptors)
 
     def _refresh_scene_selector_options(self) -> None:
         self._scene_descriptors = list(
@@ -2445,11 +2014,6 @@ class ScenePanel(BasePanel):
         # emit duplicate scene/template events for one mode switch.
         self._setup_scene_library_watcher()
         self._refresh_scene_selector_options()
-        exam_paper = getattr(self, "_exam_paper", None)
-        if exam_paper is not None:
-            exam_paper.refresh_resource_options_for_work_mode(
-                self._current_work_mode_id()
-            )
 
     def _activate_scene(
         self,
@@ -2478,6 +2042,8 @@ class ScenePanel(BasePanel):
             expected_user_revision=expected_user_revision,
         )
         if result.success:
+            self._scene_autosave_timer.stop()
+            self._set_scene_autosave_state("saved" if not dirty else "pending")
             return True
         if result.rollback_error is not None:
             Toast.show_error(
@@ -2560,6 +2126,15 @@ class ScenePanel(BasePanel):
             }
         )
 
+    def _navigate_to_materials(self) -> None:
+        """Open the canonical material-package owner surface.
+
+        ``scn_content`` remains accepted by the overview dispatcher as a
+        compatibility alias, but it no longer owns a visible scene card.
+        """
+
+        self.bridge.navigate_to_panel.emit(panel_index("assets"))
+
     def _refresh_navigation_cards(self) -> None:
         scene = getattr(self, "_current_scene", None)
         if scene is None or not hasattr(self, "_nav_cards"):
@@ -2597,6 +2172,7 @@ class ScenePanel(BasePanel):
             scene_label=scene_label,
             template_label=template_label,
             scene_dirty=dirty,
+            scene_save_state=getattr(self, "_scene_autosave_state", "saved"),
             current_template=getattr(self, "_current_template", None),
             delivery_preset=default_delivery_preset(scene),
             exam_paper_config=_project_exam_paper_config(scene)[0],
@@ -2607,6 +2183,26 @@ class ScenePanel(BasePanel):
         card_id = str(navigation_intent_value(intent, "card_id", "") or "").strip()
         if not card_id:
             return
+        field_id = str(navigation_intent_value(intent, "field_id", "") or "").strip()
+        if card_id == "scn_rules":
+            if field_id.startswith(("chem_typography", "thesis_formula_rules.chem_typography")):
+                card_id = "scn_chem_typography"
+            elif field_id.startswith(
+                (
+                    "formula_",
+                    "formula_table",
+                    "formula_style",
+                    "formula_to_table",
+                    "equation_",
+                    "thesis_formula_rules.formula",
+                    "thesis_formula_rules.equation",
+                )
+            ) or field_id in {
+                "output_mode",
+                "low_confidence_policy",
+                "office_fallback_enabled",
+            }:
+                card_id = "scn_formula"
         self._show_detail_from_overview(card_id)
         self._focus_navigation_field(card_id, intent)
 
@@ -2727,22 +2323,110 @@ class ScenePanel(BasePanel):
     def save_current_scene(self) -> bool:
         """Persist the active draft through the shared ownership transaction."""
 
+        self._scene_autosave_timer.stop()
         if not self.bridge.is_scene_dirty():
+            self._set_scene_autosave_state("saved")
             Toast.show_info("当前方案没有未保存修改")
             return True
+        self._set_scene_autosave_state("saving")
         if not self.prepare_pending_scene_changes(
             SCENE_PENDING_SAVE,
             save_reason="保存当前修改",
         ):
+            self._set_scene_autosave_state("pending")
             return False
         if not self.commit_prepared_scene_changes():
             self.cancel_prepared_scene_changes()
+            self._set_scene_autosave_state("failed")
             return False
         if not self.finalize_prepared_scene_changes():
             self.rollback_prepared_scene_changes()
+            self._set_scene_autosave_state("failed")
             return False
+        self._scene_session.capture_persisted_scene(self._current_scene)
+        self._capture_scene_detail_snapshots()
+        self._set_scene_detail_save_enabled(False)
+        self._set_scene_autosave_state("saved")
         Toast.show_success("方案已保存")
         return True
+
+    def _set_scene_autosave_state(self, state: str) -> None:
+        normalized = str(state or "").strip() or "saved"
+        if getattr(self, "_scene_autosave_state", "") == normalized:
+            return
+        self._scene_autosave_state = normalized
+        self._refresh_navigation_cards()
+
+    def _schedule_scene_autosave(self) -> None:
+        if not hasattr(self, "_scene_autosave_timer"):
+            return
+        if not self.bridge.is_scene_dirty():
+            self._scene_autosave_timer.stop()
+            self._set_scene_autosave_state("saved")
+            return
+        if self._scene_autosave_running:
+            return
+        self._set_scene_autosave_state("pending")
+        self._scene_autosave_timer.start(SCENE_AUTOSAVE_DELAY_MS)
+
+    def flush_pending_scene_autosave(self) -> bool:
+        """Synchronously finish a pending autosave before a destructive transition."""
+
+        self._scene_autosave_timer.stop()
+        if not self.bridge.is_scene_dirty():
+            self._set_scene_autosave_state("saved")
+            return True
+        return self._autosave_current_scene()
+
+    def pause_pending_scene_autosave(self) -> None:
+        """Let an explicit save/discard transition own the current dirty draft."""
+
+        self._scene_autosave_timer.stop()
+
+    def _autosave_current_scene(self) -> bool:
+        """Persist one quiet edit burst; built-ins become owned user copies."""
+
+        if self._scene_autosave_running:
+            return not self.bridge.is_scene_dirty()
+        if not self.bridge.is_scene_dirty():
+            self._set_scene_autosave_state("saved")
+            return True
+
+        self._scene_autosave_running = True
+        self._set_scene_autosave_state("saving")
+        fork_name: str | None = None
+        try:
+            if self._scene_session.requires_fork_save():
+                fork_name = self._unique_scene_copy_name()
+            if not self.prepare_pending_scene_changes(
+                SCENE_PENDING_SAVE,
+                fork_name=fork_name,
+                save_reason="自动保存当前修改",
+            ):
+                self._set_scene_autosave_state("failed")
+                return False
+            if not self.commit_prepared_scene_changes():
+                self.cancel_prepared_scene_changes()
+                self._set_scene_autosave_state("failed")
+                return False
+            if not self.finalize_prepared_scene_changes():
+                self.rollback_prepared_scene_changes()
+                self._set_scene_autosave_state("failed")
+                return False
+            self._scene_session.capture_persisted_scene(self._current_scene)
+            self._capture_scene_detail_snapshots()
+            self._set_scene_detail_save_enabled(False)
+            self._set_scene_autosave_state("saved")
+            if fork_name:
+                Toast.show_success(f"已创建个人方案并自动保存：{fork_name}")
+            return True
+        except Exception as exc:
+            self.cancel_prepared_scene_changes()
+            self._set_scene_autosave_state("failed")
+            Toast.show_error(f"自动保存方案失败，当前修改仍保留：{exc}")
+            return False
+        finally:
+            self._scene_autosave_running = False
 
     def _on_new_scene_requested(self) -> None:
         try:
@@ -3015,6 +2699,7 @@ class ScenePanel(BasePanel):
         dialog.accept()
 
     def _prompt_pending_scene_action(self, reason: str) -> str:
+        self.pause_pending_scene_autosave()
         dialog = BaseDialog(title="未保存的方案修改", icon_style="warning", parent=self)
         dialog.add_message(
             f"当前方案有未保存修改。{str(reason or '继续').strip()}前，"
@@ -3270,16 +2955,22 @@ class ScenePanel(BasePanel):
         scene: SceneWorkspace,
         template: TemplateConfig | None,
     ) -> None:
-        if "scn_exam_paper" in self._loaded_detail_ids:
-            self._exam_paper.set_scene(scene)
         if "scn_rules" in self._loaded_detail_ids:
             self._rules.set_scene(
                 scene,
                 template,
                 mode_id=self._current_work_mode_id(),
             )
-        if "scn_cleanup" in self._loaded_detail_ids:
-            self._cleanup.set_scene(scene)
+        for card_id in ("scn_formula", "scn_chem_typography"):
+            if card_id not in self._loaded_detail_ids:
+                continue
+            detail = self._detail_map[card_id]
+            detail.set_scene(
+                scene,
+                template,
+                mode_id=self._current_work_mode_id(),
+            )
+            detail.set_save_enabled(bool(self.bridge.is_scene_dirty()))
         if "scn_content" in self._loaded_detail_ids:
             self._content.set_scene(scene)
 
@@ -3309,8 +3000,40 @@ class ScenePanel(BasePanel):
             source_type=self._current_scene_source_type,
             emit_signal=False,
         )
-        self.bridge.mark_scene_dirty(recheck=False)
+        self._recompute_scene_dirty_state()
         self._refresh_navigation_cards()
+
+    def _recompute_scene_dirty_state(self) -> bool:
+        dirty = self._scene_session.is_dirty_against_persisted(
+            self._current_scene
+        )
+        if dirty:
+            self.bridge.mark_scene_dirty(recheck=False)
+        else:
+            self.bridge.clear_scene_dirty()
+        self._set_scene_detail_save_enabled(dirty)
+        if dirty:
+            self._schedule_scene_autosave()
+        else:
+            self._scene_autosave_timer.stop()
+            self._set_scene_autosave_state("saved")
+        return dirty
+
+    def _set_scene_detail_save_enabled(self, enabled: bool) -> None:
+        for card_id in ("scn_formula", "scn_chem_typography"):
+            detail = self._detail_map.get(card_id)
+            if card_id in self._loaded_detail_ids and hasattr(
+                detail, "set_save_enabled"
+            ):
+                detail.set_save_enabled(bool(enabled))
+
+    def _capture_scene_detail_snapshots(self) -> None:
+        for card_id in ("scn_formula", "scn_chem_typography"):
+            detail = self._detail_map.get(card_id)
+            if card_id in self._loaded_detail_ids and hasattr(
+                detail, "capture_entry_snapshot"
+            ):
+                detail.capture_entry_snapshot()
 
     def _update_dynamic_card_visibility(self) -> None:
         """Show/hide scenario-specific nav cards."""
@@ -3326,6 +3049,15 @@ class ScenePanel(BasePanel):
         exam_card = self._nav_cards.get("scn_exam_paper")
         if exam_card is not None:
             exam_card.setVisible(uses_plan_preview)
+        is_thesis = bool(
+            mode_id == "thesis"
+            and scene is not None
+            and str(getattr(scene, "mode_id", "") or "").strip() == "thesis"
+        )
+        for card_id in ("scn_formula", "scn_chem_typography"):
+            card = self._nav_cards.get(card_id)
+            if card is not None:
+                card.setVisible(is_thesis)
         if "scn_exam_paper" in self._loaded_detail_ids:
             if uses_plan_preview:
                 if getattr(self._exam_paper, "_attached_plan_card", None) is None:
@@ -3334,11 +3066,6 @@ class ScenePanel(BasePanel):
                 detached = self._exam_paper.detach_plan_card()
                 if detached is not None:
                     self._overview.restore_scene_card(detached)
-        content_card = self._nav_cards.get("scn_content")
-        if content_card is not None:
-            content_card.setVisible(
-                _scene_should_show_content_card(scene, mode_id=mode_id)
-            )
         selected_id = self._nav_rail.selected_card_id()
         selected_card = self._nav_cards.get(str(selected_id or ""))
         if selected_card is not None and selected_card.isHidden():
@@ -3346,7 +3073,7 @@ class ScenePanel(BasePanel):
         self._refresh_nav_section_headers()
 
     def _default_visible_card_id(self) -> str:
-        for card_id in ("scn_exam_paper", "scn_overview", "scn_rules", "scn_content"):
+        for card_id in ("scn_exam_paper", "scn_overview", "scn_rules"):
             card = self._nav_cards.get(card_id)
             if card is not None and not card.isHidden():
                 return card_id
@@ -3366,11 +3093,6 @@ class ScenePanel(BasePanel):
 
     def _on_scene_edited(self) -> None:
         self._refresh_scene_overview()
-        was_dirty = (
-            bool(self.bridge.is_scene_dirty())
-            if hasattr(self.bridge, "is_scene_dirty")
-            else False
-        )
         self.bridge.set_current_scene(
             self._current_scene,
             config_id=self._current_scene.scene_id,
@@ -3379,10 +3101,9 @@ class ScenePanel(BasePanel):
             source_type=self._current_scene_source_type,
             emit_signal=False,
         )
-        self.bridge.mark_scene_dirty(recheck=False)
+        self._recompute_scene_dirty_state()
         self._sync_bound_template_from_scene()
-        if was_dirty:
-            self._refresh_navigation_cards()
+        self._refresh_navigation_cards()
 
     def _on_scene_family_defaults_applied(self) -> None:
         self._apply_scene(self._current_scene)
@@ -3397,6 +3118,16 @@ class ScenePanel(BasePanel):
     def on_scene_changed(self, scene: SceneWorkspace) -> None:
         if scene is None:
             return
+        if self.bridge.scene_change_reason() == "module_switches":
+            self._scene_session.accept_bridge_runtime_scene_update(scene)
+            self._current_scene = scene
+            if "scn_rules" in self._loaded_detail_ids:
+                self._rules.set_scene(
+                    scene,
+                    self._current_template,
+                    mode_id=self._current_work_mode_id(),
+                )
+            return
         self._scene_session.accept_bridge_scene(scene)
         if (
             getattr(self, "_ignore_own_scene_changed", False)
@@ -3404,6 +3135,10 @@ class ScenePanel(BasePanel):
         ):
             return
         self._refresh_scene_selector_options()
+        if not self.bridge.is_scene_dirty():
+            self._scene_autosave_timer.stop()
+            self._set_scene_autosave_state("saved")
+            self._scene_session.capture_persisted_scene(scene)
         self._apply_scene(scene)
         self._refresh_navigation_cards()
 

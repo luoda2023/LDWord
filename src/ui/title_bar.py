@@ -96,8 +96,10 @@ class TitleBar(QWidget):
         self._btn_close.clicked.connect(self._window.close)
 
         if self._bridge is not None:
-            self._bridge.work_mode_changed.connect(self.set_work_mode)
-            self.set_work_mode(self._bridge.current_work_mode())
+            self._bridge.work_mode_changed.connect(
+                self._project_authoritative_work_mode
+            )
+            self._project_authoritative_work_mode()
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
@@ -121,6 +123,10 @@ class TitleBar(QWidget):
             self._work_mode_combo.setCurrentIndex(max(index, 0))
         finally:
             self._syncing_work_mode = False
+
+    def _project_authoritative_work_mode(self, _emitted_mode=None) -> None:
+        if self._bridge is not None:
+            self.set_work_mode(self._bridge.current_work_mode())
 
     def _on_work_mode_changed(self, *_args) -> None:
         if self._syncing_work_mode or self._bridge is None:

@@ -8,7 +8,7 @@ def apply_workbench_v2_shell_theme(panel, nav_rail, detail_scroll, detail_contai
     """Apply the V2 master-detail shell styling."""
     nav_background = theme.bg_nav_rail or theme.bg_card
     if hasattr(panel, "_shell"):
-        panel._shell.apply_theme(theme)
+        # MasterDetailShell owns both its initial theme and theme-change binding.
         return
     apply_master_detail_shell_theme(
         panel,

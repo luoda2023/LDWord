@@ -2057,6 +2057,11 @@ def _normalize_explicit_run_font_hints(doc: Document) -> int:
     return _normalize_explicit_run_font_hints_in_root(doc.element.body)
 
 
+def normalize_explicit_run_font_hints_in_paragraph(paragraph) -> int:
+    """Normalize explicit font hints only inside one authorized paragraph."""
+    return _normalize_explicit_run_font_hints_in_root(paragraph._p)
+
+
 def _normalize_related_story_part_font_hints(doc: Document) -> dict[str, int]:
     changed_parts: dict[str, int] = {}
     seen_partnames: set[str] = set()
@@ -2245,7 +2250,12 @@ def _apply_chem_marks_to_para_runs(para, marks: list[str | None]) -> int:
     return changed_chars
 
 
-def _apply_formula_font_mask_to_para_runs(para, mask: list[bool]) -> int:
+def _apply_formula_font_mask_to_para_runs(
+    para,
+    mask: list[bool],
+    *,
+    font_name: str | None = None,
+) -> int:
     """Split runs and force western font on formula-like token spans."""
     if not para.runs:
         return 0
@@ -2286,7 +2296,12 @@ def _apply_formula_font_mask_to_para_runs(para, mask: list[bool]) -> int:
         for seg_text, need_western_font in segments:
             new_r = _new_text_run_element(seg_text, base_rpr)
             if need_western_font and not _contains_cjk(seg_text):
-                target_font = _resolve_run_ascii_font(new_r) or (run.font.name or "Times New Roman")
+                target_font = (
+                    str(font_name or "").strip()
+                    or _resolve_run_ascii_font(new_r)
+                    or run.font.name
+                    or "Times New Roman"
+                )
                 if _set_run_all_fonts(new_r, target_font):
                     changed_chars += len(seg_text)
             parent.insert(insert_at, new_r)
@@ -2306,12 +2321,19 @@ def _restore_reference_chem_typography(
     if not text:
         return 0, 0
 
-    font_changed = _normalize_super_sub_unicode_font_in_para(para)
     font_mask = _build_chem_font_mask(text, chem_cfg=chem_cfg, chem_runtime=chem_runtime)
-    if any(font_mask):
-        font_changed += _apply_formula_font_mask_to_para_runs(para, font_mask)
-
     marks = _build_chem_style_marks(text, chem_cfg=chem_cfg, chem_runtime=chem_runtime)
+    if not any(font_mask) and not any(marks):
+        return 0, 0
+
+    font_changed = _normalize_super_sub_unicode_font_in_para(para)
+    if any(font_mask):
+        font_changed += _apply_formula_font_mask_to_para_runs(
+            para,
+            font_mask,
+            font_name=str(getattr(chem_cfg, "western_font", "") or "").strip()
+            or None,
+        )
     if not any(marks):
         return font_changed, 0
     mark_changed = _apply_chem_marks_to_para_runs(para, marks)
@@ -2327,6 +2349,31 @@ def build_chem_font_mask(text: str, *, chem_cfg=None) -> list[bool]:
     return _build_chem_font_mask(text, chem_cfg=chem_cfg)
 
 
+def paragraph_has_chem_typography_evidence(para, *, chem_cfg=None) -> bool:
+    text = (
+        "".join((run.text or "") for run in para.runs)
+        if para.runs
+        else (para.text or "")
+    )
+    if not text:
+        return False
+    return bool(
+        any(_build_chem_font_mask(text, chem_cfg=chem_cfg))
+        or any(_build_chem_style_marks(text, chem_cfg=chem_cfg))
+    )
+
+
+def normalize_explicit_run_font_hints(doc: Document) -> dict[str, int]:
+    """Remove stale East-Asia hints when runs already define explicit fonts."""
+    body_count = _normalize_explicit_run_font_hints(doc)
+    related = _normalize_related_story_part_font_hints(doc)
+    return {
+        "body": int(body_count),
+        "related_parts": int(sum(related.values())),
+        "total": int(body_count + sum(related.values())),
+    }
+
+
 
 def apply_chem_typography_to_paragraph(para, *, chem_cfg=None) -> tuple[int, int]:
     """Apply chemistry font + super/subscript recovery to a paragraph."""
@@ -2334,12 +2381,19 @@ def apply_chem_typography_to_paragraph(para, *, chem_cfg=None) -> tuple[int, int
     if not text:
         return 0, 0
 
-    font_changed = _normalize_super_sub_unicode_font_in_para(para)
     font_mask = _build_chem_font_mask(text, chem_cfg=chem_cfg)
-    if any(font_mask):
-        font_changed += _apply_formula_font_mask_to_para_runs(para, font_mask)
-
     marks = _build_chem_style_marks(text, chem_cfg=chem_cfg)
+    if not any(font_mask) and not any(marks):
+        return 0, 0
+
+    font_changed = _normalize_super_sub_unicode_font_in_para(para)
+    if any(font_mask):
+        font_changed += _apply_formula_font_mask_to_para_runs(
+            para,
+            font_mask,
+            font_name=str(getattr(chem_cfg, "western_font", "") or "").strip()
+            or None,
+        )
     if not any(marks):
         return font_changed, 0
     mark_changed = _apply_chem_marks_to_para_runs(para, marks)

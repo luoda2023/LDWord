@@ -44,6 +44,7 @@ from src.config.template_import_service import (
     TemplateImportError,
     TemplateImportIssue,
     TemplateImportSuccess,
+    import_template_authoring_result_text,
     process_template_import_inbox,
 )
 
@@ -72,6 +73,7 @@ __all__ = [
     "TemplateImportSuccess",
     "WORKBENCH_INDEX_FILENAME",
     "ensure_template_authoring_workspace",
+    "import_template_authoring_result_text",
     "list_template_authoring_workspace_descriptors",
     "process_template_import_inbox",
     "refresh_template_authoring_workbench_index",

@@ -1,4 +1,4 @@
-# UI Surface / 圆角实现盘点
+﻿# UI Surface / 圆角实现盘点
 
 - 日期：2026-04-02
 - 目标：列出项目内所有主要圆角实现方式，标记高 DPI / 一致性风险，并给出一劳永逸的收敛方案
@@ -24,13 +24,13 @@
 
 共享基类：
 
-- [rounded_surface.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/rounded_surface.py)
+- [rounded_surface.py](../../src/shared/ui/rounded_surface.py)
 
 当前使用者：
 
-- [main_window.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/main_window.py)
-- [base_dialog.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/base_dialog.py)
-- [quick_execution_drop_area.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/quick_execution_drop_area.py)
+- [main_window.py](../../src/ui/main_window.py)
+- [base_dialog.py](../../src/shared/ui/base_dialog.py)
+- [quick_execution_drop_area.py](../../src/ui/panels/workbench/quick_execution_drop_area.py)
 
 特点：
 
@@ -40,24 +40,24 @@
 
 已发现风险：
 
-- [quick_execution_drop_area.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/quick_execution_drop_area.py) 外层自绘边框与内部全尺寸内容层叠加，需要内容 inset 才能避免压边
+- [quick_execution_drop_area.py](../../src/ui/panels/workbench/quick_execution_drop_area.py) 外层自绘边框与内部全尺寸内容层叠加，需要内容 inset 才能避免压边
 
 ### 2.2 QSS 卡片/面板圆角
 
 共享卡片基类：
 
-- [card.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/card.py)
+- [card.py](../../src/shared/ui/card.py)
 
 卡片派生 / 依赖：
 
-- [navigation_card.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/navigation_card.py)
-- [strategy_card.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/strategy_card.py)
-- [heading_quick_card.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/heading_quick_card.py)
-- [quick_fill_card.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/quick_fill_card.py)
-- [config_management_detail.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/config_management_detail.py)
-- [feature_detail_panes.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/feature_detail_panes.py)
-- [config_list_widget.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/config_list_widget.py)
-- [recent_run_panel.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/recent_run_panel.py)
+- [navigation_card.py](../../src/shared/ui/navigation_card.py)
+- [strategy_card.py](../../src/ui/panels/workbench/strategy_card.py)
+- [heading_quick_card.py](../../src/ui/panels/workbench/heading_quick_card.py)
+- [quick_fill_card.py](../../src/ui/panels/workbench/quick_fill_card.py)
+- [config_management_detail.py](../../src/ui/panels/workbench/config_management_detail.py)
+- [feature_detail_panes.py](../../src/ui/panels/workbench/feature_detail_panes.py)
+- [config_list_widget.py](../../src/shared/ui/config_list_widget.py)
+- [recent_run_panel.py](../../src/ui/panels/workbench/recent_run_panel.py)
 
 特点：
 
@@ -67,18 +67,18 @@
 
 已发现风险：
 
-- [card.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/card.py) 仍然是 QSS 圆角 + 阴影，和 `RoundedSurfaceFrame` 体系并存
-- [navigation_card.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/navigation_card.py) 在卡片基类之上再用 QSS 改背景，后续如果统一卡片底层，需要一起迁移
+- [card.py](../../src/shared/ui/card.py) 仍然是 QSS 圆角 + 阴影，和 `RoundedSurfaceFrame` 体系并存
+- [navigation_card.py](../../src/shared/ui/navigation_card.py) 在卡片基类之上再用 QSS 改背景，后续如果统一卡片底层，需要一起迁移
 
 ### 2.3 QSS 壳层/边缘圆角
 
 文件：
 
-- [title_bar.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/title_bar.py)
-- [sidebar.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/sidebar.py)
-- [theme_panel.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/theme_panel.py)
-- [workbench/styles.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/styles.py)
-- [main_window.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/main_window.py) 里的 `_PlaceholderPanel`
+- [title_bar.py](../../src/ui/title_bar.py)
+- [sidebar.py](../../src/ui/sidebar.py)
+- [theme_panel.py](../../src/ui/panels/theme_panel.py)
+- [workbench/styles.py](../../src/ui/panels/workbench/styles.py)
+- [main_window.py](../../src/ui/main_window.py) 里的 `_PlaceholderPanel`
 
 特点：
 
@@ -94,25 +94,25 @@
 
 共享 builder / style helper：
 
-- [button_style.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/button_style.py)
-- [input_style.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/input_style.py)
-- [selection_control_style.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/selection_control_style.py)
-- [dialog_style.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/dialog_style.py)
+- [button_style.py](../../src/shared/ui/button_style.py)
+- [input_style.py](../../src/shared/ui/input_style.py)
+- [selection_control_style.py](../../src/shared/ui/selection_control_style.py)
+- [dialog_style.py](../../src/shared/ui/dialog_style.py)
 
 直接使用 token 的控件：
 
-- [badge.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/badge.py)
-- [color_picker.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/color_picker.py)
-- [collapsible_section.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/collapsible_section.py)
-- [icon_button.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/icon_button.py)
-- [log_stream_widget.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/log_stream_widget.py)
-- [progress_indicator.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/progress_indicator.py)
-- [search_input.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/search_input.py)
-- [styled_combo_box.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/styled_combo_box.py)
-- [style_preview.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/style_preview.py)
-- [heading_numbering_styles.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/heading_numbering_styles.py)
-- [workbench/styles.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/styles.py)
-- [quick_execution_detail.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/quick_execution_detail.py)
+- [badge.py](../../src/shared/ui/badge.py)
+- [color_picker.py](../../src/shared/ui/color_picker.py)
+- [collapsible_section.py](../../src/shared/ui/collapsible_section.py)
+- [icon_button.py](../../src/shared/ui/icon_button.py)
+- [log_stream_widget.py](../../src/shared/ui/log_stream_widget.py)
+- [progress_indicator.py](../../src/shared/ui/progress_indicator.py)
+- [search_input.py](../../src/shared/ui/search_input.py)
+- [styled_combo_box.py](../../src/shared/ui/styled_combo_box.py)
+- [style_preview.py](../../src/shared/ui/style_preview.py)
+- [heading_numbering_styles.py](../../src/ui/panels/heading_numbering_styles.py)
+- [workbench/styles.py](../../src/ui/panels/workbench/styles.py)
+- [quick_execution_detail.py](../../src/ui/panels/workbench/quick_execution_detail.py)
 
 特点：
 
@@ -122,17 +122,17 @@
 
 已发现风险：
 
-- [theme_panel.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/theme_panel.py) 仍有 `18px`、`6px`、`2px` 这类硬编码
-- [quick_execution_drop_area.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/quick_execution_drop_area.py) 内部图标和清除按钮也还有 `6px`、`14px` 的局部硬编码
+- [theme_panel.py](../../src/ui/panels/theme_panel.py) 仍有 `18px`、`6px`、`2px` 这类硬编码
+- [quick_execution_drop_area.py](../../src/ui/panels/workbench/quick_execution_drop_area.py) 内部图标和清除按钮也还有 `6px`、`14px` 的局部硬编码
 
 ### 2.5 自绘控件圆角
 
 文件：
 
-- [rounded_surface.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/rounded_surface.py)
-- [toggle_switch.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/toggle_switch.py)
-- [themed_slider.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/themed_slider.py)
-- [theme_panel.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/theme_panel.py) 预览绘制
+- [rounded_surface.py](../../src/shared/ui/rounded_surface.py)
+- [toggle_switch.py](../../src/shared/ui/toggle_switch.py)
+- [themed_slider.py](../../src/shared/ui/themed_slider.py)
+- [theme_panel.py](../../src/ui/panels/theme_panel.py) 预览绘制
 
 特点：
 
@@ -143,27 +143,27 @@
 
 高风险：
 
-- [card.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/card.py)
+- [card.py](../../src/shared/ui/card.py)
   QSS 圆角 + 阴影，是目前普通卡片体系的核心，和自绘 surface 分裂
-- [navigation_card.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/navigation_card.py)
+- [navigation_card.py](../../src/shared/ui/navigation_card.py)
   在 `Card` 之上再次靠 QSS 改背景状态，后续统一时必须一起迁移
-- [quick_execution_drop_area.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/quick_execution_drop_area.py)
+- [quick_execution_drop_area.py](../../src/ui/panels/workbench/quick_execution_drop_area.py)
   已迁入自绘 surface，但内部内容层和外层边框仍是独立层叠，需要继续做内容层统一裁剪
-- [theme_panel.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/theme_panel.py)
+- [theme_panel.py](../../src/ui/panels/theme_panel.py)
   同时混用了多种自绘圆角和硬编码值
 
 中风险：
 
-- [title_bar.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/title_bar.py)
-- [sidebar.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/sidebar.py)
-- [workbench/styles.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/styles.py)
-- [base_dialog.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/base_dialog.py)
-- [main_window.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/main_window.py)
+- [title_bar.py](../../src/ui/title_bar.py)
+- [sidebar.py](../../src/ui/sidebar.py)
+- [workbench/styles.py](../../src/ui/panels/workbench/styles.py)
+- [base_dialog.py](../../src/shared/ui/base_dialog.py)
+- [main_window.py](../../src/ui/main_window.py)
 
 低风险：
 
-- builder 型控件样式，如 [button_style.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/button_style.py)、[input_style.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/input_style.py)
-- 轻量角标/按钮小圆角，如 [badge.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/badge.py)、[search_input.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/search_input.py)
+- builder 型控件样式，如 [button_style.py](../../src/shared/ui/button_style.py)、[input_style.py](../../src/shared/ui/input_style.py)
+- 轻量角标/按钮小圆角，如 [badge.py](../../src/shared/ui/badge.py)、[search_input.py](../../src/shared/ui/search_input.py)
 
 ## 4. 一劳永逸的收敛方案
 
@@ -204,14 +204,14 @@
 
 第一批：表面体系收敛
 
-- 把 [card.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/card.py) 迁入 `RoundedSurfaceFrame` 体系
-- 同步调整 [navigation_card.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/shared/ui/navigation_card.py)
+- 把 [card.py](../../src/shared/ui/card.py) 迁入 `RoundedSurfaceFrame` 体系
+- 同步调整 [navigation_card.py](../../src/shared/ui/navigation_card.py)
 - 确立“Card family”和“Surface family”的清晰边界
 
 第二批：高风险特殊容器
 
-- 收尾 [quick_execution_drop_area.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/workbench/quick_execution_drop_area.py) 的内容层圆角一致性
-- 清理 [theme_panel.py](/C:/Users/Administrator/Desktop/Lark-Formatter%201.0/Lark-Formatter%20V1.0/src/ui/panels/theme_panel.py) 的多套硬编码绘制逻辑
+- 收尾 [quick_execution_drop_area.py](../../src/ui/panels/workbench/quick_execution_drop_area.py) 的内容层圆角一致性
+- 清理 [theme_panel.py](../../src/ui/panels/theme_panel.py) 的多套硬编码绘制逻辑
 
 第三批：硬编码清扫
 

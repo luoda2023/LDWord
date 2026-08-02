@@ -37,20 +37,18 @@ def test_workbench_panel_uses_v2_master_detail_shell():
         assert hasattr(panel, "_nav_rail")
         assert hasattr(panel, "_detail_scroll")
         assert panel._nav_rail.selected_card_id() == "quick_execute"
-        assert panel._current_detail is panel._quick_execution_detail
+        assert panel._current_detail is panel._document_execution_detail
     finally:
         panel.close()
 
 
-def test_workbench_panel_starts_with_all_fixed_workbench_functions():
+def test_workbench_panel_exposes_only_released_fixed_workbench_functions():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        assert list(panel._navigation_cards) == [
-            "quick_execute",
-            "batch_generate",
-            "material_suite_generate",
-        ]
+        assert list(panel._navigation_cards) == ["quick_execute"]
+        assert "material_suite_generate" not in panel._detail_map
+        assert panel._suite_generation_detail is None
         assert not hasattr(panel, "_config_management_detail")
     finally:
         panel.close()
@@ -113,34 +111,34 @@ def test_dynamic_navigation_feature_diff_preserves_selection_identity_and_order(
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        panel._quick_execution_detail.set_feature_enabled("formula", True)
-        formula_card = panel._navigation_cards["formula"]
+        panel._quick_execution_detail.set_feature_enabled("citation", True)
+        citation_card = panel._navigation_cards["citation"]
         header = panel._navigation.dynamic_section_header
-        panel._nav_rail.select_card("formula")
+        panel._nav_rail.select_card("citation")
         selection_events: list[str] = []
         panel._nav_rail.card_selected.connect(selection_events.append)
 
-        # table_chart is ordered before formula, but enabling it must move only
-        # layout items and leave the selected formula card alive.
+        # table_chart is ordered before citation, but enabling it must move only
+        # layout items and leave the selected citation card alive.
         panel._quick_execution_detail.set_feature_enabled("table_chart", True)
 
-        assert panel._navigation_cards["formula"] is formula_card
+        assert panel._navigation_cards["citation"] is citation_card
         assert panel._navigation.dynamic_section_header is header
-        assert panel._nav_rail.selected_card_id() == "formula"
+        assert panel._nav_rail.selected_card_id() == "citation"
         assert selection_events == []
         header_index = panel._nav_rail._layout.indexOf(header)
         assert panel._nav_rail._layout.itemAt(header_index + 1).widget() is panel._navigation_cards["table_chart"]
-        assert panel._nav_rail._layout.itemAt(header_index + 2).widget() is formula_card
+        assert panel._nav_rail._layout.itemAt(header_index + 2).widget() is citation_card
 
         table_card = panel._navigation_cards["table_chart"]
         panel._quick_execution_detail.set_feature_enabled("table_chart", False)
 
         assert "table_chart" not in panel._navigation_cards
-        assert panel._navigation_cards["formula"] is formula_card
+        assert panel._navigation_cards["citation"] is citation_card
         assert panel._navigation.dynamic_section_header is header
-        assert panel._nav_rail.selected_card_id() == "formula"
+        assert panel._nav_rail.selected_card_id() == "citation"
         assert selection_events == []
-        assert table_card is not formula_card
+        assert table_card is not citation_card
     finally:
         panel.close()
 

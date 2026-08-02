@@ -29,7 +29,7 @@ class QuickExecutionResultPresentation:
     cancelled: bool
     expand_log: bool
     execute_button_text: str
-    retry_profile_ids: tuple[str, ...]
+    retry_record_ids: tuple[str, ...]
     batch_run_id: str
     batch_attempt_number: int
     log_entries: tuple[QuickExecutionLogEntry, ...]
@@ -60,12 +60,12 @@ def build_execution_result_presentation(
         status_text, status_tone = "执行失败", "error"
 
     batch_isolation = dict(getattr(state, "batch_isolation", {}) or {})
-    retry_profile_ids = tuple(
+    retry_record_ids = tuple(
         text
         for text in (
-            str(profile_id or "").strip()
-            for profile_id in list(
-                batch_isolation.get("retry_eligible_profile_ids", []) or []
+            str(record_id or "").strip()
+            for record_id in list(
+                batch_isolation.get("retry_eligible_record_ids", []) or []
             )
         )
         if text
@@ -82,7 +82,7 @@ def build_execution_result_presentation(
         cancelled=cancelled,
         expand_log=not success and not cancelled,
         execute_button_text="重新生成" if success else "生成文档",
-        retry_profile_ids=retry_profile_ids,
+        retry_record_ids=retry_record_ids,
         batch_run_id=str(batch_isolation.get("history_run_id") or "").strip(),
         batch_attempt_number=max(1, _safe_int(batch_isolation.get("attempt_number"), 1)),
         log_entries=tuple(

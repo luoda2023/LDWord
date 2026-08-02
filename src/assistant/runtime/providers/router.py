@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from src.assistant.runtime.mock_provider import MockModelGateway
 from src.assistant.runtime.provider_contract import ModelGateway
 from src.assistant.runtime.providers.openai_compatible import OpenAICompatibleModelGateway
-from src.assistant.runtime.providers.profiles import ProviderProfileStore
+from src.assistant.runtime.providers.profiles import (
+    ProviderProfileStore,
+    provider_extra_body_with_model_defaults,
+)
 from src.assistant.runtime.providers.secrets import HybridSecretStore, ProviderSecretStore
 
 
@@ -116,7 +119,10 @@ class ProviderRouter:
                     if timeout_seconds is None
                     else min(profile.timeout_seconds, max(1.0, float(timeout_seconds)))
                 ),
-                extra_body=profile.extra_body,
+                extra_body=provider_extra_body_with_model_defaults(
+                    profile.model_id,
+                    profile.extra_body,
+                ),
             )
         raise ProviderResolutionError(f"Unsupported provider kind: {profile.kind}")
 

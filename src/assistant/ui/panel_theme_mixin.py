@@ -109,6 +109,34 @@ class AssistantPanelThemeMixin:
                 color: {theme.text_primary};
             }}
             QScrollArea#assistant_message_scroll {{ background: transparent; border: none; }}
+            QScrollArea#assistant_message_scroll QScrollBar:vertical {{
+                background: transparent;
+                width: 8px;
+                margin: 2px 0;
+                border: none;
+            }}
+            QScrollArea#assistant_message_scroll QScrollBar::handle:vertical {{
+                background: {theme.scrollbar_thumb};
+                border-radius: 4px;
+                min-height: 28px;
+            }}
+            QScrollArea#assistant_message_scroll QScrollBar::handle:vertical:hover {{
+                background: {theme.scrollbar_thumb_hover};
+            }}
+            QScrollArea#assistant_message_scroll QScrollBar::handle:vertical:disabled {{
+                background: transparent;
+            }}
+            QScrollArea#assistant_message_scroll QScrollBar::add-line:vertical,
+            QScrollArea#assistant_message_scroll QScrollBar::sub-line:vertical {{
+                height: 0;
+                background: transparent;
+                border: none;
+            }}
+            QScrollArea#assistant_message_scroll QScrollBar::add-page:vertical,
+            QScrollArea#assistant_message_scroll QScrollBar::sub-page:vertical {{
+                background: transparent;
+                border: none;
+            }}
             QToolButton#assistant_task_header_more,
             QToolButton#assistant_jump_latest {{
                 color: {theme.text_secondary};

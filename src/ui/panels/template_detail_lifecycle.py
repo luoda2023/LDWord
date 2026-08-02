@@ -353,6 +353,9 @@ class TemplateDetailLifecycleMixin:
             and not self._has_pending_template_edits()
         ):
             detail.capture_entry_snapshot()
+        on_detail_shown = getattr(self, "_on_detail_shown", None)
+        if callable(on_detail_shown):
+            on_detail_shown(card_id)
 
     def _schedule_loading_detail(self, card_id: str) -> None:
         self._pending_detail_card_id = card_id

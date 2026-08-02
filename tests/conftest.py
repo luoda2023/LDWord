@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import os
-from shutil import copytree
 import sys
 from pathlib import Path
+from shutil import copytree
 
 import pytest
 from PySide6.QtCore import QCoreApplication
 from shiboken6 import isValid
-
 
 # Most widget tests only need deterministic layout/rendering, not a native
 # Windows top-level surface. Forcing offscreen avoids Windows COM tail noise
@@ -40,14 +39,21 @@ def isolate_user_material_package_libraries(tmp_path_factory, monkeypatch):
     """Isolate the canonical library while retaining read-only built-in samples."""
     from src.config import material_package_library
 
-    builtin_source = material_package_library.material_package_builtin_dir("official")
+    builtin_sources = tuple(
+        path
+        for path in material_package_library.CANONICAL_MATERIAL_PACKAGE_LIBRARY_DIR.glob(
+            "*/builtin"
+        )
+        if path.is_dir()
+    )
     material_root = (
         tmp_path_factory.mktemp("isolated_config_library") / "material_packages"
     )
-    if builtin_source.is_dir():
+    for builtin_source in builtin_sources:
+        mode_id = builtin_source.parent.name
         copytree(
             builtin_source,
-            material_root / "official" / "builtin",
+            material_root / mode_id / "builtin",
         )
     monkeypatch.setattr(
         material_package_library,

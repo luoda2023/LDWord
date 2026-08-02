@@ -1,23 +1,32 @@
-"""Card-shaped, read-only material-package preview for quick execution."""
+"""Material-package selector and compact content preview for quick execution."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from src.config.execution_feature_state import (
+    DISABLED_SELECTOR_LABEL,
+    DISABLED_SELECTOR_VALUE,
+)
 from src.qt_api import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
+    Qt,
     QToolButton,
     QWidget,
-    Qt,
     Signal,
 )
 from src.shared.ui.adaptive_pair_row import AdaptivePairRow
 from src.shared.ui.badge import Badge
 from src.shared.ui.card import Card
-from src.shared.ui.rounded_surface import RoundedSurfaceFrame
-from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
 from src.shared.ui.icons.catalog import get_icon
+from src.shared.ui.material_token_edit import MaterialTokenEdit
+from src.shared.ui.rounded_surface import RoundedSurfaceFrame
+from src.shared.ui.styled_combo_box import StyledComboBox
+from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
+from src.ui.adapters.config_selector_models import SelectorOption
 
 from .quick_material_preview_presenter import QuickMaterialPreviewProjection
 
@@ -68,15 +77,25 @@ class _ReadOnlyPreviewField(RoundedSurfaceFrame):
         )
 
 
+class _MaterialPackageComboBox(StyledComboBox):
+    """Selector compatibility surface used by preview-focused tests and callers."""
+
+    def text(self) -> str:
+        return self.display_text()
+
+
 class QuickMaterialPreview(Card):
     """Stable material preview card matching the plan/template card language."""
 
     expanded_changed = Signal(bool)
+    package_selected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self._projection = QuickMaterialPreviewProjection()
         self._expanded = False
+        self._package_options: tuple[SelectorOption, ...] | None = None
+        self._selected_package_identity = ""
         self.setObjectName("wb_quick_material_preview")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.set_header("资料包内容预览", icon_name="package")
@@ -92,15 +111,14 @@ class QuickMaterialPreview(Card):
             self._package_icon,
             self._package_key_label,
             self._package_field,
-        ) = self._build_control_group("资料包", "package")
+        ) = self._build_package_control_group("资料包", "package")
         (
             self._content_group,
             self._content_icon,
             self._content_key_label,
             self._content_field,
-        ) = self._build_control_group("填充内容", "list-check")
-        self._package_label = self._package_field.value_label
-        self._source_badge = self._package_field.badge
+        ) = self._build_control_group("填充内容", "list-checks")
+        self._package_label = self._package_field
         self._summary_label = self._content_field.value_label
         self._status_badge = self._content_field.badge
 
@@ -139,11 +157,8 @@ class QuickMaterialPreview(Card):
             raise TypeError("projection must be a QuickMaterialPreviewProjection")
         self._projection = projection
         self.setVisible(projection.visible)
-        self._package_field.set_state(
-            projection.package_label,
-            badge_text=projection.package_source_text,
-            badge_tone=projection.package_source_tone,
-        )
+        if self._package_options is None:
+            self._package_field.set_display_text_override(projection.package_label)
         self._content_field.set_state(
             projection.summary_text,
             badge_text=projection.status_text,
@@ -154,6 +169,55 @@ class QuickMaterialPreview(Card):
             self._expanded = False
         self._sync_expanded_state()
         self._apply_preview_theme()
+
+    def set_package_options(
+        self,
+        options: Sequence[SelectorOption],
+        *,
+        selected_identity: str = "",
+    ) -> None:
+        self._package_options = tuple(options)
+        self._selected_package_identity = str(selected_identity or "").strip()
+        blocked = self._package_field.blockSignals(True)
+        try:
+            self._package_field.clear()
+            self._package_field.set_display_text_override(None)
+            selected_index = -1
+            for option in self._package_options:
+                if option.source_type == "builtin":
+                    badge_text, badge_kind = "内置", "builtin"
+                else:
+                    badge_text, badge_kind = "自定", "user"
+                item_index = self._package_field.add_badged_item(
+                    option.label,
+                    option.value,
+                    badge_text=badge_text,
+                    badge_kind=badge_kind,
+                )
+                if option.tooltip:
+                    self._package_field.setItemData(
+                        item_index,
+                        option.tooltip,
+                        Qt.ToolTipRole,
+                    )
+                if option.disabled:
+                    item_getter = getattr(self._package_field.model(), "item", None)
+                    item = item_getter(item_index) if callable(item_getter) else None
+                    if item is not None:
+                        item.setEnabled(False)
+                if option.value == self._selected_package_identity:
+                    selected_index = item_index
+            disabled_index = self._package_field.add_badged_item(
+                DISABLED_SELECTOR_LABEL,
+                DISABLED_SELECTOR_VALUE,
+                badge_text="关闭",
+                badge_kind="off",
+            )
+            if selected_index < 0:
+                selected_index = disabled_index
+            self._package_field.setCurrentIndex(selected_index)
+        finally:
+            self._package_field.blockSignals(blocked)
 
     def set_expanded(self, expanded: bool) -> None:
         next_state = bool(expanded) and self._projection.can_expand
@@ -189,6 +253,42 @@ class QuickMaterialPreview(Card):
         icon.setProperty("iconName", icon_name)
         return container, icon, key_label, field
 
+    def _build_package_control_group(
+        self,
+        label: str,
+        icon_name: str,
+    ) -> tuple[QWidget, QLabel, QLabel, _MaterialPackageComboBox]:
+        container = QWidget(self)
+        container.setObjectName("wb_quick_material_control_group")
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(9)
+
+        icon = QLabel(container)
+        icon.setObjectName("wb_quick_material_control_icon")
+        icon.setFixedSize(18, 18)
+        layout.addWidget(icon, 0, Qt.AlignVCenter)
+
+        key_label = QLabel(label, container)
+        key_label.setObjectName("wb_quick_material_control_key")
+        layout.addWidget(key_label, 0, Qt.AlignVCenter)
+
+        field = _MaterialPackageComboBox(container)
+        field.setObjectName("wb_quick_material_package_selector")
+        field.set_full_width_mode(True)
+        field.set_outer_height(38)
+        field.currentIndexChanged.connect(self._on_package_selection_changed)
+        layout.addWidget(field, 1)
+        icon.setProperty("iconName", icon_name)
+        return container, icon, key_label, field
+
+    def _on_package_selection_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        identity = str(self._package_field.itemData(index) or "").strip()
+        self._selected_package_identity = identity
+        self.package_selected.emit(identity)
+
     def _toggle_expanded(self) -> None:
         self.set_expanded(not self._expanded)
 
@@ -216,25 +316,23 @@ class QuickMaterialPreview(Card):
         for index, item in enumerate(self._projection.items):
             row = index // 2
             column = (index % 2) * 2
-            key_label = QLabel(item.label, self._details)
-            key_label.setObjectName("wb_quick_material_detail_key")
+            token_edit = MaterialTokenEdit(
+                item.token,
+                self._details,
+                editable=False,
+            )
+            token_edit.setObjectName("wb_quick_material_detail_token")
+            token_edit.setToolTip("单击复制完整 Token")
+
             value_label = QLabel(item.value, self._details)
             value_label.setObjectName("wb_quick_material_detail_value")
             value_label.setProperty("missing", item.missing)
             value_label.setWordWrap(True)
             value_label.setMinimumWidth(0)
-            self._details_layout.addWidget(key_label, row, column)
+            self._details_layout.addWidget(token_edit, row, column)
             self._details_layout.addWidget(value_label, row, column + 1)
+            self._details_layout.setColumnStretch(column, 1)
             self._details_layout.setColumnStretch(column + 1, 1)
-
-        if self._projection.hidden_item_count:
-            row = (len(self._projection.items) + 1) // 2
-            hidden_label = QLabel(
-                f"另有 {self._projection.hidden_item_count} 项已载入",
-                self._details,
-            )
-            hidden_label.setObjectName("wb_quick_material_hidden_count")
-            self._details_layout.addWidget(hidden_label, row, 0, 1, 4)
 
     def _apply_preview_theme(self) -> None:
         theme = get_theme()
@@ -246,9 +344,7 @@ class QuickMaterialPreview(Card):
         )
         for icon in (self._package_icon, self._content_icon):
             icon_name = str(icon.property("iconName") or "package")
-            icon.setPixmap(
-                get_icon(icon_name, 17, theme.icon_secondary).pixmap(17, 17)
-            )
+            icon.setPixmap(get_icon(icon_name, 17, theme.icon_secondary).pixmap(17, 17))
             icon.setStyleSheet("background: transparent;")
         for label in (self._package_key_label, self._content_key_label):
             label.setStyleSheet(
@@ -256,28 +352,18 @@ class QuickMaterialPreview(Card):
                 f"font-weight: {theme.font_weight_emphasis}; "
                 f"color: {theme.text_secondary}; background: transparent;"
             )
-        self._package_field.apply_theme()
         self._content_field.apply_theme()
         self._details.setStyleSheet(
             f"QWidget#wb_quick_material_details {{ "
             f"border-top: 1px solid {theme_rgba(theme.border, 0.8)}; "
             "background: transparent; }}"
         )
-        for label in self.findChildren(QLabel, "wb_quick_material_detail_key"):
-            label.setStyleSheet(
-                f"font-size: {theme.font_size_sm}px; "
-                f"font-weight: {theme.font_weight_emphasis}; "
-                f"color: {theme.text_secondary}; background: transparent;"
-            )
         for label in self.findChildren(QLabel, "wb_quick_material_detail_value"):
-            color = theme.error if bool(label.property("missing")) else theme.text_primary
+            color = (
+                theme.error if bool(label.property("missing")) else theme.text_primary
+            )
             label.setStyleSheet(
                 f"font-size: {theme.font_size_sm}px; color: {color}; "
-                "background: transparent;"
-            )
-        for label in self.findChildren(QLabel, "wb_quick_material_hidden_count"):
-            label.setStyleSheet(
-                f"font-size: {theme.font_size_sm}px; color: {theme.text_hint}; "
                 "background: transparent;"
             )
 

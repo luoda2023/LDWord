@@ -2,8 +2,10 @@ import ast
 import json
 from pathlib import Path
 
-from scripts import check_public_release, engineering_gate
+from docx import Document
 
+from scripts import check_public_release, engineering_gate
+from src.ui.panel_registry import PANEL_FACTORIES
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -33,10 +35,17 @@ def _required_lazy_shared_ui_hidden_imports() -> set[str]:
         "src.shared.ui package imports must resolve through _EXPORT_MAP: "
         f"{sorted(missing_exports)}"
     )
-    return {
-        f"src.shared.ui{export_map[name][0]}"
-        for name in imported_names
-    }
+    return {f"src.shared.ui{export_map[name][0]}" for name in imported_names}
+
+
+def _pyinstaller_hidden_imports() -> set[str]:
+    tree = ast.parse((ROOT / "Alavette-Form_V1.0.spec").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "Analysis":
+            for keyword in node.keywords:
+                if keyword.arg == "hiddenimports":
+                    return set(ast.literal_eval(keyword.value))
+    raise AssertionError("PyInstaller Analysis.hiddenimports is missing")
 
 
 def test_release_shell_files_exist():
@@ -54,6 +63,12 @@ def test_release_shell_files_exist():
         ROOT / "scripts" / "windows" / "check_public_release.bat",
         ROOT / "scripts" / "windows" / "clean_public_release.bat",
         ROOT / "scripts" / "check_public_release.py",
+        ROOT / "scripts" / "build_release.py",
+        ROOT / "scripts" / "generate_windows_version_info.py",
+        ROOT / "scripts" / "stage_source_release.py",
+        ROOT / "scripts" / "verify_release_environment.py",
+        ROOT / "requirements-release.lock",
+        ROOT / "Alavette-Form_V1.0.spec",
         ROOT / "scripts" / "scene_matrix_release_gate_payload.py",
         ROOT / "scripts" / "export_scene_ambiguity_clarification_ui_audit.py",
         ROOT / "scripts" / "export_scene_ambiguous_boundary_audit.py",
@@ -62,9 +77,7 @@ def test_release_shell_files_exist():
         ROOT / "scripts" / "export_scene_boundary_guarded_completion_audit.py",
         ROOT / "scripts" / "export_scene_boundary_subject_release_continuity_audit.py",
         ROOT / "scripts" / "export_scene_release_closure_ledger_audit.py",
-        ROOT
-        / "scripts"
-        / "export_scene_boundary_maturity_release_envelope_audit.py",
+        ROOT / "scripts" / "export_scene_boundary_maturity_release_envelope_audit.py",
         ROOT / "scripts" / "export_scene_retained_gap_exit_criteria_audit.py",
         ROOT / "scripts" / "export_scene_release_residual_ratio_ledger_audit.py",
         ROOT / "scripts" / "export_scene_release_residual_explanation_audit.py",
@@ -83,7 +96,9 @@ def test_release_shell_files_exist():
         ROOT / "scripts" / "export_scene_high_frequency_task_lexicon_audit.py",
         ROOT / "scripts" / "export_scene_import_handoff_audit.py",
         ROOT / "scripts" / "export_scene_input_source_audit.py",
-        ROOT / "scripts" / "export_scene_non_subject_release_trace_attribution_audit.py",
+        ROOT
+        / "scripts"
+        / "export_scene_non_subject_release_trace_attribution_audit.py",
         ROOT / "scripts" / "export_scene_release_trace_partition_guard_audit.py",
         ROOT / "scripts" / "export_scene_release_projection_surface_parity_audit.py",
         ROOT / "scripts" / "export_scene_material_schema_audit.py",
@@ -120,16 +135,20 @@ def test_root_batch_wrappers_delegate_to_windows_scripts():
 
 
 def test_windows_install_script_bootstraps_env_from_pyproject_extras():
-    script = (ROOT / "scripts" / "windows" / "install_env.bat").read_text(encoding="utf-8")
+    script = (ROOT / "scripts" / "windows" / "install_env.bat").read_text(
+        encoding="utf-8"
+    )
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
-    assert 'py -3.14 --version' in script
-    assert 'python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"' in script
-    assert '".venv\\Scripts\\python.exe" -m pip install -e ".[dev,build]"' in script
+    assert "py -3.12 --version" in script
+    assert "requirements-release.lock" in script
+    assert 'pip install -c "requirements-release.lock" -e ".[dev,build]"' in script
+    assert "scripts\\verify_release_environment.py" in script
+    assert "py -3.14" not in script
     assert "pyinstaller" not in requirements.lower()
     assert "pyinstaller" in pyproject.lower()
-    assert "Environment is ready" in script
+    assert "CPython 3.12" in script
 
 
 def test_windows_engineering_gate_script_delegates_to_python_gate():
@@ -188,103 +207,73 @@ def test_ci_workflows_install_project_dev_dependency_profile():
         assert "python-docx lxml PyYAML pytest" not in workflow, workflow_name
 
 
-def test_windows_package_script_builds_pyside6_release_and_copies_notices():
-    script = (ROOT / "scripts" / "windows" / "package_release.bat").read_text(encoding="utf-8")
+def test_windows_package_script_delegates_to_gated_release_builder():
+    script = (ROOT / "scripts" / "windows" / "package_release.bat").read_text(
+        encoding="utf-8"
+    )
+    builder = (ROOT / "scripts" / "build_release.py").read_text(encoding="utf-8")
 
-    assert "PyInstaller" in script
-    assert "main.py" in script
-    assert "Alavette-Form_V1.0" in script
-    assert "ZIP_PATH=dist\\%APP_NAME%.zip" in script
-    assert "--collect-submodules PySide6" not in script
-    assert '--hidden-import PySide6.QtCore' in script
-    assert '--hidden-import PySide6.QtGui' in script
-    assert '--hidden-import PySide6.QtWidgets' in script
-    assert '--hidden-import PySide6.QtSvg' in script
-    assert '--hidden-import shiboken6' in script
-    assert '--hidden-import src.ui.panels.theme_panel' in script
-    assert '--hidden-import src.ui.panels.workbench.batch_generation_detail' in script
-    assert '--hidden-import src.ui.panels.workbench.batch_generation_source_area' in script
-    assert (
-        '--hidden-import src.ui.panels.workbench.material_suite_generation_detail'
-        in script
+    assert "scripts\\verify_release_environment.py" in script
+    assert '"scripts\\build_release.py" %*' in script
+    for marker in (
+        "scripts/engineering_gate.py",
+        "scripts/verify_scene_matrix_release_gate.py",
+        '"pytest", "-q", "tests"',
+        "stage_source_revision",
+        'kind="source"',
+        "PyInstaller",
+        "stage_user_documentation.ps1",
+        "scan_binary_release_tree",
+        "_sign_and_verify",
+        "SBOM.cdx.json",
+        "RELEASE_MANIFEST.json",
+        "UNSIGNED-QA",
+    ):
+        assert marker in builder
+    assert builder.count("cwd=source_root") >= 7
+
+    hidden_imports = _pyinstaller_hidden_imports()
+    assert {factory.module_name for factory in PANEL_FACTORIES.values()}.issubset(
+        hidden_imports
     )
-    assert (
-        '--hidden-import src.ui.panels.workbench.material_suite_workbench_controller'
-        in script
-    )
-    assert "--hidden-import src.material_suite.plan" in script
-    assert "--hidden-import src.material_suite.runner" in script
-    assert "--hidden-import src.config.material_package_v6" in script
-    assert "--hidden-import src.config.material_scope" in script
-    assert "--hidden-import src.config.material_import_draft" in script
-    assert '--exclude-module PySide6.QtGraphs' in script
-    assert '--exclude-module PySide6.QtGraphsWidgets' in script
-    assert '--exclude-module PySide6.QtHttpServer' in script
-    assert '--exclude-module PySide6.QtMultimedia' in script
-    assert '--exclude-module PySide6.QtNetworkAuth' in script
-    assert '--exclude-module PySide6.QtQml' in script
-    assert '--exclude-module PySide6.QtQuick3D' in script
-    assert '--exclude-module PySide6.QtWebEngineWidgets' in script
-    assert "Qt6WebEngineCore.dll" in script
-    assert "for %%P in (qml resources translations)" in script
-    assert "Compress-Archive" in script
-    assert "Output archive: %ZIP_PATH%" in script
-    assert '-m pip install pyinstaller' not in script
-    assert "PyInstaller is missing in .venv" in script
-    assert "THIRD_PARTY_NOTICES.md" in script
-    assert "scripts\\build_license_bundle.py" in script
-    assert '--add-data "licenses;licenses"' in script
-    assert "scripts\\stage_release_config_library.py" in script
-    assert '--add-data "build\\release_config_library;config_library"' in script
-    assert '--add-data "config_library;config_library"' not in script
-    assert "--exclude-module PIL.AvifImagePlugin" in script
-    assert "--exclude-module PIL._avif" in script
-    assert '--add-data "count_profiles;count_profiles"' in script
-    assert '--collect-submodules src.shared.ui' not in script
-    packaged_shared_ui_hidden_imports = {
-        stripped.split()[1]
-        for line in script.splitlines()
-        if (stripped := line.strip()).startswith(
-            "--hidden-import src.shared.ui."
-        )
-    }
-    assert (
-        packaged_shared_ui_hidden_imports
-        == _required_lazy_shared_ui_hidden_imports()
-    )
-    assert '--collect-submodules src.services.material_attachments' not in script
-    assert '--hidden-import src.services.material_attachments.processing' in script
-    assert '--hidden-import src.config.entity_archive_codec' in script
-    assert '--hidden-import src.config.entity_bundle' in script
-    assert 'xcopy /E /I /Y "licenses"' in script
-    assert "LICENSE" in script
-    assert "defaults" in script
+    assert {
+        item for item in hidden_imports if item.startswith("src.shared.ui.")
+    } == _required_lazy_shared_ui_hidden_imports()
+    spec = (ROOT / "Alavette-Form_V1.0.spec").read_text(encoding="utf-8")
+    assert "version='build\\\\windows_version_info.txt'" in spec
+    assert "('licenses', 'licenses')" in spec
+    assert "('RELEASE_NOTES.md', '.')" in spec
+    assert "('SECURITY.md', '.')" in spec
+    assert "('build\\\\release_config_library', 'config_library')" in spec
 
 
 def test_windows_clean_script_removes_local_release_artifacts():
-    script = (ROOT / "scripts" / "windows" / "clean_public_release.bat").read_text(encoding="utf-8")
+    script = (ROOT / "scripts" / "windows" / "clean_public_release.bat").read_text(
+        encoding="utf-8"
+    )
 
-    assert 'rmdir /s /q ".venv"' in script
     assert 'rmdir /s /q "build"' in script
     assert 'rmdir /s /q "dist"' in script
-    assert 'del /q "crash.log"' in script
-    assert 'del /q "demo_crash.log"' in script
-    assert 'del /q "alavette_form.log"' in script
-    assert 'for %%F in (*.spec)' in script
-    assert "Failed to remove .venv" in script
-    assert "Failed to remove build" in script
-    assert "Failed to remove dist" in script
-    assert "Failed to remove generated spec" in script
+    assert 'rmdir /s /q ".venv"' not in script
+    assert "*.spec" not in script
+    assert "alavette_form.log" not in script
+    assert "never deletes .venv" in script
+    assert "Failed to remove generated build directory" in script
 
 
 def test_public_release_checker_and_readme_document_mit_source_release():
     checker = (ROOT / "scripts" / "check_public_release.py").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    checklist = (ROOT / "docs" / "OPEN_SOURCE_MIT_RELEASE_CHECKLIST.md").read_text(encoding="utf-8")
+    checklist = (ROOT / "docs" / "OPEN_SOURCE_MIT_RELEASE_CHECKLIST.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "--strict" in checker
     assert "THIRD_PARTY_NOTICES.md" in checker
     assert "licenses/manifest.json" in checker
+    assert "docs/user/quick-start.md" in checker
+    assert "docs/user/user-guide.md" in checker
+    assert "docs/user/00-开始这里.md" in checker
     assert "README.md" in checker
     assert "exam_masters/user" in checker
     assert "config_library/plans/*/user" in checker
@@ -298,12 +287,16 @@ def test_public_release_checker_and_readme_document_mit_source_release():
     assert ".\\package_release.bat" in readme
     assert ".\\check_public_release.bat" in readme
     assert ".\\clean_public_release.bat" in readme
+    assert "docs/user/quick-start.md" in readme
+    assert "docs/user/user-guide.md" in readme
+    assert "docs/user/00-开始这里.md" in readme
 
     assert "MIT" in checklist
     assert "THIRD_PARTY_NOTICES.md" in checklist
     assert "Lucide" in checklist
     assert "Feather" in checklist
     assert "clean_public_release.bat" in checklist
+    assert "docs/user/" in checklist
 
 
 def test_public_release_checker_flags_user_resource_pools_without_blocking_builtins(
@@ -312,7 +305,14 @@ def test_public_release_checker_flags_user_resource_pools_without_blocking_built
     for rel in check_public_release.REQUIRED_DOCS:
         target = tmp_path / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("placeholder", encoding="utf-8")
+        if target.suffix.casefold() == ".docx":
+            document = Document()
+            document.core_properties.author = "Alavette Form"
+            document.core_properties.last_modified_by = "Alavette Form"
+            document.add_paragraph("synthetic fixture")
+            document.save(target)
+        else:
+            target.write_text("placeholder", encoding="utf-8")
     license_text = tmp_path / "licenses" / "fixture-license.txt"
     license_text.write_text("fixture license", encoding="utf-8")
     components = [
@@ -392,7 +392,9 @@ def test_public_release_checker_flags_user_resource_pools_without_blocking_built
     warning_text = "\n".join(warnings)
 
     assert errors == []
-    assert "Runtime/user path should not be published: exam_masters/user" in warning_text
+    assert (
+        "Runtime/user path should not be published: exam_masters/user" in warning_text
+    )
     assert (
         "Runtime/user path should not be published: config_library/plans/exam/user"
         in warning_text
@@ -427,7 +429,7 @@ def test_gitignore_covers_local_release_artifacts():
         "demo_crash.log",
         "alavette_form.log",
         "*_new.docx",
-            "/exam_masters/",
+        "/exam_masters/",
         "config_library/plans/*/user/",
         "config_library/templates/*/user/",
         "config_library/masters/*/user/",
@@ -447,4 +449,6 @@ def test_no_local_release_artifacts_remain_in_workspace():
     ]
 
     for path in unwanted_paths:
-        assert not path.exists(), f"Local artifact should be removed before public release: {path}"
+        assert not path.exists(), (
+            f"Local artifact should be removed before public release: {path}"
+        )

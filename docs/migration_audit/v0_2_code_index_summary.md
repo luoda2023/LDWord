@@ -1,6 +1,6 @@
-# V0.2 Code Index Summary
+﻿# V0.2 Code Index Summary
 
-- Root: `c:\Users\Administrator\Desktop\Lark-Formatter 1.0\lark-formatter V0.2 LTS\src`
+- Root: `<LOCAL_PATH>`
 - Indexed files: 82
 
 | Path | Lines | Classes | Functions |

@@ -1,0 +1,39 @@
+{
+  "kind": "alavette.material_package",
+  "schema_version": 1,
+  "package_id": "pkg_f952ac3781c84e8faf87648c2d75aeb0",
+  "display_name": "试卷资料包样例",
+  "work_mode_id": "exam",
+  "material_contract_id": "exam_items_v1",
+  "shared_scope": {
+    "fields": {},
+    "resources": {},
+    "derivations": {},
+    "timelines": {},
+    "provenance": {}
+  },
+  "groups": [],
+  "records": [
+    {
+      "record_id": "rec_dab51b3639574a649a806331d6629fba",
+      "display_name": "七年级数学阶段测试",
+      "group_id": "",
+      "lifecycle": "active",
+      "scope": {
+        "fields": {
+          "paper_title": "七年级数学阶段测试卷",
+          "subject": "数学",
+          "grade": "七年级",
+          "duration": "90分钟",
+          "total_score": "100"
+        },
+        "resources": {},
+        "derivations": {},
+        "timelines": {},
+        "provenance": {}
+      },
+      "origin": {}
+    }
+  ],
+  "metadata": {}
+}

@@ -274,7 +274,7 @@ def build_scene_key_setting_rows(
             key="materials",
             label="资料包",
             summary=_material_package_summary(scene),
-            target_card_id="scn_content",
+            target_card_id="assets",
             icon_name="package",
             status=_material_package_status(scene),
             action_label="设置",

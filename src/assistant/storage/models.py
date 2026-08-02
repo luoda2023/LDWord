@@ -10,8 +10,17 @@ from src.assistant.contracts.jobs import validate_document_job_transition
 from src.assistant.contracts.messages import AssistantMessage
 from src.assistant.contracts.serialization import plain_data
 
-
 ASSISTANT_SESSION_SCHEMA_VERSION = "form-assistant-session-v1"
+ASSISTANT_SESSION_SUMMARY_SCHEMA_VERSION = "form-assistant-session-summary-v1"
+ASSISTANT_SESSION_ICON_NAMES = frozenset(
+    {
+        "message-circle",
+        "file-text",
+        "chart-no-axes-gantt",
+        "alert-triangle",
+        "circle-check",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +33,62 @@ class AssistantSessionSummary:
     document_job_status: str = ""
     corrupt: bool = False
     recovery_path: str = ""
+    activity_at: str = ""
+    has_draft: bool = False
+    preview: str = ""
+    turn_count: int = 0
+    unread: bool = False
+    icon_name: str = "message-circle"
+    sidebar_order: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": ASSISTANT_SESSION_SUMMARY_SCHEMA_VERSION,
+            "session_id": self.session_id,
+            "title": self.title,
+            "updated_at": self.updated_at,
+            "pinned": self.pinned,
+            "turn_status": self.turn_status,
+            "document_job_status": self.document_job_status,
+            "corrupt": self.corrupt,
+            "recovery_path": self.recovery_path,
+            "activity_at": self.activity_at,
+            "has_draft": self.has_draft,
+            "preview": self.preview,
+            "turn_count": self.turn_count,
+            "unread": self.unread,
+            "icon_name": self.icon_name,
+            "sidebar_order": self.sidebar_order,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> AssistantSessionSummary:
+        if (
+            str(value.get("schema_version") or "")
+            != ASSISTANT_SESSION_SUMMARY_SCHEMA_VERSION
+        ):
+            raise ValueError("Unsupported assistant session summary schema")
+        session_id = str(value.get("session_id") or "").strip()
+        updated_at = str(value.get("updated_at") or "").strip()
+        if not session_id or not updated_at:
+            raise ValueError("Assistant session summary identity is required")
+        return cls(
+            session_id=session_id,
+            title=str(value.get("title") or "新对话"),
+            updated_at=updated_at,
+            pinned=bool(value.get("pinned", False)),
+            turn_status=str(value.get("turn_status") or ""),
+            document_job_status=str(value.get("document_job_status") or ""),
+            corrupt=bool(value.get("corrupt", False)),
+            recovery_path=str(value.get("recovery_path") or ""),
+            activity_at=str(value.get("activity_at") or updated_at),
+            has_draft=bool(value.get("has_draft", False)),
+            preview=str(value.get("preview") or ""),
+            turn_count=max(0, _optional_int(value.get("turn_count")) or 0),
+            unread=bool(value.get("unread", False)),
+            icon_name=str(value.get("icon_name") or "message-circle"),
+            sidebar_order=_optional_int(value.get("sidebar_order")),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,10 +108,20 @@ class AssistantSession:
     provider_history_grant: Mapping[str, Any] = field(default_factory=dict)
     context_refs: tuple[dict[str, Any], ...] = ()
     turn_status: str = ""
+    activity_at: str = ""
+    unread: bool = False
+    icon_name: str = "message-circle"
+    sidebar_order: int | None = None
 
     def __post_init__(self) -> None:
         if not self.session_id or not self.created_at or not self.updated_at:
             raise ValueError("Assistant session identity and timestamps are required")
+        if not self.activity_at:
+            object.__setattr__(self, "activity_at", self.updated_at)
+        if self.icon_name not in ASSISTANT_SESSION_ICON_NAMES:
+            object.__setattr__(self, "icon_name", "message-circle")
+        if self.sidebar_order is not None and self.sidebar_order < 0:
+            object.__setattr__(self, "sidebar_order", None)
         if not all(isinstance(item, AssistantMessage) for item in self.messages):
             raise TypeError("Assistant session messages must be AssistantMessage values")
         for name in (
@@ -71,6 +146,10 @@ class AssistantSession:
             "title": self.title,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "activity_at": self.activity_at,
+            "unread": self.unread,
+            "icon_name": self.icon_name,
+            "sidebar_order": self.sidebar_order,
             "messages": [message.to_dict() for message in self.messages],
             "draft_text": self.draft_text,
             "pinned": self.pinned,
@@ -85,7 +164,7 @@ class AssistantSession:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "AssistantSession":
+    def from_dict(cls, value: Mapping[str, Any]) -> AssistantSession:
         schema = str(value.get("schema_version") or "")
         if schema != ASSISTANT_SESSION_SCHEMA_VERSION:
             raise ValueError(f"Unsupported assistant session schema: {schema!r}")
@@ -121,9 +200,28 @@ class AssistantSession:
             ),
             context_refs=tuple(dict(item) for item in raw_refs if isinstance(item, Mapping)),
             turn_status=str(value.get("turn_status") or ""),
+            activity_at=str(
+                value.get("activity_at")
+                or value.get("updated_at")
+                or value.get("created_at")
+                or ""
+            ),
+            unread=bool(value.get("unread", False)),
+            icon_name=str(value.get("icon_name") or "message-circle"),
+            sidebar_order=_optional_int(value.get("sidebar_order")),
         )
 
     def summary(self) -> AssistantSessionSummary:
+        preview = ""
+        for message in reversed(self.messages):
+            candidate = " ".join(message.visible_text().split())
+            if candidate:
+                preview = (
+                    f"{candidate[:77]}…"
+                    if len(candidate) > 78
+                    else candidate
+                )
+                break
         return AssistantSessionSummary(
             session_id=self.session_id,
             title=self.title,
@@ -131,11 +229,31 @@ class AssistantSession:
             pinned=self.pinned,
             turn_status=self.turn_status,
             document_job_status=str(self.document_job.get("status") or ""),
+            activity_at=self.activity_at,
+            has_draft=bool(self.draft_text.strip()),
+            preview=preview,
+            turn_count=sum(
+                1 for message in self.messages if message.role == "user"
+            ),
+            unread=self.unread,
+            icon_name=self.icon_name,
+            sidebar_order=self.sidebar_order,
         )
 
 
+def _optional_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 __all__ = [
+    "ASSISTANT_SESSION_ICON_NAMES",
     "ASSISTANT_SESSION_SCHEMA_VERSION",
+    "ASSISTANT_SESSION_SUMMARY_SCHEMA_VERSION",
     "AssistantSession",
     "AssistantSessionSummary",
 ]

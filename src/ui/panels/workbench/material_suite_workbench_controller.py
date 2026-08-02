@@ -1,88 +1,153 @@
-"""Thin Workbench coordinator for the independent material-suite flow."""
+"""Controller for canonical material-suite generation."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from src.application.materials import MaterialPreviewSnapshot
+from src.domain.materials import MaterialIssue, MaterialRunSelection
+from src.material_suite.plan import (
+    MaterialSuiteRunRequest,
+    compile_material_suite_plan,
+    discover_material_suite_bundle,
+)
 from src.material_suite.runner import MaterialSuiteGenerationRunner
 
-from .execution_session_controller import ExecutionBuildResult
-from .execution_thread_handle import ThreadedExecutionHandle
-from .execution_worker import ExecutionWorker
+from .execution_session_controller import (
+    ExecutionBuildResult,
+    build_threaded_runner,
+)
+from .material_state import bind_workbench_material
+
+
+class _MaterialSuiteRunner:
+    def __init__(self, plan) -> None:
+        self._runner = MaterialSuiteGenerationRunner(plan)
+
+    def run(self, progress_callback, cancel_check):
+        return self._runner.run(progress_callback, cancel_check)
 
 
 class MaterialSuiteWorkbenchController:
-    """Wire the suite detail to the shared worker lifecycle without panel bloat."""
-
     def __init__(
         self,
         detail,
-        execution_controller,
+        execution,
         *,
-        start_worker,
-        active_worker,
-        cancel_execution,
-        refresh_navigation,
-        publish_material_selection=None,
-        open_material_workspace=None,
+        start_worker: Callable[[ExecutionBuildResult], None],
+        active_worker: Callable[[], object | None],
+        cancel_execution: Callable[[], None],
+        refresh_navigation: Callable[[], None],
+        publish_material_selection: Callable[[MaterialRunSelection | None], None],
+        open_material_workspace: Callable[[], None],
+        current_mode_id: Callable[[], str] | None = None,
+        current_scene_id: Callable[[], str] | None = None,
+        current_document_type_id: Callable[[], str] | None = None,
         worker_parent=None,
     ) -> None:
         self._detail = detail
-        self._execution_controller = execution_controller
+        self._execution = execution
         self._start_worker = start_worker
         self._active_worker = active_worker
-        self._cancel_execution = cancel_execution
         self._refresh_navigation = refresh_navigation
+        self._publish_material_selection = publish_material_selection
+        self._current_mode_id = current_mode_id or (lambda: "custom")
+        self._current_scene_id = current_scene_id or (lambda: "")
+        self._current_document_type_id = (
+            current_document_type_id or (lambda: "")
+        )
         self._worker_parent = worker_parent
         detail.execute_requested.connect(self.start)
-        detail.retry_requested.connect(self.retry)
+        detail.retry_requested.connect(self.start)
         detail.cancel_requested.connect(cancel_execution)
+        detail.material_workspace_requested.connect(open_material_workspace)
         detail.summary_changed.connect(refresh_navigation)
-        if publish_material_selection is not None:
-            detail.material_selection_changed.connect(publish_material_selection)
-        if open_material_workspace is not None:
-            detail.material_workspace_requested.connect(open_material_workspace)
 
-    def apply_material_selection(self, selection) -> None:
-        self._detail.set_material_batch_selection(selection)
+    def apply_material_selection(
+        self,
+        selection: MaterialRunSelection | None,
+        *,
+        preview: MaterialPreviewSnapshot | None = None,
+        issues: tuple[MaterialIssue, ...] = (),
+    ) -> None:
+        self._detail.set_material_selection(
+            selection,
+            preview=preview,
+            issues=issues,
+        )
 
     def start(self) -> None:
-        self._start(retry_only=False)
-
-    def retry(self) -> None:
-        self._start(retry_only=True)
-
-    def _start(self, *, retry_only: bool) -> None:
         if self._active_worker() is not None:
             return
-        self._execution_controller.set_feedback_target("suite")
+        selection = self._detail.material_selection()
+        if selection is None:
+            return
+        blockers = self._detail.execution_blocking_reasons()
+        if blockers:
+            return
+        mode_id = self._current_mode_id()
+        snapshot, issues = bind_workbench_material(
+            selection,
+            work_mode_id=mode_id,
+            recipe_id="material_suite",
+            scene_id=self._current_scene_id(),
+            document_type=(
+                self._current_document_type_id()
+                if mode_id == "official"
+                else ""
+            ),
+        )
+        if snapshot is None:
+            self._publish_failure(issues)
+            return
         try:
-            plan = self._detail.current_run_plan(retry_only=retry_only)
-        except Exception as exc:  # noqa: BLE001 - report preflight through UI
-            self._start_worker(
-                ExecutionBuildResult(
-                    worker=None,
-                    error_text=f"成套生成预检失败：{type(exc).__name__}: {exc}",
+            bundle = discover_material_suite_bundle(
+                self._detail.suite_root()
+            )
+            plan = compile_material_suite_plan(
+                snapshot,
+                bundle,
+                output_root=self._detail.output_dir(),
+                request=MaterialSuiteRunRequest(
+                    output_root=self._detail.output_dir(),
+                    requested_by="workbench",
+                ),
+            )
+            build = build_threaded_runner(
+                _MaterialSuiteRunner(plan),
+                parent=self._worker_parent,
+            )
+        except Exception as exc:
+            self._publish_failure(
+                (
+                    MaterialIssue(
+                        code="material_suite.plan_failed",
+                        message=f"{type(exc).__name__}: {exc}",
+                    ),
                 )
             )
             return
-        if not plan.ok:
-            issues = [
-                *plan.issues,
-                *[
-                    f"{record.profile_name}：{'；'.join(record.issues)}"
-                    for record in plan.records
-                    if record.issues
-                ],
-            ]
-            self._start_worker(
-                ExecutionBuildResult(
-                    worker=None,
-                    error_text="成套生成预检未通过：" + "；".join(issues),
-                )
-            )
-            return
-        worker = ExecutionWorker(MaterialSuiteGenerationRunner(plan))
-        handle = ThreadedExecutionHandle(worker, parent=self._worker_parent)
-        self._start_worker(ExecutionBuildResult(worker=handle))
+        self._execution.set_feedback_target("suite")
+        self._start_worker(build)
+
+    def _publish_failure(
+        self,
+        issues: tuple[MaterialIssue, ...],
+    ) -> None:
+        self._execution.set_feedback_target("suite")
+        self._execution.reset_feedback()
+        self._execution.apply_execution_result(
+            {
+                "status": "failed",
+                "output_path": "",
+                "report_paths": [],
+                "failed_count": 0,
+                "error_text": "；".join(
+                    item.message or item.code for item in issues
+                ),
+            }
+        )
+        self._refresh_navigation()
 
 
 __all__ = ["MaterialSuiteWorkbenchController"]

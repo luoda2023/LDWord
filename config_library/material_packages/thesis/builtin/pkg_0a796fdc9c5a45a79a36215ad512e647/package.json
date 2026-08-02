@@ -1,0 +1,42 @@
+{
+  "kind": "alavette.material_package",
+  "schema_version": 1,
+  "package_id": "pkg_0a796fdc9c5a45a79a36215ad512e647",
+  "display_name": "论文校规资料包样例",
+  "work_mode_id": "thesis",
+  "material_contract_id": "thesis_school_rule_context_v1",
+  "shared_scope": {
+    "fields": {},
+    "resources": {},
+    "derivations": {},
+    "timelines": {},
+    "provenance": {}
+  },
+  "groups": [],
+  "records": [
+    {
+      "record_id": "rec_4a1c4774580b409392ae9932d672e35f",
+      "display_name": "示例高校论文规则",
+      "group_id": "",
+      "lifecycle": "active",
+      "scope": {
+        "fields": {
+          "school_rule_source_id": "school-rule-demo-2026",
+          "section_classifier_decisions": "摘要、目录、正文、参考文献按已确认分类处理",
+          "school_name": "示例大学",
+          "rule_source_version": "2026.1",
+          "reviewed_by": "教务处示例审核人",
+          "reviewed_on": "2026-07-31",
+          "confirmed_by": "论文作者",
+          "confirmed_at": "2026-07-31T10:00:00+08:00"
+        },
+        "resources": {},
+        "derivations": {},
+        "timelines": {},
+        "provenance": {}
+      },
+      "origin": {}
+    }
+  ],
+  "metadata": {}
+}

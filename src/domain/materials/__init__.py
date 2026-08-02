@@ -1,0 +1,65 @@
+"""Canonical material-package domain for the first public release."""
+
+from .contract import (
+    MaterialContract,
+    MaterialFieldContract,
+    MaterialResourceRoleContract,
+)
+from .model import (
+    MATERIAL_PACKAGE_KIND,
+    MATERIAL_PACKAGE_SCHEMA_VERSION,
+    MATERIAL_RECORD_LIFECYCLES,
+    MAX_OBJECT_SIZE,
+    MaterialDerivationSpec,
+    MaterialGroup,
+    MaterialIssue,
+    MaterialObjectRef,
+    MaterialPackage,
+    MaterialPackageRef,
+    MaterialRecord,
+    MaterialResourceBinding,
+    MaterialRunSelection,
+    MaterialScope,
+    MaterialTimelineSpec,
+    clone_material_package,
+    clone_material_record,
+    generate_group_id,
+    generate_package_id,
+    generate_record_id,
+)
+from .resolver import (
+    MaterialResolution,
+    MaterialResolver,
+    ResolvedMaterialRecord,
+)
+from .validation import validate_material_package_contract
+
+__all__ = [
+    "MATERIAL_PACKAGE_KIND",
+    "MATERIAL_PACKAGE_SCHEMA_VERSION",
+    "MATERIAL_RECORD_LIFECYCLES",
+    "MAX_OBJECT_SIZE",
+    "MaterialContract",
+    "MaterialDerivationSpec",
+    "MaterialFieldContract",
+    "MaterialGroup",
+    "MaterialIssue",
+    "MaterialObjectRef",
+    "MaterialPackage",
+    "MaterialPackageRef",
+    "MaterialRecord",
+    "MaterialResolution",
+    "MaterialResolver",
+    "MaterialResourceBinding",
+    "MaterialResourceRoleContract",
+    "MaterialRunSelection",
+    "MaterialScope",
+    "MaterialTimelineSpec",
+    "ResolvedMaterialRecord",
+    "clone_material_package",
+    "clone_material_record",
+    "generate_group_id",
+    "generate_package_id",
+    "generate_record_id",
+    "validate_material_package_contract",
+]

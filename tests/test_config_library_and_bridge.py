@@ -26,6 +26,7 @@ from src.config.library import (
 from src.config.builtin_templates import create_builtin_template
 from src.config.loader import load_scene, save_scene, save_template
 from src.config.master_library import MasterSpec
+from src.config.material_package_library import DEFAULT_MATERIAL_PACKAGE_IDENTITIES
 from src.config.official_document_profiles import (
     OFFICIAL_PLAN_ENTRY_BUILTIN,
     OFFICIAL_PLAN_ENTRY_CANDIDATE,
@@ -41,7 +42,7 @@ from src.config.work_mode import list_work_modes
 from src.ui.adapters.config_selector_models import (
     master_display_label,
     master_selector_options,
-    material_package_sample_selector_options,
+    material_package_selector_options,
     plan_selector_options,
     strip_source_prefix,
     template_selector_options,
@@ -49,6 +50,7 @@ from src.ui.adapters.config_selector_models import (
 from src.qt_api import QApplication
 from src.shared.ui.styled_combo_box import SOURCE_BADGE_TEXT_ROLE
 from src.ui.bridge import PanelBridge
+from src.ui.panel_specs import panel_index
 from src.ui.panels.scene_panel import ScenePanel
 from src.ui.panels.scene_state_projection import is_scene_selector_group
 from src.ui.panels.workbench import WorkbenchPanel
@@ -62,6 +64,8 @@ def _combo_values(combo, *, skip_scene_groups: bool = False) -> list[str]:
     values: list[str] = []
     for index in range(combo.count()):
         value = str(combo.itemData(index) or "").strip()
+        if value == "__disabled__":
+            continue
         if skip_scene_groups and is_scene_selector_group(value):
             continue
         values.append(value)
@@ -72,6 +76,8 @@ def _combo_labels(combo, *, skip_scene_groups: bool = False) -> list[str]:
     labels: list[str] = []
     for index in range(combo.count()):
         value = str(combo.itemData(index) or "").strip()
+        if value == "__disabled__":
+            continue
         if skip_scene_groups and is_scene_selector_group(value):
             continue
         labels.append(combo.itemText(index))
@@ -259,7 +265,7 @@ def test_ui_exam_master_surface_does_not_write_master_files_directly():
     assert violations == []
 
 
-def test_ui_exam_master_inventory_calls_use_only_explicit_active_pool_dir():
+def test_compact_scene_preview_does_not_mutate_exam_master_pool():
     protected_names = {
         "sync_user_exam_blank_master_files",
         "audit_exam_user_master_pool",
@@ -307,8 +313,8 @@ def test_ui_exam_master_inventory_calls_use_only_explicit_active_pool_dir():
                 continue
             violations.append(f"{relative_path}:{node.lineno} {name}")
 
-    assert checked_calls >= 1
-    assert active_calls >= 1
+    assert checked_calls == 0
+    assert active_calls == 0
     assert violations == []
 
 
@@ -877,21 +883,20 @@ def test_selector_projections_keep_material_packages_mode_scoped(tmp_path):
     }
     assert official_master_values.isdisjoint(exam_master_values)
 
-    official_material_options = material_package_sample_selector_options(
+    official_material_options = material_package_selector_options(
         "official",
         include_source_prefix=True,
     )
     official_materials = {option.value: option for option in official_material_options}
-    assert {
-        "builtin/letter_material_request",
-        "builtin/notice_archive_check",
-        "builtin/minutes_coordination",
-    } <= set(official_materials)
-    letter = official_materials["builtin/letter_material_request"]
+    assert len(official_materials) == 6
+    letter = next(
+        option for option in official_material_options
+        if strip_source_prefix(option.label) == "函件资料包样例"
+    )
     assert letter.label == "内置资料包：函件资料包样例"
     assert letter.source_type == "builtin"
     assert strip_source_prefix(letter.label) == "函件资料包样例"
-    notice = official_materials["builtin/notice_archive_check"]
+    notice = official_materials[DEFAULT_MATERIAL_PACKAGE_IDENTITIES["official"]]
     assert notice.label == "内置资料包：通知资料包样例"
     assert notice.source_type == "builtin"
     assert "material_packages" in notice.tooltip
@@ -899,8 +904,10 @@ def test_selector_projections_keep_material_packages_mode_scoped(tmp_path):
     assert "builtin" in notice.tooltip
     assert strip_source_prefix(notice.label) == "通知资料包样例"
 
-    for mode_id in ("custom", "exam", "thesis", "bidding", "technical", "report"):
-        assert material_package_sample_selector_options(mode_id) == ()
+    assert {
+        mode_id: len(material_package_selector_options(mode_id))
+        for mode_id in ("custom", "exam", "thesis", "official")
+    } == {"custom": 1, "exam": 1, "thesis": 1, "official": 6}
 
 
 def test_selector_projections_expose_only_mode_owned_builtin_resources(tmp_path):
@@ -939,21 +946,11 @@ def test_selector_projections_expose_only_mode_owned_builtin_resources(tmp_path)
         "technical": set(),
         "report": set(),
     }
-    expected_material_packages = {
-        "custom": set(),
-        "exam": set(),
-        "thesis": set(),
-        "bidding": set(),
-        "official": {
-            "builtin/approval_archive_system",
-            "builtin/letter_material_request",
-            "builtin/minutes_coordination",
-            "builtin/notice_archive_check",
-            "builtin/report_work_summary",
-            "builtin/request_archive_system",
-        },
-        "technical": set(),
-        "report": set(),
+    expected_material_package_counts = {
+        "custom": 1,
+        "exam": 1,
+        "thesis": 1,
+        "official": 6,
     }
 
     for mode in list_work_modes():
@@ -977,14 +974,15 @@ def test_selector_projections_expose_only_mode_owned_builtin_resources(tmp_path)
         }
         material_values = {
             option.value
-            for option in material_package_sample_selector_options(mode_id)
+            for option in material_package_selector_options(mode_id)
             if option.source_type == "builtin"
         }
 
         assert plan_values == expected_plans[mode_id]
         assert template_values == expected_templates[mode_id]
         assert master_values == expected_masters[mode_id]
-        assert material_values == expected_material_packages[mode_id]
+        assert len(material_values) == expected_material_package_counts[mode_id]
+        assert DEFAULT_MATERIAL_PACKAGE_IDENTITIES[mode_id] in material_values
 
 
 def test_template_selector_options_stay_within_work_mode_when_ids_are_stale():
@@ -1065,7 +1063,7 @@ def test_official_plan_selector_exposes_one_base_plan_and_six_document_types():
 
     default_scene = load_scene_from_library("official", mode_id="official")
 
-    assert default_scene.default_material_profile_id == "official:notice"
+    assert not hasattr(default_scene, "default_material_profile_id")
     assert default_scene.input_source_profile.material_schema_ids == [
         "official_document_v1"
     ]
@@ -1076,6 +1074,26 @@ def test_official_plan_selector_exposes_one_base_plan_and_six_document_types():
         "document_no",
         "issue_date",
     ]
+
+
+def test_scene_panel_hides_legacy_token_card_and_routes_materials_to_assets():
+    app = _app()
+    bridge = PanelBridge()
+    panel = ScenePanel(bridge)
+    destinations: list[int] = []
+    bridge.navigate_to_panel.connect(destinations.append)
+    try:
+        assert "scn_content" not in panel._nav_cards
+
+        panel._show_detail_from_overview("assets")
+        panel._show_detail_from_overview("scn_content")
+
+        assert destinations == [panel_index("assets")] * 2
+    finally:
+        panel.close()
+        app.processEvents()
+
+
 def test_official_document_type_is_one_shared_task_state_across_panels():
     app = _app()
     bridge = PanelBridge()
@@ -1091,7 +1109,7 @@ def test_official_document_type_is_one_shared_task_state_across_panels():
 
         assert bridge.current_official_document_type_id() == "letter"
         assert workbench._quick_execution_detail.official_document_type_id() == "letter"
-        assert scene_panel._content._official_material_profile.currentData() == "letter"
+        assert not hasattr(scene_panel._content, "_official_material_profile")
 
         minutes_index = workbench._quick_execution_detail._document_type_combo.findData(
             "minutes"
@@ -1102,7 +1120,6 @@ def test_official_document_type_is_one_shared_task_state_across_panels():
         app.processEvents()
 
         assert bridge.current_official_document_type_id() == "minutes"
-        assert scene_panel._content._official_material_profile.currentData() == "minutes"
         assert bridge.current_scene_id() == "official"
     finally:
         scene_panel.close()
@@ -1185,7 +1202,7 @@ def test_official_plan_entry_decisions_gate_profile_promotion():
 
     for profile_id, plan_id in builtin_decisions.items():
         scene = load_scene_from_library(plan_id, mode_id="official")
-        assert scene.default_material_profile_id == f"official:{profile_id}"
+        assert not hasattr(scene, "default_material_profile_id")
     for decision in decisions:
         if decision.entry_kind != OFFICIAL_PLAN_ENTRY_BUILTIN:
             assert decision.plan_id == ""
@@ -1739,14 +1756,7 @@ def test_workbench_and_scene_overview_plan_selectors_share_mode_options():
         app.processEvents()
 
 
-def test_workbench_plan_selector_and_plan_preview_master_selector_stay_distinct(
-    monkeypatch,
-    tmp_path,
-):
-    monkeypatch.setattr(
-        "src.ui.panels.scene_exam_detail.USER_EXAM_MASTER_DIR",
-        tmp_path / "exam_user_masters",
-    )
+def test_workbench_plan_selector_and_scene_plan_host_stay_distinct(tmp_path):
     app = _app()
     bridge = PanelBridge()
     workbench = WorkbenchPanel(bridge)
@@ -1758,23 +1768,16 @@ def test_workbench_plan_selector_and_plan_preview_master_selector_stay_distinct(
         app.processEvents()
 
         exam_plan_options = plan_selector_options("exam", include_source_prefix=False)
-        exam_master_options = master_selector_options(
-            "exam",
-            user_master_dir=tmp_path / "exam_user_masters",
-        )
         quick_plan_values = _combo_values(workbench._quick_execution_detail._scene_combo)
         quick_plan_labels = _combo_labels(workbench._quick_execution_detail._scene_combo)
-        preview_master_values = _combo_values(scene_panel._exam_paper._blank_style)
-        preview_master_labels = _combo_labels(scene_panel._exam_paper._blank_style)
 
         assert quick_plan_values == [option.value for option in exam_plan_options]
         assert quick_plan_labels == [option.label for option in exam_plan_options]
-        assert preview_master_values == [option.value for option in exam_master_options]
-        assert preview_master_labels == [option.label for option in exam_master_options]
-        assert set(quick_plan_values).isdisjoint(preview_master_values)
-        assert set(quick_plan_labels).isdisjoint(preview_master_labels)
+        assert scene_panel._exam_paper._attached_plan_card is scene_panel._overview._scene_card
+        assert not hasattr(scene_panel._exam_paper, "_scene_summary")
+        assert not hasattr(scene_panel._exam_paper, "_card")
+        assert not hasattr(scene_panel._exam_paper, "_blank_style")
         assert all("方案" in label for label in quick_plan_labels[:3])
-        assert all("卷面" in label for label in preview_master_labels[:3])
 
         bridge.set_current_work_mode("official")
         app.processEvents()
@@ -1785,23 +1788,16 @@ def test_workbench_plan_selector_and_plan_preview_master_selector_stay_distinct(
             "official",
             include_source_prefix=False,
         )
-        official_master_options = master_selector_options("official")
         quick_plan_values = _combo_values(workbench._quick_execution_detail._scene_combo)
         quick_plan_labels = _combo_labels(workbench._quick_execution_detail._scene_combo)
-        official_master_values = _combo_values(scene_panel._exam_paper._official_master)
-        official_master_labels = _combo_labels(scene_panel._exam_paper._official_master)
 
         assert quick_plan_values == [option.value for option in official_plan_options]
         assert quick_plan_labels == [option.label for option in official_plan_options]
-        assert official_master_values == [option.value for option in official_master_options]
-        assert official_master_labels == [option.label for option in official_master_options]
-        assert set(quick_plan_values).isdisjoint(official_master_values)
-        assert set(quick_plan_labels).isdisjoint(official_master_labels)
+        assert scene_panel._exam_paper._attached_plan_card is scene_panel._overview._scene_card
+        assert not hasattr(scene_panel._exam_paper, "_scene_summary")
+        assert not hasattr(scene_panel._exam_paper, "_card")
+        assert not hasattr(scene_panel._exam_paper, "_official_master")
         assert all("方案" in label for label in quick_plan_labels)
-        assert all(
-            any(noun in label for noun in ("版式", "格式"))
-            for label in official_master_labels
-        )
     finally:
         scene_panel.close()
         workbench.close()
@@ -1904,7 +1900,7 @@ def test_workbench_quick_execution_official_plan_template_cascade_is_mode_scoped
         assert _combo_values(detail._scene_combo) == [
             option.value for option in expected_plan_options
         ]
-        assert [detail._scene_combo.itemText(index) for index in range(detail._scene_combo.count())] == [
+        assert _combo_labels(detail._scene_combo) == [
             option.label for option in expected_plan_options
         ]
 

@@ -9,6 +9,7 @@ from src.config.scene import SceneWorkspace
 from src.config.template import TemplateConfig
 from src.execution_diagnostics import build_execution_diagnostics
 from src.modules.base import BaseModule, ModuleMeta
+from src.modules.basic.section_format import SectionFormatModule
 from src.pipeline.runner import Pipeline
 from src.pipeline.tracker import ChangeTracker
 from src.report_writer import write_json_report, write_markdown_report
@@ -77,6 +78,38 @@ def test_object_preflight_detects_content_controls(tmp_path):
     kinds = {finding.kind for finding in result.findings}
 
     assert "content_controls" in kinds
+
+
+def test_object_preflight_does_not_treat_revision_style_metadata_as_visio(
+    tmp_path,
+):
+    source = tmp_path / "plain-python-docx.docx"
+    document = Document()
+    document.add_paragraph("Plain content")
+    document.save(source)
+
+    result = inspect_docx_package(source)
+    kinds = {finding.kind for finding in result.findings}
+
+    assert "visio_drawings" not in kinds
+
+
+def test_object_preflight_detects_explicit_visio_markup(tmp_path):
+    source = _docx_with_parts(
+        tmp_path,
+        "visio.docx",
+        {
+            "word/visio-marker.xml": (
+                b'<v:document xmlns:v="http://schemas.microsoft.com/'
+                b'visio/2012/main" />'
+            ),
+        },
+    )
+
+    result = inspect_docx_package(source)
+    kinds = {finding.kind for finding in result.findings}
+
+    assert "visio_drawings" in kinds
 
 
 def test_object_preflight_respects_policy_scan_targets(tmp_path):
@@ -406,6 +439,39 @@ def test_pipeline_runs_high_risk_modules_when_preflight_skips_are_disabled(tmp_p
     assert result.success is True
     assert any(record.rule_name == "risky_rewriter" and record.change_type == "format" for record in records)
     assert not any(record.rule_name == "risky_rewriter" and record.change_type == "skip" for record in records)
+
+
+def test_ole_finding_does_not_skip_section_inventory_and_safe_planner(tmp_path):
+    source = _docx_with_parts(
+        tmp_path,
+        "section-safe-ole.docx",
+        {"word/embeddings/oleObject1.bin": b"ole"},
+    )
+    scene = SceneWorkspace()
+    scene.compliance_profile.object_preflight.preservation_mode = "warn"
+    scene.compliance_profile.object_preflight.block_on = []
+    scene.compliance_profile.object_preflight.skip_modules_by_finding = {
+        "ole_objects": ["section_format"],
+    }
+    template = TemplateConfig()
+    template.section.boundary_mode = "preserve_source"
+
+    result = Pipeline(
+        modules=[SectionFormatModule()],
+        config=resolve_config(template, scene),
+        output_dir=str(tmp_path / "out"),
+    ).execute(str(source))
+
+    records = result.tracker.get_all() if result.tracker else []
+    assert result.success is True
+    assert result.context.section_inventory is not None
+    assert result.context.section_execution_receipt is not None
+    assert result.context.object_preflight_module_skips == []
+    assert any(
+        record.rule_name == "object_preflight"
+        and record.change_type == "granular_risk_clearance"
+        for record in records
+    )
 
 
 def _docx_with_parts(

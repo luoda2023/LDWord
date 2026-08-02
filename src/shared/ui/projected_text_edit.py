@@ -255,36 +255,18 @@ class ProjectedTextEdit(QWidget):
         self._stack.addWidget(self._editor_frame)
         self._stack.setCurrentWidget(self._display)
 
-        self._expanded_popup = _ExpandedEditorPopup(self)
-        self._expanded_popup.dismissed.connect(self._request_finish_edit)
-        self._expanded_surface = self._expanded_popup.surface
-        expanded_layout = QVBoxLayout(self._expanded_surface)
-        expanded_layout.setContentsMargins(12, 10, 12, 10)
-        expanded_layout.setSpacing(8)
-        self._expanded_content_layout = expanded_layout
-        self._expanded_title = QLabel(
-            self._expanded_editor_title(),
-            self._expanded_surface,
-        )
-        self._expanded_title.setObjectName("projected_text_expanded_title")
-        self._expanded_preview = _ExpandedPreviewEdit(self._expanded_surface)
-        self._expanded_preview.positionRequested.connect(
-            self._on_expanded_preview_position
-        )
-        self._expanded_preview.heightChanged.connect(
-            self._on_expanded_preview_height_changed
-        )
+        # A Qt.Popup is a native top-level window on Windows.  Creating one for
+        # every token/name cell made an inline row add manufacture several
+        # hidden child windows.  Build the popup only when an overflowing value
+        # is actually opened for editing.
+        self._expanded_popup: _ExpandedEditorPopup | None = None
+        self._expanded_surface: RoundedSurfaceFrame | None = None
+        self._expanded_content_layout: QVBoxLayout | None = None
+        self._expanded_title: QLabel | None = None
+        self._expanded_preview: _ExpandedPreviewEdit | None = None
+        self._expanded_hint: QLabel | None = None
         self._expanded_preview_core_start = 0
         self._expanded_preview_core_end = 0
-        self._expanded_hint = QLabel(
-            self._expanded_editor_hint(),
-            self._expanded_surface,
-        )
-        self._expanded_hint.setObjectName("projected_text_expanded_hint")
-        self._expanded_hint.setWordWrap(True)
-        expanded_layout.addWidget(self._expanded_title)
-        expanded_layout.addWidget(self._expanded_preview)
-        expanded_layout.addWidget(self._expanded_hint)
 
         self._copy_feedback = ConfirmedCopyEmitter(self.copied.emit, self)
         self._dismissal_guard = InlineEditDismissalGuard(
@@ -292,7 +274,6 @@ class ProjectedTextEdit(QWidget):
             self._request_finish_edit,
             self,
         )
-        self._dismissal_guard.add_inside_root(self._expanded_popup)
         for interaction_target in (
             self._editor,
             self._editor_frame,
@@ -713,9 +694,43 @@ class ProjectedTextEdit(QWidget):
         required = self._editor.fontMetrics().horizontalAdvance(str(core or ""))
         return required + 8 > self._inline_editor_available_width()
 
+    def _ensure_expanded_editor(self) -> None:
+        if self._expanded_popup is not None:
+            return
+        popup = _ExpandedEditorPopup(self)
+        popup.dismissed.connect(self._request_finish_edit)
+        surface = popup.surface
+        expanded_layout = QVBoxLayout(surface)
+        expanded_layout.setContentsMargins(12, 10, 12, 10)
+        expanded_layout.setSpacing(8)
+        title = QLabel(self._expanded_editor_title(), surface)
+        title.setObjectName("projected_text_expanded_title")
+        preview = _ExpandedPreviewEdit(surface)
+        preview.positionRequested.connect(self._on_expanded_preview_position)
+        preview.heightChanged.connect(self._on_expanded_preview_height_changed)
+        hint = QLabel(self._expanded_editor_hint(), surface)
+        hint.setObjectName("projected_text_expanded_hint")
+        hint.setWordWrap(True)
+        expanded_layout.addWidget(title)
+        expanded_layout.addWidget(preview)
+        expanded_layout.addWidget(hint)
+
+        self._expanded_popup = popup
+        self._expanded_surface = surface
+        self._expanded_content_layout = expanded_layout
+        self._expanded_title = title
+        self._expanded_preview = preview
+        self._expanded_hint = hint
+        self._dismissal_guard.add_inside_root(popup)
+        # The regular control may already have cached this theme signature.
+        # Force one pass so the newly-created popup receives matching chrome.
+        self._applied_theme_signature = None
+        self._apply_theme()
+
     def _open_expanded_editor(self) -> None:
         if self._expanded_editing:
             return
+        self._ensure_expanded_editor()
         self._expanded_editing = True
         self._stack.removeWidget(self._editor_frame)
         self._editor_frame.setParent(self._expanded_surface)
@@ -739,6 +754,9 @@ class ProjectedTextEdit(QWidget):
     def _close_expanded_editor(self) -> None:
         if not self._expanded_editing:
             return
+        if self._expanded_content_layout is None or self._expanded_popup is None:
+            self._expanded_editing = False
+            return
         self._expanded_content_layout.removeWidget(self._editor_frame)
         self._editor_frame.setParent(self)
         self._stack.addWidget(self._editor_frame)
@@ -747,7 +765,11 @@ class ProjectedTextEdit(QWidget):
         self._sync_editor_affixes(self._locked_prefix, self._locked_suffix)
 
     def _update_expanded_preview(self) -> None:
-        if not self._expanded_editing:
+        if (
+            not self._expanded_editing
+            or self._expanded_preview is None
+            or self._expanded_popup is None
+        ):
             return
         canonical = self._compose_canonical(
             self._locked_prefix,
@@ -766,12 +788,18 @@ class ProjectedTextEdit(QWidget):
             self._resize_and_position_expanded_popup()
 
     def _settle_expanded_popup_geometry(self) -> None:
-        if not self._expanded_editing or not self._expanded_popup.isVisible():
+        if (
+            not self._expanded_editing
+            or self._expanded_popup is None
+            or not self._expanded_popup.isVisible()
+        ):
             return
         self._expanded_popup.adjustSize()
         self._resize_and_position_expanded_popup()
 
     def _resize_and_position_expanded_popup(self) -> None:
+        if self._expanded_popup is None:
+            return
         anchor_top_left = self.mapToGlobal(self.rect().topLeft())
         anchor_bottom_right = self.mapToGlobal(self.rect().bottomRight())
         anchor = QRect(anchor_top_left, anchor_bottom_right)
@@ -821,7 +849,7 @@ class ProjectedTextEdit(QWidget):
         self._editor.deselect()
 
     def _on_expanded_preview_height_changed(self) -> None:
-        if not self._expanded_editing:
+        if not self._expanded_editing or self._expanded_popup is None:
             return
         self._expanded_popup.adjustSize()
         if self._expanded_popup.isVisible():
@@ -912,10 +940,24 @@ class ProjectedTextEdit(QWidget):
         if not hasattr(self, "_display"):
             return
         theme = get_theme()
+        display_color = self._display_text_color(theme)
+        signature = (
+            id(theme),
+            str(getattr(self, "_surface", "")),
+            display_color,
+            self._font_weight,
+        )
+        if getattr(self, "_applied_theme_signature", None) == signature:
+            return
+        self._applied_theme_signature = signature
         editor_layout = self._editor_frame.layout()
         if editor_layout is not None:
-            editor_layout.setContentsMargins(theme.input_padding_x, 0, theme.input_padding_x, 0)
-        display_color = self._display_text_color(theme)
+            editor_layout.setContentsMargins(
+                theme.input_padding_x,
+                0,
+                theme.input_padding_x,
+                0,
+            )
         weight = (
             ""
             if self._font_weight is None
@@ -954,21 +996,28 @@ class ProjectedTextEdit(QWidget):
         )
         self._prefix_label.setStyleSheet(affix_style)
         self._suffix_label.setStyleSheet(affix_style)
-        self._expanded_surface.configure_surface(
-            background=theme.bg_card,
-            radius=theme.radius_md,
-            border_color=theme.border,
-            border_width=1,
-        )
-        self._expanded_title.setStyleSheet(
-            f"color: {theme.text_primary}; font-weight: {theme.font_weight_emphasis};"
-        )
-        self._expanded_preview.setStyleSheet(
-            _expanded_preview_stylesheet(theme)
-        )
-        self._expanded_hint.setStyleSheet(
-            f"color: {theme.text_hint}; font-size: {theme.font_size_sm}px;"
-        )
+        if (
+            self._expanded_surface is not None
+            and self._expanded_title is not None
+            and self._expanded_preview is not None
+            and self._expanded_hint is not None
+        ):
+            self._expanded_surface.configure_surface(
+                background=theme.bg_card,
+                radius=theme.radius_md,
+                border_color=theme.border,
+                border_width=1,
+            )
+            self._expanded_title.setStyleSheet(
+                f"color: {theme.text_primary}; "
+                f"font-weight: {theme.font_weight_emphasis};"
+            )
+            self._expanded_preview.setStyleSheet(
+                _expanded_preview_stylesheet(theme)
+            )
+            self._expanded_hint.setStyleSheet(
+                f"color: {theme.text_hint}; font-size: {theme.font_size_sm}px;"
+            )
 
 
 __all__ = [

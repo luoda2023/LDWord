@@ -21,7 +21,20 @@ from src.config.migration import (
     unflatten_dict,
 )
 from src.config.template import TemplateConfig
-from src.config.feature_configs import disabled_output_config
+from src.config.feature_configs import (
+    EquationNumberingConfig,
+    FormulaStyleConfig,
+    FormulaTableConfig,
+    disabled_output_config,
+)
+from src.config.formula_policy import (
+    ChemTypographyOptions,
+    FormulaConvertOptions,
+    FormulaToTableOptions,
+    THESIS_FORMULA_MODULE_NAMES,
+    ThesisFormulaRules,
+    is_thesis_formula_mode,
+)
 from src.config.document_scope import coerce_document_scope_policy
 from src.config.scene import (
     SceneWorkspace,
@@ -77,6 +90,7 @@ def resolve_config(
         normalize_template_overrides(session_overrides)
     )
     scene_feature_overrides = _extract_scene_feature_overrides(scene)
+    formula_rules = _resolved_formula_rules(scene)
 
     template_payload = asdict(template)
     template_flat = add_template_compat_aliases(flatten_dict("", template_payload))
@@ -111,6 +125,13 @@ def resolve_config(
             source="scene",
             template_default=None,
         )
+    if is_thesis_formula_mode(scene.mode_id):
+        for key, value in flatten_dict("", asdict(formula_rules)).items():
+            provenance[key] = ConfigValue(
+                value=copy.deepcopy(value),
+                source="scene",
+                template_default=None,
+            )
     return ResolvedConfig(
         # From template (core appearance)
         page_setup=merged_template.page_setup,
@@ -130,19 +151,20 @@ def resolve_config(
         header_footer=merged_template.header_footer,
         watermark=merged_template.watermark,
         reference_style=merged_template.reference_style,
-        formula_table=merged_template.formula_table,
-        formula_style=merged_template.formula_style,
-        equation_numbering=merged_template.equation_numbering,
+        formula_table=copy.deepcopy(formula_rules.formula_table),
+        formula_style=copy.deepcopy(formula_rules.formula_style),
+        equation_numbering=copy.deepcopy(formula_rules.equation_numbering),
         # From scene (behavior)
-        module_switches=normalize_module_switches(scene.module_switches),
+        module_switches=_resolved_module_switches(scene),
         mode_id=str(scene.mode_id or "").strip() or "custom",
         document_scope=coerce_document_scope_policy(scene.document_scope),
         strict_mode=scene.strict_mode,
         md_cleanup=copy.deepcopy(scene.md_cleanup),
         whitespace=copy.deepcopy(scene.whitespace),
         citation_link=copy.deepcopy(scene.citation_link),
-        formula_convert=copy.deepcopy(scene.formula_convert),
-        chem_typography=copy.deepcopy(scene.chem_typography),
+        formula_convert=copy.deepcopy(formula_rules.formula_convert),
+        formula_to_table=copy.deepcopy(formula_rules.formula_to_table),
+        chem_typography=copy.deepcopy(formula_rules.chem_typography),
         input_source_profile=copy.deepcopy(scene.input_source_profile),
         compliance_profile=copy.deepcopy(scene.compliance_profile),
         default_delivery_preset_id=scene.default_delivery_preset_id,
@@ -194,9 +216,14 @@ def resolve_template_baseline(template: TemplateConfig) -> ResolvedConfig:
         header_footer=baseline.header_footer,
         watermark=baseline.watermark,
         reference_style=baseline.reference_style,
-        formula_table=baseline.formula_table,
-        formula_style=baseline.formula_style,
-        equation_numbering=baseline.equation_numbering,
+        # Formula policy has no template baseline.  These inert defaults only
+        # satisfy the execution-shaped ResolvedConfig used by preview callers.
+        formula_table=FormulaTableConfig(),
+        formula_style=FormulaStyleConfig(),
+        equation_numbering=EquationNumberingConfig(),
+        formula_convert=FormulaConvertOptions(),
+        formula_to_table=FormulaToTableOptions(),
+        chem_typography=ChemTypographyOptions(),
         module_switches={},
         _provenance=provenance,
     )
@@ -232,8 +259,6 @@ def _build_provenance(
 
 
 _SCENE_FEATURE_FIELDS = (
-    "formula_style",
-    "equation_numbering",
     "reference_style",
     "watermark",
 )
@@ -272,6 +297,17 @@ def _filter_delivery_artifact_overrides(
 def _filter_scene_template_overrides(overrides: dict[str, Any]) -> dict[str, Any]:
     filtered: dict[str, Any] = {}
     for key, value in overrides.items():
+        root = str(key).split(".", 1)[0]
+        if root in {
+            "formula_convert",
+            "formula_to_table",
+            "formula_table",
+            "formula_style",
+            "equation_table_format",
+            "equation_numbering",
+            "chem_typography",
+        }:
+            continue
         if key in _SCENE_IGNORED_PAGE_NUMBER_OVERRIDE_KEYS:
             continue
         if any(
@@ -281,6 +317,43 @@ def _filter_scene_template_overrides(overrides: dict[str, Any]) -> dict[str, Any
             continue
         filtered[key] = value
     return filtered
+
+
+def _resolved_formula_rules(scene: SceneWorkspace) -> ThesisFormulaRules:
+    """Return the only formula policy authorized for execution."""
+
+    if not is_thesis_formula_mode(scene.mode_id):
+        return ThesisFormulaRules()
+    rules = scene.thesis_formula_rules
+    return copy.deepcopy(rules) if rules is not None else ThesisFormulaRules()
+
+
+def _resolved_module_switches(scene: SceneWorkspace) -> dict[str, bool]:
+    switches = normalize_module_switches(scene.module_switches)
+    rules = scene.thesis_formula_rules
+    if not is_thesis_formula_mode(scene.mode_id) or rules is None:
+        for module_name in THESIS_FORMULA_MODULE_NAMES:
+            switches[module_name] = False
+        return switches
+    switches["formula_convert"] = bool(
+        rules.formula_enabled and rules.formula_convert.enabled
+    )
+    switches["chem_typography"] = bool(
+        rules.chem_typography.enabled
+        and any(
+            bool(active)
+            for active in (rules.chem_typography.scopes or {}).values()
+        )
+    )
+    switches["equation_table_format"] = bool(
+        rules.formula_enabled
+        and (
+            rules.formula_to_table.enabled
+            or rules.equation_numbering.enabled
+            or rules.formula_style.enabled
+        )
+    )
+    return switches
 
 
 def _normalize_image_items(

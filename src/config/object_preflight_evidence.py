@@ -8,12 +8,13 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
-from src.config.asset_resolution import file_content_revision
+from src.shared.files.content_hash import file_content_revision
 from src.shared.engine.object_preflight import (
     ObjectPreflightFinding,
     ObjectPreflightResult,
     inspect_docx_package,
     object_preflight_module_skips,
+    refine_section_format_module_skips,
 )
 
 
@@ -137,7 +138,9 @@ def build_object_preflight_evidence(
             inspection_error="source_unreadable",
         )
     revision_after = _read_source_revision(path)
-    module_skips = object_preflight_module_skips(result.findings, policy)
+    module_skips = refine_section_format_module_skips(
+        object_preflight_module_skips(result.findings, policy)
+    )
 
     payload = _canonical_payload(
         source_path=normalized_path,

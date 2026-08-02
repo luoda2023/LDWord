@@ -1,0 +1,48 @@
+{
+  "kind": "alavette.material_package",
+  "schema_version": 1,
+  "package_id": "pkg_9e9357f7a7114c7f9195bed5f3c4f597",
+  "display_name": "纪要资料包样例",
+  "work_mode_id": "official",
+  "material_contract_id": "official_document_v1",
+  "shared_scope": {
+    "fields": {},
+    "resources": {},
+    "derivations": {},
+    "timelines": {},
+    "provenance": {}
+  },
+  "groups": [],
+  "records": [
+    {
+      "record_id": "rec_177d32f68a744c37be501b197c040353",
+      "display_name": "纪要",
+      "group_id": "",
+      "lifecycle": "active",
+      "scope": {
+        "fields": {
+          "document_type": "minutes",
+          "title": "专题协调会议纪要",
+          "meeting_title": "资料归档专题协调会议",
+          "body": "会议研究了近期资料归档和流程优化事项，明确由各部门按清单完成材料提交。",
+          "organization": "示例市办公室",
+          "document_no": "会议纪要〔2026〕2号",
+          "issuer": "示例市办公室",
+          "issue_date": "2026年7月10日",
+          "meeting_date": "2026年7月10日上午",
+          "participants": "张三、李四、王五",
+          "copy_scope": "各相关处室",
+          "archive_status": "待归档",
+          "archive_no": "示会纪-2026-0002",
+          "retention_period": "30年"
+        },
+        "resources": {},
+        "derivations": {},
+        "timelines": {},
+        "provenance": {}
+      },
+      "origin": {}
+    }
+  ],
+  "metadata": {}
+}

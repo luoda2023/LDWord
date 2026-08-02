@@ -1,8 +1,8 @@
-# 代码结构健康深度分析记录
+﻿# 代码结构健康深度分析记录
 
 记录日期: 2026-07-07
 
-项目路径: `C:\Users\70768\Desktop\Lark-Formatter 1.0\Lark-Formatter V1.0`
+项目路径: `<LOCAL_PATH>`
 
 ## 1. 结论摘要
 
@@ -3759,7 +3759,7 @@ D  .claude/worktrees/awesome-tu-3d3302
 | `git ls-tree HEAD` | `160000 commit 8f959998d29652be5124dcb1c5a4e2d7bbd8c993 .claude/worktrees/awesome-tu-3d3302` |
 | gitlink commit message | `Refine heading detection and template panel layout` |
 | 当前磁盘目录 | 目录存在，包含一份嵌套工作区文件 |
-| 嵌套 `.git` 文件 | 指向旧路径 `C:/Users/Administrator/Desktop/.../.git/worktrees/awesome-tu-3d3302` |
+| 嵌套 `.git` 文件 | 指向旧路径 `<LOCAL_PATH>` |
 | `git -C .claude/worktrees/awesome-tu-3d3302 status` | 失败: `fatal: not a git repository` |
 
 当前判断:

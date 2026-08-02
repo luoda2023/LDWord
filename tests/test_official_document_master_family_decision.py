@@ -1,6 +1,12 @@
 import json
 from pathlib import Path
 
+from src.config.master_library import get_master
+from src.config.master_placeholder_index import scan_master_placeholder_index
+from src.config.official_document_profiles import (
+    get_official_document_assembly_contract,
+    list_official_document_profiles,
+)
 from src.shared.engine.official_document_master_family_decision import (
     evaluate_official_master_family_decision,
     write_official_master_family_decision_manifest,
@@ -160,3 +166,18 @@ def test_official_master_family_decision_marks_split_candidate_on_visual_mismatc
         "letter": "official_gbt_letter",
     }
     assert decision.issues == ("visual_baseline_mismatch: letter",)
+
+
+def test_every_applicable_profile_field_has_a_real_master_placeholder():
+    for profile in list_official_document_profiles():
+        contract = get_official_document_assembly_contract(profile.profile_id)
+        assert contract is not None
+        master = get_master(contract.master_id, "official")
+        assert master is not None
+        index = scan_master_placeholder_index(master.docx_path, use_cache=False)
+        expected = {
+            "@text:" + binding.placeholder_id
+            for binding in contract.field_bindings
+            if binding.applicable
+        }
+        assert expected <= set(index.placeholder_ids), profile.profile_id

@@ -2,10 +2,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from src.config.scene import SceneWorkspace
+from src.config.scene_repair_routing import repair_route_for_target
+from src.ui.adapters.workbench_boundary_issues import coverage_boundary_issue_items
 from src.ui.adapters.workbench_issue_models import WorkbenchIssueItem
 from src.ui.adapters.workbench_issue_navigation import (
     audit_workbench_issue_navigation_routes,
@@ -31,10 +33,11 @@ def test_workbench_issue_navigation_uses_issue_owner_modules_directly():
 
 def test_workbench_issue_navigation_registry_maps_targets_to_surfaces():
     cases = {
-        "profile_field": ("material_profile_target", "", "", "content_fill"),
-        "material": ("material_target", "", "", "content_fill"),
-        "field": ("material_target", "", "", "content_fill"),
-        "schema": ("scene_panel", "scene", "scn_content", ""),
+        "profile_field": ("material_profile_target", "assets", "", ""),
+        "material": ("material_target", "assets", "", ""),
+        "material_package": ("material_target", "assets", "", ""),
+        "field": ("material_target", "assets", "", ""),
+        "schema": ("material_target", "assets", "", ""),
         "template": ("template_panel", "template", "tpl_overview", ""),
         "template_style_field": ("template_panel", "template", "tpl_style", ""),
         "template_page_field": ("template_panel", "template", "tpl_page", ""),
@@ -52,9 +55,9 @@ def test_workbench_issue_navigation_registry_maps_targets_to_surfaces():
         "coverage_boundary": ("scene_panel", "scene", "scn_overview", ""),
         "sample_fixture": ("scene_panel", "scene", "scn_overview", ""),
         "parameter_ownership": ("scene_panel", "scene", "scn_overview", ""),
-        "control_contract": ("scene_panel", "scene", "scn_cleanup", ""),
-        "row_height": ("scene_panel", "scene", "scn_cleanup", ""),
-        "parameter_path": ("scene_panel", "scene", "scn_cleanup", ""),
+        "control_contract": ("feature_card", "", "", "quick_execute"),
+        "row_height": ("feature_card", "", "", "quick_execute"),
+        "parameter_path": ("feature_card", "", "", "quick_execute"),
         "plugin_manual_gate": ("feature_card", "", "", "quick_execute"),
         "question_figure_batch_apply_transaction_task_summary": (
             "transaction_artifact",
@@ -84,6 +87,24 @@ def test_workbench_issue_navigation_registry_falls_back_to_content_fill():
     assert projection.feature_card_id == "content_fill"
 
 
+def test_material_repairs_route_to_canonical_assets_panel():
+    for target_type in ("material", "material_package", "field", "asset"):
+        projection = workbench_issue_navigation_for_target(target_type, "payload")
+        assert projection.action_kind == "material_target"
+        assert projection.panel_id == "assets"
+        assert projection.feature_card_id == ""
+
+
+def test_coverage_boundary_issue_exposes_plugin_manual_gate_for_planned_family():
+    items = coverage_boundary_issue_items(
+        SceneWorkspace(scene_id="journal_en", category="journal_en")
+    )
+
+    assert items
+    assert items[0].repair_target_type == "plugin_manual_gate"
+    assert items[0].repair_target_key
+
+
 def test_workbench_issue_navigation_audit_covers_scene_repair_routes():
     audit = audit_workbench_issue_navigation_routes()
 
@@ -96,6 +117,23 @@ def test_workbench_issue_navigation_audit_covers_scene_repair_routes():
     assert "template" in registered_workbench_issue_navigation_target_types()
     assert "delivery_preset" in registered_workbench_issue_navigation_target_types()
     assert "parameter_path" in registered_workbench_issue_navigation_target_types()
+
+
+def test_scene_repair_routing_registry_covers_fixed_layout_targets():
+    route = repair_route_for_target("row_height")
+
+    assert route is not None
+    assert route.route_id == "fixed_layout"
+    assert {"row_height", "content_controls", "textboxes"}.issubset(
+        route.repair_target_types
+    )
+
+
+def test_workbench_fixed_layout_repairs_stay_on_execution_surface():
+    for target_type in ("row_height", "content_controls", "textboxes"):
+        projection = workbench_issue_navigation_for_target(target_type, "payload")
+        assert projection.action_kind == "feature_card"
+        assert projection.feature_card_id == "quick_execute"
 
 
 def test_workbench_issue_navigation_audit_reports_missing_route_targets():
@@ -132,7 +170,7 @@ def test_workbench_issue_navigation_audit_reports_missing_surfaces():
     )
 
     assert ("template", "template") in audit.invalid_panel_targets
-    assert ("control_contract", "scene", "scn_cleanup") in audit.invalid_card_targets
+    assert ("control_contract", "quick_execute") in audit.invalid_feature_card_targets
     assert ("plugin", "quick_execute") in audit.invalid_feature_card_targets
     assert audit.invalid_scene_field_targets == (
         (
@@ -167,7 +205,7 @@ def test_workbench_scene_field_focus_projection_normalizes_reusable_controls():
     assert roles_projection.valid
     assert roles_projection.focus_kind == "document_scope"
     assert roles_projection.normalized_key == "scene.document_scope.selected_roles"
-    assert roles_projection.display_label == "指定区域"
+    assert roles_projection.display_label == "自选区域"
 
     schema_projection = workbench_scene_field_focus_projection(
         "schema",

@@ -1,8 +1,8 @@
-# Project Health Optimization Plan
+﻿# Project Health Optimization Plan
 
 记录日期: 2026-07-09
 
-项目路径: `C:\Users\70768\Desktop\Lark-Formatter 1.0\Lark-Formatter V1.0`
+项目路径: `<LOCAL_PATH>`
 
 ## 1. 结论摘要
 

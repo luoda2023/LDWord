@@ -27,12 +27,9 @@ TEMPLATE_AUTHORABLE_ROOTS: tuple[str, ...] = (
     "header_footer",
     "toc",
     "caption",
-    "formula_table",
 )
 
 TEMPLATE_FROZEN_ROOTS: tuple[str, ...] = (
-    "formula_style",
-    "equation_numbering",
     "reference_style",
     "watermark",
 )
@@ -154,7 +151,7 @@ _PROFILES: tuple[TemplateAuthoringProfile, ...] = (
             "通知、请示、报告、批复、函和纪要的固定结构差异由公文母版族表达。",
         ),
         scene_boundaries=(
-            "公文文种路由、母版选择、处理能力、风险检查和正式/审阅交付属于公文方案。",
+            "公文文种路由、母版选择、处理能力、执行安全与正式/审阅交付属于公文方案。",
         ),
         material_boundaries=(
             "official_document_v1 与 administrative_meeting_fields_v1 的机构、文号、收文对象、签发人、日期、会议字段和印章属于公文资料。",

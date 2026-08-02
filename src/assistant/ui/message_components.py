@@ -164,11 +164,11 @@ class AssistantAttachmentDropOverlay(QFrame):
         self._icon.setFixedHeight(38)
         self._icon.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._icon)
-        self._title = QLabel("松开以添加 DOCX 材料", self)
+        self._title = QLabel("松开以添加文档材料", self)
         self._title.setObjectName("assistant_attachment_drop_title")
         self._title.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._title)
-        self._caption = QLabel("材料只会在本次发送获得正文读取授权", self)
+        self._caption = QLabel("支持 DOCX、Markdown；单次最多 6 份", self)
         self._caption.setObjectName("assistant_attachment_drop_caption")
         self._caption.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._caption)
@@ -298,7 +298,13 @@ class AssistantMessageFileCard(QFrame):
         preview_layout.addWidget(self._icon)
         layout.addWidget(self._preview)
         copy = QVBoxLayout()
-        copy.setContentsMargins(0, 7, 0, 7)
+        has_subtitle = bool(self.file.subtitle)
+        copy.setContentsMargins(
+            0,
+            7 if has_subtitle else 0,
+            0,
+            7 if has_subtitle else 0,
+        )
         copy.setSpacing(3)
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
@@ -313,10 +319,15 @@ class AssistantMessageFileCard(QFrame):
         )
         self._suffix.setObjectName("assistant_file_card_suffix")
         title_row.addWidget(self._suffix)
+        if not has_subtitle:
+            copy.addStretch(1)
         copy.addLayout(title_row)
-        self._subtitle = QLabel(self.file.subtitle or "点击打开", self)
+        self._subtitle = QLabel(self.file.subtitle, self)
         self._subtitle.setObjectName("assistant_artifact_subtitle")
+        self._subtitle.setVisible(has_subtitle)
         copy.addWidget(self._subtitle)
+        if not has_subtitle:
+            copy.addStretch(1)
         layout.addLayout(copy, 1)
         self._open = QToolButton(self)
         self._open.setObjectName("assistant_artifact_open")

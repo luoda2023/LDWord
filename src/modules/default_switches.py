@@ -29,11 +29,14 @@ DEFAULT_MODULE_SWITCHES = MappingProxyType(
         "image_insertion": False,
         "watermark": False,
         "chem_typography": False,
+        "formula_convert": False,
         "md_cleanup": False,
         "whitespace_normalize": False,
         "validation": True,
         "citation_link": False,
-        "equation_table_format": True,
+        # Runtime-only projection of the thesis formula sub-passes. Persisted
+        # enablement lives in SceneWorkspace.thesis_formula_rules.
+        "equation_table_format": False,
         "reference_format": True,
     }
 )

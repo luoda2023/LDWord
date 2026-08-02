@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from functools import lru_cache
 from pathlib import Path
 
 CN_ALIASES: dict[str, list[str]] = {
+    # GB/T 9704 names a typeface category (小标宋体), not a commercial font.
+    # Prefer open-source OFL families and fall back only to a same-category
+    # system Song family.  Product code must not silently select Founder fonts.
+    "小标宋": [
+        "Noto Serif SC",
+        "Noto Serif CJK SC",
+        "Source Han Serif SC",
+        "Source Han Serif CN",
+        "思源宋体",
+    ],
     "宋体": ["SimSun", "NSimSun", "宋体"],
     "黑体": ["SimHei", "黑体"],
     "微软雅黑": ["Microsoft YaHei", "微软雅黑"],
@@ -45,7 +56,11 @@ def canonicalize_font_name(font_name: str) -> str:
         normalized = repaired
 
     for canonical, aliases in CN_ALIASES.items():
-        if normalized == canonical or normalized in aliases:
+        folded = normalized.casefold()
+        if (
+            folded == canonical.casefold()
+            or any(folded == alias.casefold() for alias in aliases)
+        ):
             return canonical
 
     for canonical in EN_ALIASES:
@@ -65,6 +80,8 @@ def list_system_fonts() -> set[str]:
         for font_file in directory.iterdir():
             if font_file.suffix.lower() in (".ttf", ".otf", ".ttc"):
                 names.add(font_file.stem)
+    if sys.platform == "win32":
+        names.update(_windows_registry_font_families())
     return names
 
 
@@ -107,6 +124,56 @@ def _get_font_dirs() -> list[Path]:
         Path.home() / ".fonts",
         Path.home() / ".local" / "share" / "fonts",
     ]
+
+
+def _windows_registry_font_families() -> set[str]:
+    """Return installed Windows font family names, not only file stems.
+
+    Variable fonts such as ``NotoSerifSC-VF.ttf`` expose a Word family name
+    (``Noto Serif SC``) that cannot be inferred reliably from the filename.
+    """
+
+    try:
+        import winreg
+    except ImportError:
+        return set()
+
+    locations = (
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts",
+        ),
+        (
+            winreg.HKEY_CURRENT_USER,
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts",
+        ),
+    )
+    families: set[str] = set()
+    for hive, key_path in locations:
+        try:
+            with winreg.OpenKey(hive, key_path) as key:
+                index = 0
+                while True:
+                    try:
+                        display_name = str(winreg.EnumValue(key, index)[0] or "")
+                    except OSError:
+                        break
+                    index += 1
+                    family = re.sub(
+                        r"\s*\((?:TrueType|OpenType)\)\s*$",
+                        "",
+                        display_name,
+                        flags=re.IGNORECASE,
+                    ).strip()
+                    if not family:
+                        continue
+                    families.add(family)
+                    families.update(
+                        part.strip() for part in family.split("&") if part.strip()
+                    )
+        except OSError:
+            continue
+    return families
 
 
 def resolve_font(

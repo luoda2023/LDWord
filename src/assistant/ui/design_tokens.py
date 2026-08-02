@@ -14,6 +14,8 @@ class AssistantDesignTokens:
     content_max_width: int = 760
     message_column_max_width: int = 860
     assistant_message_max_width: int = 820
+    plan_card_max_width: int = 760
+    progress_card_max_width: int = 760
     user_message_max_width: int = 640
     compact_composer_height: int = 154
     compact_breakpoint: int = 900

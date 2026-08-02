@@ -20,7 +20,7 @@ def test_field_display_name_translates_scene_and_template_paths():
     )
     assert (
         field_display_name("scene.document_scope.selected_roles")
-        == "指定区域"
+        == "自选区域"
     )
     assert (
         field_display_name("template.page_setup.margin.left_cm")
@@ -100,7 +100,7 @@ def test_replace_field_keys_with_display_names_translates_embedded_keys():
     assert replace_field_keys_with_display_names(
         "参数：scene.document_scope.selected_roles"
     ) == (
-        "参数：指定区域"
+        "参数：自选区域"
         "（scene.document_scope.selected_roles）"
     )
     assert replace_field_keys_with_display_names(

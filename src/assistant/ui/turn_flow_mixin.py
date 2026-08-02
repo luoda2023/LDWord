@@ -4,12 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from src.assistant.adapters.workspace_state_adapter import snapshot_workspace
-from src.assistant.adapters.workspace_state_adapter import WorkspaceSnapshot
+from src.application.materials import (
+    ExecutionMaterialSnapshot,
+    bind_repository_material_run,
+)
+from src.assistant.adapters.workspace_state_adapter import (
+    WorkspaceSnapshot,
+)
+from src.assistant.application.active_document_continuation import (
+    is_active_document_revision_request,
+    resolve_active_document_continuation,
+)
 from src.assistant.application.attachment_policy import bind_policy_attachment_roles
 from src.assistant.application.request_policy import (
     POLICY_DOCUMENT_ACTION,
@@ -22,57 +30,118 @@ from src.assistant.contracts.document_plan import DocumentPlan
 from src.assistant.contracts.jobs import (
     JOB_CANCELLED,
     JOB_FAILED,
+    JOB_NEEDS_EXECUTION_APPROVAL,
+    JOB_PREFLIGHT_FAILED,
     JOB_PROVIDER_RUNNING,
     JOB_RESPONSE_WAITING,
 )
-from src.assistant.contracts.material_snapshot import MaterialContextSnapshot
-from src.assistant.contracts.permissions import DisclosureGrant
+from src.assistant.contracts.material_snapshot import MaterialExecutionEnvelope
 from src.assistant.contracts.messages import (
     ROLE_ASSISTANT,
     ROLE_USER,
     AssistantMessage,
 )
+from src.assistant.contracts.permissions import DisclosureGrant
 from src.assistant.contracts.runtime import (
-    AssistantTurnRequest,
     MAX_ASSISTANT_USER_MESSAGE_CHARACTERS,
     TURN_COMPLETED,
     TURN_WAITING_DATA_PERMISSION,
     TURN_WAITING_USER_QUESTION,
+    AssistantTurnRequest,
 )
 from src.assistant.domain.docx_format_evidence import (
     attachment_disclosure_fields,
     bind_attachment_semantic_roles,
+    is_template_authoring_request,
 )
-from src.assistant.runtime.events import (
-    EVENT_CONTEXT_READY,
-    EVENT_MODEL_STARTED,
-    EVENT_TEXT_DELTA,
-    EVENT_TURN_CANCELLED,
-    EVENT_TURN_FAILED,
-    EVENT_TURN_FINISHED,
-    EVENT_TURN_STARTED,
-    EVENT_TURN_WAITING,
+from src.assistant.domain.exam_authoring_contract import (
+    exam_request_clarification,
 )
 from src.assistant.runtime.providers.router import ProviderResolutionError
-from src.assistant.runtime.turn_runner import attachment_fingerprints
 from src.assistant.storage.models import AssistantSession
 from src.assistant.ui.creative_home import AssistantHeroComposer
+from src.assistant.ui.exam_clarification_mixin import AssistantExamClarificationMixin
+from src.assistant.ui.official_clarification_mixin import (
+    AssistantOfficialClarificationMixin,
+    official_request_needs_intake,
+)
 from src.assistant.ui.turn_completion_mixin import AssistantTurnCompletionMixin
+from src.assistant.ui.turn_preview_mixin import AssistantTurnPreviewMixin
 from src.assistant.ui.workers import (
     AssistantTurnWorker,
 )
-from src.qt_api import (
-    QTimer,
-)
-from src.config.material_context import MaterialExecutionContext
+from src.config.material_package_library import material_package_repository
+
+_ASSISTANT_ATTACHMENT_MEDIA_TYPES = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+}
 
 
-class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
+class AssistantTurnFlowMixin(
+    AssistantOfficialClarificationMixin,
+    AssistantExamClarificationMixin,
+    AssistantTurnCompletionMixin,
+    AssistantTurnPreviewMixin,
+):
+    _DOCUMENT_RECOVERY_COMMANDS = frozenset(
+        {
+            "转为文档任务",
+            "按刚才的需求生成文档",
+            "把刚才的内容做成word",
+            "把刚才的内容做成docx",
+            "根据刚才的需求创建文档",
+            "将刚才的需求转成文档",
+        }
+    )
+
+    def _current_execution_material_snapshot(
+        self,
+    ) -> ExecutionMaterialSnapshot | None:
+        selection = self.bridge.current_material_run_selection()
+        if selection is None:
+            return None
+        mode_id = self.bridge.current_work_mode_id()
+        result = bind_repository_material_run(
+            material_package_repository(),
+            selection,
+            work_mode_id=mode_id,
+            recipe_id="document_batch",
+            scene_id=self.bridge.current_scene_id(),
+            document_type=(
+                self.bridge.current_official_document_type_id()
+                if mode_id == "official"
+                else ""
+            ),
+        )
+        if not result.ok:
+            self.bridge.set_current_material_issues(result.issues)
+            return None
+        return result.snapshot
+
     def _send_message(
         self,
         text: str,
         *,
         source: AssistantHeroComposer | None = None,
+        context_refs_override: tuple[dict[str, object], ...] | None = None,
+    ) -> bool:
+        accepted = self._submit_message(
+            text,
+            source=source,
+            context_refs_override=context_refs_override,
+        )
+        if accepted:
+            self._consume_submitted_context_refs()
+        return accepted
+
+    def _submit_message(
+        self,
+        text: str,
+        *,
+        source: AssistantHeroComposer | None = None,
+        context_refs_override: tuple[dict[str, object], ...] | None = None,
     ) -> bool:
         normalized = str(text or "").strip()
         if not normalized:
@@ -114,25 +183,60 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
             self._active_session = self._provider_selection.synchronize_session(
                 self._active_session
             )
-        missing_refs = self._missing_context_refs_for_submission()
+        if context_refs_override is None:
+            submission_refs = self._context_refs_for_submission()
+            missing_refs = self._missing_context_refs_for_submission()
+        else:
+            submission_refs = tuple(
+                dict(item)
+                for item in context_refs_override
+                if isinstance(item, Mapping)
+            )
+            missing_refs = self._missing_context_refs_for_submission(
+                submission_refs
+            )
         if missing_refs:
             names = "、".join(
                 str(item.get("title") or item.get("name") or Path(
                     str(item.get("path") or "")
-                ).name or "DOCX 附件")
+                    ).name or "文档材料")
                 for item in missing_refs
             )
             reason = (
-                f"附件已失效：{names}。请重新选择存在的 DOCX 文档后再发送；"
+                f"附件已失效：{names}。请重新选择存在的文档材料后再发送；"
                 "当前草稿已保留。"
             )
             self._composer.set_submission_gate(reason)
             self._empty_input.set_submission_gate(reason)
             return False
         context_refs = bind_attachment_semantic_roles(
-            self._context_refs_for_submission(),
+            submission_refs,
             normalized,
         )
+        template_authoring_requested = is_template_authoring_request(normalized)
+        template_source_is_valid = bool(
+            len(context_refs) == 1
+            and Path(
+                str(
+                    context_refs[0].get("path")
+                    or context_refs[0].get("file_path")
+                    or context_refs[0].get("local_path")
+                    or ""
+                )
+            ).suffix.casefold()
+            == ".docx"
+        )
+        if template_authoring_requested and not template_source_is_valid:
+            self._close_template_authoring_without_single_source(
+                query=normalized,
+                context_refs=context_refs,
+            )
+            return True
+        if self._recover_previous_request_as_document(
+            normalized,
+            context_refs=context_refs,
+        ):
+            return True
         pending_continuation = dict(self._active_session.pending_continuation)
         continuation_cursor = str(
             pending_continuation.get("continuation_id")
@@ -184,30 +288,109 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
             pending_continuation=(
                 pending_continuation if continuation_cursor else None
             ),
+            consume_draft=retrying_continuation,
         )
-        workspace = self._workspace_snapshot_for_session(self._active_session)
-        material_context = self.bridge.current_material_context()
-        material_snapshot = (
-            material_context.clone()
-            if isinstance(material_context, MaterialExecutionContext)
-            else MaterialExecutionContext()
+        active_plan = None
+        if self._active_session.active_plan:
+            try:
+                active_plan = DocumentPlan.from_dict(
+                    self._active_session.active_plan
+                )
+            except (TypeError, ValueError):
+                active_plan = None
+        job_status = str(
+            self._active_session.document_job.get("status") or ""
         )
-        if not continuation_cursor:
-            policy = evaluate_request_policy(
-                normalized,
-                workspace_mode_id=workspace.mode_id,
-                has_attachment=bool(context_refs),
+        pending_kind = str(
+            self._active_session.pending_continuation.get("kind") or ""
+        )
+        active_continuation = resolve_active_document_continuation(
+            normalized,
+            job_status=job_status,
+            has_active_plan=active_plan is not None,
+            pending_kind=pending_kind,
+            generation_pending=bool(
+                active_plan is not None
+                and active_plan.generation_required
+                and active_plan.production_input_artifact is None
+            ),
+        )
+        if active_continuation is not None:
+            return self._dispatch_document_action(
+                active_continuation.action_id,
+                user_text=normalized,
+                source_refs=context_refs,
             )
+        preserve_active_draft = bool(
+            active_plan is not None
+            and is_active_document_revision_request(
+                normalized,
+                job_status=job_status,
+            )
+        )
+        if (
+            preserve_active_draft
+            and job_status == JOB_NEEDS_EXECUTION_APPROVAL
+        ):
+            invalidated_job = dict(self._active_session.document_job)
+            invalidated_job.pop("preflight", None)
+            invalidated_job.update(
+                {
+                    "status": JOB_PREFLIGHT_FAILED,
+                    "preflight_invalidated_reason": (
+                        "assistant_draft_revision_requested"
+                    ),
+                }
+            )
+            self._active_session = self._coordinator.update_state(
+                self._active_session,
+                document_job=invalidated_job,
+            )
+        workspace = self._workspace_snapshot_for_session(self._active_session)
+        material_snapshot = self._current_execution_material_snapshot()
+        policy = evaluate_request_policy(
+            normalized,
+            workspace_mode_id=workspace.mode_id,
+            has_attachment=bool(context_refs),
+        )
+        local_policy_kinds = {
+            POLICY_DOCUMENT_ACTION,
+            POLICY_NEEDS_ROUTE_CLARIFICATION,
+            POLICY_RESPONSE_CLOSED,
+        }
+        if (
+            continuation_cursor
+            and not preserve_active_draft
+            and policy.kind in local_policy_kinds
+        ):
+            # A provider question owns only its answer, not every later turn in
+            # the conversation.  A fresh deterministic document request
+            # supersedes that cursor and is routed through Form again.
+            interrupted_job = dict(self._active_session.document_job)
+            interrupted_job_update = None
+            if str(interrupted_job.get("status") or "") == JOB_RESPONSE_WAITING:
+                interrupted_job.update(
+                    {
+                        "status": JOB_CANCELLED,
+                        "superseded_continuation_id": continuation_cursor,
+                        "superseded_reason": "new_local_document_request",
+                    }
+                )
+                interrupted_job_update = interrupted_job
+            self._active_session = self._coordinator.update_state(
+                self._active_session,
+                pending_continuation={},
+                document_job=interrupted_job_update,
+                turn_status=TURN_COMPLETED,
+            )
+            continuation_cursor = ""
+        if not continuation_cursor and not preserve_active_draft:
             context_refs = bind_policy_attachment_roles(context_refs, policy)
             self._active_session = self._coordinator.update_state(
                 self._active_session,
                 context_refs=context_refs,
             )
-            if policy.kind in {
-                POLICY_DOCUMENT_ACTION,
-                POLICY_NEEDS_ROUTE_CLARIFICATION,
-                POLICY_RESPONSE_CLOSED,
-            }:
+            if policy.kind in local_policy_kinds:
                 self._handle_local_request_policy(
                     policy,
                     workspace=workspace,
@@ -235,13 +418,166 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
             disclosure_grant=None,
         )
 
+    def _consume_submitted_context_refs(self) -> None:
+        """Clear only pending composer materials after a turn accepts them."""
+
+        session = self._active_session
+        if session is not None and session.context_refs:
+            try:
+                self._active_session = self._coordinator.update_state(
+                    session,
+                    context_refs=(),
+                    touch_activity=False,
+                )
+            except (OSError, RuntimeError, TypeError, ValueError):
+                # The message/request already owns an immutable copy. Never
+                # leave the in-memory composer pointing at a consumed file.
+                self._active_session = replace(session, context_refs=())
+        self._empty_input.set_document_paths(())
+        self._composer.set_document_paths(())
+
+    def _recover_previous_request_as_document(
+        self,
+        command: str,
+        *,
+        context_refs: tuple[dict[str, object], ...],
+    ) -> bool:
+        """Give a misrouted provider conversation an explicit local escape hatch."""
+
+        session = self._active_session
+        compact = "".join(str(command or "").casefold().split())
+        if (
+            session is None
+            or session.active_plan
+            or compact not in self._DOCUMENT_RECOVERY_COMMANDS
+        ):
+            return False
+        previous_query = next(
+            (
+                message.visible_text().strip()
+                for message in reversed(session.messages)
+                if message.role == ROLE_USER and message.visible_text().strip()
+            ),
+            "",
+        )
+        if not previous_query:
+            return False
+        workspace = self._workspace_snapshot_for_session(session)
+        policy = evaluate_request_policy(
+            previous_query,
+            workspace_mode_id=workspace.mode_id,
+            has_attachment=bool(context_refs),
+        )
+        if policy.kind not in {
+            POLICY_DOCUMENT_ACTION,
+            POLICY_NEEDS_ROUTE_CLARIFICATION,
+            POLICY_RESPONSE_CLOSED,
+        }:
+            previous_query = "生成一份文档，具体要求如下：" + previous_query
+            policy = evaluate_request_policy(
+                previous_query,
+                workspace_mode_id=workspace.mode_id,
+                has_attachment=bool(context_refs),
+            )
+        if policy.kind not in {
+            POLICY_DOCUMENT_ACTION,
+            POLICY_NEEDS_ROUTE_CLARIFICATION,
+            POLICY_RESPONSE_CLOSED,
+        }:
+            return False
+        bound_refs = bind_policy_attachment_roles(context_refs, policy)
+        self._active_session = self._coordinator.update_state(
+            session,
+            context_refs=bound_refs,
+            pending_continuation={},
+        )
+        self._handle_local_request_policy(
+            policy,
+            workspace=workspace,
+            material_snapshot=self._current_execution_material_snapshot(),
+            context_refs=bound_refs,
+        )
+        return True
+
+    def _close_template_authoring_without_single_source(
+        self,
+        *,
+        query: str,
+        context_refs: tuple[dict[str, object], ...],
+    ) -> None:
+        """Fail closed before provider disclosure when the source is ambiguous."""
+
+        session = self._active_session
+        if session is None:
+            return
+        session = self._coordinator.append_message(
+            session,
+            AssistantMessage.text(
+                role=ROLE_USER,
+                text=query,
+                source_refs=context_refs,
+            ),
+            turn_status=TURN_COMPLETED,
+            consume_draft=True,
+        )
+        single_non_docx = bool(
+            len(context_refs) == 1
+            and Path(
+                str(
+                    context_refs[0].get("path")
+                    or context_refs[0].get("file_path")
+                    or context_refs[0].get("local_path")
+                    or ""
+                )
+            ).suffix.casefold()
+            != ".docx"
+        )
+        body = (
+            "请先上传一份 DOCX 规范文档或标准样稿。应用会同时读取其中的"
+            "规范正文和格式结构证据，再生成并校验一个新的排版模板。"
+            if not context_refs
+            else (
+                "模板创作的来源必须是 DOCX，Markdown 或其他附件不能提供完整的"
+                "Word 样式、分节和页面结构证据。请改为上传一份 DOCX 后重试。"
+                if single_non_docx
+                else (
+                    "一次模板创作只能绑定一份来源 DOCX，以免不同规范相互覆盖。"
+                    "请只保留要作为模板依据的那一份后重试。"
+                )
+            )
+        )
+        session = self._coordinator.append_message(
+            session,
+            AssistantMessage.interaction(
+                role=ROLE_ASSISTANT,
+                interaction_type="boundary",
+                title="请选择一份模板来源 DOCX",
+                body=body,
+                payload={"actions": []},
+            ),
+            turn_status=TURN_COMPLETED,
+        )
+        self._active_session = self._coordinator.update_state(
+            session,
+            context_refs=context_refs,
+            pending_continuation={},
+            document_job={
+                **dict(session.document_job),
+                "status": "response_closed",
+                "reason": "template_authoring_requires_single_docx",
+            },
+            turn_status=TURN_COMPLETED,
+        )
+        self._render_active_session()
+        self._refresh_session_list(select_session_id=session.session_id)
+
     def _queue_provider_disclosure(
         self,
         *,
         query: str,
         context_refs: tuple[dict[str, object], ...],
         workspace: WorkspaceSnapshot,
-        material_snapshot: MaterialExecutionContext,
+        material_snapshot: ExecutionMaterialSnapshot | None,
         continuation_cursor: str,
     ) -> None:
         session = self._active_session
@@ -250,7 +586,8 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
         turn_id = uuid4().hex
         disclosure_id = uuid4().hex
         fields = attachment_disclosure_fields(context_refs)
-        durable_material = MaterialContextSnapshot.capture(material_snapshot)
+        template_authoring_requested = is_template_authoring_request(query)
+        durable_material = MaterialExecutionEnvelope.capture(material_snapshot)
         session = self._coordinator.append_message(
             session,
             AssistantMessage.text(
@@ -259,6 +596,7 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
                 source_refs=context_refs,
             ),
             turn_status=TURN_WAITING_DATA_PERMISSION,
+            consume_draft=True,
         )
         continuation = {
             "kind": "local_provider_disclosure",
@@ -276,6 +614,11 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
             "status": "needs_data_disclosure",
             "request_turn_id": turn_id,
             "disclosure_id": disclosure_id,
+            "operation": (
+                "template_authoring"
+                if template_authoring_requested
+                else "provider_response"
+            ),
         }
         session = self._coordinator.update_state(
             session,
@@ -308,6 +651,13 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
             if target_attachment_required
             else []
         )
+        if template_authoring_requested:
+            scope_facts.append(
+                {
+                    "label": "写入目标",
+                    "value": f"{workspace.mode_label}用户模板库（新增模板）",
+                }
+            )
         session = self._coordinator.append_message(
             session,
             AssistantMessage.interaction(
@@ -317,6 +667,12 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
                 body=(
                     "确认后，仅把下面列出的内容发送给当前模型；本地路径和未列出的"
                     "生产资料不会发送。"
+                    + (
+                        "\n模型只负责生成模板配置；返回结果还会经过本地合同、字段边界"
+                        "和无损读回校验，通过后才会新增到当前模式的用户模板库。"
+                        if template_authoring_requested
+                        else ""
+                    )
                     + (
                         "\n目标文档尚未提供，本轮只分析标准样稿并列出格式要求；"
                         "不会把样稿当作生产输入。"
@@ -418,9 +774,9 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
         raw_material = continuation.get("material_snapshot")
         try:
             material_snapshot = (
-                MaterialContextSnapshot.from_dict(raw_material).restore()
+                MaterialExecutionEnvelope.from_dict(raw_material).restore()
                 if isinstance(raw_material, Mapping)
-                else MaterialExecutionContext()
+                else None
             )
         except (TypeError, ValueError):
             return
@@ -454,7 +810,7 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
         query: str,
         context_refs: tuple[dict[str, object], ...],
         workspace: WorkspaceSnapshot,
-        material_snapshot: MaterialExecutionContext,
+        material_snapshot: ExecutionMaterialSnapshot | None,
         continuation_cursor: str,
         append_user: bool,
         disclosure_grant: DisclosureGrant | None,
@@ -487,6 +843,7 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
                     source_refs=context_refs,
                 ),
                 turn_status="provider_running",
+                consume_draft=True,
             )
             self._active_session = session
         self._render_active_session()
@@ -555,11 +912,16 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
                 session.provider_history_grant
             ),
             conversation_cursor=continuation_cursor,
+            template_authoring_mode_id=(
+                workspace.mode_id
+                if is_template_authoring_request(query)
+                else ""
+            ),
         )
         worker = AssistantTurnWorker(runner, request, parent=self)
         worker.workspace_snapshot = workspace
-        worker.material_context_snapshot = material_snapshot.clone()
-        self._turn_material_snapshots[turn_id] = worker.material_context_snapshot
+        worker.material_snapshot = material_snapshot
+        self._turn_material_snapshots[turn_id] = worker.material_snapshot
         self._turn_workers[session.session_id] = worker
         self._turn_worker = worker
         self._active_cancellation = worker.cancellation
@@ -583,7 +945,7 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
         policy: RequestPolicyDecision,
         *,
         workspace: WorkspaceSnapshot,
-        material_snapshot: MaterialExecutionContext,
+        material_snapshot: ExecutionMaterialSnapshot | None,
         context_refs: tuple[dict[str, object], ...],
     ) -> None:
         """Complete a deterministic Form decision without invoking a provider."""
@@ -600,8 +962,9 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
                 source_refs=context_refs,
             ),
             turn_status="local_processing",
+            consume_draft=True,
         )
-        durable_material = MaterialContextSnapshot.capture(material_snapshot)
+        durable_material = MaterialExecutionEnvelope.capture(material_snapshot)
         if policy.kind == POLICY_NEEDS_ROUTE_CLARIFICATION:
             choice_rows = [choice.to_dict() for choice in policy.choices]
             continuation = {
@@ -653,14 +1016,54 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
                 turn_id=turn_id,
             )
         else:
-            session = self._create_local_form_plan(
-                session,
-                query=policy.query,
-                turn_id=turn_id,
-                workspace=workspace,
-                material_snapshot=material_snapshot,
-                route_id_override=policy.route_id,
+            official_clarification_required = bool(
+                policy.operation == "author"
+                and policy.capability.mode_id == "official"
+                and official_request_needs_intake(
+                    policy.query,
+                    document_type_id=(
+                        workspace.document_type_id
+                        if workspace.mode_id == "official"
+                        else ""
+                    ),
+                )
             )
+            exam_clarification = (
+                exam_request_clarification(policy.query)
+                if policy.operation == "author"
+                and policy.capability.mode_id == "exam"
+                else None
+            )
+            if official_clarification_required:
+                session = self._queue_local_official_clarification(
+                    session,
+                    query=policy.query,
+                    turn_id=turn_id,
+                    workspace=workspace,
+                    material_snapshot=material_snapshot,
+                    context_refs=context_refs,
+                    route_id_override=policy.route_id,
+                )
+            elif exam_clarification is not None:
+                session = self._queue_local_exam_clarification(
+                    session,
+                    query=policy.query,
+                    turn_id=turn_id,
+                    workspace=workspace,
+                    material_snapshot=material_snapshot,
+                    context_refs=context_refs,
+                    route_id_override=policy.route_id,
+                    clarification=exam_clarification,
+                )
+            else:
+                session = self._create_local_form_plan(
+                    session,
+                    query=policy.query,
+                    turn_id=turn_id,
+                    workspace=workspace,
+                    material_snapshot=material_snapshot,
+                    route_id_override=policy.route_id,
+                )
         self._active_session = session
         self._render_active_session()
         self._refresh_session_list(select_session_id=session.session_id)
@@ -733,8 +1136,9 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
         query: str,
         turn_id: str,
         workspace: WorkspaceSnapshot,
-        material_snapshot: MaterialExecutionContext,
+        material_snapshot: ExecutionMaterialSnapshot | None,
         route_id_override: str = "",
+        scene_ref_updates: Mapping[str, object] | None = None,
     ) -> AssistantSession:
         previous_plan = None
         if session.active_plan:
@@ -749,13 +1153,21 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
             previous_plan=previous_plan,
             route_id_override=route_id_override,
         )
-        durable_material = MaterialContextSnapshot.capture(material_snapshot)
+        if scene_ref_updates:
+            plan = replace(
+                plan,
+                scene_ref={
+                    **dict(plan.scene_ref),
+                    **dict(scene_ref_updates),
+                },
+            )
+        durable_material = MaterialExecutionEnvelope.capture(material_snapshot)
         plan = replace(
             plan,
             material_snapshot_ref=durable_material.reference(),
         )
         self._turn_material_snapshots.pop(turn_id, None)
-        self._plan_material_snapshots[plan.plan_id] = material_snapshot.clone()
+        self._plan_material_snapshots[plan.plan_id] = material_snapshot
         job = {
             **dict(session.document_job),
             "job_id": uuid4().hex,
@@ -824,9 +1236,9 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
         raw_material = continuation.get("material_snapshot")
         try:
             material_snapshot = (
-                MaterialContextSnapshot.from_dict(raw_material).restore()
+                MaterialExecutionEnvelope.from_dict(raw_material).restore()
                 if isinstance(raw_material, Mapping)
-                else MaterialExecutionContext()
+                else None
             )
         except (TypeError, ValueError):
             return
@@ -863,243 +1275,6 @@ class AssistantTurnFlowMixin(AssistantTurnCompletionMixin):
         self._active_session = session
         self._render_active_session()
         self._refresh_session_list(select_session_id=session.session_id)
-
-    def _start_turn_preview(self, *, session_id: str, turn_id: str) -> None:
-        normalized_session_id = str(session_id or "")
-        self._turn_previews[normalized_session_id] = {
-            "turn_id": str(turn_id or ""),
-            "text": "",
-            "status": "正在准备请求",
-        }
-        self._activate_turn_preview(normalized_session_id)
-
-    def _context_refs_for_submission(self) -> tuple[dict[str, object], ...]:
-        """Freeze explicitly selected local material into this turn and message."""
-
-        if self._active_session is not None and self._active_session.context_refs:
-            valid_refs: list[dict[str, object]] = []
-            for reference in self._active_session.context_refs:
-                path_text = str(reference.get("path") or "").strip()
-                if path_text and Path(path_text).expanduser().is_file():
-                    valid_refs.append(dict(reference))
-            return tuple(valid_refs)
-        composer = (
-            self._composer
-            if self._conversation_stack.currentWidget() is self._active_page
-            else self._empty_input
-        )
-        return self._context_refs_for_path(composer.document_path())
-
-    def _missing_context_refs_for_submission(
-        self,
-    ) -> tuple[dict[str, object], ...]:
-        """Return explicitly selected attachment refs that no longer exist."""
-
-        candidates: list[dict[str, object]] = []
-        if self._active_session is not None and self._active_session.context_refs:
-            candidates.extend(
-                dict(reference)
-                for reference in self._active_session.context_refs
-                if isinstance(reference, Mapping)
-            )
-        else:
-            composer = (
-                self._composer
-                if self._conversation_stack.currentWidget()
-                is self._active_page
-                else self._empty_input
-            )
-            path_text = str(composer.document_path() or "").strip()
-            if path_text:
-                candidates.append(
-                    {
-                        "path": path_text,
-                        "name": Path(path_text).name,
-                    }
-                )
-        return tuple(
-            reference
-            for reference in candidates
-            if (
-                str(reference.get("path") or "").strip()
-                and not Path(
-                    str(reference.get("path") or "")
-                ).expanduser().is_file()
-            )
-        )
-
-    @staticmethod
-    def _context_refs_for_path(path_text: str) -> tuple[dict[str, object], ...]:
-        normalized = str(path_text or "").strip()
-        if not normalized:
-            return ()
-        path = Path(normalized).expanduser()
-        if not path.is_file() or path.suffix.casefold() != ".docx":
-            return ()
-        return (
-            {
-                "type": "file",
-                "source_type": "attachment",
-                "title": path.name,
-                "path": str(path.resolve()),
-                "media_type": (
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    if path.suffix.casefold() == ".docx"
-                    else "application/octet-stream"
-                ),
-            },
-        )
-
-    @staticmethod
-    def _disclosure_grant_for_turn(
-        session: AssistantSession,
-        context_refs: tuple[dict[str, object], ...],
-    ) -> DisclosureGrant | None:
-        if not context_refs:
-            return None
-        ref_ids = tuple(str(item.get("path") or "") for item in context_refs)
-        return DisclosureGrant(
-            grant_id=uuid4().hex,
-            session_id=session.session_id,
-            provider_id=session.provider_profile_id,
-            model_id=session.model_id,
-            allowed_refs=ref_ids,
-            allowed_fields=attachment_disclosure_fields(context_refs),
-            created_at=datetime.now(timezone.utc).isoformat(),
-            scope="once",
-            content_fingerprints=attachment_fingerprints(context_refs),
-        )
-
-    def _workspace_snapshot_for_session(
-        self,
-        session: AssistantSession,
-    ) -> WorkspaceSnapshot:
-        live = snapshot_workspace(self.bridge)
-        path_text = ""
-        for reference in session.context_refs:
-            path_text = str(reference.get("path") or "").strip()
-            if path_text:
-                break
-        if not path_text:
-            return replace(
-                live,
-                input_path="",
-                input_name="",
-                input_exists=False,
-            )
-        path = Path(path_text).expanduser()
-        return replace(
-            live,
-            input_path=str(path.resolve()) if path.exists() else str(path),
-            input_name=path.name,
-            input_exists=path.is_file(),
-        )
-
-    def _activate_turn_preview(self, session_id: str) -> None:
-        normalized = str(session_id or "")
-        state = self._turn_previews.get(normalized)
-        if state is None:
-            self._turn_preview_session_id = ""
-            self._turn_preview_turn_id = ""
-            self._turn_preview_text = ""
-            self._turn_preview_status = ""
-        else:
-            self._turn_preview_session_id = normalized
-            self._turn_preview_turn_id = state["turn_id"]
-            self._turn_preview_text = state["text"]
-            self._turn_preview_status = state["status"]
-        self._turn_preview_widget = None
-
-    def _clear_turn_preview(self, session_id: str = "") -> None:
-        normalized = str(session_id or self._turn_preview_session_id or "")
-        if normalized:
-            self._turn_previews.pop(normalized, None)
-        current_session_id = (
-            self._active_session.session_id
-            if self._active_session is not None
-            else ""
-        )
-        if not normalized or normalized == current_session_id:
-            self._activate_turn_preview(current_session_id)
-
-    def _on_turn_event(self, worker: AssistantTurnWorker | object, event=None) -> None:
-        if event is None:
-            event = worker
-            worker = self._turn_worker
-        session_id = (
-            worker.request.session_id
-            if isinstance(worker, AssistantTurnWorker)
-            else self._turn_preview_session_id
-        )
-        state = self._turn_previews.get(session_id)
-        if state is None or str(getattr(event, "turn_id", "") or "") != state["turn_id"]:
-            return
-        event_type = str(getattr(event, "type", "") or "")
-        status_by_type = {
-            EVENT_TURN_STARTED: "正在理解你的要求",
-            EVENT_CONTEXT_READY: "已整理当前文档上下文",
-            EVENT_MODEL_STARTED: "模型正在生成",
-            EVENT_TEXT_DELTA: "正在生成回复",
-            EVENT_TURN_FINISHED: "回复生成完成",
-            EVENT_TURN_FAILED: "模型响应未完成",
-            EVENT_TURN_CANCELLED: "正在停止",
-            EVENT_TURN_WAITING: "需要你的确认或补充",
-        }
-        if event_type == EVENT_TEXT_DELTA:
-            state["text"] += str(getattr(event, "text_delta", "") or "")
-        state["status"] = status_by_type.get(
-            event_type,
-            state["status"] or "正在处理",
-        )
-        if (
-            self._active_session is None
-            or self._active_session.session_id != session_id
-        ):
-            return
-        self._turn_preview_session_id = session_id
-        self._turn_preview_turn_id = state["turn_id"]
-        self._turn_preview_text = state["text"]
-        self._turn_preview_status = state["status"]
-        if self._turn_preview_widget is None:
-            self._render_active_session()
-            return
-        follow_output = self._is_near_latest()
-        self._turn_preview_widget.set_live_state(
-            text=self._turn_preview_text,
-            status_text=self._turn_preview_status,
-        )
-        if follow_output:
-            QTimer.singleShot(0, self._scroll_to_bottom)
-
-    def _finish_turn_ui(self, worker: AssistantTurnWorker) -> None:
-        session_id = worker.request.session_id
-        if self._turn_workers.get(session_id) is worker:
-            self._turn_workers.pop(session_id, None)
-        worker.deleteLater()
-        self._sync_turn_worker_alias()
-        self._clear_turn_preview(session_id)
-        self._sync_composer_busy_state()
-        if (
-            (self._content_worker is None or not self._content_worker.is_running)
-            and (self._preflight_worker is None or not self._preflight_worker.is_running)
-            and (self._execution_worker is None or not self._execution_worker.is_running)
-        ):
-            self._stop_button.setVisible(False)
-
-    def cancel_active_turn(self) -> None:
-        if self._turn_worker is not None:
-            self._turn_worker.cancel()
-        current_session_id = (
-            self._active_session.session_id
-            if self._active_session is not None
-            else ""
-        )
-        if self._content_worker is not None and self._worker_session_id(self._content_worker) == current_session_id:
-            self._content_worker.cancel()
-        if self._preflight_worker is not None and self._worker_session_id(self._preflight_worker) == current_session_id:
-            self._preflight_worker.cancel()
-        if self._execution_worker is not None and self._worker_session_id(self._execution_worker) == current_session_id:
-            self._execution_worker.cancel()
 
     def _sync_composer_busy_state(self) -> None:
         self._sync_turn_worker_alias()

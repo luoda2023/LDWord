@@ -1,0 +1,45 @@
+{
+  "kind": "alavette.material_package",
+  "schema_version": 1,
+  "package_id": "pkg_19a972401f204c97ade73e302af312c3",
+  "display_name": "函件资料包样例",
+  "work_mode_id": "official",
+  "material_contract_id": "official_document_v1",
+  "shared_scope": {
+    "fields": {},
+    "resources": {},
+    "derivations": {},
+    "timelines": {},
+    "provenance": {}
+  },
+  "groups": [],
+  "records": [
+    {
+      "record_id": "rec_6b19aec91e7b465fb02879a6424d3a46",
+      "display_name": "函",
+      "group_id": "",
+      "lifecycle": "active",
+      "scope": {
+        "fields": {
+          "document_type": "letter",
+          "title": "关于商请协助提供归档材料的函",
+          "body": "为做好项目资料归档工作，商请贵单位协助提供相关材料，并于本周五前反馈。",
+          "organization": "示例市档案局",
+          "document_no": "示档函〔2026〕3号",
+          "recipient": "项目建设单位",
+          "issuer": "示例市档案局",
+          "issue_date": "2026年7月10日",
+          "copy_scope": "办公室",
+          "printing_org": "示例市档案局办公室",
+          "printing_date": "2026年7月10日"
+        },
+        "resources": {},
+        "derivations": {},
+        "timelines": {},
+        "provenance": {}
+      },
+      "origin": {}
+    }
+  ],
+  "metadata": {}
+}

@@ -31,6 +31,8 @@ class PreviewBlockLayout:
     text: str
     font: QFont
     detail_font: QFont
+    space_before_px: float = 0.0
+    space_after_px: float = 0.0
     first_indent_px: float = 0.0
     hanging_indent_px: float = 0.0
     line_height_px: float = 0.0
@@ -244,6 +246,20 @@ def _layout_local_pages(
                         block.detail_style or block.style,
                         pt_scale,
                     ),
+                    space_before_px=max(
+                        0.0,
+                        float(
+                            getattr(block.style, "space_before_pt", 0.0) or 0.0
+                        ),
+                    )
+                    * pt_scale,
+                    space_after_px=max(
+                        0.0,
+                        float(
+                            getattr(block.style, "space_after_pt", 0.0) or 0.0
+                        ),
+                    )
+                    * pt_scale,
                     first_indent_px=(
                         float(getattr(block.style, "first_indent_pt", 0.0) or 0.0)
                         - float(getattr(block.style, "hanging_indent_pt", 0.0) or 0.0)
@@ -517,6 +533,8 @@ def _translate_page(
             first_indent_px=layout.first_indent_px,
             hanging_indent_px=layout.hanging_indent_px,
             line_height_px=layout.line_height_px,
+            space_before_px=layout.space_before_px,
+            space_after_px=layout.space_after_px,
             pt_scale=layout.pt_scale,
         )
 

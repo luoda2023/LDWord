@@ -2,28 +2,24 @@
 
 from __future__ import annotations
 
+import re
 from io import BytesIO
 from pathlib import Path
-import re
 
 from docx import Document
 
-from .builder import (
-    DocumentStructureConfirmation,
-    ExecutionSessionBuildRequest,
-    ObjectPreflightConfirmation,
-    ResolvedExecutionIdentity,
-    ResolvedExecutionResourceGraph,
-    ValidatedExecutionResourceGraph,
+from src.config.document_scope import (
+    coerce_document_scope_policy,
+    selectable_document_scope_roles,
 )
 from src.config.execution_config_integrity import execution_config_integrity_issues
+from src.config.execution_feature_state import execution_plan_is_enabled
 from src.config.material_schema_registry import resolve_material_schema_ids
 from src.config.official_document_profiles import get_official_document_profile
 from src.config.resource_ref import ResourceRef
 from src.config.work_mode import execution_work_mode_issue
-from src.config.document_scope import (
-    coerce_document_scope_policy,
-    selectable_document_scope_roles,
+from src.services.delivery_template_validation import (
+    unsupported_delivery_target_template_issue,
 )
 from src.services.document_structure_evidence import (
     DocumentStructureEvidence,
@@ -33,6 +29,15 @@ from src.services.document_structure_evidence import (
     validate_region_decisions,
 )
 from src.shared.engine.document_scope_runtime import bind_document_scope
+
+from .builder import (
+    DocumentStructureConfirmation,
+    ExecutionSessionBuildRequest,
+    ObjectPreflightConfirmation,
+    ResolvedExecutionIdentity,
+    ResolvedExecutionResourceGraph,
+    ValidatedExecutionResourceGraph,
+)
 
 
 def validate_execution_resource_graph(
@@ -60,14 +65,13 @@ def validate_execution_resource_graph(
     if mode_issue:
         issues.append(mode_issue)
     issues.extend(_validate_explicit_plan_selection(request, identity))
+    issues.extend(_validate_delivery_target_templates(request, identity))
     issues.extend(_validate_primary_resource_refs(identity, graph))
-    issues.extend(_validate_master_resources(identity, graph))
+    issues.extend(_validate_master_resources(request, identity, graph))
     issues.extend(
         execution_config_integrity_issues(
             request.scene,
-            entity_data=(
-                getattr(request.material_context, "entity_data", {}) or {}
-            ),
+            entity_data=(getattr(request.material_context, "entity_data", {}) or {}),
         )
     )
     issues.extend(_validate_material_scope(request, identity, graph))
@@ -147,9 +151,7 @@ def _validate_document_structure_confirmation(
         included_roles=included_roles,
     )
     if pending:
-        issues.append(
-            "document_structure_review_required:" + ",".join(pending)
-        )
+        issues.append("document_structure_review_required:" + ",".join(pending))
 
     if not issues:
         issues.extend(
@@ -170,8 +172,7 @@ def _validate_document_structure_confirmation(
     )
 
 
-def _not_applicable_document_structure_confirmation(
-) -> DocumentStructureConfirmation:
+def _not_applicable_document_structure_confirmation() -> DocumentStructureConfirmation:
     return DocumentStructureConfirmation(
         status="not_applicable",
         source_revision="",
@@ -266,9 +267,7 @@ def _validate_explicit_plan_selection(
     elif not scene_plan_id:
         issues.append("plan_identity_missing")
     elif scene_plan_id != identity.plan_id:
-        issues.append(
-            f"plan_identity_mismatch:{identity.plan_id}:{scene_plan_id}"
-        )
+        issues.append(f"plan_identity_mismatch:{identity.plan_id}:{scene_plan_id}")
 
     compatible_template_ids = {
         str(value or "").strip()
@@ -278,10 +277,21 @@ def _validate_explicit_plan_selection(
     if not identity.template_id:
         issues.append("template_ref_missing")
     elif identity.template_id not in compatible_template_ids:
-        issues.append(
-            f"runtime_template_not_compatible:{identity.template_id}"
-        )
+        issues.append(f"runtime_template_not_compatible:{identity.template_id}")
     return issues
+
+
+def _validate_delivery_target_templates(
+    request: ExecutionSessionBuildRequest,
+    identity: ResolvedExecutionIdentity,
+) -> list[str]:
+    """Block V1 presets that claim an unimplemented alternate render template."""
+
+    issue = unsupported_delivery_target_template_issue(
+        request.scene,
+        primary_template_id=identity.template_id,
+    )
+    return [issue] if issue else []
 
 
 def _validate_object_preflight_confirmation(
@@ -321,8 +331,7 @@ def _validate_object_preflight_confirmation(
         re.fullmatch(r"sha256:[0-9a-f]{64}", confirmation_digest) is None
     )
     digest_is_mismatch = bool(confirmation_digest) and (
-        not digest_is_invalid
-        and confirmation_digest != evidence.evidence_digest
+        not digest_is_invalid and confirmation_digest != evidence.evidence_digest
     )
     if digest_is_invalid:
         issues.append("object_preflight_confirmation_digest_invalid")
@@ -363,20 +372,19 @@ def _validate_primary_resource_refs(
         graph.template_ref.requested_id
         and graph.template_ref.requested_id != graph.template_ref.effective_id
     ):
-        issues.append(
-            f"template_ref_unresolved:{graph.template_ref.requested_id}"
-        )
-    elif identity.template_entry is None and not _existing_file(
-        identity.template_path
-    ):
+        issues.append(f"template_ref_unresolved:{graph.template_ref.requested_id}")
+    elif identity.template_entry is None and not _existing_file(identity.template_path):
         issues.append(f"template_ref_unresolved:{identity.template_id}")
     return issues
 
 
 def _validate_master_resources(
+    request: ExecutionSessionBuildRequest,
     identity: ResolvedExecutionIdentity,
     graph: ResolvedExecutionResourceGraph,
 ) -> list[str]:
+    if not execution_plan_is_enabled(request.scene):
+        return []
     issues: list[str] = []
     if identity.mode_id in {"official", "exam"} and not identity.requested_master_id:
         issues.append("master_ref_missing")
@@ -395,9 +403,7 @@ def _validate_master_resources(
         issues.append(f"master_ref_unresolved:{identity.requested_master_id}")
     for captured in graph.captured_masters:
         if captured.resource_ref.status != "ok":
-            issues.append(
-                f"master_file_unresolved:{captured.resource_ref.resource_id}"
-            )
+            issues.append(f"master_file_unresolved:{captured.resource_ref.resource_id}")
     for unresolved_id in graph.unresolved_official_master_ids:
         issues.append(f"master_ref_unresolved:{unresolved_id}")
     for captured in graph.captured_masters:
@@ -444,9 +450,7 @@ def _validate_material_scope(
         and normalized_profile not in compatible_profiles
     ):
         issues.append(f"material_profile_incompatible:{normalized_profile}")
-    package_schemas = set(
-        getattr(material_context, "material_schema_ids", ()) or ()
-    )
+    package_schemas = set(getattr(material_context, "material_schema_ids", ()) or ())
     input_profile = getattr(request.scene, "input_source_profile", None)
     plan_schemas = set(
         resolve_material_schema_ids(
@@ -454,9 +458,7 @@ def _validate_material_scope(
             list(getattr(input_profile, "material_schema_ids", ()) or ()),
         )
     )
-    if package_schemas and plan_schemas and not package_schemas.issubset(
-        plan_schemas
-    ):
+    if package_schemas and plan_schemas and not package_schemas.issubset(plan_schemas):
         issues.append(
             "material_schema_incompatible:"
             + ",".join(sorted(package_schemas - plan_schemas))
@@ -528,9 +530,7 @@ def _validate_official_document_types(
         identity.document_type_id != "per_item"
         and get_official_document_profile(identity.document_type_id) is None
     ):
-        issues.append(
-            f"official_document_type_unknown:{identity.document_type_id}"
-        )
+        issues.append(f"official_document_type_unknown:{identity.document_type_id}")
     for document_type_id in identity.official_document_type_ids:
         if get_official_document_profile(document_type_id) is None:
             issues.append(f"official_document_type_unknown:{document_type_id}")

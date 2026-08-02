@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.application.materials import get_package_material_contract
 from src.config import library as config_library
 from src.qt_api import QWidget
 from src.ui.main_window import MainWindow
@@ -9,7 +10,7 @@ def _close_clean(window: MainWindow, qapp) -> None:
     window.bridge.clear_scene_dirty()
     assets = window._loaded_panel_for_id("assets")
     if assets is not None and assets.has_pending_material_changes():
-        assets._capture_material_persistence_snapshot()
+        assets._restore_committed_draft()
     window.close()
     qapp.processEvents()
 
@@ -223,15 +224,23 @@ def test_window_close_failure_restores_real_scene_and_material_edits(
 ):
     window = MainWindow(
         enable_background_services=False,
-        include_optional_panels=True,
     )
     failure = _PreparedCloseFailure()
     try:
         scene_panel = window._ensure_panel_loaded_for_id("scene")
         assets_panel = window._ensure_panel_loaded_for_id("assets")
-        archive = assets_panel.current_archive()
-        archive.profiles[0].fields["company_name"] = "TRANSACTION_SENTINEL"
-        assets_panel.set_archive(archive)
+        owner_scope, owner_id = assets_panel._selected_scope()
+        contract = get_package_material_contract(assets_panel._package)
+        field_key = contract.fields[0].key
+        assert assets_panel._apply_result(
+            assets_panel._service().set_field(
+                assets_panel._package,
+                owner_scope=owner_scope,
+                owner_id=owner_id,
+                key=field_key,
+                value="TRANSACTION_SENTINEL",
+            )
+        )
         window.bridge.set_scene_dirty(True)
         monkeypatch.setattr(
             scene_panel,
@@ -253,7 +262,7 @@ def test_window_close_failure_restores_real_scene_and_material_edits(
         assert window.bridge.is_scene_dirty() is True
         assert assets_panel.has_pending_material_changes() is True
         assert (
-            assets_panel.current_archive().profiles[0].fields["company_name"]
+            assets_panel._scope_object(owner_scope, owner_id).fields[field_key]
             == "TRANSACTION_SENTINEL"
         )
     finally:

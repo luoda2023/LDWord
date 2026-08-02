@@ -20,6 +20,7 @@ from src.config.library import (
     get_template_entry,
     load_template_from_library,
 )
+from src.config.execution_feature_state import execution_plan_is_enabled
 from src.config.loader import ConfigLoadError
 from src.config.master_library import (
     MasterSpec,
@@ -194,6 +195,18 @@ def _resolve_master_resources(
     tuple[str, ...],
     bool,
 ]:
+    if not execution_plan_is_enabled(request.scene):
+        return (
+            (),
+            ResourceRef(
+                kind="master",
+                mode_id=identity.mode_id,
+                status="not_applicable",
+            ),
+            (),
+            (),
+            False,
+        )
     requested_official_master = (
         get_master(identity.requested_master_id, "official")
         if identity.mode_id == "official" and identity.requested_master_id

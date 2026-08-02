@@ -4,28 +4,33 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable
 
 from src.config.feature_configs import default_continuous_page_number_phases
-from src.config.header_footer_presets import split_page_number_phases
+from src.config.header_footer_presets import (
+    split_page_number_phases,
+    toc_roman_body_decimal_phases,
+)
+from src.config.special_title_rules import special_title_selector_label
 from src.config.template import PageNumberPhaseConfig, TemplateConfig
 from src.qt_api import (
+    QApplication,
+    QEvent,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QSize,
     QSizePolicy,
+    Qt,
     QVBoxLayout,
     QWidget,
-    Qt,
     Signal,
 )
 from src.shared.engine.page_number_planner import (
     collect_static_page_number_diagnostics,
     expand_page_number_selectors,
     format_page_number_diagnostic_text,
-    resolve_suppressed_header_footer_section_types,
 )
 from src.shared.ui.button_style import apply_button_variant
 from src.shared.ui.card import Card
@@ -33,11 +38,19 @@ from src.shared.ui.flow_layout import FlowLayout
 from src.shared.ui.flow_section import FlowSection
 from src.shared.ui.inline_alert import InlineAlert
 from src.shared.ui.input_style import build_text_input_stylesheet
-from src.shared.ui.layout_sync import refresh_layout_chain, refresh_layout_chain_later, updates_suspended
+from src.shared.ui.layout_sync import (
+    refresh_layout_chain,
+    refresh_layout_chain_later,
+    updates_suspended,
+)
 from src.shared.ui.sizing import apply_size_class, control_size_metrics
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.styled_spin_box import StyledSpinBox
-from src.shared.ui.template_form_layout import TemplateFormGrid, compact_form_column_gap, template_form_row
+from src.shared.ui.template_form_layout import (
+    TemplateFormGrid,
+    compact_form_column_gap,
+    template_form_row,
+)
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.toggle_switch import ToggleSwitch
 from src.shared.ui.viewport_mutation import viewport_mutation_for_widget
@@ -78,33 +91,24 @@ PAGE_NUMBER_RULE_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("continuous", "全文连续编号"),
     ("split_restart", "前置罗马，正文从 1"),
     ("split_continue", "前置罗马，正文续号"),
+    ("toc_roman_body_decimal", "仅目录罗马，正文从 1"),
     ("custom", "自定义编号分组"),
 )
 
 PAGE_NUMBER_SELECTOR_OPTIONS: tuple[tuple[str, str], ...] = (
     ("all_numbered_content", "全文"),
     ("front_matter", "前置部分"),
-    ("body", "正文部分"),
+    ("body", "其余正文"),
     ("back_matter", "后置部分"),
-    ("toc", "目录"),
-    ("references", "参考文献"),
-    ("appendix", "附录"),
-    ("acknowledgment", "致谢"),
-    ("resume", "简历"),
-    ("errata", "勘误"),
-    ("abstracts", "摘要"),
     ("cover", "封面"),
 )
 
 SUPPRESS_HEADER_FOOTER_SELECTOR_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("pre_numbering", "封面及声明页"),
-    ("cover", "仅封面"),
-    ("statement", "声明页"),
-    ("authorization", "授权书"),
-    ("front_note", "说明页"),
+    ("pre_numbering", "封面"),
+    ("cover", "封面"),
     ("front_matter", "前置部分"),
     ("toc", "目录"),
-    ("body", "正文部分"),
+    ("body", "其余正文"),
     ("back_matter", "后置部分"),
     ("references", "参考文献"),
     ("appendix", "附录"),
@@ -112,13 +116,10 @@ SUPPRESS_HEADER_FOOTER_SELECTOR_OPTIONS: tuple[tuple[str, str], ...] = (
 
 _SECTION_TYPE_LABELS: dict[str, str] = {
     "cover": "封面",
-    "statement": "声明页",
-    "authorization": "授权书",
-    "front_note": "说明页",
     "abstract_cn": "中文摘要",
     "abstract_en": "英文摘要",
     "toc": "目录",
-    "body": "正文部分",
+    "body": "其余正文",
     "references": "参考文献",
     "errata": "勘误",
     "appendix": "附录",
@@ -190,7 +191,10 @@ def _selector_text(selectors: list[str]) -> str:
 def _selector_brief(selectors: list[str]) -> str:
     label_map = dict(PAGE_NUMBER_SELECTOR_OPTIONS)
     labels = [
-        label_map.get(str(selector or "").strip(), str(selector or "").strip())
+        label_map.get(
+            str(selector or "").strip(),
+            special_title_selector_label(selector),
+        )
         for selector in selectors
         if str(selector or "").strip()
     ]
@@ -217,11 +221,15 @@ def _suppress_selector_brief(selectors: list[str]) -> str:
         for selector in selectors
         if str(selector or "").strip()
     ]
-    return "、".join(labels) if labels else "未设置排除分区"
+    return "、".join(labels) if labels else "未设置不显示页面"
 
 
 def _section_type_label(section_type: str) -> str:
-    return _SECTION_TYPE_LABELS.get(str(section_type or "").strip(), str(section_type or "").strip())
+    normalized = str(section_type or "").strip()
+    return _SECTION_TYPE_LABELS.get(
+        normalized,
+        special_title_selector_label(normalized),
+    )
 
 
 def _section_type_labels(section_types: set[str] | frozenset[str]) -> str:
@@ -235,19 +243,6 @@ def _section_type_labels(section_types: set[str] | frozenset[str]) -> str:
 
 def _page_number_format_label(value: str) -> str:
     return dict(PAGE_NUMBER_FORMAT_OPTIONS).get(str(value or "decimal"), "阿拉伯数字")
-
-
-def default_suppress_header_footer_selectors(header_footer) -> list[str]:
-    selectors = [
-        str(selector or "").strip()
-        for selector in (getattr(header_footer, "suppress_header_footer_selectors", None) or [])
-        if str(selector or "").strip()
-    ]
-    if selectors:
-        return selectors
-    if bool(getattr(header_footer, "hide_cover_header_footer", False)):
-        return ["pre_numbering"]
-    return []
 
 
 def _parse_selector_text(text: str) -> list[str]:
@@ -269,11 +264,14 @@ class PageSelectorEditor(QWidget):
         options: tuple[tuple[str, str], ...] = PAGE_NUMBER_SELECTOR_OPTIONS,
         hint_text: str = "",
         allow_custom_input: bool = True,
+        retain_unknown_selectors: bool = False,
     ):
         super().__init__(parent)
         self._is_syncing = False
         self._options = tuple(options)
         self._allow_custom_input = bool(allow_custom_input)
+        self._retain_unknown_selectors = bool(retain_unknown_selectors)
+        self._retained_selectors: list[str] = []
         self._selector_buttons: dict[str, QPushButton] = {}
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
@@ -287,11 +285,7 @@ class PageSelectorEditor(QWidget):
         self._chips_layout = FlowLayout(self._chips, h_spacing=8, v_spacing=8)
 
         for selector, label in self._options:
-            button = QPushButton(label, self._chips)
-            button.setCheckable(True)
-            button.clicked.connect(self._emit_changed)
-            self._selector_buttons[selector] = button
-            self._chips_layout.addWidget(button)
+            self._add_selector_button(selector, label)
 
         layout.addWidget(self._chips)
 
@@ -309,6 +303,50 @@ class PageSelectorEditor(QWidget):
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
+        self._sync_chips_height()
+
+    def _add_selector_button(self, selector: str, label: str) -> None:
+        button = QPushButton(label, self._chips)
+        button.setCheckable(True)
+        button.clicked.connect(self._emit_changed)
+        self._selector_buttons[selector] = button
+        self._chips_layout.addWidget(button)
+
+    def set_options(
+        self,
+        options: Iterable[tuple[str, str]],
+        *,
+        preserve_selection: bool = True,
+    ) -> None:
+        """Replace visible scope chips without emitting a user edit."""
+
+        selected = self.selectors() if preserve_selection else []
+        normalized_options: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for raw_selector, raw_label in options:
+            selector = str(raw_selector or "").strip()
+            if not selector or selector in seen:
+                continue
+            seen.add(selector)
+            normalized_options.append((selector, str(raw_label or selector)))
+
+        self._is_syncing = True
+        try:
+            while self._chips_layout.count():
+                item = self._chips_layout.takeAt(0)
+                widget = item.widget() if item is not None else None
+                if widget is not None:
+                    widget.hide()
+                    widget.setParent(None)
+                    widget.deleteLater()
+            self._selector_buttons.clear()
+            self._options = tuple(normalized_options)
+            for selector, label in self._options:
+                self._add_selector_button(selector, label)
+        finally:
+            self._is_syncing = False
+        self.set_selectors(selected)
+        self._apply_theme()
         self._sync_chips_height()
 
     def hasHeightForWidth(self) -> bool:
@@ -335,12 +373,12 @@ class PageSelectorEditor(QWidget):
         )
 
     def sizeHint(self) -> QSize:
-        width = max(self.width(), self._DEFAULT_LAYOUT_WIDTH, self._chips_layout.minimumSize().width())
+        width = max(1, self.width() or self._DEFAULT_LAYOUT_WIDTH)
         return QSize(width, self.heightForWidth(width))
 
     def minimumSizeHint(self) -> QSize:
-        width = max(1, self._chips_layout.minimumSize().width())
-        return QSize(width, self.heightForWidth(self._DEFAULT_LAYOUT_WIDTH))
+        width = max(1, self.width() or self._DEFAULT_LAYOUT_WIDTH)
+        return QSize(0, self.heightForWidth(width))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -353,12 +391,16 @@ class PageSelectorEditor(QWidget):
     def _sync_chips_height(self) -> None:
         width = max(1, self._chips.width() or self.width() or self._DEFAULT_LAYOUT_WIDTH)
         height = max(0, self._chips_layout.heightForWidth(width))
+        geometry_changed = False
         if self._chips.minimumHeight() != height:
             self._chips.setMinimumHeight(height)
+            geometry_changed = True
         if self._chips.maximumHeight() != height:
             self._chips.setMaximumHeight(height)
-        self._chips.updateGeometry()
-        self.updateGeometry()
+            geometry_changed = True
+        if geometry_changed:
+            self._chips.updateGeometry()
+            self.updateGeometry()
 
     def set_selectors(self, selectors: list[str]) -> None:
         self._is_syncing = True
@@ -374,6 +416,11 @@ class PageSelectorEditor(QWidget):
             for selector, button in self._selector_buttons.items():
                 button.setChecked(selector in known)
             self._custom_edit.setText(_selector_text(extras) if self._allow_custom_input else "")
+            self._retained_selectors = (
+                list(extras)
+                if self._retain_unknown_selectors
+                else []
+            )
         finally:
             self._is_syncing = False
 
@@ -389,6 +436,11 @@ class PageSelectorEditor(QWidget):
                 for selector in _parse_selector_text(self._custom_edit.text())
                 if selector not in selected
             )
+        selected.extend(
+            selector
+            for selector in self._retained_selectors
+            if selector not in selected
+        )
         return selected
 
     def _emit_changed(self, *_args) -> None:
@@ -453,6 +505,7 @@ class PageNumberPlanSection:
     ):
         self._owner = owner
         self._page_phase_rows: list[PageNumberPhaseControls] = []
+        self._selector_options = PAGE_NUMBER_SELECTOR_OPTIONS
         self._embedded = bool(embedded)
         self._group_title_builder = group_title_builder
         self._syncing_numbering_mode = False
@@ -627,7 +680,13 @@ class PageNumberPlanSection:
         phase_id_edit.setPlaceholderText("例如：前置 / 正文 / 附录")
         phase_id_edit.hide()
 
-        selector_editor = PageSelectorEditor(section, hint_text="")
+        selector_editor = PageSelectorEditor(
+            section,
+            options=self._selector_options,
+            hint_text="",
+            allow_custom_input=False,
+            retain_unknown_selectors=True,
+        )
         selector_preview = QLabel("", section)
         selector_preview.setObjectName("tpl_phase_selector_preview")
         selector_preview.setWordWrap(True)
@@ -755,15 +814,13 @@ class PageNumberPlanSection:
 
     def _refresh_page_phase_row_state(self) -> None:
         row_count = len(self._page_phase_rows)
-        suppressed = self._suppressed_section_types()
         matched_by_section = self._matched_sections_by_phase_row()
         for index, row in enumerate(self._page_phase_rows, start=1):
             matched_sections = matched_by_section.get(id(row), set())
-            hidden_sections = matched_sections & set(suppressed)
             row.section._toggle_button.setText(
-                self._phase_section_title(index, row, hidden_sections=hidden_sections)
+                self._phase_section_title(index, row)
             )
-            preview_text = self._phase_preview_text(row, suppressed, matched_sections)
+            preview_text = self._phase_preview_text(row, matched_sections)
             row.selector_preview.setText(preview_text)
             row.selector_preview.setVisible(bool(preview_text))
             start_mode = str(row.start_mode_combo.currentData() or "restart")
@@ -771,12 +828,6 @@ class PageNumberPlanSection:
             row.remove_btn.setEnabled(row_count > 1)
             row.move_up_btn.setEnabled(index > 1)
             row.move_down_btn.setEnabled(index < row_count)
-
-    def _suppressed_section_types(self) -> frozenset[str]:
-        template = getattr(self._owner, "_current_template", None)
-        if template is None:
-            return frozenset()
-        return resolve_suppressed_header_footer_section_types(template.header_footer)
 
     def _matched_sections_by_phase_row(self) -> dict[int, set[str]]:
         matched_by_row: dict[int, set[str]] = {}
@@ -787,7 +838,6 @@ class PageNumberPlanSection:
     def _phase_preview_text(
         self,
         row: PageNumberPhaseControls,
-        suppressed: frozenset[str],
         matched_sections: set[str],
     ) -> str:
         selectors = row.selector_editor.selectors()
@@ -796,10 +846,6 @@ class PageNumberPlanSection:
             lines.append("请选择这一组包含的部分。")
         elif not matched_sections:
             lines.append("这些范围没有匹配到已知分区。")
-
-        visible_sections = matched_sections - set(suppressed)
-        if matched_sections and not visible_sections:
-            lines.append("这一组都在分区排除中，不会显示页码。")
 
         overlap_sections = self._overlapped_sections_for_row(row, matched_sections)
         if overlap_sections:
@@ -851,13 +897,13 @@ class PageNumberPlanSection:
         start_mode = str(row.start_mode_combo.currentData() or "restart")
         if start_mode == "continue":
             title = f"{scope_text}：{format_label}，延续前段"
-            return self._phase_title_with_exclusions(title, hidden_sections)
+            return title
         start_value = max(1, int(round(row.start_value_spin.value())))
         if start_value == 1:
             title = f"{scope_text}：{format_label}，从 1 起"
-            return self._phase_title_with_exclusions(title, hidden_sections)
+            return title
         title = f"{scope_text}：{format_label}，从 {start_value} 起"
-        return self._phase_title_with_exclusions(title, hidden_sections)
+        return title
 
     def _phase_title_with_exclusions(
         self,
@@ -915,6 +961,7 @@ class PageNumberPlanSection:
             "continuous": continuous_page_number_preset(),
             "split_restart": split_page_number_preset(continue_body=False),
             "split_continue": split_page_number_preset(continue_body=True),
+            "toc_roman_body_decimal": toc_roman_body_decimal_phases(),
         }
         for preset_id, preset_phases in candidates.items():
             if self._phases_match(phases, preset_phases):
@@ -948,6 +995,8 @@ class PageNumberPlanSection:
             phases = split_page_number_preset(continue_body=False)
         elif preset_id == "split_continue":
             phases = split_page_number_preset(continue_body=True)
+        elif preset_id == "toc_roman_body_decimal":
+            phases = toc_roman_body_decimal_phases()
         else:
             phases = continuous_page_number_preset()
 
@@ -994,11 +1043,15 @@ class PageNumberPlanSection:
                     self._page_phase_rows_layout.takeAt(index)
                     break
             self._page_phase_rows.remove(row)
+            row.section.hide()
             row.section.setParent(None)
             row.section.deleteLater()
             self._refresh_page_phase_row_state()
             self.apply_theme()
             self._owner._on_structure_edited()
+            QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+            QApplication.sendPostedEvents(None, QEvent.LayoutRequest)
+            refresh_layout_chain(self._owner._editor_column, passes=2)
 
     def _duplicate_phase_row(self, row: PageNumberPhaseControls) -> None:
         if self._owner._current_template is None or row not in self._page_phase_rows:
@@ -1080,6 +1133,14 @@ class PageNumberPlanSection:
     def clear(self) -> None:
         self._rebuild_page_phase_rows([], ensure_one=False)
         self._page_plan_alert.hide()
+
+    def set_selector_options(
+        self,
+        options: Iterable[tuple[str, str]],
+    ) -> None:
+        self._selector_options = tuple(options)
+        for row in self._page_phase_rows:
+            row.selector_editor.set_options(self._selector_options)
 
     def set_header_footer(self, header_footer) -> None:
         self._set_combo_by_data(
@@ -1195,7 +1256,6 @@ __all__ = [
     "SUPPRESS_HEADER_FOOTER_SELECTOR_OPTIONS",
     "continuous_page_number_preset",
     "default_page_number_phases",
-    "default_suppress_header_footer_selectors",
     "ensure_default_page_number_phases",
     "page_number_phase_brief",
     "split_page_number_preset",

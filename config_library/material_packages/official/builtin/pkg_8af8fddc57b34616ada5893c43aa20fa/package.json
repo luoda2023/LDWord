@@ -1,0 +1,48 @@
+{
+  "kind": "alavette.material_package",
+  "schema_version": 1,
+  "package_id": "pkg_8af8fddc57b34616ada5893c43aa20fa",
+  "display_name": "通知资料包样例",
+  "work_mode_id": "official",
+  "material_contract_id": "official_document_v1",
+  "shared_scope": {
+    "fields": {},
+    "resources": {},
+    "derivations": {},
+    "timelines": {},
+    "provenance": {}
+  },
+  "groups": [],
+  "records": [
+    {
+      "record_id": "rec_bbfe79f9e31941bf958939c0a27e1e64",
+      "display_name": "通知",
+      "group_id": "",
+      "lifecycle": "active",
+      "scope": {
+        "fields": {
+          "document_type": "notice",
+          "title": "关于开展资料归档检查的通知",
+          "body": "请各部门按要求完成自查，并于本周五前提交归档材料。",
+          "organization": "示例市档案局",
+          "document_no": "示档发〔2026〕5号",
+          "recipient": "各部门",
+          "issuer": "示例市档案局",
+          "issue_date": "2026年7月10日",
+          "copy_scope": "办公室",
+          "printing_org": "示例市档案局办公室",
+          "printing_date": "2026年7月10日",
+          "archive_status": "待归档",
+          "archive_no": "示档-2026-0005",
+          "retention_period": "10年"
+        },
+        "resources": {},
+        "derivations": {},
+        "timelines": {},
+        "provenance": {}
+      },
+      "origin": {}
+    }
+  ],
+  "metadata": {}
+}

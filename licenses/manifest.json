@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "component_count": 16,
+  "component_count": 18,
   "components": [
     {
       "id": "alavette-flow-derived",
@@ -98,6 +98,43 @@
           "title": "lxml · LICENSES.txt",
           "license_id": "BSD-3-Clause",
           "path": "packages/lxml/LICENSES.txt"
+        }
+      ]
+    },
+    {
+      "id": "latex2mathml",
+      "name": "latex2mathml",
+      "purpose": "LaTeX 公式转换为 MathML",
+      "license_expression": "MIT",
+      "homepage": "https://github.com/roniemartinez/latex2mathml",
+      "version": "3.79.0",
+      "python_distributions": [
+        "latex2mathml"
+      ],
+      "documents": [
+        {
+          "title": "latex2mathml 主许可证",
+          "license_id": "MIT",
+          "path": "packages/latex2mathml/LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "olefile",
+      "name": "olefile",
+      "purpose": "MathType/OLE 复合文档解析",
+      "license_expression": "BSD-2-Clause AND HPND",
+      "display_license": "BSD-2-Clause + PIL",
+      "homepage": "https://www.decalage.info/python/olefile",
+      "version": "0.47",
+      "python_distributions": [
+        "olefile"
+      ],
+      "documents": [
+        {
+          "title": "olefile 主许可证",
+          "license_id": "BSD-2-Clause AND HPND",
+          "path": "packages/olefile/LICENSE.txt"
         }
       ]
     },

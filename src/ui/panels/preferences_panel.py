@@ -15,7 +15,6 @@ from src.qt_api import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QSize,
     QSizePolicy,
@@ -36,6 +35,7 @@ from src.services.license_catalog import (
 from src.shared.ui.badge import Badge
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.design_system_card import DesignSystemCard
+from src.shared.ui.dialogs import confirm
 from src.shared.ui.form_row import FormRow
 from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.master_detail_shell import MasterDetailShell
@@ -48,15 +48,18 @@ from src.shared.ui.toast import Toast
 from src.shared.ui.typography_policy import TextRole, apply_text_role, brand_font
 from src.ui.base_panel import BasePanel
 from src.shared.ui.icons.catalog import get_app_logo, get_icon
-from src.assistant.runtime.providers.profiles import ProviderProfile, ProviderProfileStore
-from src.assistant.runtime.providers.router import ProviderResolutionError, ProviderRouter
-from src.assistant.runtime.providers.secrets import HybridSecretStore, ProviderSecretStore
-from src.assistant.ui.provider_presentation import (
+from src.assistant.provider_settings_facade import (
+    HybridSecretStore,
+    ProviderProbeWorker,
+    ProviderProfile,
+    ProviderProfileStore,
+    ProviderResolutionError,
+    ProviderRouter,
+    ProviderSecretStore,
     provider_connection_badge,
     provider_connection_status_text,
     provider_error_text,
 )
-from src.assistant.ui.provider_probe_worker import ProviderProbeWorker
 
 
 class _LicenseNavigationItem(QPushButton):
@@ -716,14 +719,13 @@ class PreferencesPanel(BasePanel):
 
     def _start_new_ai_profile(self) -> None:
         if self._ai_form_dirty:
-            answer = QMessageBox.question(
-                self,
+            if not confirm(
                 "放弃未保存修改？",
                 "当前模型配置有未保存修改。新建配置会丢失这些修改，是否继续？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
+                confirm_text="放弃修改并新建",
+                destructive=True,
+                parent=self,
+            ):
                 return
         blocked = self._ai_profile_combo.blockSignals(True)
         try:
@@ -740,14 +742,13 @@ class PreferencesPanel(BasePanel):
             and self._ai_loaded_profile_id
             and target != self._ai_loaded_profile_id
         ):
-            answer = QMessageBox.question(
-                self,
+            if not confirm(
                 "放弃未保存修改？",
                 "当前模型配置有未保存修改。切换配置会丢失这些修改，是否继续？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
+                confirm_text="放弃修改并切换",
+                destructive=True,
+                parent=self,
+            ):
                 blocked = self._ai_profile_combo.blockSignals(True)
                 try:
                     if self._ai_loaded_profile_id == "__new__":
@@ -892,14 +893,13 @@ class PreferencesPanel(BasePanel):
         profile_id = str(self._ai_profile_combo.currentData() or "")
         if not profile_id or profile_id in {"mock-default", "__new__"}:
             return
-        answer = QMessageBox.question(
-            self,
+        if not confirm(
             "删除模型配置？",
             "删除后，使用该配置的历史会话将无法继续请求，直到重新配置。是否继续？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+            confirm_text="删除配置",
+            destructive=True,
+            parent=self,
+        ):
             return
         try:
             previous_profile = self._provider_profiles.get(profile_id)

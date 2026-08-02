@@ -1,73 +1,21 @@
 from __future__ import annotations
 
 import copy
+import re
+from dataclasses import replace
 from pathlib import Path
 
-import re
-
-from src.qt_api import (
-    QButtonGroup,
-    QFileDialog,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QSizePolicy,
-    Qt,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
-    Signal,
+from src.application.materials import (
+    RUNTIME_IMAGE_WATERMARK_KEY,
+    MaterialPreviewSnapshot,
+    MaterialRuntimeFieldPreview,
 )
-from src.qt_api import QIcon, QProgressBar
-from src.services.execution_result_contract import normalize_terminal_payload
-from src.shared.ui import ThemedRadioButton
-from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
-from src.shared.ui.card import Card
-from src.shared.ui.keyed_widget_list import KeyedWidgetListController
-from src.shared.ui.layout_sync import refresh_layout_chain, refresh_layout_chain_later
-from src.shared.ui.official_field_value_edit import OfficialFieldValueEdit
-from src.shared.ui.path_action_semantics import PathAction, path_action_presentation
-from src.shared.ui.sizing import apply_size_class, resolved_control_height
-from src.shared.ui.styled_combo_box import StyledComboBox
-from src.shared.ui.theme import bind_theme, get_theme
-from src.shared.engine.material_timeline import (
-    timeline_output_field_keys,
-    timeline_owned_field_keys,
-)
-from src.shared.engine.material_token_contract import (
-    MaterialTokenNamespace,
-    material_token,
-)
-from src.ui.adapters.workbench_execution_gate import ExecutionGateDecision
-from src.ui.adapters.workbench_material_issues import (
-    material_readiness_gate_decision,
-    material_readiness_issue_groups,
-)
-from src.ui.adapters.config_selector_models import (
-    plan_combo_label,
-    plan_selector_descriptors,
-    strip_source_prefix,
-    template_selector_options,
-)
-from src.shared.ui.icons.catalog import get_icon
-from src.ui.panels.workbench.state import ExecutionResultState
-from .document_scope_review import DocumentScopeStatusRow
-from .quick_execution_drop_area import QuickExecutionDropArea
-from .quick_execution_feedback_mixin import QuickExecutionFeedbackMixin
-from .quick_execution_presenter import (
-    FEATURE_DEFINITIONS,
-    build_feature_navigation_snapshot,
-    build_navigation_snapshot,
-    build_running_status,
-)
-from .quick_material_preview import QuickMaterialPreview
-from .quick_material_preview_presenter import (
-    build_quick_material_preview_projection,
-)
-from .quick_execution_source_presenter import (
-    build_exam_source_projection,
-    build_official_document_readiness_projection,
-    resolve_official_document_profile_id,
+from src.config.execution_feature_state import (
+    DISABLED_SELECTOR_LABEL,
+    DISABLED_SELECTOR_SOURCE_TYPE,
+    DISABLED_SELECTOR_VALUE,
+    project_execution_scene,
+    project_execution_template,
 )
 from src.config.library import (
     default_scene_descriptor,
@@ -75,9 +23,6 @@ from src.config.library import (
     list_template_entries,
     load_scene_from_library,
 )
-from src.config.work_mode import get_work_mode, resolve_work_mode_id
-from src.config.material_context import MaterialExecutionContext
-from src.config.material_preview_snapshot import MaterialPreviewSnapshot
 from src.config.official_document_profiles import (
     get_official_document_profile,
     list_common_official_document_profiles,
@@ -87,14 +32,6 @@ from src.config.official_material_form import (
     official_material_field_label,
 )
 from src.config.scene import SceneWorkspace
-from src.services.exam_markdown_source import (
-    is_exam_markdown_source_path,
-    project_exam_markdown_source,
-)
-from src.config.scene_surface_registry import (
-    scene_uses_exam_paper_surface,
-    scene_uses_official_document_surface,
-)
 from src.config.scene_presets import (
     LEGACY_FEATURE_GROUP_MAP,
     UI_CAPABILITY_GROUPS,
@@ -102,6 +39,73 @@ from src.config.scene_presets import (
     get_group_enabled,
     set_group_enabled,
 )
+from src.config.scene_surface_registry import (
+    scene_uses_exam_paper_surface,
+    scene_uses_official_document_surface,
+)
+from src.config.work_mode import get_work_mode, resolve_work_mode_id
+from src.qt_api import (
+    QButtonGroup,
+    QFileDialog,
+    QHBoxLayout,
+    QIcon,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    Qt,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+    Signal,
+)
+from src.services.execution_result_contract import normalize_terminal_payload
+from src.shared.engine.material_token_contract import (
+    MaterialTokenNamespace,
+    material_token,
+)
+from src.shared.ui import ThemedRadioButton
+from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.card import Card
+from src.shared.ui.icons.catalog import get_icon
+from src.shared.ui.keyed_widget_list import KeyedWidgetListController
+from src.shared.ui.layout_sync import refresh_layout_chain, refresh_layout_chain_later
+from src.shared.ui.official_field_value_edit import OfficialFieldValueEdit
+from src.shared.ui.path_action_semantics import PathAction, path_action_presentation
+from src.shared.ui.sizing import apply_size_class, resolved_control_height
+from src.shared.ui.styled_combo_box import StyledComboBox
+from src.shared.ui.theme import bind_theme, get_theme
+from src.ui.adapters.config_selector_models import (
+    material_package_selector_options,
+    plan_combo_label,
+    plan_selector_descriptors,
+    strip_source_prefix,
+    template_selector_options,
+)
+from src.ui.adapters.workbench_execution_gate import ExecutionGateDecision
+from src.domain.materials import MaterialIssue, MaterialRunSelection
+from src.ui.panels.workbench.state import ExecutionResultState
+
+from .quick_execution_drop_area import QuickExecutionDropArea
+from .quick_execution_feedback_mixin import QuickExecutionFeedbackMixin
+from .quick_execution_floating_fields_mixin import QuickExecutionFloatingFieldsMixin
+from .quick_execution_presenter import (
+    FEATURE_DEFINITIONS,
+    build_feature_navigation_snapshot,
+    build_navigation_snapshot,
+    build_running_status,
+)
+from .quick_execution_source_presenter import (
+    build_exam_source_projection,
+    build_official_document_readiness_projection,
+    resolve_official_document_profile_id,
+)
+from .quick_material_preview import QuickMaterialPreview
+from .quick_material_preview_presenter import (
+    build_quick_material_preview_projection,
+)
+from .material_state import material_execution_gate, material_issue_lines
+
 
 def _strip_library_combo_prefix(label: str) -> str:
     return strip_source_prefix(label)
@@ -112,15 +116,61 @@ def _plan_combo_label(descriptor) -> str:
 
 
 def _source_badge(source_type: object) -> tuple[str, str]:
-    is_builtin = str(source_type or "").strip() == "builtin"
+    normalized = str(source_type or "").strip()
+    if normalized == DISABLED_SELECTOR_SOURCE_TYPE:
+        return ("关闭", "off")
+    is_builtin = normalized == "builtin"
     return ("内置", "builtin") if is_builtin else ("自定", "user")
 
 
-def _official_material_field_label(field_id: object) -> str:
-    return official_material_field_label(field_id)
+def _refresh_material_package_selector(detail) -> None:
+    preview = getattr(detail, "_material_preview", None)
+    if preview is None:
+        return
+    selection = getattr(detail, "_material_selection", None)
+    snapshot = getattr(detail, "_material_preview_snapshot", None)
+    identity = (
+        selection.package_ref.package_id
+        if isinstance(selection, MaterialRunSelection)
+        else (
+            snapshot.package_id
+            if isinstance(snapshot, MaterialPreviewSnapshot)
+            else ""
+        )
+    )
+    detail._material_package_identity = identity
+    selected_identity = (
+        identity
+        if getattr(detail, "_material_package_enabled", False)
+        else DISABLED_SELECTOR_VALUE
+    )
+    preview.set_package_options(
+        material_package_selector_options(
+            detail._work_mode_id,
+            include_source_prefix=False,
+        ),
+        selected_identity=selected_identity,
+    )
 
 
-class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
+def _apply_material_package_selection(detail, identity: str) -> None:
+    selected_identity = str(identity or "").strip()
+    material_enabled = selected_identity != DISABLED_SELECTOR_VALUE
+    package_identity = (
+        selected_identity
+        if selected_identity != DISABLED_SELECTOR_VALUE
+        else ""
+    )
+    detail._material_package_identity = package_identity
+    detail._material_package_enabled = material_enabled
+    detail.material_package_selected.emit(package_identity)
+
+
+class QuickExecutionDetail(
+    QuickExecutionFloatingFieldsMixin,
+    QuickExecutionFeedbackMixin,
+    QWidget,
+):
     """Workbench V2 quick-execution detail pane (redesigned)."""
 
     feature_toggled = Signal(str, bool)
@@ -131,17 +181,17 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
     execute_requested = Signal()
     cancel_requested = Signal()
     document_selected = Signal(str)
-    document_scope_review_requested = Signal()
     binding_changed = Signal(object, str)
     scene_config_changed = Signal(object)
     official_document_type_changed = Signal(str)
-    material_context_changed = Signal(object)
+    material_package_selected = Signal(str)
 
     FEATURE_DEFINITIONS = FEATURE_DEFINITIONS
     FEATURE_ID_ALIASES = LEGACY_FEATURE_GROUP_MAP
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, include_shared_chrome: bool = True):
         super().__init__(parent)
+        self._include_shared_chrome = bool(include_shared_chrome)
         self._execution_running = False
         self._execution_cancel_requested = False
         self._last_result_status = "idle"
@@ -154,6 +204,9 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         self._scene_descriptors = list(plan_selector_descriptors(self._work_mode_id))
         self._official_document_type_id = "notice"
         self._current_template = None
+        self._plan_enabled = True
+        self._template_enabled = True
+        self._material_package_enabled = True
         initial_scene = default_scene_descriptor(mode_id=self._work_mode_id)
         if initial_scene is None and self._scene_descriptors:
             initial_scene = self._scene_descriptors[0]
@@ -168,16 +221,18 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
                 template_id="default",
                 compatible_template_ids=["default"],
             )
-        self._material_context = MaterialExecutionContext()
-        self._material_preview_snapshot = MaterialPreviewSnapshot()
-        self._material_readiness_issues = material_readiness_issue_groups(
-            self._current_scene,
-            self._material_context,
-        )
+        self._selected_template_id = str(
+            getattr(self._current_scene, "template_id", "") or ""
+        ).strip()
+        self._material_selection: MaterialRunSelection | None = None
+        self._material_package_identity = ""
+        self._material_preview_snapshot: MaterialPreviewSnapshot | None = None
+        self._material_issues: tuple[MaterialIssue, ...] = ()
         self._last_result_issue_count = 0
         self._log_expanded = False
         self._log_collapsed_label = "查看执行日志"
         self._result_primary_path = ""
+        self._custom_output_dir = ""
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -192,12 +247,6 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         self._drop_area.file_cleared.connect(self._on_file_cleared)
         self._layout.addWidget(self._drop_area)
 
-        self._document_scope_status = DocumentScopeStatusRow(self)
-        self._document_scope_status.review_requested.connect(
-            self.document_scope_review_requested.emit
-        )
-        self._layout.addWidget(self._document_scope_status)
-
         # ── 2. Plan & Template ──
         self._build_scene_section()
         self._layout.addWidget(self._scene_card)
@@ -207,6 +256,10 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         self._material_preview.expanded_changed.connect(
             lambda _expanded: refresh_layout_chain_later(self)
         )
+        self._material_preview.package_selected.connect(
+            lambda identity: _apply_material_package_selection(self, identity)
+        )
+        _refresh_material_package_selector(self)
         self._layout.addWidget(self._material_preview)
 
         # ── 4. Floating material fields ──
@@ -219,15 +272,16 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         self._build_exam_source_section()
         self._layout.addWidget(self._exam_source_card)
 
-        # ── 6. Output ──
-        self._output_card = Card(parent=self)
-        self._build_output_section()
-        self._layout.addWidget(self._output_card)
+        if self._include_shared_chrome:
+            # Standalone compatibility surface. Inside Workbench the shared
+            # output policy and footer are created by DocumentExecutionDetail.
+            self._output_card = Card(parent=self)
+            self._build_output_section()
+            self._layout.addWidget(self._output_card)
 
-        # ── 7. Execute ──
-        self._execution_card = Card(parent=self)
-        self._build_execute_area()
-        self._layout.addWidget(self._execution_card)
+            self._execution_card = Card(parent=self)
+            self._build_execute_area()
+            self._layout.addWidget(self._execution_card)
 
         self._layout.addStretch(1)
 
@@ -249,6 +303,8 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
             return
         self._invalidate_execution_feedback()
         self._work_mode_id = mode
+        self._material_package_identity = ""
+        _refresh_material_package_selector(self)
         self._scene_descriptors = list(plan_selector_descriptors(self._work_mode_id))
         if not hasattr(self, "_scene_combo"):
             return
@@ -321,6 +377,22 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
                     self._scene_combo.setItemData(item_index, tooltip, Qt.ToolTipRole)
                 if descriptor.config_id == current_scene_id:
                     selected_index = item_index
+            badge_text, badge_kind = _source_badge(
+                DISABLED_SELECTOR_SOURCE_TYPE
+            )
+            disabled_index = self._scene_combo.add_badged_item(
+                DISABLED_SELECTOR_LABEL,
+                DISABLED_SELECTOR_VALUE,
+                badge_text=badge_text,
+                badge_kind=badge_kind,
+            )
+            self._scene_combo.setItemData(
+                disabled_index,
+                "关闭处理方案及其全部执行模块",
+                Qt.ToolTipRole,
+            )
+            if not self._plan_enabled:
+                selected_index = disabled_index
             if selected_index >= 0:
                 self._scene_combo.setCurrentIndex(selected_index)
         finally:
@@ -340,6 +412,7 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         blocked = self._template_combo.blockSignals(True)
         try:
             self._template_combo.clear()
+            selected_index = -1
             for option in template_selector_options(
                 self._work_mode_id,
                 template_ids=template_ids,
@@ -364,11 +437,29 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
                     item = item_getter(item_index) if callable(item_getter) else None
                     if item is not None:
                         item.setEnabled(False)
+                if option.value == str(current_template_id or "").strip():
+                    selected_index = item_index
+            badge_text, badge_kind = _source_badge(
+                DISABLED_SELECTOR_SOURCE_TYPE
+            )
+            disabled_index = self._template_combo.add_badged_item(
+                DISABLED_SELECTOR_LABEL,
+                DISABLED_SELECTOR_VALUE,
+                badge_text=badge_text,
+                badge_kind=badge_kind,
+            )
+            self._template_combo.setItemData(
+                disabled_index,
+                "关闭模板排版，保留方案中的非排版处理",
+                Qt.ToolTipRole,
+            )
             target = str(current_template_id or "").strip()
-            for index in range(self._template_combo.count()):
-                if str(self._template_combo.itemData(index) or "").strip() == target:
-                    self._template_combo.setCurrentIndex(index)
-                    break
+            if target:
+                self._selected_template_id = target
+            if not self._template_enabled:
+                selected_index = disabled_index
+            if selected_index >= 0:
+                self._template_combo.setCurrentIndex(selected_index)
         finally:
             self._template_combo.blockSignals(blocked)
 
@@ -421,6 +512,18 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
             tooltip = descriptor.load_error or str(getattr(descriptor, "path", "") or "")
             if tooltip:
                 self._scene_combo.setItemData(item_index, tooltip, Qt.ToolTipRole)
+        badge_text, badge_kind = _source_badge(DISABLED_SELECTOR_SOURCE_TYPE)
+        disabled_index = self._scene_combo.add_badged_item(
+            DISABLED_SELECTOR_LABEL,
+            DISABLED_SELECTOR_VALUE,
+            badge_text=badge_text,
+            badge_kind=badge_kind,
+        )
+        self._scene_combo.setItemData(
+            disabled_index,
+            "关闭处理方案及其全部执行模块",
+            Qt.ToolTipRole,
+        )
         self._scene_combo.currentIndexChanged.connect(self._on_scene_changed)
         row_layout.addWidget(self._scene_combo, 1)
 
@@ -519,6 +622,7 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         self._floating_field_name_labels: dict[str, QLabel] = {}
         self._floating_field_rows: dict[str, QWidget] = {}
         self._floating_field_render_values: dict[str, str] = {}
+        self._floating_field_specs: dict[str, MaterialRuntimeFieldPreview] = {}
         self._floating_generated_keys: set[str] = set()
         self._floating_fields_controller = KeyedWidgetListController[
             tuple[str, bool], str
@@ -531,235 +635,6 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         )
         self._floating_fields_card.add_widget(self._floating_fields_container)
         self._refresh_floating_fields_card()
-
-    def _floating_field_display_name(self, field_key: str, _value: object = "") -> str:
-        label = _official_material_field_label(field_key)
-        if not re.fullmatch(
-            r"时间段\d+(?:开始|结束)日期",
-            str(field_key or ""),
-        ) and not label[-1:].isdigit():
-            label += "1"
-        namespace = (
-            MaterialTokenNamespace.TIME
-            if field_key
-            in set(
-                timeline_owned_field_keys(
-                    self._material_context.timeline_plans,
-                    include_inactive=True,
-                )
-            )
-            else MaterialTokenNamespace.TEXT
-        )
-        return material_token(namespace, label)
-
-    @staticmethod
-    def _floating_field_editor_kind(field_key: str) -> str:
-        if re.fullmatch(
-            r"时间段(?:\d+(?:开始|结束)日期|(?:开始|结束)日期\d+)",
-            str(field_key or ""),
-        ):
-            return "date"
-        kinds = {spec.field_key: spec.editor_kind for spec in OFFICIAL_MATERIAL_FIELD_SPECS}
-        return kinds.get(field_key, "single_line")
-
-    @classmethod
-    def _floating_field_placeholder(cls, field_key: str) -> str:
-        kind = cls._floating_field_editor_kind(field_key)
-        label = _official_material_field_label(field_key)
-        if not re.fullmatch(
-            r"时间段\d+(?:开始|结束)日期",
-            str(field_key or ""),
-        ) and not label[-1:].isdigit():
-            label += "1"
-        if kind == "date":
-            return "例如：2026年7月11日"
-        if kind == "multi_value":
-            return f"填写{label}，使用顿号分隔"
-        return f"填写{label}"
-
-    def _refresh_floating_fields_card(self) -> None:
-        if not hasattr(self, "_floating_fields_card"):
-            return
-        field_scopes = dict(getattr(self._material_context, "field_scopes", {}) or {})
-        keys = [key for key, scope in field_scopes.items() if scope == "floating"]
-        visible = self._is_official_document_scene() and bool(keys)
-        self._floating_fields_card.setVisible(visible)
-        if not visible:
-            self._floating_fields_progress.setText("")
-            controller = getattr(self, "_floating_fields_controller", None)
-            if controller is not None:
-                controller.reconcile([])
-            return
-
-        values = self._material_context.resolved_entity_data()
-        self._material_context.entity_data.update(values)
-        generated_keys = set(
-            dict(getattr(self._material_context, "field_functions", {}) or {})
-        )
-        generated_keys.update(
-            timeline_output_field_keys(
-                getattr(self._material_context, "timeline_plans", {}) or {}
-            )
-        )
-        self._floating_field_render_values = {
-            key: str(values.get(key, "") or "") for key in keys
-        }
-        self._floating_generated_keys = generated_keys
-        completed_count = sum(
-            1 for key in keys if str(values.get(key, "") or "").strip()
-        )
-        self._set_floating_fields_progress(completed_count, len(keys))
-        self._floating_fields_controller.reconcile(
-            [
-                (key, index == len(keys) - 1)
-                for index, key in enumerate(keys)
-            ]
-        )
-        refresh_layout_chain(self._floating_fields_card, passes=2)
-
-    def _create_floating_field_row(self, item: tuple[str, bool]) -> QWidget:
-        key, _is_last = item
-        row = QWidget(self._floating_fields_container)
-        row.setObjectName("wb_floating_field_row")
-        row.setProperty("fieldKey", key)
-        row.setAttribute(Qt.WA_StyledBackground)
-        row.setMinimumHeight(56)
-        row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(4, 8, 4, 8)
-        layout.setSpacing(12)
-
-        value = self._floating_field_render_values.get(key, "")
-        label = QLabel(self._floating_field_display_name(key, value), row)
-        label.setObjectName("wb_floating_field_name")
-        label.setProperty("fieldKey", key)
-        label.setMinimumWidth(240)
-        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        layout.addWidget(label, 0)
-
-        edit = OfficialFieldValueEdit(
-            editor_kind=self._floating_field_editor_kind(key),
-            read_only=key in self._floating_generated_keys,
-            parent=row,
-        )
-        edit.setObjectName("wb_floating_field_input")
-        edit.setText(value)
-        edit.textChanged.connect(
-            lambda text, field_key=key: self._on_floating_field_changed(
-                field_key,
-                text,
-            )
-        )
-        layout.addWidget(edit, 1)
-        self._floating_field_rows[key] = row
-        self._floating_field_name_labels[key] = label
-        self._floating_field_inputs[key] = edit
-        row.setVisible(True)
-        return row
-
-    def _update_floating_field_row(
-        self,
-        row: QWidget,
-        item: tuple[str, bool],
-        _index: int,
-    ) -> None:
-        key, is_last = item
-        value = self._floating_field_render_values.get(key, "")
-        label = self._floating_field_name_labels[key]
-        edit = self._floating_field_inputs[key]
-        label.setText(self._floating_field_display_name(key, value))
-        self._style_floating_field_name(label, value)
-        if not edit.hasFocus() and edit.text() != value:
-            blocked = edit.blockSignals(True)
-            edit.setText(value)
-            edit.blockSignals(blocked)
-        generated = key in self._floating_generated_keys
-        edit.setReadOnly(generated)
-        edit.setPlaceholderText(self._floating_field_placeholder(key))
-        edit.setToolTip(
-            "由字段函数或时间计划自动生成；请在资料区修改"
-            if generated
-            else ""
-        )
-        theme = get_theme()
-        divider = "transparent" if is_last else theme.divider
-        row.setStyleSheet(
-            f"""
-            QWidget#wb_floating_field_row {{
-                border: none;
-                border-bottom: 1px solid {divider};
-                background: transparent;
-            }}
-            QWidget#wb_floating_field_row:hover {{ background: {theme.bg_hover}; }}
-            """
-        )
-        row.setVisible(True)
-
-    def _dispose_floating_field_row(self, row: QWidget) -> None:
-        key = str(row.property("fieldKey") or "")
-        self._floating_field_rows.pop(key, None)
-        self._floating_field_name_labels.pop(key, None)
-        self._floating_field_inputs.pop(key, None)
-        row.setParent(None)
-        row.deleteLater()
-
-    def _on_floating_field_changed(self, key: str, value: str) -> None:
-        if key in dict(
-            getattr(self._material_context, "field_functions", {}) or {}
-        ):
-            return
-        self._invalidate_execution_feedback()
-        cleaned = str(value or "").strip()
-        if cleaned:
-            self._material_context.entity_data[key] = str(value)
-        else:
-            self._material_context.entity_data.pop(key, None)
-        label = self._floating_field_name_labels.get(key)
-        if label is not None:
-            label.setText(self._floating_field_display_name(key, value))
-            self._style_floating_field_name(label, value)
-        completed_count = sum(
-            1
-            for field_key in self._floating_field_inputs
-            if str(self._material_context.entity_data.get(field_key, "") or "").strip()
-        )
-        self._set_floating_fields_progress(
-            completed_count,
-            len(self._floating_field_inputs),
-        )
-        self._refresh_exam_source_card()
-        self._emit_summary_changed()
-        self.material_context_changed.emit(self._material_context.clone())
-
-    def _style_floating_field_name(self, label: QLabel, value: object) -> None:
-        theme = get_theme()
-        completed = bool(str(value or "").strip())
-        label.setStyleSheet(
-            f"font-size: {theme.font_size_md}px; "
-            f"font-weight: {theme.font_weight_emphasis}; "
-            f"color: {theme.primary if completed else theme.text_primary}; "
-            "background: transparent;"
-        )
-        label.setToolTip(
-            "资料变量，由系统映射到母版占位符"
-            if completed
-            else "本字段仅用于当前生成任务"
-        )
-
-    def _set_floating_fields_progress(self, completed: int, total: int) -> None:
-        if total <= 0:
-            self._floating_fields_progress.setText("")
-            return
-        self._floating_fields_progress.setText(
-            f"已完成 {total}/{total}" if completed >= total else f"{completed}/{total} 已填写"
-        )
-        theme = get_theme()
-        self._floating_fields_progress.setStyleSheet(
-            f"font-size: {theme.font_size_sm}px; "
-            f"font-weight: {theme.font_weight_emphasis}; "
-            f"color: {theme.success if completed >= total else theme.text_secondary}; "
-            "background: transparent;"
-        )
 
     def _build_output_section(self) -> None:
         """Build the output directory section — matches scene card style."""
@@ -1028,6 +903,16 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
 
     def _on_scene_changed(self, index: int) -> None:
         scene_id = str(self._scene_combo.itemData(index) or "").strip()
+        if scene_id == DISABLED_SELECTOR_VALUE:
+            if self._plan_enabled:
+                self._invalidate_execution_feedback()
+            self._plan_enabled = False
+            self._configure_drop_area_for_scene(self.execution_scene())
+            self._refresh_floating_fields_card()
+            self._refresh_exam_source_card()
+            self._emit_summary_changed()
+            return
+
         descriptor = self._descriptor_for_scene_id(scene_id)
         if descriptor is None and 0 <= index < len(self._scene_descriptors):
             descriptor = self._scene_descriptors[index]
@@ -1045,6 +930,7 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
             scene_id = self._scene_descriptors[index].config_id
         if scene_id:
             self._invalidate_execution_feedback()
+            self._plan_enabled = True
             self._current_scene = load_scene_from_library(
                 scene_id,
                 mode_id=self._work_mode_id,
@@ -1070,10 +956,15 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         self._align_work_mode_for_scene(scene)
         self._sync_official_document_type_selector_visibility()
         self._current_scene = scene
-        self._configure_drop_area_for_scene(scene)
+        self._selected_template_id = str(scene.template_id or "").strip()
+        self._configure_drop_area_for_scene(self.execution_scene(scene))
         self._scene_syncing = True
         try:
-            scene_index = self._find_scene_index(scene.scene_id)
+            scene_index = (
+                self._find_scene_index(DISABLED_SELECTOR_VALUE)
+                if not self._plan_enabled
+                else self._find_scene_index(scene.scene_id)
+            )
             if scene_index >= 0:
                 was_blocked = self._scene_combo.blockSignals(True)
                 self._scene_combo.setCurrentIndex(scene_index)
@@ -1091,7 +982,7 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
             self._populate_template_combo_options(
                 template_ids=template_ids,
                 fallback_labels=fallback_labels,
-                current_template_id=scene.template_id,
+                current_template_id=self._selected_template_id,
             )
 
             self._refresh_floating_fields_card()
@@ -1167,19 +1058,19 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
 
     def _is_exam_scene(self) -> bool:
         return scene_uses_exam_paper_surface(
-            getattr(self, "_current_scene", None),
+            self.execution_scene(),
             mode_id=self._work_mode_id,
         )
 
     def _is_official_document_scene(self) -> bool:
         return scene_uses_official_document_surface(
-            getattr(self, "_current_scene", None),
+            self.execution_scene(),
             mode_id=self._work_mode_id,
         )
 
     def _exam_source_projection(self) -> tuple[str, dict[str, str]]:
         return build_exam_source_projection(
-            scene=getattr(self, "_current_scene", None),
+            scene=self.execution_scene(),
             document_path=(
                 self.document_path() if hasattr(self, "_drop_area") else ""
             ),
@@ -1188,7 +1079,7 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
     def _official_document_readiness_projection(self) -> tuple[str, dict[str, str]]:
         return build_official_document_readiness_projection(
             profile_id=self._official_profile_id(),
-            material_context=self._material_context,
+            preview_snapshot=self._material_preview_snapshot,
             plan_label=self._active_plan_label(),
             template_label=self._active_template_combo_label(),
         )
@@ -1200,6 +1091,8 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         )
 
     def _active_plan_label(self) -> str:
+        if not self._plan_enabled:
+            return DISABLED_SELECTOR_LABEL
         if hasattr(self, "_scene_combo"):
             label = _strip_library_combo_prefix(self._scene_combo.currentText())
             if label:
@@ -1211,6 +1104,8 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         )
 
     def _active_template_combo_label(self) -> str:
+        if not self._template_enabled:
+            return DISABLED_SELECTOR_LABEL
         if hasattr(self, "_template_combo"):
             label = _strip_library_combo_prefix(self._template_combo.currentText())
             if label:
@@ -1245,8 +1140,11 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
     def document_path(self) -> str:
         return self._drop_area.file_path()
 
+    def set_document_picker_visible(self, visible: bool) -> None:
+        self._drop_area.setVisible(bool(visible))
+
     def set_document_scope_status(self, state: str, *, count: int = 0) -> None:
-        self._document_scope_status.set_state(state, count=count)
+        """Retain the scan-controller API without rendering a status row."""
 
     def pick_document_path(self) -> str:
         """Choose an input using the same format policy shown by the drop area."""
@@ -1326,9 +1224,18 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
             if scene_name:
                 for idx, descriptor in enumerate(self._scene_descriptors):
                     if descriptor.name == scene_name:
-                        self._scene_combo.setCurrentIndex(idx)
+                        if self._plan_enabled:
+                            self._scene_combo.setCurrentIndex(idx)
                         break
-            if template_name:
+            projected_disabled_label = (
+                str(template_name or "").strip()
+                == DISABLED_SELECTOR_LABEL
+                and (
+                    not self._plan_enabled
+                    or not self._template_enabled
+                )
+            )
+            if template_name and not projected_disabled_label:
                 self._ensure_combo_value(template_name, template_id=template_id)
             elif template_id:
                 self._set_current_template_id(template_id)
@@ -1340,7 +1247,11 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         self._emit_summary_changed()
 
     def set_execute_enabled(self, enabled: bool) -> None:
-        self._execute_btn.setEnabled(bool(enabled))
+        if hasattr(self, "_execute_btn"):
+            self._execute_btn.setEnabled(bool(enabled))
+
+    def has_local_execution_surface(self) -> bool:
+        return self._include_shared_chrome
 
     def set_object_preflight_confirmation(
         self,
@@ -1349,9 +1260,12 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         blocked: bool = False,
     ) -> None:
         self._execution_running = False
+        self._last_result_status = "failed" if blocked else "idle"
+        if not self._include_shared_chrome:
+            self.summary_changed.emit()
+            return
         self._reset_execution_cancel_button()
         self._clear_result_receipt()
-        self._last_result_status = "failed" if blocked else "idle"
         self._exec_bar.setVisible(False)
         self._set_material_repair_visible(False)
         self._object_preflight_cancel_btn.setVisible(not blocked)
@@ -1416,27 +1330,90 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         return get_group_enabled(self._current_scene, group)
 
     def enabled_features(self) -> list[str]:
+        scene = self.execution_scene()
         enabled: list[str] = []
         for group in UI_CAPABILITY_GROUPS:
-            if get_group_enabled(self._current_scene, group):
+            if get_group_enabled(scene, group):
                 enabled.append(group.group_id)
         return enabled
 
     def current_scene_id(self) -> str:
+        if not self._plan_enabled:
+            return DISABLED_SELECTOR_VALUE
         return self._current_scene.scene_id
 
     def current_scene(self) -> SceneWorkspace:
         return self._current_scene
 
-    def set_material_context(self, context: MaterialExecutionContext | None) -> None:
-        next_context = (
-            context.clone()
-            if isinstance(context, MaterialExecutionContext)
-            else MaterialExecutionContext()
+    def execution_scene(
+        self,
+        scene: SceneWorkspace | None = None,
+    ) -> SceneWorkspace:
+        """Return a runtime projection honoring all three enablement switches."""
+
+        return project_execution_scene(
+            scene if isinstance(scene, SceneWorkspace) else self._current_scene,
+            plan_enabled=self._plan_enabled,
+            template_enabled=self._template_enabled,
+            material_enabled=self._material_package_enabled,
         )
-        if next_context != self._material_context:
+
+    def execution_template(self, template=None):
+        """Return the selected template or a neutral runtime template."""
+
+        selected = template if template is not None else self._current_template
+        return project_execution_template(
+            selected,
+            enabled=self._plan_enabled and self._template_enabled,
+        )
+
+    def execution_material_selection(self) -> MaterialRunSelection | None:
+        """Return the exact committed selection used by the next run."""
+
+        if not self._plan_enabled or not self._material_package_enabled:
+            return None
+        return self._material_selection
+
+    def plan_enabled(self) -> bool:
+        return self._plan_enabled
+
+    def template_enabled(self) -> bool:
+        return self._template_enabled
+
+    def material_package_enabled(self) -> bool:
+        return self._material_package_enabled
+
+    def set_material_selection(
+        self,
+        selection: MaterialRunSelection | None,
+        *,
+        preview_snapshot: MaterialPreviewSnapshot | None = None,
+        issues: tuple[MaterialIssue, ...] = (),
+        material_enabled: bool | None = None,
+    ) -> None:
+        next_selection = (
+            selection
+            if isinstance(selection, MaterialRunSelection)
+            else None
+        )
+        next_enabled = (
+            self._material_package_enabled
+            if material_enabled is None
+            else bool(material_enabled)
+        )
+        if material_enabled is None and next_selection is not None:
+            next_enabled = True
+        if (
+            next_selection != self._material_selection
+            or next_enabled != self._material_package_enabled
+        ):
             self._invalidate_execution_feedback()
-        self._material_context = next_context
+        self._material_selection = next_selection
+        self._material_package_enabled = next_enabled
+        if preview_snapshot is not None:
+            self._material_preview_snapshot = preview_snapshot
+        self._material_issues = tuple(issues)
+        _refresh_material_package_selector(self)
         self._refresh_floating_fields_card()
         self._refresh_exam_source_card()
         self._emit_summary_changed()
@@ -1448,21 +1425,32 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         next_snapshot = (
             snapshot
             if isinstance(snapshot, MaterialPreviewSnapshot)
-            else MaterialPreviewSnapshot()
+            else None
         )
         if next_snapshot == self._material_preview_snapshot:
             return
         self._material_preview_snapshot = next_snapshot
+        _refresh_material_package_selector(self)
+        self._refresh_floating_fields_card()
+        self._emit_summary_changed()
+
+    def set_material_issues(
+        self,
+        issues: tuple[MaterialIssue, ...] | list[MaterialIssue],
+    ) -> None:
+        next_issues = tuple(issues)
+        if next_issues == self._material_issues:
+            return
+        self._material_issues = next_issues
         self._emit_summary_changed()
 
     def last_terminal_payload(self) -> dict[str, object]:
         return normalize_terminal_payload(self._last_terminal_payload)
 
     def current_template_id(self) -> str:
-        template_id = str(self._template_combo.currentData() or "").strip()
-        if template_id:
-            return template_id
-        return str(self._current_scene.template_id or "").strip()
+        if not self._template_enabled:
+            return ""
+        return self._binding_template_id()
 
     def current_strategy(self) -> str:
         return "rebuild" if bool(getattr(self._current_scene, "strict_mode", False)) else "preserve"
@@ -1501,15 +1489,27 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
             for index in range(self._template_combo.count()):
                 if str(self._template_combo.itemData(index) or "").strip() == target_id:
                     self._template_combo.setItemText(index, target)
-                    self._template_combo.setCurrentIndex(index)
                     self._set_current_template_id(target_id)
+                    if self._template_enabled:
+                        self._template_combo.setCurrentIndex(index)
                     return
         for index in range(self._template_combo.count()):
             if self._template_combo.itemText(index).strip() == target and not target_id:
                 self._template_combo.setCurrentIndex(index)
                 return
-        self._template_combo.addItem(target, target_id or self.current_template_id() or target)
-        self._template_combo.setCurrentIndex(self._template_combo.count() - 1)
+        disabled_index = self._find_template_index(DISABLED_SELECTOR_VALUE)
+        insert_index = (
+            disabled_index
+            if disabled_index >= 0
+            else self._template_combo.count()
+        )
+        self._template_combo.insertItem(
+            insert_index,
+            target,
+            target_id or self._binding_template_id() or target,
+        )
+        if self._template_enabled:
+            self._template_combo.setCurrentIndex(insert_index)
         if target_id:
             self._set_current_template_id(target_id)
 
@@ -1521,6 +1521,14 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
             return
         if target not in set(self._current_scene.compatible_template_ids or []):
             return
+        self._selected_template_id = target
+
+    def _binding_template_id(self) -> str:
+        selected = str(getattr(self, "_selected_template_id", "") or "").strip()
+        if selected:
+            return selected
+        return str(self._current_scene.template_id or "").strip()
+
     def _template_id_is_from_other_work_mode(self, template_id: str) -> bool:
         target = str(template_id or "").strip()
         if not target:
@@ -1541,11 +1549,25 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
                 return index
         return -1
 
+    def _find_template_index(self, template_id: str) -> int:
+        target = str(template_id or "").strip()
+        if not target:
+            return -1
+        for index in range(self._template_combo.count()):
+            if str(self._template_combo.itemData(index) or "").strip() == target:
+                return index
+        return -1
+
     def _on_template_changed(self, _index: int) -> None:
         if not self._scene_syncing:
             self._invalidate_execution_feedback()
         template_id = str(self._template_combo.currentData() or "").strip()
+        if template_id == DISABLED_SELECTOR_VALUE:
+            self._template_enabled = False
+            self._emit_summary_changed()
+            return
         if template_id:
+            self._template_enabled = True
             self._set_current_template_id(template_id)
         self._emit_summary_changed()
         if not self._scene_syncing:
@@ -1554,9 +1576,11 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
     def _emit_binding_changed(self) -> None:
         if self._binding_signal_blocked:
             return
-        self.binding_changed.emit(self._current_scene, self.current_template_id())
+        self.binding_changed.emit(self._current_scene, self._binding_template_id())
 
     def _active_template_label(self) -> str:
+        if not self._plan_enabled or not self._template_enabled:
+            return DISABLED_SELECTOR_LABEL
         label = _strip_library_combo_prefix(self._template_combo.currentText())
         template_id = str(self._template_combo.currentData() or "").strip()
         if template_id and (not label or label == template_id):
@@ -1586,25 +1610,10 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
         self._emit_summary_changed()
 
     def current_execution_gate_decision(self) -> ExecutionGateDecision:
-        return material_readiness_gate_decision(
-            self._current_scene,
-            self._effective_material_context(),
+        return material_execution_gate(
+            self.execution_material_selection(),
+            self._material_issues,
         )
-
-    def _effective_material_context(self) -> MaterialExecutionContext:
-        context = self._material_context.clone()
-        document_path = str(self.document_path() or "").strip()
-        if not (self._is_exam_scene() and document_path):
-            return context
-        if not is_exam_markdown_source_path(document_path):
-            return context
-        try:
-            return project_exam_markdown_source(
-                document_path,
-                self._material_context,
-            ).material_context
-        except Exception:
-            return context
 
     def _request_material_repair(self) -> None:
         decision = self.current_execution_gate_decision()
@@ -1616,6 +1625,9 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
 
     def _emit_summary_changed(self) -> None:
         if self._execution_running:
+            if not self._include_shared_chrome:
+                self.summary_changed.emit()
+                return
             self._set_material_repair_visible(False)
             self._set_status(
                 "正在取消，请稍候…"
@@ -1627,34 +1639,30 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
             return
 
         document_path = str(self.document_path() or "").strip()
-        effective_context = self._effective_material_context()
-        material_issues = material_readiness_issue_groups(
-            self._current_scene,
-            effective_context,
-        )
-        decision = material_readiness_gate_decision(
-            self._current_scene,
-            effective_context,
-        )
-        self._material_readiness_issues = material_issues
+        execution_scene = self.execution_scene()
+        selection = self.execution_material_selection()
+        decision = material_execution_gate(selection, self._material_issues)
         self._material_preview.set_projection(
             build_quick_material_preview_projection(
-                self._current_scene,
-                effective_context,
+                execution_scene,
+                selection,
                 preview_snapshot=self._material_preview_snapshot,
                 gate_decision=decision,
-                issue_groups=material_issues,
+                issues=self._material_issues,
             )
         )
+        if not self._include_shared_chrome:
+            self.summary_changed.emit()
+            return
         self._execution_cancel_btn.setVisible(False)
         show_repair = bool(
             document_path
-            and material_issues.has_issues
+            and self._material_issues
             and decision.primary_action is not None
         )
         self._set_material_repair_visible(
             show_repair,
-            material_issues.detail_lines(),
+            list(material_issue_lines(self._material_issues)),
         )
         self._object_preflight_cancel_btn.setVisible(False)
 
@@ -1727,22 +1735,8 @@ class QuickExecutionDetail(QuickExecutionFeedbackMixin, QWidget):
                 f"font-size: {t.font_size_sm}px; color: {t.text_primary}; "
                 f"background: transparent;"
             )
-        for lbl in self.findChildren(QLabel, "wb_floating_field_name"):
-            field_key = str(lbl.property("fieldKey") or "")
-            self._style_floating_field_name(
-                lbl,
-                self._material_context.entity_data.get(field_key, ""),
-            )
         if hasattr(self, "_floating_fields_progress"):
-            completed = sum(
-                1
-                for field_key in getattr(self, "_floating_field_inputs", {})
-                if str(self._material_context.entity_data.get(field_key, "") or "").strip()
-            )
-            self._set_floating_fields_progress(
-                completed,
-                len(getattr(self, "_floating_field_inputs", {})),
-            )
+            self._set_floating_fields_progress(0, 0)
         if hasattr(self, "_scene_icon_label"):
             self._scene_icon_label.setPixmap(
                 get_icon("mountain-snow", 16, t.text_hint).pixmap(16, 16)

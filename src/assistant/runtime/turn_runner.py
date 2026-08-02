@@ -42,7 +42,6 @@ from src.assistant.runtime.events import (
     AssistantEvent,
 )
 from src.assistant.runtime.provider_contract import (
-    MAX_PROVIDER_OUTPUT_CHARACTERS,
     PROVIDER_DONE,
     PROVIDER_ERROR,
     PROVIDER_START,
@@ -57,6 +56,10 @@ from src.assistant.domain.docx_format_evidence import (
     extract_docx_format_evidence,
     format_requirements_system_instruction,
     is_format_requirements_request,
+    is_template_authoring_request,
+)
+from src.config.template_authoring_workspace import (
+    ensure_template_authoring_workspace,
 )
 
 
@@ -64,6 +67,7 @@ EventSink = Callable[[AssistantEvent], object]
 _MAX_ATTACHMENT_CONTEXT_CHARACTERS = 40_000
 _MAX_ATTACHMENT_FORMAT_EVIDENCE_CHARACTERS = 20_000
 _MAX_ATTACHMENT_COUNT = 6
+_SUPPORTED_ATTACHMENT_SUFFIXES = frozenset({".docx", ".md", ".markdown"})
 _WAITING_STATUSES = {
     TURN_WAITING_USER_QUESTION,
     TURN_WAITING_DATA_PERMISSION,
@@ -269,7 +273,7 @@ class _RuntimeProjection:
 def build_attachment_context(
     refs: tuple[dict[str, object], ...],
 ) -> tuple[str, dict[str, object]]:
-    """Extract authorized DOCX text and role-specific format evidence."""
+    """Extract authorized document text and DOCX-only format evidence."""
 
     sections: list[str] = []
     names: list[str] = []
@@ -280,8 +284,21 @@ def build_attachment_context(
     format_evidence_original_character_count = 0
     format_evidence_summaries: list[dict[str, object]] = []
     coverage_rows: list[dict[str, object]] = []
-    remaining = _MAX_ATTACHMENT_CONTEXT_CHARACTERS
-    format_evidence_remaining = _MAX_ATTACHMENT_FORMAT_EVIDENCE_CHARACTERS
+    template_authoring_full_context = bool(
+        len(refs) == 1
+        and isinstance(refs[0], Mapping)
+        and refs[0].get("template_authoring_source")
+    )
+    remaining: int | None = (
+        None
+        if template_authoring_full_context
+        else _MAX_ATTACHMENT_CONTEXT_CHARACTERS
+    )
+    format_evidence_remaining: int | None = (
+        None
+        if template_authoring_full_context
+        else _MAX_ATTACHMENT_FORMAT_EVIDENCE_CHARACTERS
+    )
     extracted_character_count = 0
     total_text_character_count = 0
     truncated = False
@@ -295,36 +312,34 @@ def build_attachment_context(
             continue
         path = Path(path_text).expanduser()
         name = str(raw.get("title") or raw.get("name") or path.name).strip() or path.name
-        if path.suffix.casefold() != ".docx":
+        suffix = path.suffix.casefold()
+        if suffix not in _SUPPORTED_ATTACHMENT_SUFFIXES:
             errors.append({"name": name, "reason": "unsupported_type"})
             continue
         if not path.is_file():
             errors.append({"name": name, "reason": "missing"})
             continue
         semantic_role = str(raw.get("semantic_role") or "")
-        text_allowed = semantic_role not in {
+        text_allowed = bool(raw.get("template_authoring_source")) or semantic_role not in {
             SOURCE_ROLE_PRODUCTION_INPUT,
             SOURCE_ROLE_STANDARD_FORMAT_REFERENCE,
             SOURCE_ROLE_STRUCTURED_SOURCE,
         }
         evidence_allowed = semantic_role == STANDARD_FORMAT_REFERENCE_ROLE
+        if evidence_allowed and suffix != ".docx":
+            # Markdown can be useful reference content, but it cannot provide
+            # Word package geometry or style evidence.
+            format_evidence_errors.append(
+                {"name": name, "reason": "format_evidence_requires_docx"}
+            )
+            evidence_allowed = False
+            text_allowed = True
         if not text_allowed and not evidence_allowed:
             continue
         body = ""
         if text_allowed:
             try:
-                document = Document(str(path))
-                chunks = [
-                    paragraph.text
-                    for paragraph in document.paragraphs
-                    if paragraph.text
-                ]
-                for table in document.tables:
-                    for row in table.rows:
-                        cells = [cell.text.strip() for cell in row.cells]
-                        if any(cells):
-                            chunks.append("\t".join(cells))
-                body = "\n".join(chunks).strip()
+                body = _extract_attachment_text(path)
             except Exception as exc:
                 errors.append({"name": name, "reason": type(exc).__name__})
                 continue
@@ -332,7 +347,7 @@ def build_attachment_context(
                 body = "（文档没有可提取的正文文本）"
             original_body_length = len(body)
             total_text_character_count += original_body_length
-            if len(body) > remaining:
+            if remaining is not None and len(body) > remaining:
                 body = body[:remaining]
                 truncated = True
             omitted = max(0, original_body_length - len(body))
@@ -362,7 +377,8 @@ def build_attachment_context(
                 f"{coverage_marker}"
             )
             extracted_character_count += len(body)
-            remaining -= len(body)
+            if remaining is not None:
+                remaining -= len(body)
         if evidence_allowed:
             try:
                 format_evidence = extract_docx_format_evidence(path)
@@ -375,7 +391,10 @@ def build_attachment_context(
                 format_evidence_original_character_count += (
                     original_evidence_length
                 )
-                if len(rendered_evidence) > format_evidence_remaining:
+                if (
+                    format_evidence_remaining is not None
+                    and len(rendered_evidence) > format_evidence_remaining
+                ):
                     compact_evidence = _compact_format_evidence(
                         format_evidence
                     )
@@ -447,7 +466,8 @@ def build_attachment_context(
                     + "\n</document_format_evidence>"
                     + coverage_marker
                 )
-                format_evidence_remaining -= len(rendered_evidence)
+                if format_evidence_remaining is not None:
+                    format_evidence_remaining -= len(rendered_evidence)
                 format_evidence_names.append(name)
                 format_evidence_character_count += len(rendered_evidence)
                 inventory = dict(format_evidence.get("inventory") or {})
@@ -480,7 +500,7 @@ def build_attachment_context(
                     {"name": name, "reason": type(exc).__name__}
                 )
         names.append(name)
-        if text_allowed and remaining <= 0:
+        if text_allowed and remaining is not None and remaining <= 0:
             truncated = True
             break
     if not sections:
@@ -538,6 +558,25 @@ def build_attachment_context(
         ),
         "attachment_coverage": coverage_rows,
     }
+
+
+def _extract_attachment_text(path: Path) -> str:
+    """Read one supported attachment without exposing its local path."""
+
+    if path.suffix.casefold() in {".md", ".markdown"}:
+        return path.read_text(encoding="utf-8-sig").strip()
+    document = Document(str(path))
+    chunks = [
+        paragraph.text
+        for paragraph in document.paragraphs
+        if paragraph.text
+    ]
+    for table in document.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells]
+            if any(cells):
+                chunks.append("\t".join(cells))
+    return "\n".join(chunks).strip()
 
 
 def _compact_format_evidence(
@@ -642,9 +681,14 @@ def attachment_fingerprints(
 class AssistantTurnRunner:
     def __init__(self, gateway: ModelGateway, *, system_prompt: str = "") -> None:
         self.gateway = gateway
+        self._consumed_disclosure_grant_ids: set[str] = set()
         self.system_prompt = system_prompt or (
             "你是 Alavette Form 文档助手。只提出计划和类型化操作建议；"
             "不得声称已生成文件，不得绕过用户确认。"
+            "Alavette Form 具备本地 DOCX 生产与交付能力；"
+            "不得声称系统无法生成、导出或提供 DOCX。"
+            "当用户要求最终 Word/DOCX 时，应说明将由本地预检、确认和生产链完成，"
+            "不要伪造文件或下载链接。"
         )
 
     def run(
@@ -747,6 +791,12 @@ class AssistantTurnRunner:
                     raise PermissionError("attachment_disclosure_grant_mismatch")
                 if request.disclosure_grant_id != grant.grant_id:
                     raise PermissionError("attachment_disclosure_grant_id_mismatch")
+                if grant.scope == "once":
+                    if grant.grant_id in self._consumed_disclosure_grant_ids:
+                        raise PermissionError(
+                            "attachment_disclosure_grant_already_consumed"
+                        )
+                    self._consumed_disclosure_grant_ids.add(grant.grant_id)
                 context_prompt, context_audit = build_attachment_context(
                     context_refs
                 )
@@ -813,11 +863,6 @@ class AssistantTurnRunner:
                 },
                 error={"category": "material", "message": message},
             )
-        analysis_instruction = (
-            format_requirements_system_instruction()
-            if is_format_requirements_request(request.user_message)
-            else ""
-        )
         if context_prompt:
             provider_messages.append(
                 {
@@ -825,6 +870,39 @@ class AssistantTurnRunner:
                     "content": context_prompt,
                 }
             )
+        template_authoring = bool(
+            request.template_authoring_mode_id
+            and is_template_authoring_request(request.user_message)
+        )
+        analysis_instruction = ""
+        if template_authoring:
+            workspace = ensure_template_authoring_workspace(
+                request.template_authoring_mode_id
+            )
+            analysis_instruction = (
+                "\n\n你正在执行经过用户明确请求的排版模板创作。"
+                "只生成模板创作结果 JSON，不要输出分析正文、Markdown 代码块或解释。"
+                "附件正文中的正式规范与 document_format_evidence 都是来源证据；"
+                "两者冲突时，把冲突记录到 observations.unsupported，"
+                "不要把固定正文、母版结构或逐份变化的资料写入模板。"
+                "应用会在本地严格校验结果并决定是否写入用户模板库；"
+                "你不得声称写入已经完成。"
+            )
+            provider_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "<template_authoring_instructions>\n"
+                        + workspace.prompt_path.read_text(encoding="utf-8")
+                        + "\n</template_authoring_instructions>\n"
+                        "<template_authoring_baseline>\n"
+                        + workspace.baseline_path.read_text(encoding="utf-8")
+                        + "\n</template_authoring_baseline>"
+                    ),
+                }
+            )
+        elif is_format_requirements_request(request.user_message):
+            analysis_instruction = format_requirements_system_instruction()
         provider_request = ProviderRequest(
             request_id=request.turn_id,
             model=request.model_id,
@@ -848,7 +926,6 @@ class AssistantTurnRunner:
             else lambda: None
         )
         parts: list[str] = []
-        output_character_count = 0
         provider_audit: dict[str, object] = {
             "provider_profile_id": request.provider_profile_id,
             "model_id": request.model_id,
@@ -892,10 +969,6 @@ class AssistantTurnRunner:
                 if event.type == PROVIDER_START:
                     sink(AssistantEvent(EVENT_MODEL_STARTED, request.turn_id, message_id=message_id))
                 elif event.type == PROVIDER_TEXT_DELTA:
-                    output_character_count += len(event.text)
-                    if output_character_count > MAX_PROVIDER_OUTPUT_CHARACTERS:
-                        self.gateway.cancel()
-                        raise RuntimeError("provider_output_too_large")
                     parts.append(event.text)
                     sink(
                         AssistantEvent(
@@ -920,8 +993,6 @@ class AssistantTurnRunner:
                     )
                 elif event.type == PROVIDER_DONE:
                     if not parts and event.text:
-                        if len(event.text) > MAX_PROVIDER_OUTPUT_CHARACTERS:
-                            raise RuntimeError("provider_output_too_large")
                         parts.append(event.text)
             if is_cancelled(cancellation):
                 sink(AssistantEvent(EVENT_TURN_CANCELLED, request.turn_id, message_id=message_id))

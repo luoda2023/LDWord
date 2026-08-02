@@ -5,20 +5,19 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.config.scene_matrix_dashboard import (  # noqa: E402
+from src.config.scene_matrix_dashboard import (
     SCENE_MATRIX_DASHBOARD_AMBIGUITY_CLARIFICATION_COUNT_RENAMES,
     SCENE_MATRIX_DASHBOARD_AMBIGUOUS_BOUNDARY_COUNT_RENAMES,
     SCENE_MATRIX_DASHBOARD_BOUNDARY_CAPABILITY_COUNT_RENAMES,
     SCENE_MATRIX_DASHBOARD_BUSINESS_CAPABILITY_MATRIX_COUNT_RENAMES,
     SCENE_MATRIX_DASHBOARD_CONTROL_RUNTIME_COUNT_RENAMES,
     SCENE_MATRIX_DASHBOARD_COUNT_PROFILES,
-    SCENE_MATRIX_DASHBOARD_DIRECT_COUNT_FIELD_CLASSIFICATIONS,
     SCENE_MATRIX_DASHBOARD_DELIVERY_EXECUTION_COUNT_RENAMES,
     SCENE_MATRIX_DASHBOARD_DELIVERY_PRESET_COUNT_RENAMES,
+    SCENE_MATRIX_DASHBOARD_DIRECT_COUNT_FIELD_CLASSIFICATIONS,
     SCENE_MATRIX_DASHBOARD_EXTERNAL_HANDOFF_CONTRACT_COUNT_RENAMES,
     SCENE_MATRIX_DASHBOARD_FIXED_LAYOUT_PROFILE_COUNT_RENAMES,
     SCENE_MATRIX_DASHBOARD_GENERATED_COUNT_MARKER_IDS,
@@ -34,10 +33,10 @@ from src.config.scene_matrix_dashboard import (  # noqa: E402
     audit_scene_matrix_dashboard,
     build_scene_matrix_dashboard,
 )
-from src.config.scene_matrix_dashboard_models import (  # noqa: E402
+from src.config.scene_matrix_dashboard_models import (
     SceneMatrixDashboardReport,
 )
-from tests._scene_matrix_dashboard_assertions import (  # noqa: E402
+from tests._scene_matrix_dashboard_assertions import (
     assert_expected_count_values,
 )
 
@@ -276,8 +275,8 @@ EXPECTED_SCENE_MATRIX_DASHBOARD_AGGREGATE_COUNTS: dict[str, int] = {
     "material_schema_pack_count": 12,
     "material_schema_material_pack_count": 10,
     "material_schema_ready_material_pack_count": 10,
-    "material_schema_schema_count": 22,
-    "material_schema_referenced_schema_count": 21,
+    "material_schema_schema_count": 23,
+    "material_schema_referenced_schema_count": 22,
     "material_schema_registry_only_schema_count": 1,
     "material_schema_required_field_count": 41,
     "material_schema_required_asset_count": 6,
@@ -347,7 +346,7 @@ EXPECTED_SCENE_MATRIX_DASHBOARD_AGGREGATE_COUNTS: dict[str, int] = {
     "formula_output_watermark_ready_family_count": 14,
     "formula_output_watermark_boundary_family_count": 1,
     "formula_output_watermark_accounted_family_count": 15,
-    "formula_output_watermark_formula_family_count": 3,
+    "formula_output_watermark_formula_family_count": 1,
     "formula_output_watermark_output_family_count": 15,
     "formula_output_watermark_watermark_family_count": 1,
     "formula_output_watermark_plugin_gate_count": 2,
@@ -384,8 +383,7 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         EXPECTED_SCENE_MATRIX_DASHBOARD_AGGREGATE_COUNTS,
     )
     assert (
-        payload["counts"]["ambiguity_clarification_missing_source_evidence_count"]
-        == 0
+        payload["counts"]["ambiguity_clarification_missing_source_evidence_count"] == 0
     )
     assert payload["counts"]["control_runtime_shared_component_count"] >= 15
     assert (
@@ -393,16 +391,13 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         == 10
     )
     assert (
-        payload["counts"]["object_preflight_action_missing_source_evidence_count"]
-        == 0
+        payload["counts"]["object_preflight_action_missing_source_evidence_count"] == 0
     )
     assert (
-        payload["counts"]["business_capability_matrix_high_priority_ready_count"]
-        == 11
+        payload["counts"]["business_capability_matrix_high_priority_ready_count"] == 11
     )
     assert (
-        payload["counts"]["business_capability_matrix_missing_journey_group_count"]
-        == 0
+        payload["counts"]["business_capability_matrix_missing_journey_group_count"] == 0
     )
     assert (
         payload["counts"]["business_capability_matrix_missing_source_evidence_count"]
@@ -412,27 +407,19 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         payload["counts"]["external_handoff_contract_missing_source_evidence_count"]
         == 0
     )
+    assert payload["counts"]["boundary_guarded_completion_external_contract_count"] == 6
     assert (
-        payload["counts"]["boundary_guarded_completion_external_contract_count"]
-        == 6
+        payload["counts"]["boundary_guarded_completion_boundary_capability_count"] == 6
     )
     assert (
-        payload["counts"]["boundary_guarded_completion_boundary_capability_count"]
-        == 6
+        payload["counts"]["boundary_guarded_completion_excluded_core_claim_count"] == 14
     )
     assert (
-        payload["counts"]["boundary_guarded_completion_excluded_core_claim_count"]
-        == 14
-    )
-    assert (
-        payload["counts"][
-            "boundary_guarded_completion_missing_source_evidence_count"
-        ]
+        payload["counts"]["boundary_guarded_completion_missing_source_evidence_count"]
         == 0
     )
     assert (
-        payload["counts"]["residual_warning_governance_input_source_warning_count"]
-        == 5
+        payload["counts"]["residual_warning_governance_input_source_warning_count"] == 5
     )
     assert (
         payload["counts"][
@@ -463,9 +450,7 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         == 5
     )
     assert (
-        payload["counts"][
-            "residual_warning_governance_reference_profile_warning_count"
-        ]
+        payload["counts"]["residual_warning_governance_reference_profile_warning_count"]
         == 2
     )
     assert (
@@ -479,14 +464,11 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         == 1
     )
     assert (
-        payload["counts"][
-            "residual_warning_governance_object_preflight_warning_count"
-        ]
+        payload["counts"]["residual_warning_governance_object_preflight_warning_count"]
         == 0
     )
     assert (
-        payload["counts"]["boundary_readiness_reconciliation_unreconciled_count"]
-        == 0
+        payload["counts"]["boundary_readiness_reconciliation_unreconciled_count"] == 0
     )
     assert (
         payload["counts"]["boundary_readiness_reconciliation_readiness_delta_count"]
@@ -504,48 +486,31 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         ]
         == 6
     )
+    assert payload["counts"]["terminal_release_exception_warning_projection_count"] == 3
     assert (
-        payload["counts"]["terminal_release_exception_warning_projection_count"]
-        == 3
-    )
-    assert (
-        payload["counts"][
-            "terminal_release_exception_readiness_reconciliation_count"
-        ]
+        payload["counts"]["terminal_release_exception_readiness_reconciliation_count"]
         == 15
     )
     assert (
-        payload["counts"][
-            "terminal_release_exception_boundary_guarded_maturity_count"
-        ]
+        payload["counts"]["terminal_release_exception_boundary_guarded_maturity_count"]
         == 6
     )
     assert (
-        payload["counts"][
-            "terminal_release_exception_static_closed_boundary_count"
-        ]
+        payload["counts"]["terminal_release_exception_static_closed_boundary_count"]
         == 2
     )
     assert (
-        payload["counts"][
-            "terminal_release_exception_unique_source_trace_count"
-        ]
-        == 31
+        payload["counts"]["terminal_release_exception_unique_source_trace_count"] == 31
     )
     assert (
-        payload["counts"][
-            "terminal_release_exception_linked_boundary_subject_count"
-        ]
+        payload["counts"]["terminal_release_exception_linked_boundary_subject_count"]
         == 6
     )
     assert (
-        payload["counts"]["boundary_subject_release_dossier_subject_trace_count"]
-        == 26
+        payload["counts"]["boundary_subject_release_dossier_subject_trace_count"] == 26
     )
     assert (
-        payload["counts"][
-            "boundary_subject_release_dossier_unique_source_trace_count"
-        ]
+        payload["counts"]["boundary_subject_release_dossier_unique_source_trace_count"]
         == 24
     )
     assert (
@@ -555,9 +520,7 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         == 14
     )
     assert (
-        payload["counts"][
-            "non_subject_release_trace_attribution_unattributed_count"
-        ]
+        payload["counts"]["non_subject_release_trace_attribution_unattributed_count"]
         == 0
     )
     assert (
@@ -573,17 +536,13 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         == 2
     )
     assert (
-        payload["counts"]["release_trace_partition_guard_non_subject_trace_count"]
-        == 10
+        payload["counts"]["release_trace_partition_guard_non_subject_trace_count"] == 10
     )
     assert (
-        payload["counts"]["release_trace_partition_guard_partitioned_trace_count"]
-        == 36
+        payload["counts"]["release_trace_partition_guard_partitioned_trace_count"] == 36
     )
     assert (
-        payload["counts"][
-            "release_projection_surface_parity_release_gate_check_count"
-        ]
+        payload["counts"]["release_projection_surface_parity_release_gate_check_count"]
         == 13
     )
     assert (
@@ -591,9 +550,7 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         == 13
     )
     assert (
-        payload["counts"][
-            "boundary_subject_release_continuity_maturity_subject_count"
-        ]
+        payload["counts"]["boundary_subject_release_continuity_maturity_subject_count"]
         == 6
     )
     assert (
@@ -619,31 +576,22 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         == 6
     )
     assert (
-        payload["counts"][
-            "boundary_maturity_release_envelope_external_handoff_count"
-        ]
+        payload["counts"]["boundary_maturity_release_envelope_external_handoff_count"]
         == 6
     )
     assert (
-        payload["counts"][
-            "boundary_maturity_release_envelope_subject_continuity_count"
-        ]
+        payload["counts"]["boundary_maturity_release_envelope_subject_continuity_count"]
         == 6
     )
     assert (
-        payload["counts"]["boundary_maturity_release_envelope_retained_gap_count"]
+        payload["counts"]["boundary_maturity_release_envelope_retained_gap_count"] == 6
+    )
+    assert (
+        payload["counts"]["retained_gap_exit_criteria_guarded_completion_link_count"]
         == 6
     )
     assert (
-        payload["counts"][
-            "retained_gap_exit_criteria_guarded_completion_link_count"
-        ]
-        == 6
-    )
-    assert (
-        payload["counts"][
-            "retained_gap_exit_criteria_boundary_capability_link_count"
-        ]
+        payload["counts"]["retained_gap_exit_criteria_boundary_capability_link_count"]
         == 6
     )
     assert (
@@ -657,21 +605,15 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         == 11
     )
     assert (
-        payload["counts"][
-            "release_residual_ratio_ledger_release_envelope_link_count"
-        ]
+        payload["counts"]["release_residual_ratio_ledger_release_envelope_link_count"]
         == 10
     )
     assert (
-        payload["counts"][
-            "release_residual_ratio_ledger_exit_criteria_link_count"
-        ]
+        payload["counts"]["release_residual_ratio_ledger_exit_criteria_link_count"]
         == 10
     )
     assert (
-        payload["counts"][
-            "release_residual_ratio_ledger_receipt_alignment_link_count"
-        ]
+        payload["counts"]["release_residual_ratio_ledger_receipt_alignment_link_count"]
         == 10
     )
     assert (
@@ -723,25 +665,16 @@ def _assert_scene_matrix_dashboard_aggregate_counts(report, payload):
         == 6
     )
     assert (
-        payload["counts"][
-            "release_residual_explanation_missing_summary_marker_count"
-        ]
+        payload["counts"]["release_residual_explanation_missing_summary_marker_count"]
         == 0
     )
+    assert payload["counts"]["release_acceptance_certificate_ready_receipt_count"] == 2
     assert (
-        payload["counts"]["release_acceptance_certificate_ready_receipt_count"]
-        == 2
-    )
-    assert (
-        payload["counts"][
-            "release_acceptance_certificate_expected_count_match_count"
-        ]
+        payload["counts"]["release_acceptance_certificate_expected_count_match_count"]
         == 14
     )
     assert (
-        payload["counts"][
-            "release_acceptance_certificate_ready_source_evidence_count"
-        ]
+        payload["counts"]["release_acceptance_certificate_ready_source_evidence_count"]
         == 15
     )
     assert (
@@ -796,10 +729,7 @@ def _assert_scene_matrix_dashboard_aggregate_cards(payload):
         "4/4 count/delivery receipts aligned"
         in cards_by_id["release_residual_ratios"]["detail"]
     )
-    assert (
-        "6/6 L5 receipts aligned"
-        in cards_by_id["release_residual_ratios"]["detail"]
-    )
+    assert "6/6 L5 receipts aligned" in cards_by_id["release_residual_ratios"]["detail"]
     assert (
         "6/6 L5 blockers aligned"
         in cards_by_id["release_acceptance_certificate"]["detail"]
@@ -814,8 +744,14 @@ def _assert_scene_matrix_dashboard_aggregate_cards(payload):
         in cards_by_id["release_acceptance_certificate"]["detail"]
     )
     assert "15/15 evidence" in cards_by_id["release_acceptance_certificate"]["detail"]
-    assert "6/6 L5 blockers enveloped" in cards_by_id["boundary_release_envelopes"]["detail"]
-    assert "6/6 retained gaps enveloped" in cards_by_id["boundary_release_envelopes"]["detail"]
+    assert (
+        "6/6 L5 blockers enveloped"
+        in cards_by_id["boundary_release_envelopes"]["detail"]
+    )
+    assert (
+        "6/6 retained gaps enveloped"
+        in cards_by_id["boundary_release_envelopes"]["detail"]
+    )
     assert cards_by_id["retained_gap_exit_criteria"]["value"] == "6/6 release-allowed"
     assert "6 boundary rows" in cards_by_id["retained_gap_exit_criteria"]["detail"]
     assert "6/6 receipt-aligned" in cards_by_id["retained_gap_exit_criteria"]["detail"]
@@ -854,13 +790,17 @@ def _assert_scene_matrix_dashboard_aggregate_cards(payload):
         "2/2 static boundary governed"
         in cards_by_id["terminal_release_exceptions"]["detail"]
     )
-    assert "3/3 dashboard projected" in cards_by_id["residual_warning_governance"]["detail"]
-    assert "3/3 dashboard warnings" in cards_by_id["terminal_release_exceptions"]["detail"]
+    assert (
+        "3/3 dashboard projected"
+        in cards_by_id["residual_warning_governance"]["detail"]
+    )
+    assert (
+        "3/3 dashboard warnings" in cards_by_id["terminal_release_exceptions"]["detail"]
+    )
     assert "2/2 static-closed governed" in cards_by_id["readiness"]["detail"]
     assert "15/15 accounted" in cards_by_id["count_profiles"]["detail"]
     assert "15/15 families accounted" in cards_by_id["delivery_presets"]["detail"]
     assert "12/12 packs accounted" in cards_by_id["delivery_presets"]["detail"]
-
 
 
 def _assert_scene_matrix_dashboard_aggregate_rows(report, rows):
@@ -1173,9 +1113,9 @@ def test_scene_matrix_dashboard_count_payload_is_derived_from_model_fields(
     ]
     model_field_names = {field.name for field in model_fields}
     sample_fixture_index = expected_count_keys.index("sample_fixture_count")
-    expected_count_keys[
-        sample_fixture_index + 1 : sample_fixture_index + 1
-    ] = derived_count_keys
+    expected_count_keys[sample_fixture_index + 1 : sample_fixture_index + 1] = (
+        derived_count_keys
+    )
 
     assert list(dashboard_payload["counts"]) == expected_count_keys
     assert set(derived_count_keys).isdisjoint(model_field_names)
@@ -1183,9 +1123,7 @@ def test_scene_matrix_dashboard_count_payload_is_derived_from_model_fields(
         1 for row in dashboard_report.rows if row.plugin_boundary
     )
     assert dashboard_payload["counts"]["manual_boundary_pack_count"] == sum(
-        1
-        for row in dashboard_report.rows
-        if row.manual_boundary_request_cell_count
+        1 for row in dashboard_report.rows if row.manual_boundary_request_cell_count
     )
     assert dashboard_payload["counts"]["ambiguous_pack_count"] == sum(
         1 for row in dashboard_report.rows if row.ambiguous_request_cell_count
@@ -1293,9 +1231,7 @@ def test_scene_matrix_dashboard_generated_count_markers_are_model_fields():
     assert len(SCENE_MATRIX_DASHBOARD_GENERATED_COUNT_MARKER_IDS) == len(
         set(SCENE_MATRIX_DASHBOARD_GENERATED_COUNT_MARKER_IDS)
     )
-    assert set(SCENE_MATRIX_DASHBOARD_GENERATED_COUNT_MARKER_IDS) <= (
-        model_field_names
-    )
+    assert set(SCENE_MATRIX_DASHBOARD_GENERATED_COUNT_MARKER_IDS) <= (model_field_names)
     assert profile_count_ids <= set(SCENE_MATRIX_DASHBOARD_GENERATED_COUNT_MARKER_IDS)
     assert profile_count_ids <= model_field_names
     assert profile_rename_count_ids <= profile_count_ids

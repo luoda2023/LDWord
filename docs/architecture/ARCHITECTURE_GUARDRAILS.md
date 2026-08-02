@@ -14,6 +14,12 @@ intentional refactor lowers a baseline, lower the matching budget in the same
 change. Raising a budget requires an architecture note explaining why the
 responsibility cannot be separated.
 
+Binding domain decisions:
+
+- [Material-package top-level unification](./MATERIAL_PACKAGE_UNIFIED_ARCHITECTURE_DECISION.md)
+  defines the single material domain model, identity, persistence, editor, and
+  execution boundaries for the first public release.
+
 ## Dependency Direction
 
 The intended runtime direction is:

@@ -12,10 +12,10 @@ from src.qt_api import (
     Signal,
 )
 from src.shared.ui.button_style import apply_button_variant
+from src.shared.ui.icons.catalog import get_icon
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
-from src.shared.ui.icons.catalog import get_icon
 
 
 class BatchGenerationSourceArea(RoundedSurfaceFrame):
@@ -34,6 +34,7 @@ class BatchGenerationSourceArea(RoundedSurfaceFrame):
         self._profile_summary = ""
         self._source_document_required = True
         self._source_document_path = ""
+        self._document_picker_enabled = True
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(17, 17, 17, 17)
@@ -99,6 +100,10 @@ class BatchGenerationSourceArea(RoundedSurfaceFrame):
         self._source_document_path = str(source_document_path or "").strip()
         self._refresh()
 
+    def set_document_picker_visible(self, visible: bool) -> None:
+        self._document_picker_enabled = bool(visible)
+        self._refresh()
+
     def _refresh(self) -> None:
         if self._count:
             self._title.setText(f"已准备 {self._count} 份批次资料")
@@ -119,7 +124,10 @@ class BatchGenerationSourceArea(RoundedSurfaceFrame):
             self._hint.setText("请先在资料功能中选择批次，本页仅负责生成")
             self._hint.setToolTip("")
 
-        self._document_button.setVisible(self._source_document_required)
+        self._document_button.setVisible(
+            self._source_document_required
+            and self._document_picker_enabled
+        )
         if self._source_document_required:
             if self._source_document_path:
                 name = Path(self._source_document_path).name

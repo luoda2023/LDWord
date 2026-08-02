@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from lxml import etree
 from docx.shared import Pt
 
 from src.config.style_semantics import (
@@ -12,22 +11,38 @@ from src.config.style_semantics import (
     normalize_indent_value,
     resolve_style_special_indent,
 )
-from src.shared.engine.ooxml_ops import qn
+from src.shared.engine.ooxml_ops import (
+    find_or_create_before,
+    get_or_add_paragraph_properties_first,
+    qn,
+)
 
 
 def _ensure_ppr(container_element):
-    ppr = container_element.find(qn("w:pPr"))
-    if ppr is None:
-        ppr = etree.SubElement(container_element, qn("w:pPr"))
-    return ppr
+    return get_or_add_paragraph_properties_first(container_element)
 
 
 def _ensure_ind(container_element):
     ppr = _ensure_ppr(container_element)
-    ind = ppr.find(qn("w:ind"))
-    if ind is None:
-        ind = etree.SubElement(ppr, qn("w:ind"))
-    return ind
+    return find_or_create_before(
+        ppr,
+        "w:ind",
+        (
+            "w:contextualSpacing",
+            "w:mirrorIndents",
+            "w:suppressOverlap",
+            "w:jc",
+            "w:textDirection",
+            "w:textAlignment",
+            "w:textboxTightWrap",
+            "w:outlineLvl",
+            "w:divId",
+            "w:cnfStyle",
+            "w:rPr",
+            "w:sectPr",
+            "w:pPrChange",
+        ),
+    )
 
 
 def resolve_style_config_indents(style_config, *, size_pt=None) -> dict[str, float | str]:

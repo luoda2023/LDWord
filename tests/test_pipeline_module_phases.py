@@ -25,6 +25,7 @@ EXPECTED_PHASES = {
         "entity_fill",
         "source_fill",
         "placeholder_replace",
+        "formula_convert",
         "md_cleanup",
     },
     Phase.SEMANTICS: {
@@ -36,8 +37,8 @@ EXPECTED_PHASES = {
         "citation_link",
     },
     Phase.FORMAT: {
-        "page_setup",
         "section_format",
+        "page_setup",
         "paragraph_style",
         "table_format",
         "figure_table_center",
@@ -62,6 +63,7 @@ EXPECTED_SCOPE_BEHAVIORS = {
         "paragraph_style",
         "table_format",
         "figure_table_center",
+        "formula_convert",
         "chem_typography",
         "equation_table_format",
         "toc",
@@ -215,6 +217,8 @@ def test_unknown_module_requires_explicit_scope_behavior():
 def test_structural_mutation_overrides_cover_body_index_invalidators():
     expected_invalidators = {
         "caption",
+        "equation_table_format",
+        "formula_convert",
         "section_format",
         "toc",
         "image_insertion",
@@ -243,6 +247,7 @@ def test_default_phase_order_is_deterministic_and_uses_registry_ties():
         "entity_fill",
         "source_fill",
         "placeholder_replace",
+        "formula_convert",
         "md_cleanup",
         # Semantics: reference_format moves before its citation_link consumer.
         "heading_recognition",
@@ -251,9 +256,9 @@ def test_default_phase_order_is_deterministic_and_uses_registry_ties():
         "whitespace_normalize",
         "reference_format",
         "citation_link",
-        # Format: same-phase dependencies override only the necessary ties.
-        "page_setup",
+        # Format: section topology is finalized before page properties are applied.
         "section_format",
+        "page_setup",
         "paragraph_style",
         "header_footer",
         "toc",

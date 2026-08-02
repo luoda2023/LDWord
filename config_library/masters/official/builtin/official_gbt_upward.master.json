@@ -13,7 +13,7 @@
     "official_gbt",
     "official_custom"
   ],
-  "master_version": "official-master-family-gbt-2026-07-11",
+  "master_version": "official-master-family-gbt-2026-08-02-r5",
   "placeholder_contract": {
     "required": [
       "official_title",
@@ -58,7 +58,7 @@
     "legacy_aliases": []
   },
   "placeholder_index": {
-    "sha256": "de558ed83b0af7d4b48902923ac984928fe2e9b60ba69c32e6f3bcd5cae6709e",
+    "sha256": "57d7f858b4b0953f9f9baa273f523fd2c134f05a8652ae9b71f8b12afd8b477f",
     "scanner_version": "master-placeholder-index-v1",
     "placeholder_ids": [
       "@text:official_security_level",
@@ -143,13 +143,13 @@
         "word/document.xml:/w:document/w:body/w:p[12]"
       ],
       "@text:official_copy_scope": [
-        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr[1]/w:tc[2]/w:p"
+        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr/w:tc/w:p[1]"
       ],
       "@text:official_printing_org": [
-        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr[2]/w:tc[2]/w:p"
+        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr/w:tc/w:p[3]"
       ],
       "@text:official_printing_date": [
-        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr[3]/w:tc[2]/w:p"
+        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr/w:tc/w:p[3]"
       ]
     },
     "reference_page_excluded": false

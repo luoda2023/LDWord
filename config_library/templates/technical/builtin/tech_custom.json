@@ -4,6 +4,12 @@
   "page_setup": {
     "paper_size": "A4",
     "orientation": "portrait",
+    "paper_size_mode": "force_template",
+    "orientation_mode": "preserve_source",
+    "margin_mode": "force_template",
+    "paper_size_by_section": {},
+    "orientation_by_section": {},
+    "margin_by_section": {},
     "margin": {
       "top_cm": 2.5,
       "bottom_cm": 2.5,
@@ -11,8 +17,8 @@
       "right_cm": 3.2
     },
     "gutter_cm": 0,
-    "header_distance_cm": 3.0,
-    "footer_distance_cm": 3.0
+    "header_distance_cm": 3,
+    "footer_distance_cm": 3
   },
   "styles": {
     "body": {
@@ -249,33 +255,31 @@
     },
     "max_heading_levels": 4,
     "non_numbered_title_texts": [
-      "参考文献",
-      "勘误页",
-      "勘误",
-      "致谢",
-      "个人简历",
-      "在学期间发表的学术论文与研究成果",
       "摘要",
-      "Abstract",
-      "目录"
+      "目录",
+      "参考文献",
+      "缩略语表"
     ],
     "non_numbered_prefixes": [
       "附录",
-      "附件",
-      "Appendix"
+      "附件"
     ],
     "non_numbered_heading_style_name": "Heading 1 Unnumbered",
     "non_numbered_heading_style_mode": "inherit_heading1"
   },
   "section": {
-    "section_break_type": null
+    "boundary_mode": "semantic_rebuild",
+    "section_break_type": null,
+    "empty_break_policy": "preserve",
+    "caption_table_break_policy": "preserve",
+    "header_footer_link_mode": "semantic_rebuild"
   },
   "table": {
     "layout_mode": "smart",
     "smart_levels": 4,
     "border_mode": "three_line",
     "border_width_pt": 0.5,
-    "three_line_header_width_pt": 1.0,
+    "three_line_header_width_pt": 1,
     "three_line_bottom_width_pt": 0.5,
     "color_table_accent": "blue",
     "color_table_variant": "header_grid",
@@ -302,32 +306,35 @@
         "enabled": true,
         "line_style": "single",
         "width_pt": 0.5,
-        "spacing_pt": 1.0,
+        "spacing_pt": 1,
         "color": "auto"
       },
-      "hide_on_cover": true,
       "typography": {
         "font_cn": null,
         "font_en": null,
         "size_pt": null,
         "bold": false,
         "italic": false
-      }
+      },
+      "hidden_selectors": [
+        "cover"
+      ]
     },
     "footer": {
       "enabled": true,
-      "content_mode": "page_number",
+      "content_mode": "none",
       "fixed_text": "",
       "alignment": "center",
-      "page_number_template": "{page}",
-      "hide_on_cover": true,
       "typography": {
         "font_cn": null,
         "font_en": null,
         "size_pt": null,
         "bold": false,
         "italic": false
-      }
+      },
+      "hidden_selectors": [
+        "cover"
+      ]
     },
     "behavior": {
       "different_first_page": false,
@@ -400,9 +407,27 @@
     "page_number_plan": {
       "phases": [
         {
+          "phase_id": "pre_numbering",
+          "selectors": [
+            "cover"
+          ],
+          "visible": false,
+          "number_format": "decimal",
+          "start_mode": "restart",
+          "start_value": 1
+        },
+        {
           "phase_id": "main",
           "selectors": [
-            "all_numbered_content"
+            "abstract_cn",
+            "abstract_en",
+            "toc",
+            "body",
+            "references",
+            "errata",
+            "appendix",
+            "acknowledgment",
+            "resume"
           ],
           "visible": true,
           "number_format": "decimal",
@@ -410,12 +435,22 @@
           "start_value": 1
         }
       ],
+      "first": {
+        "visibility": "inherit",
+        "template": "",
+        "alignment": "inherit"
+      },
+      "even": {
+        "visibility": "inherit",
+        "template": "",
+        "alignment": "inherit"
+      },
       "on_missing_doc_tree": "warn_and_fallback",
-      "validation_mode": "strict"
-    },
-    "suppress_header_footer_selectors": [
-      "pre_numbering"
-    ]
+      "validation_mode": "strict",
+      "enabled": true,
+      "template": "{page}",
+      "alignment": "center"
+    }
   },
   "toc": {
     "mode": "word_native",
@@ -431,32 +466,6 @@
     "numbering_mode": "chapter",
     "auto_insert": true,
     "format_inserted": false
-  },
-  "formula_table": {
-    "formula_font_name": "Times New Roman",
-    "formula_font_size_pt": 12.0,
-    "formula_font_size_display": "12",
-    "formula_line_spacing": 1.0,
-    "formula_space_before_pt": 6.0,
-    "formula_space_before_unit": "pt",
-    "formula_space_after_pt": 6.0,
-    "formula_space_after_unit": "pt",
-    "block_alignment": "center",
-    "table_alignment": "center",
-    "formula_cell_alignment": "center",
-    "number_alignment": "right",
-    "number_font_name": "Times New Roman",
-    "number_font_size_pt": 12.0,
-    "number_font_size_display": "12",
-    "auto_shrink_number_column": true
-  },
-  "formula_style": {
-    "unify_font": true,
-    "unify_size": true,
-    "unify_spacing": true
-  },
-  "equation_numbering": {
-    "numbering_format": "chapter.seq"
   },
   "reference_style": {
     "hanging_indent_cm": 0.74,

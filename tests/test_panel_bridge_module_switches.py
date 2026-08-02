@@ -10,7 +10,11 @@ def test_bridge_module_switch_update_is_copy_on_write_and_emits_once():
     bridge.set_current_scene(original, emit_signal=False)
     scenes = []
     dirty_states = []
+    reasons = []
     bridge.scene_changed.connect(scenes.append)
+    bridge.scene_changed.connect(
+        lambda _scene: reasons.append(bridge.scene_change_reason())
+    )
     bridge.scene_dirty_changed.connect(dirty_states.append)
 
     assert bridge.update_current_scene_module_switches({"page_setup": False}) is True
@@ -20,6 +24,8 @@ def test_bridge_module_switch_update_is_copy_on_write_and_emits_once():
     assert original.module_switches["page_setup"] is True
     assert updated.module_switches["page_setup"] is False
     assert scenes == [updated]
+    assert reasons == ["module_switches"]
+    assert bridge.scene_change_reason() == ""
     assert dirty_states == [True]
 
 

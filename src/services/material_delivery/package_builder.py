@@ -373,7 +373,11 @@ class _PackageCollector:
                 raise ValueError("source byte size differs from declared identity")
             if expected_sha256 and source_receipt.sha256 != expected_sha256:
                 raise ValueError("source hash differs from declared identity")
-            public_diagnostic = category in {"report", "intermediate"} and (
+            public_diagnostic = category in {
+                "output",
+                "report",
+                "intermediate",
+            } and (
                 source_receipt.path.suffix.casefold() in {".json", ".md"}
             )
             if public_diagnostic and (expected_sha256 or expected_byte_size is not None):

@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from src.app_meta import APP_CLI_NAME, APP_DISPLAY_NAME_FULL, APP_LOG_FILE
+from src.app_paths import log_data_root
 from src.services.console_output import (
     configure_console_output,
     console_print,
@@ -35,6 +36,7 @@ class _ConsoleSafeArgumentParser(argparse.ArgumentParser):
 def _create_gui_exception_logger(log_path: Path):
     import logging
 
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("alavette.gui")
     logger.setLevel(logging.ERROR)
     logger.propagate = False
@@ -95,9 +97,8 @@ def _start_gui(font_engine: str | None = None) -> int:
 
     import traceback
 
-    from src.qt_api import QApplication, QTimer, Qt
     from PySide6.QtCore import QDir, QLockFile
-    from PySide6.QtWidgets import QMessageBox
+    from src.qt_api import QApplication, Qt
 
     # PySide6 always enables high-DPI support. Keep the exact Windows scale;
     # custom-painted strokes are snapped at the paint boundary instead.
@@ -109,13 +110,7 @@ def _start_gui(font_engine: str | None = None) -> int:
     instance_lock = QLockFile(
         QDir.temp().filePath("alavette-form-v1-gui.lock")
     )
-    if not instance_lock.tryLock(0):
-        QMessageBox.information(
-            None,
-            "程序已在运行",
-            "Alavette Form 已经打开。请使用现有窗口，避免两个实例持有不同的草稿状态。",
-        )
-        return 0
+    instance_lock_acquired = instance_lock.tryLock(0)
 
     # FreeType needs the OS-provided YaHei TTC faces registered explicitly so
     # that weight 700 resolves the real Bold face instead of synthetic bold.
@@ -127,14 +122,29 @@ def _start_gui(font_engine: str | None = None) -> int:
 
     _font_registration = register_windows_ui_fonts_for_freetype(
         font_engine_configuration.engine
-    )  # noqa: F841 - keep the startup evidence alive for diagnostics
+    )
     apply_application_typography(app)
 
-    from src.ui.main_window import MainWindow
+    if not instance_lock_acquired:
+        from src.shared.ui.dialogs import info as show_info
+
+        show_info(
+            "程序已在运行",
+            "Alavette Form 已经打开。请使用现有窗口，避免两个实例持有不同的草稿状态。",
+        )
+        return 0
+
     from src.ui.startup_splash import StartupSplash
 
+    splash = StartupSplash()
+    splash.show()
+    splash.set_status("正在准备工作台")
+    app.processEvents()
+
+    from src.ui.main_window import MainWindow
+
     # ── GUI 全局异常处理 ──
-    _log_path = ROOT / APP_LOG_FILE
+    _log_path = log_data_root() / APP_LOG_FILE
     gui_logger = _create_gui_exception_logger(_log_path)
 
     def _gui_excepthook(exc_type, exc_value, exc_tb):
@@ -152,36 +162,25 @@ def _start_gui(font_engine: str | None = None) -> int:
                 log_path=str(_log_path),
             )
         except Exception:
-            pass
+            gui_logger.exception("Failed to display the unhandled-exception dialog")
 
     sys.excepthook = _gui_excepthook
 
     # 全局输入守卫（滚轮防劫持 + SpinBox Enter/Click 行为修正）
     from src.shared.ui.input_guard import install_global_input_guard
-    _input_guard = install_global_input_guard(app)  # noqa: F841  保持引用防 GC
+    _input_guard = install_global_input_guard(app)
 
     # 全局主题 tooltip，统一悬停延迟、浮层样式和锚点位置。
     from src.shared.ui.tooltip import install_global_tooltip
-    _tooltip_guard = install_global_tooltip(app)  # noqa: F841  保持引用防 GC
-
-    splash = StartupSplash()
-    splash.show()
-    splash.set_status("正在准备工作台")
-    app.processEvents()
+    _tooltip_guard = install_global_tooltip(app)
 
     win = MainWindow(enable_background_services=True)
 
     def _show_main_window() -> None:
         splash.set_status("正在打开首页")
-        win.setWindowOpacity(0.0)
         win.show()
         app.processEvents()
-
-        def _reveal_main_window() -> None:
-            win.setWindowOpacity(1.0)
-            splash.finish_and_close()
-
-        QTimer.singleShot(80, _reveal_main_window)
+        splash.finish_and_close()
 
     win.startup_status_changed.connect(splash.set_status)
     win.startup_ready.connect(_show_main_window)
@@ -214,7 +213,7 @@ def _run_cli(args: argparse.Namespace) -> int:
             output_dir=Path(args.output) if args.output else None,
             document_type_id=args.document_type,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI process boundary
         console_print(f"[ERROR] CLI 未预期失败: {str(exc) or type(exc).__name__}")
         return 1
 
@@ -239,9 +238,17 @@ def _run_internal_office_child(argv: list[str]) -> int | None:
         return None
     flag, request_path = argv
     from src.shared.engine.office_broker_command import (
+        MATHTYPE_OFFICE_CHILD_FLAG,
         OFFICE_IMAGE_LAYOUT_CHILD_FLAG,
         OFFICE_LAYOUT_PROBE_CHILD_FLAG,
     )
+
+    if flag == MATHTYPE_OFFICE_CHILD_FLAG:
+        from src.shared.io.mathtype_office_fallback import (
+            run_mathtype_office_child,
+        )
+
+        return run_mathtype_office_child(request_path)
 
     if flag == OFFICE_IMAGE_LAYOUT_CHILD_FLAG:
         from src.shared.engine.office_image_layout import (

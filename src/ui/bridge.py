@@ -10,12 +10,15 @@ from dataclasses import dataclass, field
 from collections.abc import Mapping
 from pathlib import Path
 
-from src.config.material_batch import MaterialBatchSelection
-from src.config.material_context import MaterialExecutionContext
-from src.config.material_preview_snapshot import MaterialPreviewSnapshot
+from src.application.materials import MaterialPreviewSnapshot
 from src.config.execution_target import ExecutionTarget, resolve_execution_target
 from src.config.official_document_profiles import get_official_document_profile
 from src.config.work_mode import WorkModeSpec, default_work_mode, get_work_mode
+from src.domain.materials import (
+    MaterialIssue,
+    MaterialPackageRef,
+    MaterialRunSelection,
+)
 from src.qt_api import QObject, Signal
 
 
@@ -61,11 +64,25 @@ class _BridgeStateSnapshot:
     scene_dirty: bool
     template_dirty: bool
     suppress_next_scene_dirty_recheck: bool
-    material_context: MaterialExecutionContext
-    material_preview_snapshot: MaterialPreviewSnapshot
-    material_batch_selection: MaterialBatchSelection
+    material_package_ref: MaterialPackageRef | None
+    material_run_selection: MaterialRunSelection | None
+    material_preview_snapshot: MaterialPreviewSnapshot | None
+    material_issues: tuple[MaterialIssue, ...]
     suspended_material_states: list[dict[str, object]]
     execution_target: ExecutionTarget
+
+
+def _clone_suspended_material_states(
+    states: list[dict[str, object]] | tuple[dict[str, object], ...],
+) -> list[dict[str, object]]:
+    """Copy evidence containers without copying immutable MaterialPackage V1 values.
+
+    ``MaterialRunSelection`` and ``MaterialPreviewSnapshot`` deliberately expose
+    read-only mapping proxies.  They are frozen value objects and must be shared
+    by reference; ``copy.deepcopy`` cannot (and should not) reconstruct them.
+    """
+
+    return [dict(item) for item in states]
 
 
 @dataclass(slots=True, eq=False)
@@ -134,9 +151,10 @@ _SCENE_PUBLICATION_OWNABLE_FIELDS = frozenset(
         "scene_dirty",
         "template_dirty",
         "suppress_next_scene_dirty_recheck",
-        "material_context",
+        "material_package_ref",
+        "material_run_selection",
         "material_preview_snapshot",
-        "material_batch_selection",
+        "material_issues",
         "suspended_material_states",
         "execution_target",
     }
@@ -168,23 +186,6 @@ def _template_resource_identity(
     return mode, f"id:{str(config_id or '').strip() or 'default'}"
 
 
-def _official_document_type_from_material_context(
-    context: MaterialExecutionContext,
-) -> str:
-    raw_profile = str(getattr(context, "profile_id", "") or "").strip()
-    if ":" in raw_profile:
-        _prefix, raw_profile = raw_profile.split(":", 1)
-    candidate = raw_profile.strip()
-    if get_official_document_profile(candidate) is not None:
-        return candidate
-    entity_data = getattr(context, "entity_data", {}) or {}
-    if isinstance(entity_data, dict):
-        candidate = str(entity_data.get("document_type", "") or "").strip()
-        if get_official_document_profile(candidate) is not None:
-            return candidate
-    return ""
-
-
 class PanelBridge(QObject):
     """Shared event bus for cross-panel communication."""
 
@@ -194,9 +195,10 @@ class PanelBridge(QObject):
     work_mode_changed = Signal(object)              # WorkModeSpec
     scene_dirty_changed = Signal(bool)
     template_dirty_changed = Signal(bool)
-    material_context_changed = Signal(object)       # MaterialExecutionContext
-    material_preview_snapshot_changed = Signal(object)  # MaterialPreviewSnapshot
-    material_batch_selection_changed = Signal(object)  # MaterialBatchSelection
+    material_package_ref_changed = Signal(object)   # MaterialPackageRef | None
+    material_run_selection_changed = Signal(object)  # MaterialRunSelection | None
+    material_preview_snapshot_changed = Signal(object)  # MaterialPreviewSnapshot | None
+    material_issues_changed = Signal(object)        # tuple[MaterialIssue, ...]
     material_scope_suspended = Signal(object)       # incompatibility evidence
     execution_target_changed = Signal(object)       # ExecutionTarget
     official_document_type_changed = Signal(str)    # task-level document type id
@@ -227,6 +229,7 @@ class PanelBridge(QObject):
         self._current_scene_path = ""
         self._current_scene_source = ""
         self._current_scene_source_type = ""
+        self._scene_change_reason = ""
         self._current_template = None
         self._current_template_id = ""
         self._current_template_path = ""
@@ -246,9 +249,10 @@ class PanelBridge(QObject):
         self._scene_dirty = False
         self._template_dirty = False
         self._suppress_next_scene_dirty_recheck = False
-        self._material_context = MaterialExecutionContext()
-        self._material_preview_snapshot = MaterialPreviewSnapshot()
-        self._material_batch_selection = MaterialBatchSelection()
+        self._material_package_ref: MaterialPackageRef | None = None
+        self._material_run_selection: MaterialRunSelection | None = None
+        self._material_preview_snapshot: MaterialPreviewSnapshot | None = None
+        self._material_issues: tuple[MaterialIssue, ...] = ()
         self._suspended_material_states: list[dict[str, object]] = []
         self._material_repair_target: tuple[str, str] = ("", "")
         self._material_profile_repair_target: tuple[str, str, str, str] = ("", "", "", "")
@@ -321,10 +325,13 @@ class PanelBridge(QObject):
             scene_dirty=self._scene_dirty,
             template_dirty=self._template_dirty,
             suppress_next_scene_dirty_recheck=self._suppress_next_scene_dirty_recheck,
-            material_context=self._material_context.clone(),
+            material_package_ref=self._material_package_ref,
+            material_run_selection=self._material_run_selection,
             material_preview_snapshot=self._material_preview_snapshot,
-            material_batch_selection=self._material_batch_selection.clone(),
-            suspended_material_states=copy.deepcopy(self._suspended_material_states),
+            material_issues=self._material_issues,
+            suspended_material_states=_clone_suspended_material_states(
+                self._suspended_material_states
+            ),
             execution_target=copy.deepcopy(self._execution_target),
         )
 
@@ -367,10 +374,11 @@ class PanelBridge(QObject):
         self._suppress_next_scene_dirty_recheck = (
             snapshot.suppress_next_scene_dirty_recheck
         )
-        self._material_context = snapshot.material_context.clone()
+        self._material_package_ref = snapshot.material_package_ref
+        self._material_run_selection = snapshot.material_run_selection
         self._material_preview_snapshot = snapshot.material_preview_snapshot
-        self._material_batch_selection = snapshot.material_batch_selection.clone()
-        self._suspended_material_states = copy.deepcopy(
+        self._material_issues = snapshot.material_issues
+        self._suspended_material_states = _clone_suspended_material_states(
             snapshot.suspended_material_states
         )
         self._execution_target = copy.deepcopy(snapshot.execution_target)
@@ -387,11 +395,10 @@ class PanelBridge(QObject):
         self.template_changed.emit(self._current_template)
         self.scene_dirty_changed.emit(self._scene_dirty)
         self.template_dirty_changed.emit(self._template_dirty)
-        self.material_context_changed.emit(self._material_context.clone())
+        self.material_package_ref_changed.emit(self._material_package_ref)
+        self.material_run_selection_changed.emit(self._material_run_selection)
         self.material_preview_snapshot_changed.emit(self._material_preview_snapshot)
-        self.material_batch_selection_changed.emit(
-            self._material_batch_selection.clone()
-        )
+        self.material_issues_changed.emit(self._material_issues)
         self.execution_target_changed.emit(self._execution_target)
 
     def commit_pending_work_mode_transition(self) -> None:
@@ -725,13 +732,24 @@ class PanelBridge(QObject):
     ) -> _BridgeStateSnapshot:
         """Replace transaction-owned fields while preserving external state."""
 
-        merged = copy.deepcopy(preserved)
+        # Snapshots already own deep copies of mutable scene/template state.
+        # A shallow dataclass copy also preserves the identity of frozen V1
+        # material values, whose mapping proxies intentionally reject deepcopy.
+        merged = copy.copy(preserved)
         for field_name in owned_fields:
-            setattr(
-                merged,
-                field_name,
-                copy.deepcopy(getattr(owned_source, field_name)),
-            )
+            value = getattr(owned_source, field_name)
+            if field_name in {
+                "material_package_ref",
+                "material_run_selection",
+                "material_preview_snapshot",
+                "material_issues",
+            }:
+                cloned = value
+            elif field_name == "suspended_material_states":
+                cloned = _clone_suspended_material_states(value)
+            else:
+                cloned = copy.deepcopy(value)
+            setattr(merged, field_name, cloned)
         return merged
 
     @staticmethod
@@ -790,7 +808,7 @@ class PanelBridge(QObject):
                 if before[-overlap:] == after[:overlap]:
                     additions = after[overlap:]
                     break
-        return tuple(copy.deepcopy(item) for item in additions)
+        return tuple(dict(item) for item in additions)
 
     def _publish_scene_publication_diff(
         self,
@@ -802,25 +820,26 @@ class PanelBridge(QObject):
         """Emit a minimal diff for state that is already internally coherent."""
 
         emitted = False
-        if before.material_context != after.material_context:
-            self.material_context_changed.emit(after.material_context.clone())
+        if before.material_package_ref != after.material_package_ref:
+            self.material_package_ref_changed.emit(after.material_package_ref)
+            emitted = True
+        if before.material_run_selection != after.material_run_selection:
+            self.material_run_selection_changed.emit(after.material_run_selection)
             emitted = True
         if before.material_preview_snapshot != after.material_preview_snapshot:
             self.material_preview_snapshot_changed.emit(
                 after.material_preview_snapshot
             )
             emitted = True
-        if before.material_batch_selection != after.material_batch_selection:
-            self.material_batch_selection_changed.emit(
-                after.material_batch_selection.clone()
-            )
+        if before.material_issues != after.material_issues:
+            self.material_issues_changed.emit(after.material_issues)
             emitted = True
         for evidence in suspension_evidence:
             self.material_scope_suspended.emit(
                 {
                     key: copy.deepcopy(value)
                     for key, value in evidence.items()
-                    if key not in {"context", "batch_selection"}
+                    if key not in {"package_ref", "selection", "preview", "issues"}
                 }
             )
             emitted = True
@@ -913,9 +932,19 @@ class PanelBridge(QObject):
         updated_switches.update(changed)
         updated.module_switches = updated_switches
         self._current_scene = updated
-        self.mark_scene_dirty(recheck=False)
-        self.scene_changed.emit(updated)
+        previous_reason = self._scene_change_reason
+        self._scene_change_reason = "module_switches"
+        try:
+            self.mark_scene_dirty(recheck=False)
+            self.scene_changed.emit(updated)
+        finally:
+            self._scene_change_reason = previous_reason
         return True
+
+    def scene_change_reason(self) -> str:
+        """Return the semantic reason during a synchronous scene notification."""
+
+        return str(self._scene_change_reason or "")
 
     def is_scene_dirty(self) -> bool:
         return self._scene_dirty
@@ -1113,10 +1142,55 @@ class PanelBridge(QObject):
     def clear_template_dirty(self, *, emit_signal: bool = True) -> None:
         self.set_template_dirty(False, emit_signal=emit_signal)
 
-    def current_material_context(self) -> MaterialExecutionContext:
-        return self._material_context.clone()
+    def current_material_package_ref(self) -> MaterialPackageRef | None:
+        return self._material_package_ref
 
-    def current_material_preview_snapshot(self) -> MaterialPreviewSnapshot:
+    def set_current_material_package_ref(
+        self,
+        package_ref: MaterialPackageRef | None,
+        *,
+        emit_signal: bool = True,
+    ) -> bool:
+        if package_ref is not None and not isinstance(
+            package_ref,
+            MaterialPackageRef,
+        ):
+            raise TypeError("material_package_ref_type_invalid")
+        if package_ref == self._material_package_ref:
+            return False
+        self._material_package_ref = package_ref
+        if emit_signal:
+            self.material_package_ref_changed.emit(package_ref)
+        return True
+
+    def current_material_run_selection(self) -> MaterialRunSelection | None:
+        return self._material_run_selection
+
+    def set_current_material_run_selection(
+        self,
+        selection: MaterialRunSelection | None,
+        *,
+        emit_signal: bool = True,
+    ) -> bool:
+        if selection is not None and not isinstance(
+            selection,
+            MaterialRunSelection,
+        ):
+            raise TypeError("material_run_selection_type_invalid")
+        if selection == self._material_run_selection:
+            return False
+        self._material_run_selection = selection
+        if selection is not None:
+            self._material_package_ref = selection.package_ref
+        if emit_signal:
+            if selection is not None:
+                self.material_package_ref_changed.emit(selection.package_ref)
+            self.material_run_selection_changed.emit(selection)
+        return True
+
+    def current_material_preview_snapshot(
+        self,
+    ) -> MaterialPreviewSnapshot | None:
         return self._material_preview_snapshot
 
     def set_current_material_preview_snapshot(
@@ -1125,80 +1199,43 @@ class PanelBridge(QObject):
         *,
         emit_signal: bool = True,
     ) -> bool:
-        next_snapshot = (
-            snapshot
-            if isinstance(snapshot, MaterialPreviewSnapshot)
-            else MaterialPreviewSnapshot()
-        )
-        if next_snapshot == self._material_preview_snapshot:
+        if snapshot is not None and not isinstance(
+            snapshot,
+            MaterialPreviewSnapshot,
+        ):
+            raise TypeError("material_preview_snapshot_type_invalid")
+        if snapshot == self._material_preview_snapshot:
             return False
-        self._material_preview_snapshot = next_snapshot
+        self._material_preview_snapshot = snapshot
         if emit_signal:
-            self.material_preview_snapshot_changed.emit(next_snapshot)
+            self.material_preview_snapshot_changed.emit(snapshot)
         return True
 
-    def set_current_material_context(
+    def current_material_issues(self) -> tuple[MaterialIssue, ...]:
+        return self._material_issues
+
+    def set_current_material_issues(
         self,
-        context: MaterialExecutionContext | None,
+        issues: tuple[MaterialIssue, ...] | list[MaterialIssue],
         *,
         emit_signal: bool = True,
     ) -> bool:
-        next_context = (
-            context.clone()
-            if isinstance(context, MaterialExecutionContext)
-            else MaterialExecutionContext()
-        )
-        if next_context == self._material_context:
+        normalized = tuple(issues)
+        if any(not isinstance(item, MaterialIssue) for item in normalized):
+            raise TypeError("material_issues_type_invalid")
+        if normalized == self._material_issues:
             return False
-        self._material_context = next_context
-        if (
-            self._current_work_mode.mode_id == "official"
-            and self._current_official_document_type_source == "default"
-        ):
-            imported_type = _official_document_type_from_material_context(next_context)
-            if imported_type:
-                self.set_current_official_document_type_id(
-                    imported_type,
-                    source="material_import",
-                    emit_signal=emit_signal,
-                )
-        self._refresh_execution_target(emit_signal=emit_signal)
+        self._material_issues = normalized
         if emit_signal:
-            self.material_context_changed.emit(self._material_context.clone())
+            self.material_issues_changed.emit(normalized)
         return True
-
-    def current_material_batch_selection(self) -> MaterialBatchSelection:
-        return self._material_batch_selection.clone()
 
     def suspended_material_states(self) -> tuple[dict[str, object], ...]:
-        """Return cloned evidence for material state detached by scope changes."""
+        """Return evidence for package state detached by a scope change."""
 
         return tuple(
-            {
-                **item,
-                "context": item["context"].clone(),
-                "batch_selection": item["batch_selection"].clone(),
-            }
-            for item in self._suspended_material_states
+            _clone_suspended_material_states(self._suspended_material_states)
         )
-
-    def set_current_material_batch_selection(
-        self,
-        selection: MaterialBatchSelection | None,
-        *,
-        emit_signal: bool = True,
-    ) -> bool:
-        next_selection = (
-            selection.clone()
-            if isinstance(selection, MaterialBatchSelection)
-            else MaterialBatchSelection()
-        )
-        if next_selection == self._material_batch_selection:
-            return False
-        self._material_batch_selection = next_selection
-        if emit_signal:
-            self.material_batch_selection_changed.emit(self._material_batch_selection.clone())
-        return True
 
     def _suspend_incompatible_material_state(
         self,
@@ -1210,18 +1247,12 @@ class PanelBridge(QObject):
         previous_scene_id: str,
         emit_signal: bool,
     ) -> bool:
-        context_incompatible = not self._material_context.is_compatible_with(
-            mode_id=mode_id,
-            scene_id=scene_id,
-        )
-        batch_incompatible = not self._material_batch_selection.is_compatible_with(
-            mode_id=mode_id,
-            scene_id=scene_id,
-        )
-        preview_incompatible = (
-            not self._material_preview_snapshot.is_compatible_with(mode_id=mode_id)
-        )
-        if not context_incompatible and not batch_incompatible and not preview_incompatible:
+        if (
+            self._material_package_ref is None
+            and self._material_run_selection is None
+            and self._material_preview_snapshot is None
+            and not self._material_issues
+        ):
             return False
 
         evidence = {
@@ -1230,34 +1261,28 @@ class PanelBridge(QObject):
             "previous_scene_id": str(previous_scene_id or ""),
             "next_mode_id": str(mode_id or ""),
             "next_scene_id": str(scene_id or ""),
-            "context": self._material_context.clone(),
-            "batch_selection": self._material_batch_selection.clone(),
+            "package_ref": self._material_package_ref,
+            "selection": self._material_run_selection,
+            "preview": self._material_preview_snapshot,
+            "issues": self._material_issues,
         }
         self._suspended_material_states.append(evidence)
         if len(self._suspended_material_states) > 20:
             self._suspended_material_states = self._suspended_material_states[-20:]
-        if context_incompatible:
-            self._material_context = MaterialExecutionContext()
-        if preview_incompatible:
-            self._material_preview_snapshot = MaterialPreviewSnapshot()
-        if batch_incompatible:
-            self._material_batch_selection = MaterialBatchSelection()
+        self._material_package_ref = None
+        self._material_run_selection = None
+        self._material_preview_snapshot = None
+        self._material_issues = ()
         if emit_signal:
-            if context_incompatible:
-                self.material_context_changed.emit(self._material_context.clone())
-            if preview_incompatible:
-                self.material_preview_snapshot_changed.emit(
-                    self._material_preview_snapshot
-                )
-            if batch_incompatible:
-                self.material_batch_selection_changed.emit(
-                    self._material_batch_selection.clone()
-                )
+            self.material_package_ref_changed.emit(None)
+            self.material_run_selection_changed.emit(None)
+            self.material_preview_snapshot_changed.emit(None)
+            self.material_issues_changed.emit(())
             self.material_scope_suspended.emit(
                 {
                     key: value
                     for key, value in evidence.items()
-                    if key not in {"context", "batch_selection"}
+                    if key not in {"package_ref", "selection", "preview", "issues"}
                 }
             )
         return True

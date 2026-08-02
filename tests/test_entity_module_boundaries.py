@@ -7,57 +7,41 @@ import sys
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ENTITY_MODULES = (
-    PROJECT_ROOT / "src/config/entity.py",
-    PROJECT_ROOT / "src/config/entity_models.py",
-    PROJECT_ROOT / "src/config/entity_archive_codec.py",
-    PROJECT_ROOT / "src/config/entity_archive_validation.py",
-    PROJECT_ROOT / "src/config/entity_archive_wire_contracts.py",
-    PROJECT_ROOT / "src/config/entity_wire_validation.py",
-    PROJECT_ROOT / "src/config/entity_timeline_wire_validation.py",
-    PROJECT_ROOT / "src/config/entity_bundle.py",
-    PROJECT_ROOT / "src/config/entity_bundle_preflight.py",
-    PROJECT_ROOT / "src/config/entity_artifact_gateway.py",
+MATERIAL_DOMAIN_MODULES = tuple(
+    sorted((PROJECT_ROOT / "src/domain/materials").glob("*.py"))
 )
 
 
-def test_entity_modules_have_no_static_config_to_services_import() -> None:
+def test_material_domain_has_no_static_ui_or_service_import() -> None:
     violations: list[str] = []
-    for path in ENTITY_MODULES:
+    for path in MATERIAL_DOMAIN_MODULES:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                module = str(node.module or "")
+            modules = (
+                (str(node.module or ""),)
+                if isinstance(node, ast.ImportFrom)
+                else tuple(alias.name for alias in node.names)
+                if isinstance(node, ast.Import)
+                else ()
+            )
+            for module in modules:
+                if module == "src.ui" or module.startswith("src.ui."):
+                    violations.append(f"{path.name}:{node.lineno}:{module}")
                 if module == "src.services" or module.startswith("src.services."):
                     violations.append(f"{path.name}:{node.lineno}:{module}")
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name == "src.services" or alias.name.startswith(
-                        "src.services."
-                    ):
-                        violations.append(
-                            f"{path.name}:{node.lineno}:{alias.name}"
-                        )
+    assert MATERIAL_DOMAIN_MODULES
     assert violations == []
 
 
-def test_entity_facade_model_import_does_not_load_io_or_service_layers() -> None:
+def test_material_domain_facade_import_does_not_load_storage_or_ui() -> None:
     script = """
 import sys
-import src.config.entity as entity
-assert entity.EntityProfile.__module__ == 'src.config.entity_models'
-for name in (
-    'src.config.entity_archive_codec',
-    'src.config.entity_archive_validation',
-    'src.config.entity_archive_wire_contracts',
-    'src.config.entity_wire_validation',
-    'src.config.entity_timeline_wire_validation',
-    'src.config.entity_bundle',
-    'src.config.entity_bundle_preflight',
-    'src.config.library',
-    'src.services.material_content.artifact_repository',
-):
-    assert name not in sys.modules, name
+import src.domain.materials as materials
+assert materials.MaterialPackage.__module__ == 'src.domain.materials.model'
+for name in tuple(sys.modules):
+    assert not name.startswith('src.ui'), name
+    assert not name.startswith('src.services'), name
+    assert name != 'src.config.material_package_library', name
 """
     completed = subprocess.run(
         [sys.executable, "-c", script],
@@ -69,38 +53,22 @@ for name in (
     assert completed.returncode == 0, completed.stderr or completed.stdout
 
 
-def test_bundle_without_content_artifacts_does_not_load_content_service() -> None:
-    script = """
-import sys
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from src.config.entity import EntityArchive, save_entity_archive_bundle
-with TemporaryDirectory() as temporary_directory:
-    save_entity_archive_bundle(
-        EntityArchive(archive_id='empty'),
-        Path(temporary_directory) / 'package',
+def test_entity_fill_consumes_resolved_data_without_legacy_entity_archive() -> None:
+    path = PROJECT_ROOT / "src/modules/fill/entity_fill.py"
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    imported_modules = {
+        str(node.module or "")
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+    }
+    imported_modules.update(
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
     )
-assert 'src.services.material_content.artifact_repository' not in sys.modules
-"""
-    completed = subprocess.run(
-        [sys.executable, "-c", script],
-        cwd=PROJECT_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert completed.returncode == 0, completed.stderr or completed.stdout
 
-
-def test_entity_facade_delegates_io_to_single_implementation_modules() -> None:
-    from src.config import entity
-
-    assert entity.load_entity_archive.__module__ == (
-        "src.config.entity_archive_codec"
-    )
-    assert entity.save_entity_archive.__module__ == (
-        "src.config.entity_archive_codec"
-    )
-    assert entity.save_entity_archive_bundle.__module__ == (
-        "src.config.entity_bundle"
-    )
+    assert "entity_data = config.entity_data" in source
+    assert not any(module.startswith("src.config.entity") for module in imported_modules)
+    assert not any(module.startswith("src.services") for module in imported_modules)

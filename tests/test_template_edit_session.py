@@ -19,7 +19,6 @@ from src.ui.main_window import MainWindow
 from src.ui.panels.scene_panel import ScenePanel
 from src.ui.panels.template_caption_detail import CaptionDetail
 from src.ui.panels.template_elements_detail import ElementsDetail
-from src.ui.panels.template_formula_detail import FormulaDetail
 from src.ui.panels.template_other_detail import OtherDetail
 from src.ui.panels.template_panel import (
     TEMPLATE_EDIT_CANCEL,
@@ -31,16 +30,16 @@ from src.ui.panels.template_reference_detail import ReferenceDetail
 from src.ui.panels.template_style_detail import StyleDetail
 from src.ui.panels.template_table_detail import TableCaptionDetail
 from src.ui.panels.workbench import WorkbenchPanel
-from src.ui.template_edit_session import (
-    TemplateDraftCollisionError,
-    TemplateDraftStore,
-    TemplateEditSession,
-)
 from src.ui.template_draft_save_coordinator import (
     OVERWRITE_EXISTING_TARGET,
     TemplateDraftSaveCoordinator,
     TemplateSavePreparationCancelled,
     TemplateSaveRevisionChanged,
+)
+from src.ui.template_edit_session import (
+    TemplateDraftCollisionError,
+    TemplateDraftStore,
+    TemplateEditSession,
 )
 
 
@@ -68,7 +67,10 @@ def test_template_edit_session_separates_draft_commit_and_discard(tmp_path):
     session.draft.page_setup.margin.top_cm += 1.0
 
     assert session.is_dirty() is True
-    assert session.committed_copy().page_setup.margin.top_cm != session.draft.page_setup.margin.top_cm
+    assert (
+        session.committed_copy().page_setup.margin.top_cm
+        != session.draft.page_setup.margin.top_cm
+    )
 
     restored = session.discard()
 
@@ -237,8 +239,14 @@ def test_external_source_change_blocks_save_and_preserves_draft(tmp_path, monkey
         assert panel._save_current_template() is False
         assert bridge.is_template_dirty() is True
         assert panel._current_template.page_setup.margin.top_cm == draft_margin
-        assert load_template(source).page_setup.margin.top_cm == external.page_setup.margin.top_cm
-        assert bridge.current_template().page_setup.margin.top_cm == source_template.page_setup.margin.top_cm
+        assert (
+            load_template(source).page_setup.margin.top_cm
+            == external.page_setup.margin.top_cm
+        )
+        assert (
+            bridge.current_template().page_setup.margin.top_cm
+            == source_template.page_setup.margin.top_cm
+        )
     finally:
         panel.close()
 
@@ -371,8 +379,13 @@ def test_template_draft_store_restores_independent_draft_after_switching():
 
     assert second_context.session.is_dirty() is False
     assert restored_first is first_context
-    assert restored_first.session.draft.page_setup.margin.top_cm == original_margin + 1.5
-    assert restored_first.session.committed_copy().page_setup.margin.top_cm == original_margin
+    assert (
+        restored_first.session.draft.page_setup.margin.top_cm == original_margin + 1.5
+    )
+    assert (
+        restored_first.session.committed_copy().page_setup.margin.top_cm
+        == original_margin
+    )
     assert store.dirty_contexts() == (first_context,)
 
 
@@ -487,7 +500,7 @@ def test_builtin_template_save_creates_user_copy_without_mutating_source(
     tmp_path,
     monkeypatch,
 ):
-    import src.config.library as library
+    from src.config import library
 
     _app()
     template_dir = tmp_path / "templates"
@@ -577,8 +590,12 @@ def test_template_batch_save_rolls_back_all_targets_on_commit_failure(
 ):
     import src.config.template_save_transaction as transaction
 
-    first_path = save_template(TemplateConfig(name="first saved"), tmp_path / "first.json")
-    second_path = save_template(TemplateConfig(name="second saved"), tmp_path / "second.json")
+    first_path = save_template(
+        TemplateConfig(name="first saved"), tmp_path / "first.json"
+    )
+    second_path = save_template(
+        TemplateConfig(name="second saved"), tmp_path / "second.json"
+    )
     real_replace = os.replace
 
     def fail_second_stage_commit(source, target):
@@ -775,7 +792,6 @@ def test_opening_template_details_is_model_read_only():
         ElementsDetail(scope="toc"),
         CaptionDetail(),
         ReferenceDetail(),
-        FormulaDetail(),
         OtherDetail(),
     )
     try:
@@ -900,7 +916,7 @@ def test_close_flow_has_one_two_phase_protocol_without_legacy_fallback():
         Path("src/ui/main_window.py"),
         Path("src/ui/panels/template_panel.py"),
         Path("src/ui/panels/scene_panel.py"),
-        Path("src/ui/panels/assets/archive_presenter.py"),
+        Path("src/ui/panels/assets_panel.py"),
     )
 
     for path in paths:

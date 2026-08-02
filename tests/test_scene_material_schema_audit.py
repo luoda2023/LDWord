@@ -3,14 +3,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from scripts.verify_scene_matrix_release_gate import (  # noqa: E402
+from scripts.verify_scene_matrix_release_gate import (
     build_scene_matrix_release_gate_payload,
 )
-from src.config.scene_material_schema_audit import (  # noqa: E402
+from src.config.scene_material_schema_audit import (
     audit_scene_material_schema_report,
     build_scene_material_schema_audit_report,
 )
@@ -31,8 +30,8 @@ def test_scene_material_schema_audit_covers_families_packs_and_registry():
     assert payload["counts"]["pack_count"] == 12
     assert payload["counts"]["material_pack_count"] == 10
     assert payload["counts"]["ready_material_pack_count"] == 10
-    assert payload["counts"]["schema_count"] == 22
-    assert payload["counts"]["referenced_schema_count"] == 21
+    assert payload["counts"]["schema_count"] == 23
+    assert payload["counts"]["referenced_schema_count"] == 22
     assert payload["counts"]["registry_only_schema_count"] == 1
     assert payload["counts"]["required_field_count"] == 41
     assert payload["counts"]["required_asset_count"] == 6
@@ -64,9 +63,7 @@ def test_scene_material_schema_audit_covers_families_packs_and_registry():
         "bilingual_terms_v1",
     )
 
-    assert schema_rows["finance_quote_fields_v1"].batch_mode == (
-        "attachment_package"
-    )
+    assert schema_rows["finance_quote_fields_v1"].batch_mode == ("attachment_package")
     assert schema_rows["journal_materials_v1"].status == "registry_only"
 
 
@@ -100,15 +97,9 @@ def test_scene_material_schema_audit_filters_by_pack_family_and_schema():
         "qualification_archive_assets_v1",
     ]
 
-    assert [row.family_id for row in finance.family_rows] == [
-        "finance_quote_documents"
-    ]
-    assert [row.pack_id for row in finance.pack_rows] == [
-        "professional_disclosure"
-    ]
-    assert [row.schema_id for row in finance.schema_rows] == [
-        "finance_quote_fields_v1"
-    ]
+    assert [row.family_id for row in finance.family_rows] == ["finance_quote_documents"]
+    assert [row.pack_id for row in finance.pack_rows] == ["professional_disclosure"]
+    assert [row.schema_id for row in finance.schema_rows] == ["finance_quote_fields_v1"]
 
 
 def test_scene_material_schema_export_script_writes_json(tmp_path):
@@ -154,8 +145,9 @@ def test_scene_material_schema_export_script_prints_markdown():
     )
 
     assert "# Scene MaterialSchema Audit" in result.stdout
-    assert "| Family | Status | Packs | Schemas | Fields | Assets | Batch | Evidence |" in (
-        result.stdout
+    assert (
+        "| Family | Status | Packs | Schemas | Fields | Assets | Batch | Evidence |"
+        in (result.stdout)
     )
     assert "finance_quote_documents" in result.stdout
     assert "finance_quote_fields_v1" in result.stdout
@@ -169,21 +161,15 @@ def test_release_gate_includes_scene_material_schema_audit(tmp_path):
     assert payload["checks"]["scene_material_schema_audit"]["status"] == "passed"
     assert payload["counts"]["scene_material_schema_family_count"] == 15
     assert payload["counts"]["scene_material_schema_material_family_count"] == 15
-    assert (
-        payload["counts"]["scene_material_schema_ready_material_family_count"]
-        == 15
-    )
+    assert payload["counts"]["scene_material_schema_ready_material_family_count"] == 15
     assert payload["counts"]["scene_material_schema_pack_count"] == 12
     assert payload["counts"]["scene_material_schema_material_pack_count"] == 10
     assert payload["counts"]["scene_material_schema_ready_material_pack_count"] == 10
-    assert payload["counts"]["scene_material_schema_schema_count"] == 22
-    assert payload["counts"]["scene_material_schema_referenced_schema_count"] == 21
+    assert payload["counts"]["scene_material_schema_schema_count"] == 23
+    assert payload["counts"]["scene_material_schema_referenced_schema_count"] == 22
     assert payload["counts"]["scene_material_schema_registry_only_schema_count"] == 1
     assert payload["counts"]["scene_material_schema_required_field_count"] == 41
     assert payload["counts"]["scene_material_schema_required_asset_count"] == 6
     assert payload["counts"]["scene_material_schema_issue_count"] == 0
-    assert (
-        payload["counts"]["scene_material_schema_missing_source_evidence_count"]
-        == 0
-    )
+    assert payload["counts"]["scene_material_schema_missing_source_evidence_count"] == 0
     assert payload["scene_material_schema_audit"]["status"] == "passed"

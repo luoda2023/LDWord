@@ -217,7 +217,23 @@ _MEETING_FIELD_BINDINGS = (
 )
 
 
-_RECIPIENT_REQUIRED_PROFILES: frozenset[str] = frozenset()
+_RECIPIENT_REQUIRED_PROFILES: frozenset[str] = frozenset(
+    {
+        "report",
+        "request",
+        "approval",
+        "proposal",
+        "letter",
+    }
+)
+
+_DOCUMENT_NO_CONDITIONAL_PROFILES = frozenset(
+    {
+        "bulletin",
+        "announcement",
+        "notice_public",
+    }
+)
 
 _RECIPIENT_FORBIDDEN_PROFILES = frozenset(
     {
@@ -259,6 +275,11 @@ def _profile_binding_requirement(profile_id: str, field_key: str) -> str:
         if profile_id in _RECIPIENT_FORBIDDEN_PROFILES:
             return "forbidden"
         return "optional"
+    if (
+        field_key == "document_no"
+        and profile_id in _DOCUMENT_NO_CONDITIONAL_PROFILES
+    ):
+        return "conditional"
     if field_key == "attachment_note":
         return (
             "forbidden"
@@ -278,7 +299,7 @@ def _profile_binding_requirement(profile_id: str, field_key: str) -> str:
             return "forbidden"
         return "conditional"
     if field_key in {"security_level", "urgency"}:
-        return "optional"
+        return "forbidden" if profile_id == "order" else "optional"
     if field_key in {"printing_org", "printing_date"} and profile_id in {
         "letter",
         "order",

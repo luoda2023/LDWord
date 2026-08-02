@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.config.resolved import ResolvedConfig
 from src.config.template import StyleConfig
+from src.modules.basic.paragraph_style import ParagraphStyleModule
 from src.modules.table.caption import (
     CaptionInfo,
     CaptionModule,
@@ -115,6 +116,49 @@ def test_caption_style_syncs_spacing_indent_and_font():
     assert ind.get(qn("w:firstLine")) == "0"
     assert para.runs[0].font.size.pt == 10.5
     assert para.runs[0].font.bold is True
+
+
+def test_paragraph_style_preserves_kind_specific_caption_spacing():
+    document = Document()
+    figure = document.add_paragraph("Figure 7 Overview", style="Caption")
+    table = document.add_paragraph("Table 3 Results", style="Caption")
+    config = ResolvedConfig()
+    config.caption.numbering_mode = "global"
+    config.caption.separator = " "
+    config.styles["caption"] = StyleConfig(
+        size_pt=10.5,
+        alignment="center",
+        space_before_pt=6,
+        space_after_pt=6,
+    )
+    config.styles["figure_caption"] = StyleConfig(
+        size_pt=10.5,
+        alignment="center",
+        space_before_pt=6,
+        space_after_pt=12,
+    )
+    config.styles["table_caption"] = StyleConfig(
+        size_pt=10.5,
+        alignment="center",
+        space_before_pt=6,
+        space_after_pt=6,
+    )
+
+    CaptionModule().apply(
+        document,
+        config,
+        ChangeTracker(),
+        PipelineContext(),
+    )
+    ParagraphStyleModule().apply(
+        document,
+        config,
+        ChangeTracker(),
+        PipelineContext(),
+    )
+
+    assert figure.paragraph_format.space_after.pt == 12
+    assert table.paragraph_format.space_after.pt == 6
 
 
 def test_caption_numbering_format_supports_configured_chapter_separator():

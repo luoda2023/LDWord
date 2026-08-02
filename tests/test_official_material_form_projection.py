@@ -74,7 +74,8 @@ def test_contract_and_form_projection_share_requirement_policy():
         binding.field_key: binding.resolved_requirement
         for binding in request.field_bindings
     }
-    assert request_requirements["recipient"] == "optional"
+    assert request_requirements["recipient"] == "required"
+    assert "recipient" in projection.visible_field_keys
     assert set(projection.required_field_keys) == {
         binding.field_key
         for binding in request.field_bindings

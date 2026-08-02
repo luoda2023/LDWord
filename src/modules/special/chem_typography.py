@@ -1,11 +1,4 @@
-"""
-chem_typography — 化学式排版模块
-
-范围控制：
-- 按 scope 限制正文、标题、题注等段落
-- 调用 shared.engine.chem_marks 处理 run 级化学标记
-- 记录 tracker 变更
-"""
+"""Scope-aware chemical typography and sub/superscript recovery."""
 
 from __future__ import annotations
 
@@ -13,9 +6,16 @@ import re
 from typing import TYPE_CHECKING
 
 from src.modules.base import BaseModule, ModuleMeta
-from src.modules.table.table_format import top_level_table_anchor_positions
+from src.modules.table.table_format import (
+    _is_equation_table,
+    top_level_table_anchor_positions,
+)
+from src.shared.engine.chem_marks import (
+    apply_chem_typography_to_paragraph,
+    normalize_explicit_run_font_hints_in_paragraph,
+    paragraph_has_chem_typography_evidence,
+)
 from src.shared.engine.document_scope_runtime import document_scope_allows_paragraph
-from src.shared.engine.chem_marks import apply_chem_typography_to_paragraph
 from src.shared.engine.paragraph_iter import iter_table_cells
 
 if TYPE_CHECKING:
@@ -27,35 +27,21 @@ if TYPE_CHECKING:
 
 
 _SCOPE_KEYS = (
-    'references',
-    'body',
-    'headings',
-    'abstract_cn',
-    'abstract_en',
-    'captions',
-    'tables',
+    "references", "body", "headings", "abstract_cn", "abstract_en", "captions", "tables",
 )
-_HEADING_STYLE_RE = re.compile(
-    r'^(heading\s*\d+|heading|\u6807\u9898)',
-    re.IGNORECASE,
-)
-_CAPTION_RE = re.compile(
-    r'^(?:\u56fe|\u8868|Figure|Table|Fig\.?|Tab\.?)\s*',
-    re.IGNORECASE,
-)
-_BODY_LIKE_SECTIONS = {'body', 'errata', 'acknowledgment', 'appendix', 'resume'}
+_HEADING_STYLE_RE = re.compile(r"^(heading\s*\d+|heading|标题)", re.IGNORECASE)
+_CAPTION_RE = re.compile(r"^(?:图|表|Figure|Table|Fig\.?|Tab\.?)\s*", re.IGNORECASE)
+_BODY_LIKE_SECTIONS = {"body", "errata", "acknowledgment", "appendix", "resume"}
 
 
 class ChemTypographyModule(BaseModule):
-    """化学式排版模块。"""
-
     meta = ModuleMeta(
-        name='chem_typography',
-        description='\u5316\u5b66\u5f0f\u6392\u7248',
-        category='special',
-        requires_config=('chem_typography',),
-        soft_after=('paragraph_style', 'heading_recognition', 'caption'),
-        soft_consumes=('doc_tree', 'heading_map'),
+        name="chem_typography",
+        description="化学式排版",
+        category="special",
+        requires_config=("chem_typography",),
+        soft_after=("paragraph_style", "heading_recognition", "caption"),
+        soft_consumes=("doc_tree", "heading_map"),
     )
 
     def apply(
@@ -65,150 +51,165 @@ class ChemTypographyModule(BaseModule):
         tracker: ChangeTracker,
         context: PipelineContext,
     ) -> None:
-        chem_cfg = config.chem_typography
-        active_scopes = _resolve_active_scopes(chem_cfg)
-        compatibility_global = not active_scopes
-
-        para_count = 0
+        chem_config = config.chem_typography
+        if not bool(chem_config.enabled):
+            return
+        active_scopes = _resolve_active_scopes(chem_config)
+        paragraph_count = 0
         font_chars = 0
         mark_chars = 0
+        hint_count = 0
 
-        for para_index, para in enumerate(doc.paragraphs):
-            text = para.text or ''
-            if not text.strip():
+        for paragraph_index, paragraph in enumerate(doc.paragraphs):
+            if not str(paragraph.text or "").strip():
                 continue
             if not _should_process_paragraph(
-                para_index,
-                para,
+                paragraph_index,
+                paragraph,
                 context=context,
                 active_scopes=active_scopes,
-                compatibility_global=compatibility_global,
             ):
                 continue
+            if not paragraph_has_chem_typography_evidence(
+                paragraph,
+                chem_cfg=chem_config,
+            ):
+                continue
+            hint_count += normalize_explicit_run_font_hints_in_paragraph(
+                paragraph
+            )
+            changed_fonts, changed_marks = apply_chem_typography_to_paragraph(
+                paragraph, chem_cfg=chem_config
+            )
+            if changed_fonts or changed_marks:
+                paragraph_count += 1
+                font_chars += changed_fonts
+                mark_chars += changed_marks
 
-            para_font_chars, para_mark_chars = _apply_chem_typography(para, chem_cfg)
-            if para_font_chars or para_mark_chars:
-                para_count += 1
-                font_chars += para_font_chars
-                mark_chars += para_mark_chars
-
-        if 'tables' in active_scopes:
-            table_positions = top_level_table_anchor_positions(doc)
+        if "tables" in active_scopes:
+            anchors = top_level_table_anchor_positions(doc)
             for table_index, table in enumerate(doc.tables):
-                anchor_index = (
-                    table_positions[table_index]
-                    if table_index < len(table_positions)
-                    else -1
-                )
-                if not document_scope_allows_paragraph(context, anchor_index):
+                # Formula typography owns equation tables. Running chemical
+                # script recovery there can reinterpret equation indices or
+                # charges a second time and was explicitly excluded in 0.2.
+                if _is_equation_table(table):
+                    continue
+                anchor = anchors[table_index] if table_index < len(anchors) else -1
+                if not document_scope_allows_paragraph(context, anchor):
                     continue
                 for _, _, cell in iter_table_cells(table):
-                    for para in cell.paragraphs:
-                        text = para.text or ''
-                        if not text.strip():
+                    for paragraph in cell.paragraphs:
+                        if not str(paragraph.text or "").strip():
                             continue
-                        para_font_chars, para_mark_chars = _apply_chem_typography(para, chem_cfg)
-                        if para_font_chars or para_mark_chars:
-                            para_count += 1
-                            font_chars += para_font_chars
-                            mark_chars += para_mark_chars
+                        if not paragraph_has_chem_typography_evidence(
+                            paragraph,
+                            chem_cfg=chem_config,
+                        ):
+                            continue
+                        hint_count += normalize_explicit_run_font_hints_in_paragraph(
+                            paragraph
+                        )
+                        changed_fonts, changed_marks = apply_chem_typography_to_paragraph(
+                            paragraph, chem_cfg=chem_config
+                        )
+                        if changed_fonts or changed_marks:
+                            paragraph_count += 1
+                            font_chars += changed_fonts
+                            mark_chars += changed_marks
 
-        if para_count:
+        if paragraph_count:
             tracker.record(
                 rule_name=self.meta.name,
-                target=f'{para_count} \u4e2a\u6bb5\u843d',
-                section='global',
-                change_type='format',
-                before='\u5316\u5b66\u5f0f\u683c\u5f0f\u5f02\u5e38',
-                after=(
-                    f'\u5df2\u6062\u590d\u4e0a\u4e0b\u6807 {mark_chars} \u4e2a\u5b57\u7b26\uff0c'
-                    f'\u897f\u6587\u5b57\u4f53 {font_chars} \u4e2a\u5b57\u7b26'
-                ),
+                target=f"{paragraph_count} 个段落",
+                section="global",
+                change_type="format",
+                before="化学式格式异常",
+                after=f"恢复上下角标 {mark_chars} 个字符，西文字体 {font_chars} 个字符",
+            )
+        if hint_count:
+            tracker.record(
+                rule_name=self.meta.name,
+                target=f"{hint_count} 个字体提示",
+                section="global",
+                change_type="format",
+                before="显式西文字体仍带 EastAsia 主题提示",
+                after="仅在选中范围内改为显式字体优先",
             )
 
 
-
-def _resolve_active_scopes(chem_cfg) -> set[str]:
-    raw_scopes = getattr(chem_cfg, 'scopes', {}) or {}
-    active = {key for key in _SCOPE_KEYS if bool(raw_scopes.get(key, False))}
-    if bool(raw_scopes.get('abstract', False)):
-        active.update({'abstract_cn', 'abstract_en'})
+def _resolve_active_scopes(chem_config) -> set[str]:
+    raw = getattr(chem_config, "scopes", {}) or {}
+    active = {key for key in _SCOPE_KEYS if bool(raw.get(key, False))}
+    if bool(raw.get("abstract", False)):
+        active.update({"abstract_cn", "abstract_en"})
     return active
 
 
+def _apply_chem_typography(
+    paragraph: Paragraph,
+    chem_config,
+) -> tuple[int, int]:
+    """Compatibility entry for the migrated paragraph-level engine."""
 
-def _get_section_type(para_index: int, context: PipelineContext) -> str:
-    doc_tree = getattr(context, 'doc_tree', None)
-    if doc_tree is None:
-        return 'body'
-    getter = getattr(doc_tree, 'get_section_for_paragraph', None)
+    return apply_chem_typography_to_paragraph(
+        paragraph,
+        chem_cfg=chem_config,
+    )
+
+
+def _get_section_type(paragraph_index: int, context: PipelineContext) -> str:
+    tree = getattr(context, "doc_tree", None)
+    getter = getattr(tree, "get_section_for_paragraph", None)
     if callable(getter):
         try:
-            section = getter(para_index)
+            section = getter(paragraph_index)
             if section:
                 return str(section)
         except Exception:
             pass
-    return 'body'
+    return "body"
 
 
-
-def _is_heading_paragraph(para_index: int, para: Paragraph, context: PipelineContext) -> bool:
-    heading_map = getattr(context, 'heading_map', None) or {}
-    if para_index in heading_map:
+def _is_heading_paragraph(
+    paragraph_index: int,
+    paragraph: Paragraph,
+    context: PipelineContext,
+) -> bool:
+    if paragraph_index in (getattr(context, "heading_map", None) or {}):
         return True
-
-    doc_tree = getattr(context, 'doc_tree', None)
-    if doc_tree is not None:
-        getter = getattr(doc_tree, 'get_heading_level', None)
-        if callable(getter):
-            try:
-                if getter(para_index) is not None:
-                    return True
-            except Exception:
-                pass
-
-    style = para.style
-    style_name = style.name if style else ''
-    return bool(_HEADING_STYLE_RE.match(style_name or ''))
-
-
-
-def _is_caption_paragraph(para: Paragraph) -> bool:
-    return bool(_CAPTION_RE.match((para.text or '').strip()))
-
+    tree = getattr(context, "doc_tree", None)
+    getter = getattr(tree, "get_heading_level", None)
+    if callable(getter):
+        try:
+            if getter(paragraph_index) is not None:
+                return True
+        except Exception:
+            pass
+    style = paragraph.style
+    return bool(_HEADING_STYLE_RE.match((style.name if style else "") or ""))
 
 
 def _should_process_paragraph(
-    para_index: int,
-    para: Paragraph,
+    paragraph_index: int,
+    paragraph: Paragraph,
     *,
     context: PipelineContext,
     active_scopes: set[str],
-    compatibility_global: bool,
 ) -> bool:
-    if not document_scope_allows_paragraph(context, para_index):
+    if not document_scope_allows_paragraph(context, paragraph_index):
         return False
-    if compatibility_global:
-        return True
-
-    if _is_heading_paragraph(para_index, para, context):
-        return 'headings' in active_scopes
-
-    if _is_caption_paragraph(para):
-        return 'captions' in active_scopes
-
-    section_type = _get_section_type(para_index, context)
-    if section_type == 'references':
-        return 'references' in active_scopes
-    if section_type in {'abstract_cn', 'abstract_en'}:
-        return section_type in active_scopes
-    if section_type in _BODY_LIKE_SECTIONS:
-        return 'body' in active_scopes
+    if _is_heading_paragraph(paragraph_index, paragraph, context):
+        return "headings" in active_scopes
+    if _CAPTION_RE.match(str(paragraph.text or "").strip()):
+        return "captions" in active_scopes
+    section = _get_section_type(paragraph_index, context)
+    if section == "references":
+        return "references" in active_scopes
+    if section in {"abstract_cn", "abstract_en"}:
+        return section in active_scopes
+    if section in _BODY_LIKE_SECTIONS:
+        return "body" in active_scopes
     return False
 
 
-
-def _apply_chem_typography(para: Paragraph, chem_cfg) -> tuple[int, int]:
-    """对段落应用化学式排版。"""
-    return apply_chem_typography_to_paragraph(para, chem_cfg=chem_cfg)
+__all__ = ["ChemTypographyModule", "_apply_chem_typography"]

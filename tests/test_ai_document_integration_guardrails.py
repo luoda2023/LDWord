@@ -60,7 +60,7 @@ def test_provider_presentation_has_one_owner():
 
 
 def test_assets_material_preview_normalization_stays_a_pure_projection():
-    projection_path = "src/ui/panels/assets/material_preview_projection.py"
+    projection_path = "src/application/materials/preview.py"
     projection_source = _source(projection_path)
     projection_tree = ast.parse(projection_source, filename=projection_path)
     imported_modules = {
@@ -78,11 +78,9 @@ def test_assets_material_preview_normalization_stays_a_pure_projection():
     assert not any(module.startswith("src.qt_api") for module in imported_modules)
     assert not any(module.startswith("src.ui") for module in imported_modules)
 
-    presenter_source = _source(
-        "src/ui/panels/assets/section_summary_presenter.py"
-    )
-    assert "build_assets_material_preview_snapshot" in presenter_source
-    assert "build_material_preview_snapshot" not in presenter_source
+    assets_source = _source("src/ui/panels/assets_panel.py")
+    assert "project_material_preview" in assets_source
+    assert "MaterialPreviewSnapshot(" not in assets_source
 
 
 def test_batch_detail_has_no_hidden_compatibility_state_widgets():
@@ -101,11 +99,15 @@ def test_batch_detail_has_no_hidden_compatibility_state_widgets():
         assert retired_name not in source
 
 
-def test_workbench_execution_uses_shared_material_state():
+def test_workbench_execution_uses_canonical_material_selection():
     source = _source("src/ui/panels/workbench/panel_v2.py")
     start_execution = source.split("    def _start_execution(", 1)[1].split(
         "    def _start_batch_execution(", 1
     )[0]
 
-    assert "material_context=self.bridge.current_material_context()" in start_execution
-    assert "_content_fill_detail.material_context()" not in start_execution
+    assert (
+        "selection = self._quick_execution_detail.execution_material_selection()"
+        in start_execution
+    )
+    assert "selection=selection" in start_execution
+    assert "current_material_context()" not in start_execution

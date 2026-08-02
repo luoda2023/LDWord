@@ -2,7 +2,6 @@ import sys
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -35,8 +34,18 @@ def test_scene_parameter_ownership_registry_covers_scene_workspace_fields():
 def test_scene_parameter_ownership_classifies_high_risk_scene_board_parameters():
     assert classify_scene_parameter("input_source_profile.material_schema_id").owner_layer == "material"
     assert classify_scene_parameter("compliance_profile.object_preflight.scan_targets").owner_layer == "scene"
-    assert classify_scene_parameter("formula_convert.output_mode").owner_layer == "scene"
-    assert classify_scene_parameter("formula_style.unify_font").owner_layer == "scene"
+    assert (
+        classify_scene_parameter(
+            "thesis_formula_rules.formula_convert.output_mode"
+        ).owner_layer
+        == "scene"
+    )
+    assert (
+        classify_scene_parameter(
+            "thesis_formula_rules.formula_style.unify_font"
+        ).owner_layer
+        == "scene"
+    )
     assert classify_scene_parameter("watermark.enabled").owner_layer == "scene"
     assert classify_scene_parameter("watermark.text").owner_layer == "scene"
     assert classify_scene_parameter("output.final_docx") is None
@@ -52,7 +61,7 @@ def test_scene_parameter_ownership_classifies_high_risk_scene_board_parameters()
     assert classify_scene_parameter("document_scope").owner_layer == "scene"
     assert classify_scene_parameter("application_boundary") is None
     assert classify_scene_parameter("format_scope") is None
-    assert classify_scene_parameter("default_material_profile_id").owner_layer == "scene"
+    assert classify_scene_parameter("default_material_profile_id") is None
     assert classify_scene_parameter("section_styles") is None
 
 
@@ -71,12 +80,21 @@ def test_template_baselines_are_not_reintroduced_as_scene_compatibility_fields()
 
     assert not hasattr(scene, "output")
 
-    for path in ("table", "header_footer", "toc", "caption", "formula_table"):
+    for path in ("table", "header_footer", "toc", "caption"):
         assert not hasattr(scene, path)
         ownership = classify_scene_parameter(path)
         assert ownership is not None
         assert ownership.owner_layer == "template"
         assert ownership.template_baseline is True
+
+    assert not hasattr(scene, "formula_table")
+    assert classify_scene_parameter("formula_table") is None
+    thesis = SceneWorkspace(mode_id="thesis")
+    assert thesis.thesis_formula_rules is not None
+    assert (
+        classify_scene_parameter("thesis_formula_rules.formula_table").owner_layer
+        == "scene"
+    )
 
     assert audit_scene_parameter_ownership().is_clean
 
@@ -102,18 +120,20 @@ def test_scene_parameter_execution_consumers_have_code_anchors():
 
     assert result.is_clean
     assert declared_consumers == set(anchors)
-    assert anchors["material preflight"][0].source_path == "src/config/material_schema_registry.py"
+    assert anchors["material preflight"][0].source_path == (
+        "src/application/materials/execution.py"
+    )
     assert any(
         anchor.source_path == "src/report_writer.py"
         for anchor in anchors["report writer"]
     )
     assert any(
         anchor.source_path
-        == "src/services/production_runtime/execution_runtime.py"
+        == "src/ui/panels/workbench/execution_session_controller.py"
         for anchor in anchors["batch runner"]
     )
     assert any(
         anchor.source_path
-        == "src/services/production_runtime/batch_reporting.py"
+        == "src/document_batch/recipe.py"
         for anchor in anchors["batch runner"]
     )

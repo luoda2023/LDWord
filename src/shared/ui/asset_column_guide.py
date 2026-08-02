@@ -39,8 +39,11 @@ def resolve_asset_column_metrics(
     # Keep the navigational labels available at ordinary laptop/DPI widths.
     # The optional source column is what collapses first; hiding the complete
     # guide below 900px made every remaining column lose its meaning as well.
-    guide_visible = width >= 680
-    source_visible = width >= 900
+    guide_visible = width >= 640
+    # Keep the source column available at common 125%/150% Windows scaling.
+    # A 900 logical-pixel cutoff collapses it even when the physical detail
+    # pane is comfortably wider than 1200 pixels.
+    source_visible = width >= 680
 
     if source_visible:
         flexible = max(
@@ -54,13 +57,31 @@ def resolve_asset_column_metrics(
         )
         token_width = max(160, min(250, round(flexible * 0.25)))
         name_width = max(180, min(280, round(flexible * 0.28)))
-        minimum_source = 140
-        overflow = max(0, token_width + name_width + minimum_source - flexible)
+        # Reserve a usable elided source path even on 150% Windows scaling.
+        # Shrink token/name columns first instead of dropping the source
+        # column from attachment and image rows altogether.
+        minimum_source = 96
+        named_capacity = max(0, flexible - minimum_source)
+        overflow = max(0, token_width + name_width - named_capacity)
         if overflow:
-            trim_token = min(overflow // 2, max(0, token_width - 130))
+            trim_token = min(
+                (overflow + 1) // 2,
+                max(0, token_width - 100),
+            )
             token_width -= trim_token
             overflow -= trim_token
-            name_width -= min(overflow, max(0, name_width - 150))
+            trim_name = min(
+                overflow,
+                max(0, name_width - 110),
+            )
+            name_width -= trim_name
+            overflow -= trim_name
+            if overflow:
+                trim_token = min(overflow, token_width)
+                token_width -= trim_token
+                overflow -= trim_token
+            if overflow:
+                name_width = max(0, name_width - overflow)
     else:
         flexible = max(
             0,

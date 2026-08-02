@@ -1,12 +1,11 @@
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.config.loader import load_template, save_template
-from src.config.template import TemplateConfig
+from src.config.template import SectionMarginConfig, TemplateConfig
 from src.qt_api import QApplication, Qt
 from src.shared.ui import DashedSeparator, SummaryGrid
 from src.shared.ui.form_row import FormRow
@@ -56,21 +55,227 @@ def test_page_setup_detail_syncs_widget_values_from_template():
         assert summary_items["margin_gutter"].icon_name == "scan"
         assert summary_items["header_footer"].icon_name == "panel-top"
         assert detail._summary_grid.value_for("paper_layout") == "A3 / 横向"
-        assert detail._summary_grid.detail_for("paper_layout") == "分节 下一页分节"
+        assert (
+            detail._summary_grid.detail_for("paper_layout")
+            == "模板纸张 / 保留源方向 / 语义分节"
+        )
         assert summary_items["paper_layout"].column_span == 4
         assert summary_items["margin_gutter"].label == "页边距"
         assert summary_items["margin_gutter"].column_span == 4
         assert detail._summary_grid.value_for("margin_gutter") == "上下 2.5/3.8 cm"
-        assert detail._summary_grid.detail_for("margin_gutter") == "左右 3.2/3.2 cm / 装订 0.8 cm"
+        assert (
+            detail._summary_grid.detail_for("margin_gutter")
+            == "左右 3.2/3.2 cm / 装订 0.8 cm / 模板边距"
+        )
         assert "装订线 0.8 cm" in summary_items["margin_gutter"].tooltip
         assert summary_items["header_footer"].label == "页眉页脚"
         assert summary_items["header_footer"].column_span == 4
         assert detail._summary_grid.value_for("header_footer") == "页眉/页脚 1.6/3 cm"
-        assert detail._summary_grid.detail_for("header_footer") == "距离页面边缘"
+        assert detail._summary_grid.detail_for("header_footer") == "链接按语义重建"
         assert summary_items["margin_gutter"].detail_emphasis is True
         assert summary_items["header_footer"].detail_emphasis is True
     finally:
         detail.close()
+
+
+def test_page_setup_detail_round_trips_all_section_layout_policies():
+    app = _app()
+    detail = PageSetupDetail()
+    template = TemplateConfig()
+    template.page_setup.paper_size_mode = "per_section"
+    template.page_setup.paper_size_by_section = {
+        "body": "A4",
+        "appendix": "A3",
+    }
+    template.page_setup.orientation_mode = "per_section"
+    template.page_setup.orientation_by_section = {
+        "body": "portrait",
+        "appendix": "landscape",
+    }
+    template.page_setup.margin_mode = "per_section"
+    template.page_setup.margin_by_section = {
+        "appendix": SectionMarginConfig(
+            top_cm=2.0,
+            bottom_cm=2.1,
+            left_cm=2.2,
+            right_cm=2.3,
+            gutter_cm=0.4,
+            header_distance_cm=0.8,
+            footer_distance_cm=0.9,
+        )
+    }
+    template.section.boundary_mode = "normalize_all"
+    template.section.section_break_type = "oddPage"
+    template.section.empty_break_policy = "remove_proven_redundant"
+    template.section.caption_table_break_policy = "remove_proven_redundant"
+    template.section.header_footer_link_mode = "preserve_source"
+
+    try:
+        detail.set_template(template)
+
+        assert detail._paper_mode_combo.currentData() == "per_section"
+        assert detail._paper_by_section_edit.isEnabled() is True
+        assert detail._paper_by_section_edit.text() == "body=A4, appendix=A3"
+        assert detail._orientation_mode_combo.currentData() == "per_section"
+        assert detail._orientation_by_section_edit.isEnabled() is True
+        assert detail._orientation_by_section_edit.text() == (
+            "body=portrait, appendix=landscape"
+        )
+        assert detail._margin_mode_combo.currentData() == "per_section"
+        assert detail._margin_by_section_edit.isEnabled() is True
+        assert detail._margin_by_section_edit.text() == (
+            "appendix=2,2.1,2.2,2.3,0.4,0.8,0.9"
+        )
+        assert detail._section_break_combo.currentData() == "oddPage"
+        assert detail._empty_break_policy_combo.currentData() == (
+            "remove_proven_redundant"
+        )
+        assert detail._caption_table_break_policy_combo.currentData() == (
+            "remove_proven_redundant"
+        )
+        assert detail._header_footer_link_mode_combo.currentData() == (
+            "preserve_source"
+        )
+
+        detail._paper_by_section_edit.setText("body=B5, 2=A3")
+        detail._orientation_by_section_edit.setText(
+            "body=landscape, 2=portrait"
+        )
+        detail._margin_by_section_edit.setText(
+            "2=1,1.1,1.2,1.3,0.2,0.6,0.7"
+        )
+        detail._header_footer_link_mode_combo.setCurrentIndex(
+            detail._header_footer_link_mode_combo.findData("semantic_rebuild")
+        )
+        detail._section_break_combo.setCurrentIndex(
+            detail._section_break_combo.findData("evenPage")
+        )
+        app.processEvents()
+
+        assert template.page_setup.paper_size_by_section == {
+            "body": "B5",
+            "2": "A3",
+        }
+        assert template.page_setup.orientation_by_section == {
+            "body": "landscape",
+            "2": "portrait",
+        }
+        assert template.page_setup.margin_by_section["2"] == SectionMarginConfig(
+            top_cm=1.0,
+            bottom_cm=1.1,
+            left_cm=1.2,
+            right_cm=1.3,
+            gutter_cm=0.2,
+            header_distance_cm=0.6,
+            footer_distance_cm=0.7,
+        )
+        assert template.section.header_footer_link_mode == "semantic_rebuild"
+        assert template.section.section_break_type == "evenPage"
+        assert detail.focus_navigation_field(
+            "template.page_setup.orientation_by_section"
+        )
+        assert detail.focus_navigation_field(
+            "template.page_setup.paper_size_by_section"
+        )
+        assert detail.focus_navigation_field(
+            "template.page_setup.margin_by_section"
+        )
+        assert detail.focus_navigation_field(
+            "template.section.header_footer_link_mode"
+        )
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_page_setup_detail_blocks_save_for_invalid_or_empty_per_section_map():
+    app = _app()
+    detail = PageSetupDetail()
+    template = TemplateConfig()
+
+    try:
+        detail.set_template(template)
+        detail.set_save_enabled(True)
+        detail._paper_mode_combo.setCurrentIndex(
+            detail._paper_mode_combo.findData("per_section")
+        )
+        app.processEvents()
+
+        assert "至少填写一个" in detail._validation_alert.message()
+        assert detail._save_btn.isEnabled() is False
+
+        detail._paper_by_section_edit.setText("appendix=TABLOID")
+        app.processEvents()
+        assert "纸张必须是" in detail._validation_alert.message()
+        assert detail._save_btn.isEnabled() is False
+
+        detail._paper_by_section_edit.setText("appendix=A3")
+        detail._margin_mode_combo.setCurrentIndex(
+            detail._margin_mode_combo.findData("per_section")
+        )
+        app.processEvents()
+        assert "至少填写一个" in detail._validation_alert.message()
+        assert detail._save_btn.isEnabled() is False
+
+        detail._margin_by_section_edit.setText("appendix=2,2,2")
+        app.processEvents()
+        assert "必须填写 7 个数值" in detail._validation_alert.message()
+        assert detail._save_btn.isEnabled() is False
+
+        detail._margin_by_section_edit.setText("appendix=2,2,2,2,0,0.8,0.8")
+        detail._orientation_mode_combo.setCurrentIndex(
+            detail._orientation_mode_combo.findData("per_section")
+        )
+        app.processEvents()
+
+        assert detail._validation_alert.isHidden() is False
+        assert "至少填写一个" in detail._validation_alert.message()
+        assert detail._save_btn.isEnabled() is False
+
+        detail._orientation_by_section_edit.setText("appendix=sideways")
+        app.processEvents()
+        assert "portrait 或 landscape" in detail._validation_alert.message()
+        assert detail._save_btn.isEnabled() is False
+
+        detail._orientation_by_section_edit.setText("appendix=landscape")
+        app.processEvents()
+        assert template.page_setup.orientation_by_section == {
+            "appendix": "landscape"
+        }
+        assert detail._save_btn.isEnabled() is True
+    finally:
+        detail.close()
+        app.processEvents()
+
+
+def test_per_section_page_layout_survives_strict_save_load(tmp_path):
+    template = TemplateConfig()
+    template.page_setup.paper_size_mode = "per_section"
+    template.page_setup.paper_size_by_section = {"appendix": "A3"}
+    template.page_setup.orientation_mode = "per_section"
+    template.page_setup.orientation_by_section = {"appendix": "landscape"}
+    template.page_setup.margin_mode = "per_section"
+    template.page_setup.margin_by_section = {
+        "appendix": SectionMarginConfig(
+            top_cm=2.0,
+            bottom_cm=2.1,
+            left_cm=2.2,
+            right_cm=2.3,
+            gutter_cm=0.4,
+            header_distance_cm=0.8,
+            footer_distance_cm=0.9,
+        )
+    }
+    target = tmp_path / "section-layout.json"
+
+    save_template(template, target)
+    reloaded = load_template(target)
+
+    assert reloaded == template
+    assert isinstance(
+        reloaded.page_setup.margin_by_section["appendix"],
+        SectionMarginConfig,
+    )
 
 
 def test_page_setup_detail_summary_tiles_prefer_single_desktop_row():

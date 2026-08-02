@@ -157,6 +157,27 @@ def test_insert_move_and_remove_are_incremental_and_update_indexes(qapp) -> None
     assert missing.retained == ("c", "b")
 
 
+def test_default_disposal_hides_widget_before_native_detach(qapp) -> None:
+    container = QWidget()
+    layout = QVBoxLayout(container)
+    controller = KeyedWidgetListController[_Row, str](
+        layout=layout,
+        create_widget=lambda item: QLabel(item.label, container),
+        key=lambda item: item.key,
+    )
+    controller.reconcile([_Row("a", "A")])
+    removed_widget = controller.widget_for("a")
+    assert removed_widget is not None
+    container.show()
+    qapp.processEvents()
+    assert removed_widget.isVisible()
+
+    controller.remove("a")
+
+    assert removed_widget.isHidden()
+    assert removed_widget.parent() is None
+
+
 def test_reconcile_validates_all_keys_before_mutating_current_widgets(qapp) -> None:
     container = QWidget()
     layout = QVBoxLayout(container)

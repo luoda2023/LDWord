@@ -305,6 +305,7 @@ class KeyedWidgetListController(Generic[ItemT, KeyT]):
 
     @staticmethod
     def _default_dispose_widget(widget: QWidget) -> None:
+        widget.hide()
         widget.setParent(None)
         widget.deleteLater()
 

@@ -11,10 +11,14 @@ from src.assistant.application.content_generation_service import (
 )
 from src.assistant.contracts.document_plan import DocumentPlan
 from src.assistant.contracts.execution import ExecutionApproval, PreflightReceipt
-from src.assistant.contracts.runtime import AssistantTurnRequest
+from src.assistant.contracts.runtime import (
+    TURN_FAILED,
+    AssistantRuntimeResult,
+    AssistantTurnRequest,
+)
 from src.assistant.runtime.cancellation import AssistantCancellationToken
 from src.assistant.runtime.turn_runner import AssistantTurnRunner
-from src.config.material_context import MaterialExecutionContext
+from src.application.materials.execution import ExecutionMaterialSnapshot
 from src.qt_api import QObject, Signal
 
 
@@ -52,11 +56,28 @@ class AssistantTurnWorker(QObject):
         return not thread.is_alive()
 
     def _run(self) -> None:
-        result = self.runner.run(
-            self.request,
-            emit=self.event_received.emit,
-            cancellation=self.cancellation,
-        )
+        try:
+            result = self.runner.run(
+                self.request,
+                emit=self.event_received.emit,
+                cancellation=self.cancellation,
+            )
+        except Exception as exc:
+            # Workspace/prompt/baseline I/O happens before provider streaming
+            # and may otherwise terminate the daemon thread without a finished
+            # signal, leaving the composer permanently busy.
+            result = AssistantRuntimeResult(
+                status=TURN_FAILED,
+                visible_text="",
+                provider_audit={
+                    "provider_profile_id": self.request.provider_profile_id,
+                    "model_id": self.request.model_id,
+                },
+                error={
+                    "category": "internal",
+                    "message": str(exc) or type(exc).__name__,
+                },
+            )
         self.finished.emit(result)
 
 
@@ -70,17 +91,17 @@ class PreflightWorker(QObject):
         *,
         session_id: str,
         plan: DocumentPlan,
-        material_context: MaterialExecutionContext | None = None,
+        material_snapshot: ExecutionMaterialSnapshot | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.controller = controller
         self.session_id = session_id
         self.plan = plan
-        self.material_context = (
-            material_context.clone()
-            if isinstance(material_context, MaterialExecutionContext)
-            else MaterialExecutionContext()
+        self.material_snapshot = (
+            material_snapshot
+            if isinstance(material_snapshot, ExecutionMaterialSnapshot)
+            else None
         )
         self._cancel_event = Event()
         self._thread: Thread | None = None
@@ -116,7 +137,7 @@ class PreflightWorker(QObject):
         try:
             receipt = self.controller.preflight(
                 self.plan,
-                material_context=self.material_context,
+                material_snapshot=self.material_snapshot,
             )
         except Exception as exc:
             self.failed.emit(str(exc) or type(exc).__name__)
@@ -139,7 +160,7 @@ class DocumentExecutionWorker(QObject):
         plan: DocumentPlan,
         preflight: PreflightReceipt,
         approval: ExecutionApproval,
-        material_context,
+        material_snapshot: ExecutionMaterialSnapshot | None,
         execution_id: str,
         parent=None,
     ) -> None:
@@ -149,7 +170,7 @@ class DocumentExecutionWorker(QObject):
         self.plan = plan
         self.preflight = preflight
         self.approval = approval
-        self.material_context = material_context
+        self.material_snapshot = material_snapshot
         self.execution_id = execution_id
         self._cancel_event = Event()
         self._thread: Thread | None = None
@@ -186,7 +207,7 @@ class DocumentExecutionWorker(QObject):
                 plan=self.plan,
                 preflight=self.preflight,
                 approval=self.approval,
-                material_context=self.material_context,
+                material_snapshot=self.material_snapshot,
                 progress_callback=self.progress.emit,
                 cancel_check=self._cancel_event.is_set,
                 execution_id=self.execution_id,

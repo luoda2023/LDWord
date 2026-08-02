@@ -23,7 +23,20 @@ from src.shared.engine.fixed_layout_tables import (
     apply_fixed_layout_row_height_policy,
     row_height_state,
 )
-from src.shared.engine.exam_paper_style import write_exam_paper_docx_files
+from src.shared.engine.exam_markdown_content import assert_no_exam_markdown_residue
+from src.shared.engine.exam_paper_style import (
+    _insert_exam_markdown_after_block,
+    write_exam_paper_docx_files,
+)
+from src.shared.engine.exam_scale import (
+    ExamScaleProfile,
+    exam_scale_profile,
+    exam_scale_profile_for_scene,
+)
+from src.shared.engine.exam_master_visual_verification import (
+    ExamDocumentVisualQualityResult,
+    verify_exam_document_visual,
+)
 from src.shared.engine.ooxml_ops import set_inline_shape_alt_text
 from src.shared.engine.content_visibility import (
     executable_content_visibility_rule_selector,
@@ -54,8 +67,15 @@ _MARKDOWN_TITLE_RE = re.compile(r"^\s*#\s+(.+?)\s*$")
 _MARKDOWN_SECTION_RE = re.compile(r"^\s*##+\s+(.+?)\s*$")
 _MARKDOWN_QUESTION_RE = re.compile(r"^\s*(\d+)[\.\u3001]\s*(.+?)\s*$")
 _MARKDOWN_OPTION_RE = re.compile(r"^\s*([A-Ha-h])[\.\uFF0E\u3001]\s*(.+?)\s*$")
+_MARKDOWN_OPTION_LABEL_RE = re.compile(
+    r"^\s*([A-Ha-h])[\.\uFF0E\u3001]\s*$"
+)
 _MARKDOWN_FIELD_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*[:：]\s*(.*?)\s*$")
 _MARKDOWN_SCORE_RE = re.compile(r"[\(（]\s*(\d+(?:\.\d+)?)\s*分\s*[\)）]")
+_MARKDOWN_FENCE_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<delimiter>`{3,}|~{3,})"
+    r"(?P<language>[A-Za-z0-9_+.-]*)[ \t]*$"
+)
 _MARKDOWN_METADATA_PAIR_RE = re.compile(
     r"(科目|学科|年级|考试时间|时间|满分|总分)\s*[:：]\s*([^　]+?)(?=(?:　+| {2,}|\s*(?:科目|学科|年级|考试时间|时间|满分|总分)\s*[:：])|$)"
 )
@@ -245,6 +265,10 @@ class ExamRenderedVersion:
     question_asset_alt_text_count: int = 0
     rendered_question_asset_alt_text_count: int = 0
     missing_question_asset_alt_text_count: int = 0
+    scale_profile_id: str = ""
+    target_student_page_min: int = 0
+    target_student_page_max: int = 0
+    visual_quality: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -270,6 +294,10 @@ class ExamRenderedVersion:
             "missing_question_asset_alt_text_count": (
                 self.missing_question_asset_alt_text_count
             ),
+            "scale_profile_id": self.scale_profile_id,
+            "target_student_page_min": self.target_student_page_min,
+            "target_student_page_max": self.target_student_page_max,
+            "visual_quality": copy.deepcopy(self.visual_quality),
         }
 
 
@@ -322,6 +350,10 @@ class ExamDeliveryRuntimeResult:
     rendered_versions: tuple[ExamRenderedVersion, ...] = ()
     master_evidence: ExamMasterEvidence | None = None
     skipped_reason: str = ""
+    quality_status: str = "not_checked"
+    quality_issues: tuple[str, ...] = ()
+    quality_manifest_path: str = ""
+    release_tier: str = "none"
 
     @property
     def version_count(self) -> int:
@@ -337,6 +369,10 @@ class ExamDeliveryRuntimeResult:
             "markdown_preview_excerpt": self.markdown_preview_excerpt,
             "version_count": self.version_count,
             "skipped_reason": self.skipped_reason,
+            "quality_status": self.quality_status,
+            "quality_issues": list(self.quality_issues),
+            "quality_manifest_path": self.quality_manifest_path,
+            "release_tier": self.release_tier,
             "master_evidence": (
                 self.master_evidence.to_dict()
                 if self.master_evidence is not None
@@ -391,6 +427,63 @@ def inspect_exam_question_schema(config) -> ExamQuestionSchemaValidationResult:
     )
 
 
+def plan_exam_delivery_output_paths(
+    config,
+    *,
+    output_dir: Path | str,
+    source_stem: str = "exam",
+) -> dict[str, str]:
+    """Return every final exam-runtime artifact without creating directories."""
+
+    safe_stem = _safe_artifact_stem(source_stem)
+    artifact_dir = Path(output_dir).expanduser().resolve() / "exam_runtime"
+    planned = {
+        "preview": str(artifact_dir / f"{safe_stem}_preview.md"),
+    }
+    exam_paper_config = getattr(config, "exam_paper", None)
+    if exam_paper_config is not None:
+        answer_policy = str(
+            getattr(exam_paper_config, "answer_policy", "") or ""
+        ).strip()
+        if answer_policy != "answer_only":
+            planned["student"] = str(
+                artifact_dir / f"{safe_stem}_学生卷.docx"
+            )
+        if answer_policy != "student_only":
+            planned["answer_key"] = str(
+                artifact_dir / f"{safe_stem}_答案卷.docx"
+            )
+        return planned
+    for preset in _delivery_presets_for_runtime(config):
+        if not _preset_final_docx_enabled(preset):
+            continue
+        preset_id = _preset_value(preset, "preset_id", "final").strip() or "final"
+        planned[preset_id] = str(
+            artifact_dir
+            / f"{safe_stem}_{_safe_artifact_stem(preset_id)}.docx"
+        )
+    return planned
+
+
+def exam_delivery_filename_stem(
+    config=None,
+    *,
+    payload: Mapping[str, object] | None = None,
+    fallback: str = "exam",
+) -> str:
+    """Resolve a user-facing final filename stem from the exam paper title."""
+
+    resolved_payload = payload
+    if resolved_payload is None and config is not None:
+        resolved_payload, _source_key = _exam_payload_from_config(config)
+    title = (
+        _first_text(resolved_payload, _TITLE_KEYS)
+        if resolved_payload is not None
+        else ""
+    )
+    return _safe_artifact_stem(title or fallback)
+
+
 def build_exam_delivery_runtime(
     config,
     *,
@@ -398,6 +491,9 @@ def build_exam_delivery_runtime(
     source_stem: str = "exam",
     validation: ExamQuestionSchemaValidationResult | None = None,
     master=None,
+    exam_scene_id: str = "",
+    exam_scale_profile_id: str = "",
+    verify_visual_quality: bool = False,
 ) -> ExamDeliveryRuntimeResult:
     """Render first-slice exam artifacts from one structured question source.
 
@@ -424,6 +520,21 @@ def build_exam_delivery_runtime(
     markdown = render_exam_markdown_preview(payload)
     exam_paper_config = getattr(config, "exam_paper", None)
     master_evidence = _exam_master_evidence(master)
+    authoritative_scale_profile_id = str(exam_scale_profile_id or "").strip()
+    if authoritative_scale_profile_id:
+        scale_profile = exam_scale_profile(authoritative_scale_profile_id)
+        if scale_profile.profile_id != authoritative_scale_profile_id:
+            return ExamDeliveryRuntimeResult(
+                schema_id=EXAM_SCHEMA_ID,
+                family_id=validation.family_id or EXAM_FAMILY_ID,
+                status="blocked",
+                source_key=validation.source_key or source_key,
+                markdown_preview_excerpt=_preview_excerpt(markdown),
+                master_evidence=master_evidence,
+                skipped_reason="exam_scale_profile_invalid",
+            )
+    else:
+        scale_profile = exam_scale_profile_for_scene(exam_scene_id)
 
     if validation.error_count:
         return ExamDeliveryRuntimeResult(
@@ -464,6 +575,7 @@ def build_exam_delivery_runtime(
                     source_stem=safe_stem,
                     summary=getattr(validation, "summary", None),
                     master=master,
+                    scale_profile=scale_profile,
                 )
             )
         else:
@@ -491,13 +603,150 @@ def build_exam_delivery_runtime(
                 skipped_reason="no_final_docx_delivery_preset",
             )
 
+        quality_status = "not_checked"
+        quality_issues: tuple[str, ...] = ()
+        quality_manifest_stage_path: Path | None = None
+        if verify_visual_quality:
+            quality_results: list[
+                tuple[ExamRenderedVersion, ExamDocumentVisualQualityResult]
+            ] = []
+            for version in versions:
+                minimum = (
+                    scale_profile.min_student_pages
+                    if version.preset_id == "student"
+                    else 1
+                )
+                maximum = scale_profile.max_student_pages
+                result = verify_exam_document_visual(
+                    version.docx_path,
+                    staging_dir
+                    / "visual_qa"
+                    / _safe_artifact_stem(version.preset_id),
+                    target_page_min=minimum,
+                    target_page_max=maximum,
+                )
+                quality_results.append((version, result))
+
+            review_results = tuple(
+                (version, result)
+                for version, result in quality_results
+                if result.status == "quality_failed"
+            )
+            fatal_results = tuple(
+                (version, result)
+                for version, result in quality_results
+                if result.status in {"docx_missing", "docx_corrupt"}
+            )
+            unverified_results = tuple(
+                (version, result)
+                for version, result in quality_results
+                if result.status not in {
+                    "quality_ok",
+                    "quality_failed",
+                    "docx_missing",
+                    "docx_corrupt",
+                }
+            )
+            quality_issues = tuple(
+                f"{version.preset_id}:{issue}"
+                for version, result in quality_results
+                for issue in (result.issues or (result.status,))
+                if result.status != "quality_ok"
+            )
+            if fatal_results:
+                return ExamDeliveryRuntimeResult(
+                    schema_id=EXAM_SCHEMA_ID,
+                    family_id=validation.family_id or EXAM_FAMILY_ID,
+                    status="blocked",
+                    source_key=validation.source_key or source_key,
+                    markdown_preview_excerpt=_preview_excerpt(markdown),
+                    master_evidence=master_evidence,
+                    skipped_reason="visual_quality_fatal",
+                    quality_status="quality_fatal",
+                    quality_issues=quality_issues,
+                    release_tier="none",
+                )
+
+            quality_status = (
+                "quality_review_required"
+                if review_results
+                else (
+                    "quality_unverified"
+                    if unverified_results
+                    else "quality_ok"
+                )
+            )
+            quality_by_preset = {
+                version.preset_id: _exam_visual_quality_summary(result)
+                for version, result in quality_results
+            }
+            versions = [
+                replace(
+                    version,
+                    visual_quality=quality_by_preset.get(
+                        version.preset_id,
+                        {},
+                    ),
+                )
+                for version in versions
+            ]
+            quality_manifest_stage_path = (
+                staging_dir / f"{safe_stem}_visual_quality.json"
+            )
+            quality_manifest_stage_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "scale_profile_id": scale_profile.profile_id,
+                        "status": quality_status,
+                        "release_tier": (
+                            "review"
+                            if quality_status in {
+                                "quality_review_required",
+                                "quality_unverified",
+                            }
+                            else "final"
+                        ),
+                        "issues": list(quality_issues),
+                        "semantic_review_status": "manual_review_required",
+                        "material_grounding_review_status": (
+                            "manual_review_required"
+                        ),
+                        "versions": quality_by_preset,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+        review_release = quality_status in {
+            "quality_review_required",
+            "quality_unverified",
+        }
+        publication_dir = (
+            artifact_dir / "review_candidates"
+            if review_release
+            else artifact_dir
+        )
         staged_artifacts = [
             StagedArtifact(
                 artifact_id="preview",
                 stage_path=staged_markdown_path,
-                final_path=artifact_dir / staged_markdown_path.name,
+                final_path=publication_dir / staged_markdown_path.name,
             )
         ]
+        if quality_manifest_stage_path is not None:
+            staged_artifacts.append(
+                StagedArtifact(
+                    artifact_id="visual-quality-manifest",
+                    stage_path=quality_manifest_stage_path,
+                    final_path=(
+                        publication_dir / quality_manifest_stage_path.name
+                    ),
+                )
+            )
         version_artifact_ids: list[str] = []
         for index, version in enumerate(versions):
             staged_docx = Path(version.docx_path).expanduser().resolve()
@@ -513,7 +762,7 @@ def build_exam_delivery_runtime(
                 StagedArtifact(
                     artifact_id=artifact_id,
                     stage_path=staged_docx,
-                    final_path=artifact_dir / relative_docx,
+                    final_path=publication_dir / relative_docx,
                 )
             )
 
@@ -530,13 +779,54 @@ def build_exam_delivery_runtime(
     return ExamDeliveryRuntimeResult(
         schema_id=EXAM_SCHEMA_ID,
         family_id=validation.family_id or EXAM_FAMILY_ID,
-        status="warning" if validation.warning_count else "ok",
+        status=(
+            "warning"
+            if validation.warning_count
+            or quality_status in {
+                "quality_unverified",
+                "quality_review_required",
+            }
+            else "ok"
+        ),
         source_key=validation.source_key or source_key,
         markdown_preview_path=published_paths["preview"],
         markdown_preview_excerpt=_preview_excerpt(markdown),
         rendered_versions=published_versions,
         master_evidence=master_evidence,
+        quality_status=quality_status,
+        quality_issues=quality_issues,
+        quality_manifest_path=(
+            published_paths.get("visual-quality-manifest", "")
+        ),
+        release_tier=(
+            "review"
+            if quality_status in {
+                "quality_review_required",
+                "quality_unverified",
+            }
+            else "final"
+        ),
     )
+
+
+def _exam_visual_quality_summary(
+    result: ExamDocumentVisualQualityResult,
+) -> dict[str, object]:
+    return {
+        "status": result.status,
+        "target_page_min": result.target_page_min,
+        "target_page_max": result.target_page_max,
+        "actual_page_count": result.actual_page_count,
+        "substantive_page_count": result.substantive_page_count,
+        "page_ink_ratios": [
+            round(value, 6) for value in result.page_ink_ratios
+        ],
+        "structured_response_page_numbers": list(
+            result.structured_response_page_numbers
+        ),
+        "renderer": result.renderer,
+        "issues": list(result.issues),
+    }
 
 
 def render_exam_markdown_preview(payload: object) -> str:
@@ -572,6 +862,11 @@ def render_exam_markdown_preview(payload: object) -> str:
             knowledge = _question_knowledge(question)
             if knowledge:
                 lines.append(f"   - Knowledge: {knowledge}")
+            difficulty = _text(
+                question.get("difficulty") or question.get("difficulty_level")
+            )
+            if difficulty:
+                lines.append(f"   - Difficulty: {difficulty}")
             score = _text(question.get("score"))
             if score:
                 lines.append(f"   - Score: {score}")
@@ -596,6 +891,14 @@ def parse_exam_markdown_source(
     answer_groups: list[dict[str, object]] = []
     current_answer_group: dict[str, object] | None = None
     current_answer_item: dict[str, object] | None = None
+    current_option_index: int | None = None
+    question_numbering_mode: str | None = None
+    parsed_question_count = 0
+    fenced_code_delimiter = ""
+    fenced_code_indent = 0
+    fenced_code_target = ""
+    pending_lead_in_lines: list[str] = []
+    current_question_closed = False
 
     def ensure_section(title: str = "") -> dict[str, object]:
         nonlocal current_section
@@ -617,23 +920,100 @@ def parse_exam_markdown_source(
             answer_groups.append(current_answer_group)
         return current_answer_group
 
-    def append_stem_line(line: str) -> None:
+    def append_stem_line(line: str, *, preserve_indent: bool = False) -> None:
         if current_question is None:
             return
         existing = str(current_question.get("stem", "") or "").rstrip()
-        current_question["stem"] = f"{existing}\n{line.strip()}".strip()
+        addition = line.rstrip() if preserve_indent else line.strip()
+        current_question["stem"] = f"{existing}\n{addition}".strip()
+
+    def append_answer_line(line: str, *, preserve_indent: bool = False) -> None:
+        if current_answer_item is None:
+            return
+        addition = line.rstrip() if preserve_indent else line.strip()
+        if "analysis" in current_answer_item:
+            current_answer_item["analysis"] = (
+                f"{current_answer_item['analysis']}\n{addition}".strip()
+            )
+        else:
+            current_answer_item["answer"] = (
+                f"{current_answer_item.get('answer', '')}\n{addition}".strip()
+            )
+
+    def append_option_line(line: str, *, preserve_indent: bool = False) -> None:
+        if current_question is None or current_option_index is None:
+            return
+        options = current_question.get("options")
+        if not isinstance(options, list) or current_option_index >= len(options):
+            return
+        addition = line.rstrip() if preserve_indent else line.strip()
+        options[current_option_index] = (
+            f"{options[current_option_index]}\n{addition}".rstrip()
+        )
+
+    def append_pending_lead_in(
+        line: str,
+        *,
+        preserve_indent: bool = False,
+    ) -> None:
+        addition = line.rstrip() if preserve_indent else line.strip()
+        if addition:
+            pending_lead_in_lines.append(addition)
 
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
         stripped = raw_line.strip()
+        fence_match = _MARKDOWN_FENCE_RE.match(raw_line)
+        if fence_match:
+            delimiter = fence_match.group("delimiter")
+            if not fenced_code_delimiter:
+                fenced_code_delimiter = delimiter
+                fenced_code_indent = len(fence_match.group("indent").expandtabs(4))
+                if in_answer_block:
+                    fenced_code_target = "answer"
+                elif pending_lead_in_lines or current_question is None or current_question_closed:
+                    fenced_code_target = "lead_in"
+                elif current_option_index is not None:
+                    fenced_code_target = "option"
+                else:
+                    fenced_code_target = "stem"
+            elif (
+                delimiter[0] == fenced_code_delimiter[0]
+                and len(delimiter) >= len(fenced_code_delimiter)
+            ):
+                fenced_code_delimiter = ""
+                fenced_code_indent = 0
+                fenced_code_target = ""
+            continue
+
+        if fenced_code_delimiter:
+            expanded_line = raw_line.expandtabs(4)
+            code_line = expanded_line[
+                min(fenced_code_indent, len(expanded_line)) :
+            ].rstrip()
+            if fenced_code_target == "answer":
+                append_answer_line(code_line, preserve_indent=True)
+            elif fenced_code_target == "option":
+                append_option_line(code_line, preserve_indent=True)
+            elif fenced_code_target == "lead_in":
+                append_pending_lead_in(code_line, preserve_indent=True)
+            elif fenced_code_target == "stem":
+                append_stem_line(code_line, preserve_indent=True)
+            continue
+
         if not stripped:
             continue
 
         section_match = _MARKDOWN_SECTION_RE.match(stripped)
         if section_match:
-            section_title = section_match.group(1).strip()
+            section_title = _strip_outer_markdown_emphasis(
+                section_match.group(1)
+            )
             if _markdown_is_answer_heading(section_title):
                 in_answer_block = True
                 current_question = None
+                current_option_index = None
+                current_question_closed = False
+                pending_lead_in_lines.clear()
                 current_answer_group = None
                 current_answer_item = None
                 continue
@@ -644,10 +1024,16 @@ def parse_exam_markdown_source(
             }
             sections.append(current_section)
             current_question = None
+            current_option_index = None
+            current_question_closed = False
+            pending_lead_in_lines.clear()
             continue
 
         if in_answer_block:
-            answer_match = _MARKDOWN_QUESTION_RE.match(stripped)
+            if stripped in {"---", "***", "___"}:
+                current_answer_item = None
+                continue
+            answer_match = _top_level_markdown_question_match(raw_line)
             if answer_match:
                 group = ensure_answer_group()
                 answer_number = int(answer_match.group(1))
@@ -669,20 +1055,14 @@ def parse_exam_markdown_source(
                 continue
 
             if _markdown_looks_like_answer_group(stripped):
-                current_answer_group = ensure_answer_group(stripped)
+                current_answer_group = ensure_answer_group(
+                    _normalize_markdown_answer_text(stripped)
+                )
                 current_answer_item = None
                 continue
 
             if current_answer_item is not None:
-                extra = stripped
-                if "analysis" in current_answer_item:
-                    current_answer_item["analysis"] = (
-                        f"{current_answer_item['analysis']}\n{extra}".strip()
-                    )
-                else:
-                    current_answer_item["answer"] = (
-                        f"{current_answer_item.get('answer', '')}\n{extra}".strip()
-                    )
+                append_answer_line(stripped)
                 continue
 
             issues.append(
@@ -697,29 +1077,47 @@ def parse_exam_markdown_source(
 
         title_match = _MARKDOWN_TITLE_RE.match(stripped)
         if title_match and "paper_title" not in payload:
-            payload["paper_title"] = title_match.group(1).strip()
+            payload["paper_title"] = _strip_outer_markdown_emphasis(
+                title_match.group(1)
+            )
             continue
 
         if stripped.startswith(">"):
             _merge_markdown_metadata(payload, stripped.lstrip("> "))
             continue
 
-        question_match = _MARKDOWN_QUESTION_RE.match(stripped)
+        question_match = _top_level_markdown_question_match(raw_line)
         if question_match:
             section = ensure_section()
             question_number = int(question_match.group(1))
             existing_questions = section.get("questions")
-            expected_number = (
+            expected_section_number = (
                 len(existing_questions) + 1
                 if isinstance(existing_questions, list)
                 else 1
             )
-            if question_number != expected_number:
+            expected_global_number = parsed_question_count + 1
+            if question_numbering_mode is None:
+                if expected_section_number == expected_global_number:
+                    number_is_valid = question_number == expected_section_number
+                elif question_number == expected_section_number:
+                    question_numbering_mode = "section"
+                    number_is_valid = True
+                elif question_number == expected_global_number:
+                    question_numbering_mode = "global"
+                    number_is_valid = True
+                else:
+                    number_is_valid = False
+            elif question_numbering_mode == "global":
+                number_is_valid = question_number == expected_global_number
+            else:
+                number_is_valid = question_number == expected_section_number
+            if not number_is_valid:
                 issues.append(
                     _markdown_issue(
                         f"line.{line_number}",
                         "question_number_sequence_invalid",
-                        "每个大题内的小题必须从 1 开始连续编号。",
+                        "题号必须全卷连续，或在每个大题内从 1 开始连续编号。",
                         severity="error",
                         observed=str(question_number),
                     )
@@ -728,10 +1126,18 @@ def parse_exam_markdown_source(
                 "number": question_number,
                 "stem": question_match.group(2).strip(),
             }
+            if pending_lead_in_lines:
+                question["lead_in"] = _normalize_markdown_lead_in(
+                    "\n".join(pending_lead_in_lines)
+                )
+                pending_lead_in_lines.clear()
             questions = section.setdefault("questions", [])
             if isinstance(questions, list):
                 questions.append(question)
+            parsed_question_count += 1
             current_question = question
+            current_option_index = None
+            current_question_closed = False
             continue
 
         option_match = _MARKDOWN_OPTION_RE.match(stripped)
@@ -741,6 +1147,16 @@ def parse_exam_markdown_source(
                 option_label = option_match.group(1).upper()
                 option_text = option_match.group(2).strip()
                 options.append(f"{option_label}. {option_text}")
+                current_option_index = len(options) - 1
+            continue
+
+        option_label_match = _MARKDOWN_OPTION_LABEL_RE.match(stripped)
+        if option_label_match and current_question is not None:
+            options = current_question.setdefault("options", [])
+            if isinstance(options, list):
+                option_label = option_label_match.group(1).upper()
+                options.append(f"{option_label}.")
+                current_option_index = len(options) - 1
             continue
 
         field_match = _MARKDOWN_FIELD_RE.match(stripped)
@@ -751,6 +1167,8 @@ def parse_exam_markdown_source(
                 normalized_kind = field_value.lower()
                 if normalized_kind in _MARKDOWN_ALLOWED_ANSWER_AREA_KINDS:
                     current_question["answer_area_kind"] = normalized_kind
+                    current_option_index = None
+                    current_question_closed = True
                 else:
                     issues.append(
                         _markdown_issue(
@@ -764,6 +1182,8 @@ def parse_exam_markdown_source(
             if field_key == "answer_lines":
                 try:
                     current_question["answer_lines"] = max(0, int(float(field_value)))
+                    current_option_index = None
+                    current_question_closed = True
                 except ValueError:
                     issues.append(
                         _markdown_issue(
@@ -774,20 +1194,62 @@ def parse_exam_markdown_source(
                         )
                     )
                 continue
+            if field_key in {"score", "points"}:
+                try:
+                    current_question["score"] = _format_markdown_score(
+                        float(field_value)
+                    )
+                    current_option_index = None
+                    current_question_closed = True
+                except ValueError:
+                    issues.append(
+                        _markdown_issue(
+                            f"line.{line_number}",
+                            "invalid_question_score",
+                            "题目分值必须是数字。",
+                            observed=field_value,
+                        )
+                    )
+                continue
+            if field_key in {"difficulty", "difficulty_level"}:
+                current_question["difficulty"] = field_value
+                current_option_index = None
+                current_question_closed = True
+                continue
+            if field_key in {"knowledge_points", "knowledgePoints", "tags"}:
+                current_question["knowledge_points"] = [
+                    item.strip()
+                    for item in re.split(r"[,，、;；|/]+", field_value)
+                    if item.strip()
+                ]
+                current_option_index = None
+                current_question_closed = True
+                continue
 
-        if current_question is not None:
-            append_stem_line(stripped)
-        else:
-            issues.append(
-                _markdown_issue(
-                    f"line.{line_number}",
-                    "unrecognized_line",
-                    "题稿中存在未挂接到试卷结构的内容。",
-                    observed=stripped,
-                )
-            )
+        if (
+            current_question is None
+            or current_question_closed
+            or pending_lead_in_lines
+            or _markdown_looks_like_question_lead_in(stripped)
+        ):
+            append_pending_lead_in(stripped)
+        elif current_question is not None:
+            if current_option_index is not None and _markdown_indentation(raw_line):
+                append_option_line(stripped)
+            else:
+                append_stem_line(stripped)
 
     payload["sections"] = sections
+    if pending_lead_in_lines:
+        issues.append(
+            _markdown_issue(
+                "lead_in",
+                "dangling_question_lead_in",
+                "题稿末尾存在未挂接到下一道题的前置材料。",
+                severity="error",
+                observed="\n".join(pending_lead_in_lines),
+            )
+        )
     _finalize_markdown_questions(payload)
     _apply_markdown_answers(payload, answer_groups, issues)
 
@@ -813,6 +1275,21 @@ def parse_exam_markdown_source(
         source_excerpt=_preview_excerpt(text),
         status=status,
     )
+
+
+def _top_level_markdown_question_match(
+    raw_line: str,
+) -> re.Match[str] | None:
+    expanded = str(raw_line or "").expandtabs(4)
+    indentation = len(expanded) - len(expanded.lstrip(" "))
+    if indentation > 3:
+        return None
+    return _MARKDOWN_QUESTION_RE.match(expanded)
+
+
+def _markdown_indentation(raw_line: str) -> int:
+    expanded = str(raw_line or "").expandtabs(4)
+    return len(expanded) - len(expanded.lstrip(" "))
 
 
 def parse_exam_markdown_file(path: str | Path) -> ExamMarkdownImportResult:
@@ -876,7 +1353,7 @@ def _markdown_is_answer_heading(title: str) -> bool:
 
 
 def _markdown_looks_like_answer_group(line: str) -> bool:
-    text = str(line or "").strip()
+    text = _normalize_markdown_answer_text(line)
     if not text:
         return False
     if _MARKDOWN_QUESTION_RE.match(text):
@@ -886,32 +1363,79 @@ def _markdown_looks_like_answer_group(line: str) -> bool:
     return bool(_MARKDOWN_ANSWER_GROUP_RE.match(text)) or text.endswith("题")
 
 
+def _markdown_looks_like_question_lead_in(line: str) -> bool:
+    text = _strip_outer_markdown_emphasis(str(line or "").strip())
+    normalized = re.sub(r"\s+", "", text).casefold()
+    if not normalized:
+        return False
+    lead_in_tokens = (
+        "程序片段",
+        "阅读材料",
+        "参考材料",
+        "背景材料",
+        "案例",
+        "情境",
+        "根据以下",
+        "阅读以下",
+        "观察下图",
+        "观察下表",
+    )
+    return any(token in normalized for token in lead_in_tokens)
+
+
 def _parse_markdown_answer_text(text: str) -> dict[str, object]:
     raw = str(text or "").strip()
     match = _MARKDOWN_ANSWER_SPLIT_RE.match(raw)
     if match and match.group(2):
-        answer = match.group(1).strip(" 。；;")
-        analysis = match.group(2).strip()
+        answer = _normalize_markdown_answer_text(
+            match.group(1).strip(" 。；;")
+        )
+        analysis = _normalize_markdown_answer_text(match.group(2))
         return {
             "answer": answer,
             "analysis": analysis,
         }
-    return {"answer": raw}
+    return {"answer": _normalize_markdown_answer_text(raw)}
 
 
 def _finalize_markdown_questions(payload: dict[str, object]) -> None:
     for section in list(payload.get("sections") or []):
         if not isinstance(section, Mapping):
             continue
+        declared_each_score = _markdown_declared_each_question_score(
+            str(section.get("title", "") or "")
+        )
         for question in list(section.get("questions") or []):
             if not isinstance(question, dict):
                 continue
             stem = str(question.get("stem", "") or "").strip()
             matches = list(_MARKDOWN_SCORE_RE.finditer(stem))
             if matches and "score" not in question:
-                question["score"] = matches[-1].group(1)
-            if matches:
-                stem = _MARKDOWN_SCORE_RE.sub("", stem).strip()
+                score, score_match_to_remove = _resolve_markdown_question_score(
+                    stem,
+                    matches,
+                    declared_each_score=declared_each_score,
+                )
+                question["score"] = _format_markdown_score(score)
+                if score_match_to_remove is not None:
+                    stem = (
+                        stem[: score_match_to_remove.start()]
+                        + stem[score_match_to_remove.end() :]
+                    ).strip()
+            elif "score" not in question and declared_each_score is not None:
+                question["score"] = _format_markdown_score(declared_each_score)
+            elif matches and "score" in question:
+                explicit_score = _number(question.get("score"))
+                score_match_to_remove = _explicit_score_match_to_remove(
+                    stem,
+                    matches,
+                    explicit_score=explicit_score,
+                )
+                if score_match_to_remove is not None:
+                    stem = (
+                        stem[: score_match_to_remove.start()]
+                        + stem[score_match_to_remove.end() :]
+                    ).strip()
             question["stem"] = _normalize_markdown_inline_text(stem)
             if "options" in question and isinstance(question["options"], list):
                 question["options"] = [
@@ -921,12 +1445,118 @@ def _finalize_markdown_questions(payload: dict[str, object]) -> None:
                 ]
 
 
+def _resolve_markdown_question_score(
+    stem: str,
+    matches: list[re.Match[str]],
+    *,
+    declared_each_score: float | None,
+) -> tuple[float, re.Match[str] | None]:
+    values = [float(match.group(1)) for match in matches]
+    if len(matches) == 1:
+        return values[0], matches[0]
+
+    final_match = matches[-1]
+    final_prefix = stem[max(0, final_match.start() - 12) : final_match.start()]
+    if re.search(r"(?:本题|合计|共)\s*$", final_prefix):
+        return values[-1], final_match
+    if declared_each_score is not None:
+        if abs(sum(values) - declared_each_score) <= 0.01:
+            return declared_each_score, None
+        if abs(values[-1] - declared_each_score) <= 0.01:
+            return declared_each_score, final_match
+    return sum(values), None
+
+
+def _markdown_declared_each_question_score(value: str) -> float | None:
+    match = re.search(
+        r"每(?:小题|题)\s*(\d+(?:\.\d+)?)\s*分",
+        str(value or ""),
+    )
+    return float(match.group(1)) if match else None
+
+
+def _explicit_score_match_to_remove(
+    stem: str,
+    matches: list[re.Match[str]],
+    *,
+    explicit_score: float | None,
+) -> re.Match[str] | None:
+    if explicit_score is None or not matches:
+        return None
+    if len(matches) == 1 and abs(float(matches[0].group(1)) - explicit_score) <= 0.01:
+        return matches[0]
+    final_match = matches[-1]
+    final_prefix = stem[max(0, final_match.start() - 12) : final_match.start()]
+    if (
+        abs(float(final_match.group(1)) - explicit_score) <= 0.01
+        and re.search(r"(?:本题|合计|共)\s*$", final_prefix)
+    ):
+        return final_match
+    return None
+
+
+def _format_markdown_score(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else str(value)
+
+
 def _normalize_markdown_inline_text(text: str) -> str:
     normalized = str(text or "").strip()
-    normalized = re.sub(r"`([^`]+)`", r"\1", normalized)
+    normalized = re.sub(
+        r"(?m)^[ \t]*(?:`{3,}|~{3,})[A-Za-z0-9_+.-]*[ \t]*$",
+        "",
+        normalized,
+    )
+    normalized = re.sub(r"(?<!`)`([^`\n]+)`(?!`)", r"\1", normalized)
     normalized = re.sub(r"[ \t]+\n", "\n", normalized)
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     return normalized.strip()
+
+
+def _normalize_markdown_lead_in(text: str) -> str:
+    normalized = _normalize_markdown_inline_text(text)
+    return "\n".join(
+        _strip_outer_markdown_emphasis(line)
+        for line in normalized.splitlines()
+    ).strip()
+
+
+def _normalize_markdown_answer_text(text: str) -> str:
+    normalized = _normalize_markdown_inline_text(text)
+    normalized = re.sub(
+        r"(?<![\w*])\*\*(?=\S)(.+?)(?<=\S)\*\*(?![\w*])",
+        r"\1",
+        normalized,
+    )
+    normalized = re.sub(
+        r"(?im)^\s*(?:参考答案|答案)\s*[:：]\s*",
+        "",
+        normalized,
+    )
+    normalized = re.sub(
+        r"(?im)^\s*解析\s*[:：]\s*",
+        "",
+        normalized,
+    )
+    return normalized.strip()
+
+
+def _strip_outer_markdown_emphasis(text: str) -> str:
+    normalized = str(text or "").strip()
+    while normalized:
+        marker = next(
+            (
+                candidate
+                for candidate in ("***", "___", "**", "__", "*", "_")
+                if len(normalized) > len(candidate) * 2
+                and normalized.startswith(candidate)
+                and normalized.endswith(candidate)
+            ),
+            "",
+        )
+        if not marker:
+            break
+        normalized = normalized[len(marker) : -len(marker)].strip()
+    return normalized
 
 
 def _apply_markdown_answers(
@@ -1039,9 +1669,22 @@ def _apply_answer_group_to_section(
     answers = group.get("answers", {})
     if not isinstance(answers, Mapping):
         return
+    questions_by_number = {
+        int(question.get("number")): question
+        for question in questions
+        if str(question.get("number") or "").isdigit()
+    }
     for answer_number, answer_payload in answers.items():
-        target_index = int(answer_number) - 1
-        if target_index < 0 or target_index >= len(questions):
+        normalized_number = int(answer_number)
+        target = questions_by_number.get(normalized_number)
+        if target is None:
+            target_index = normalized_number - 1
+            target = (
+                questions[target_index]
+                if 0 <= target_index < len(questions)
+                else None
+            )
+        if target is None:
             issues.append(
                 _markdown_issue(
                     f"{group_path}.{answer_number}",
@@ -1052,7 +1695,7 @@ def _apply_answer_group_to_section(
                 )
             )
             continue
-        _merge_answer_payload(questions[target_index], answer_payload)
+        _merge_answer_payload(target, answer_payload)
 
 
 def _merge_answer_payload(
@@ -1065,9 +1708,9 @@ def _merge_answer_payload(
     answer = str(answer_payload.get("answer", "") or "").strip()
     analysis = str(answer_payload.get("analysis", "") or "").strip()
     if answer:
-        question["answer"] = _normalize_markdown_inline_text(answer)
+        question["answer"] = _normalize_markdown_answer_text(answer)
     if analysis:
-        question["analysis"] = _normalize_markdown_inline_text(analysis)
+        question["analysis"] = _normalize_markdown_answer_text(analysis)
 
 
 def _markdown_question_family(value: str) -> str:
@@ -1629,6 +2272,7 @@ def _render_exam_master_docx(
     source_stem: str,
     summary: ExamQuestionSchemaSummary | None = None,
     master,
+    scale_profile: ExamScaleProfile,
 ) -> tuple[ExamRenderedVersion, ...]:
     answer_policy = str(getattr(exam_paper_config, "answer_policy", "") or "").strip()
     include_student_version = answer_policy != "answer_only"
@@ -1675,6 +2319,9 @@ def _render_exam_master_docx(
                     0,
                     figure_alt_text_count - rendered_alt_text_count,
                 ),
+                scale_profile_id=scale_profile.profile_id,
+                target_student_page_min=scale_profile.min_student_pages,
+                target_student_page_max=scale_profile.max_student_pages,
             )
         )
     if include_answer_version and outputs.answer_key_docx is not None:
@@ -1691,6 +2338,7 @@ def _render_exam_master_docx(
                 question_asset_count=0,
                 rendered_question_asset_count=0,
                 missing_question_asset_count=0,
+                scale_profile_id=scale_profile.profile_id,
             )
         )
     return tuple(versions)
@@ -1762,16 +2410,36 @@ def _render_exam_version_docx(
 
     for section_index, section in enumerate(_exam_sections(payload), start=1):
         section_title = _text(section.get("title")) or f"Section {section_index}"
-        document.add_heading(section_title, level=1)
-        for question in _section_questions(section):
+        current_block = document.add_heading(section_title, level=1)
+        for question_index, question in enumerate(
+            _section_questions(section),
+            start=1,
+        ):
             global_question_number += 1
             if show_question:
                 visible_questions += 1
-                document.add_paragraph(
-                    f"{global_question_number}. {_question_stem(question)}"
+                current_block, _question_paragraphs = _insert_exam_markdown_after_block(
+                    current_block,
+                    _question_stem(question),
+                    "Normal",
+                    field_path=(
+                        f"delivery.sections.{section_index - 1}.questions."
+                        f"{question_index - 1}.stem"
+                    ),
+                    prefix=f"{global_question_number}. ",
                 )
-                for option in _question_options(question):
-                    document.add_paragraph(option, style=None)
+                for option_index, option in enumerate(_question_options(question)):
+                    current_block, _option_paragraphs = (
+                        _insert_exam_markdown_after_block(
+                            current_block,
+                            option,
+                            "Normal",
+                            field_path=(
+                                f"delivery.sections.{section_index - 1}.questions."
+                                f"{question_index - 1}.options.{option_index}"
+                            ),
+                        )
+                    )
                 asset_state = _render_question_figures(document, question)
                 question_assets += asset_state[0]
                 rendered_question_assets += asset_state[1]
@@ -1779,20 +2447,50 @@ def _render_exam_version_docx(
                 question_asset_alt_texts += asset_state[3]
                 rendered_question_asset_alt_texts += asset_state[4]
                 missing_question_asset_alt_texts += asset_state[5]
+                if asset_state[1] and document.paragraphs:
+                    current_block = document.paragraphs[-1]
             answer = _question_answer(question)
             if show_answer and answer:
                 visible_answers += 1
-                document.add_paragraph(f"Answer: {answer}")
+                current_block, _answer_paragraphs = _insert_exam_markdown_after_block(
+                    current_block,
+                    answer,
+                    "Normal",
+                    field_path=(
+                        f"delivery.sections.{section_index - 1}.questions."
+                        f"{question_index - 1}.answer"
+                    ),
+                    prefix="Answer: ",
+                )
 
             analysis = _question_analysis(question)
             if show_analysis and analysis:
                 visible_analysis += 1
-                document.add_paragraph(f"Analysis: {analysis}")
+                current_block, _analysis_paragraphs = _insert_exam_markdown_after_block(
+                    current_block,
+                    analysis,
+                    "Normal",
+                    field_path=(
+                        f"delivery.sections.{section_index - 1}.questions."
+                        f"{question_index - 1}.analysis"
+                    ),
+                    prefix="Analysis: ",
+                )
 
             knowledge = _question_knowledge(question)
             if show_knowledge and knowledge:
-                document.add_paragraph(f"Knowledge: {knowledge}")
+                current_block, _knowledge_paragraphs = _insert_exam_markdown_after_block(
+                    current_block,
+                    knowledge,
+                    "Normal",
+                    field_path=(
+                        f"delivery.sections.{section_index - 1}.questions."
+                        f"{question_index - 1}.knowledge_points"
+                    ),
+                    prefix="Knowledge: ",
+                )
 
+    assert_no_exam_markdown_residue(document)
     document.save(str(docx_path))
     return ExamRenderedVersion(
         preset_id=preset_id,
@@ -1852,6 +2550,7 @@ def _render_exam_answer_sheet_docx(
     apply_fixed_layout_row_height_policy(table, policy)
     first_data_row = table.rows[1] if len(table.rows) > 1 else table.rows[0]
     height_state = row_height_state(first_data_row)
+    assert_no_exam_markdown_residue(document)
     document.save(str(docx_path))
     return ExamRenderedVersion(
         preset_id=preset_id,
@@ -2079,8 +2778,13 @@ def _format_value(value: object) -> str:
 
 
 def _safe_artifact_stem(value: object) -> str:
-    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", _text(value)).strip("._")
-    return stem or "exam"
+    forbidden = '<>:"/\\|?*'
+    cleaned = "".join(
+        "_" if char in forbidden or ord(char) < 32 else char
+        for char in _text(value)
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._")
+    return cleaned[:120].rstrip(" ._") or "exam"
 
 
 def _preview_excerpt(markdown: str, *, max_length: int = 500) -> str:
@@ -2217,8 +2921,10 @@ __all__ = [
     "ExamMasterEvidence",
     "ExamDeliveryRuntimeResult",
     "build_exam_delivery_runtime",
+    "exam_delivery_filename_stem",
     "exam_markdown_import_entity_data",
     "inspect_exam_question_schema",
+    "plan_exam_delivery_output_paths",
     "parse_exam_markdown_file",
     "parse_exam_markdown_source",
     "render_exam_markdown_preview",

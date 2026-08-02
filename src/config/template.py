@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 # ── 页面设置 ────────────────────────────────────────
 
 @dataclass
@@ -23,9 +22,28 @@ class MarginConfig:
 
 
 @dataclass
+class SectionMarginConfig:
+    """Complete page-margin geometry for one ordinal or semantic section."""
+
+    top_cm: float = 3.8
+    bottom_cm: float = 3.8
+    left_cm: float = 3.2
+    right_cm: float = 3.2
+    gutter_cm: float = 0
+    header_distance_cm: float = 3.0
+    footer_distance_cm: float = 3.0
+
+
+@dataclass
 class PageSetupConfig:
     paper_size: str = "A4"
     orientation: str = "portrait"           # "portrait" | "landscape"
+    paper_size_mode: str = "force_template"  # "preserve_source" | "force_template" | "per_section"
+    orientation_mode: str = "preserve_source"  # "preserve_source" | "force_template" | "per_section"
+    margin_mode: str = "force_template"      # "preserve_source" | "force_template" | "per_section"
+    paper_size_by_section: dict[str, str] = field(default_factory=dict)
+    orientation_by_section: dict[str, str] = field(default_factory=dict)
+    margin_by_section: dict[str, SectionMarginConfig] = field(default_factory=dict)
     margin: MarginConfig = field(default_factory=MarginConfig)
     gutter_cm: float = 0
     header_distance_cm: float = 3.0
@@ -150,12 +168,10 @@ class HeadingModelConfig:
     })
     max_heading_levels: int = 4
     non_numbered_title_texts: list[str] = field(default_factory=lambda: [
-        "参考文献", "勘误页", "勘误", "致谢",
-        "个人简历", "在学期间发表的学术论文与研究成果",
-        "摘要", "Abstract", "目录",
+        "摘要", "目录", "参考文献", "缩略语表",
     ])
     non_numbered_prefixes: list[str] = field(default_factory=lambda: [
-        "附录", "附件", "Appendix",
+        "附录", "附件",
     ])
     non_numbered_heading_style_name: str = "Heading 1 Unnumbered"
     non_numbered_heading_style_mode: str = "inherit_heading1"
@@ -165,34 +181,35 @@ class HeadingModelConfig:
 
 @dataclass
 class SectionConfig:
+    boundary_mode: str = "semantic_rebuild"  # preserve_source | semantic_rebuild | normalize_all
     section_break_type: str | None = None   # "nextPage" | "continuous" | None(不修改)
+    empty_break_policy: str = "preserve"    # preserve | remove_proven_redundant
+    caption_table_break_policy: str = "preserve"
+    header_footer_link_mode: str = "semantic_rebuild"  # preserve_source | semantic_rebuild
 
 
-# ── 功能专属配置的向后兼容 re-export ─────────────────
-# 这些类型已移到 feature_configs.py，由 TemplateConfig 和 SceneWorkspace 共享。
-# 此处 re-export 以保持下游 import 不中断。
+# ── 模板外观配置的向后兼容 re-export ─────────────────
+# 仅保留 TemplateConfig 实际拥有的外观类型。公式类型只从
+# feature_configs/formula_policy 导出，避免重新形成模板归属假象。
 from src.config.feature_configs import (  # noqa: E402, F401
-    HeaderFooterConfig,
-    HeaderFooterTypographyConfig,
-    HeaderFooterBorderConfig,
+    CaptionConfig,
+    FooterConfig,
+    HeaderConfig,
     HeaderFooterBehaviorConfig,
+    HeaderFooterBorderConfig,
+    HeaderFooterConfig,
     HeaderFooterContentConfig,
+    HeaderFooterTypographyConfig,
     HeaderFooterVariantConfig,
     HeaderFooterVariantsConfig,
-    HeaderConfig,
-    FooterConfig,
     PageNumberPhaseConfig,
     PageNumberPlanConfig,
-    TocConfig,
-    CaptionConfig,
-    FormulaTableConfig,
-    FormulaStyleConfig,
-    EquationNumberingConfig,
+    PageNumberVariantConfig,
     ReferenceStyleConfig,
-    WatermarkConfig,
     TableConfig,
+    TocConfig,
+    WatermarkConfig,
 )
-
 
 # ── 顶层聚合 ────────────────────────────────────────
 
@@ -215,8 +232,5 @@ class TemplateConfig:
     header_footer: HeaderFooterConfig = field(default_factory=HeaderFooterConfig)
     toc: TocConfig = field(default_factory=TocConfig)
     caption: CaptionConfig = field(default_factory=CaptionConfig)
-    formula_table: FormulaTableConfig = field(default_factory=FormulaTableConfig)
-    formula_style: FormulaStyleConfig = field(default_factory=FormulaStyleConfig)
-    equation_numbering: EquationNumberingConfig = field(default_factory=EquationNumberingConfig)
     reference_style: ReferenceStyleConfig = field(default_factory=ReferenceStyleConfig)
     watermark: WatermarkConfig = field(default_factory=WatermarkConfig)

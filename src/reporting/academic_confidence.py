@@ -29,7 +29,11 @@ def _extract_academic_confidence(
         return None
 
     citation = _academic_citation_confidence(records, count_result)
-    formula = _academic_formula_confidence(records, count_result)
+    formula = _academic_formula_confidence(
+        records,
+        count_result,
+        getattr(result, "context", None),
+    )
     issues = [
         *list(citation.get("issues", []) or []),
         *list(formula.get("issues", []) or []),
@@ -172,35 +176,140 @@ def _academic_citation_confidence(
 def _academic_formula_confidence(
     records: list,
     count_result: dict | None,
+    context=None,
 ) -> dict[str, object]:
     counts = (count_result or {}).get("counts", {}) if isinstance(count_result, dict) else {}
     equation_count = int(counts.get("equation_count") or 0)
     table_count = 0
+    created_table_count = 0
+    converted_source_count = 0
+    skipped_conversion_count = 0
     normalized_numbers = 0
     skipped_numbers = 0
     issues: list[dict[str, object]] = []
     record_count = 0
 
+    runtime = dict(getattr(context, "formula_runtime", None) or {})
+    office_fallback = list(
+        getattr(context, "mathtype_office_fallback", None) or []
+    )
+
     for record in records:
-        if _clean_text(getattr(record, "rule_name", "")) != "equation_table_format":
+        rule_name = _clean_text(getattr(record, "rule_name", ""))
+        if rule_name not in {
+            "formula_convert",
+            "formula_to_table",
+            "equation_table_format",
+            "formula_style",
+        }:
             continue
         record_count += 1
         target = _clean_text(getattr(record, "target", ""))
         change_type = _clean_text(getattr(record, "change_type", ""))
-        if "公式表格" in target:
+        issue_added = False
+        if rule_name == "formula_convert" and "个公式" in target and "未自动" not in target:
+            converted_source_count += _extract_int(target, r"(\d+)", default=0)
+        elif rule_name == "formula_convert" and "未自动改写" in target:
+            skipped_conversion_count += _extract_int(target, r"(\d+)", default=0)
+        elif rule_name == "formula_to_table" and "块公式" in target:
+            created_table_count += _extract_int(target, r"(\d+)", default=0)
+        elif "公式表格" in target:
             table_count += _extract_int(target, r"(\d+)", default=0)
         elif "公式编号" in target and change_type != "skip":
             normalized_numbers += _extract_int(target, r"(\d+)", default=0)
         elif "公式编号" in target and change_type == "skip":
             skipped_numbers += _extract_int(target, r"(\d+)", default=0)
             issues.append(_academic_issue_from_record("formula", record))
-        elif change_type == "skip" or not bool(getattr(record, "success", True)):
+            issue_added = True
+        if (
+            not issue_added
+            and (
+                change_type in {"skip", "review"}
+                or not bool(getattr(record, "success", True))
+            )
+        ):
             issues.append(_academic_issue_from_record("formula", record))
+
+    # Tracker wording is presentation-oriented and may be localized. Runtime
+    # counters are the authoritative execution receipt.
+    converted_source_count = max(
+        converted_source_count,
+        int(runtime.get("converted") or 0),
+    )
+    skipped_conversion_count = max(
+        skipped_conversion_count,
+        int(runtime.get("skipped") or 0),
+    )
+    created_table_count = max(
+        created_table_count,
+        int(runtime.get("tables_created") or 0),
+    )
+    table_count = max(
+        table_count,
+        int(runtime.get("formatted_equation_tables") or 0),
+    )
+    normalized_numbers = max(
+        normalized_numbers,
+        int(runtime.get("normalized_numbers") or 0),
+    )
+    skipped_numbers = max(
+        skipped_numbers,
+        int(runtime.get("skipped_numbers") or 0),
+    )
+    for item in list(runtime.get("low_confidence", []) or []):
+        if not isinstance(item, dict):
+            continue
+        issues.append(
+            {
+                "domain": "formula",
+                "severity": "warning",
+                "rule_name": "formula_convert",
+                "target": _clean_text(item.get("location", "")),
+                "change_type": "review",
+                "reason": _clean_text(item.get("reason", "low_confidence")),
+                "paragraph_index": int(item.get("paragraph_index") or -1),
+            }
+        )
+    for item in list(runtime.get("diagnostics", []) or []):
+        if not isinstance(item, dict):
+            continue
+        issues.append(
+            {
+                "domain": "formula",
+                "severity": "warning",
+                "rule_name": "formula_convert",
+                "target": _clean_text(item.get("location", "")),
+                "change_type": "diagnostic",
+                "reason": _clean_text(item.get("reason", "formula_diagnostic")),
+                "paragraph_index": int(item.get("paragraph_index") or -1),
+            }
+        )
+    for receipt in office_fallback:
+        if not isinstance(receipt, dict):
+            continue
+        found = int(dict(receipt.get("stats") or {}).get("found") or 0)
+        if found and not bool(receipt.get("changed", False)):
+            issues.append(
+                {
+                    "domain": "formula",
+                    "severity": "warning",
+                    "rule_name": "formula_convert",
+                    "target": "MathType Office fallback",
+                    "change_type": "review",
+                    "reason": _clean_text(receipt.get("detail", "fallback_not_applied")),
+                    "paragraph_index": -1,
+                }
+            )
 
     if issues:
         status = "needs_review"
         confidence_level = "low"
-    elif equation_count > 0 or table_count > 0 or normalized_numbers > 0:
+    elif (
+        equation_count > 0
+        or table_count > 0
+        or normalized_numbers > 0
+        or int(runtime.get("matched") or 0) > 0
+    ):
         status = "ok"
         confidence_level = "high"
     else:
@@ -211,10 +320,20 @@ def _academic_formula_confidence(
         "status": status,
         "confidence_level": confidence_level,
         "equation_count": equation_count,
+        "converted_source_count": converted_source_count,
+        "skipped_conversion_count": skipped_conversion_count,
+        "created_equation_table_count": created_table_count,
         "formatted_equation_table_count": table_count,
         "normalized_number_count": normalized_numbers,
         "skipped_number_count": skipped_numbers,
         "tracker_record_count": record_count,
+        "source_counts": dict(runtime.get("source_counts") or {}),
+        "matched_source_count": int(runtime.get("matched") or 0),
+        "output_mode": _clean_text(runtime.get("output_mode", "")),
+        "latex_exchange_count": len(list(runtime.get("latex_exchange", []) or [])),
+        "latex_wrappers_removed": int(runtime.get("latex_wrappers_removed") or 0),
+        "styled_formula_paragraphs": int(runtime.get("styled_formula_paragraphs") or 0),
+        "office_fallback": office_fallback,
         "issues": issues,
     }
 
@@ -272,9 +391,15 @@ def _format_academic_confidence_markdown(evidence: dict) -> list[str]:
             "- Formula: "
             f"status={_clean_text(formula.get('status', '')) or '-'}, "
             f"equations={int(formula.get('equation_count') or 0)}, "
+            f"converted={int(formula.get('converted_source_count') or 0)}, "
+            f"conversion_skipped={int(formula.get('skipped_conversion_count') or 0)}, "
+            f"created_tables={int(formula.get('created_equation_table_count') or 0)}, "
             f"tables={int(formula.get('formatted_equation_table_count') or 0)}, "
             f"normalized_numbers={int(formula.get('normalized_number_count') or 0)}, "
-            f"skipped_numbers={int(formula.get('skipped_number_count') or 0)}"
+            f"skipped_numbers={int(formula.get('skipped_number_count') or 0)}, "
+            f"mode={_clean_text(formula.get('output_mode', '')) or '-'}, "
+            f"latex_exchange={int(formula.get('latex_exchange_count') or 0)}, "
+            f"office_fallbacks={len(list(formula.get('office_fallback', []) or []))}"
         )
     issues = list(evidence.get("issues", []) or []) if isinstance(evidence, dict) else []
     if issues:

@@ -17,11 +17,14 @@ from src.config.migration import (
     normalize_module_switches,
 )
 from src.config.feature_configs import (
-    FormulaStyleConfig,
-    EquationNumberingConfig,
     ReferenceStyleConfig,
     WatermarkConfig,
     OutputConfig,
+)
+from src.config.formula_policy import (
+    THESIS_FORMULA_MODULE_NAMES,
+    ThesisFormulaRules,
+    is_thesis_formula_mode,
 )
 from src.config.document_scope import (
     DocumentScopePolicy,
@@ -72,34 +75,9 @@ class CitationLinkOptions:
 
 
 @dataclass
-class FormulaConvertOptions:
-    """公式转换模块的细项开关。"""
-    output_mode: str = "word_native"
-    low_confidence_policy: str = "skip_and_mark"
-    office_fallback_enabled: bool = False
-    office_fallback_timeout_sec: int = 30
-
-
-@dataclass
-class ChemTypographyOptions:
-    """化学式处理的细项开关。"""
-    western_font: str = "Times New Roman"
-    scopes: dict[str, bool] = field(default_factory=lambda: {
-        "references": False, "body": False, "headings": False,
-        "abstract_cn": False, "abstract_en": False,
-        "captions": False, "tables": False,
-    })
-    allow_tokens: list[str] = field(default_factory=list)
-    allow_patterns: list[str] = field(default_factory=list)
-    ignore_tokens: list[str] = field(default_factory=list)
-    ignore_patterns: list[str] = field(default_factory=list)
-    manual_overrides: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
 class BatchPreset:
-    """批量生成预设（陪标等场景）。"""
-    entity_profile_ids: list[str] = field(default_factory=list)
+    """Recipe output preset; record selection remains run-owned."""
+
     output_dir_template: str = "{entity_name}/"
 
 
@@ -372,7 +350,6 @@ class SceneWorkspace:
     template_id: str = ""               # 唯一持久化模板 ID
     compatible_template_ids: list[str] = field(default_factory=list)
     master_id: str = ""                 # 唯一持久化母版 ID（无母版的方案留空）
-    default_material_profile_id: str = ""
 
     # ── 处理范围 ───────────────────────────
     document_scope: DocumentScopePolicy = field(
@@ -395,13 +372,10 @@ class SceneWorkspace:
     md_cleanup: MdCleanupOptions = field(default_factory=MdCleanupOptions)
     whitespace: WhitespaceOptions = field(default_factory=WhitespaceOptions)
     citation_link: CitationLinkOptions = field(default_factory=CitationLinkOptions)
-    formula_convert: FormulaConvertOptions = field(default_factory=FormulaConvertOptions)
-    chem_typography: ChemTypographyOptions = field(default_factory=ChemTypographyOptions)
-
-    # Template appearance lives only in TemplateConfig/template_overrides.
-    # Scene-owned runtime policy fields remain below.
-    formula_style: FormulaStyleConfig = field(default_factory=FormulaStyleConfig)
-    equation_numbering: EquationNumberingConfig = field(default_factory=EquationNumberingConfig)
+    # Formula conversion, equation-table layout/numbering and chemical
+    # super/subscript recovery have one persisted owner.  Non-thesis plans use
+    # ``None`` and are fail-closed by the resolver.
+    thesis_formula_rules: ThesisFormulaRules | None = None
     reference_style: ReferenceStyleConfig = field(default_factory=ReferenceStyleConfig)
     watermark: WatermarkConfig = field(default_factory=WatermarkConfig)
 
@@ -418,15 +392,24 @@ class SceneWorkspace:
         self.document_scope = coerce_document_scope_policy(self.document_scope)
 
         self.module_switches = normalize_module_switches(self.module_switches)
+        # Formula enablement is persisted only inside ``thesis_formula_rules``.
+        # The resolver recreates the runtime switches expected by the pipeline.
+        for module_name in THESIS_FORMULA_MODULE_NAMES:
+            self.module_switches.pop(module_name, None)
         self.scene_id = str(self.scene_id or "").strip()
         self.mode_id = str(self.mode_id or "").strip()
+        if is_thesis_formula_mode(self.mode_id):
+            if self.thesis_formula_rules is None:
+                self.thesis_formula_rules = ThesisFormulaRules()
+        else:
+            # A formula policy attached to a non-thesis plan is stale/invalid
+            # state.  Do not allow it to become executable merely because old
+            # module switches were persisted as true.
+            self.thesis_formula_rules = None
         if type(self.display_order) is not int:
             self.display_order = 0
         self.template_id = str(self.template_id or "").strip()
         self.master_id = str(self.master_id or "").strip()
-        self.default_material_profile_id = str(
-            self.default_material_profile_id or ""
-        ).strip()
         # Preserve an explicit empty/unknown ID.  Execution integrity is the
         # single owner that rejects it; construction must not silently select
         # a different delivery contract.
@@ -443,12 +426,44 @@ class SceneWorkspace:
         if self.delivery_presets is None:
             self.delivery_presets = []
 
+    def ensure_thesis_formula_rules(self) -> ThesisFormulaRules:
+        """Return the thesis rule aggregate, rejecting cross-mode activation."""
+
+        if not is_thesis_formula_mode(self.mode_id):
+            raise RuntimeError(
+                "thesis formula rules are unavailable outside thesis mode"
+            )
+        if self.thesis_formula_rules is None:
+            self.thesis_formula_rules = ThesisFormulaRules()
+        return self.thesis_formula_rules
+
     def is_module_enabled(self, module_name: str) -> bool:
         """查询模块是否在本场景中启用。"""
-        return self.module_switches.get(
-            normalize_module_name(module_name),
-            False,
-        )
+        normalized_name = normalize_module_name(module_name)
+        rules = self.thesis_formula_rules
+        if not is_thesis_formula_mode(self.mode_id) or rules is None:
+            if normalized_name in THESIS_FORMULA_MODULE_NAMES:
+                return False
+        elif normalized_name == "formula_convert":
+            return bool(rules.formula_enabled and rules.formula_convert.enabled)
+        elif normalized_name == "chem_typography":
+            return bool(
+                rules.chem_typography.enabled
+                and any(
+                    bool(active)
+                    for active in (rules.chem_typography.scopes or {}).values()
+                )
+            )
+        elif normalized_name == "equation_table_format":
+            return bool(
+                rules.formula_enabled
+                and (
+                    rules.formula_to_table.enabled
+                    or rules.equation_numbering.enabled
+                    or rules.formula_style.enabled
+                )
+            )
+        return self.module_switches.get(normalized_name, False)
 
     def default_delivery_preset(self) -> DeliveryPreset:
         """Return the canonical artifact owner selected for default delivery."""

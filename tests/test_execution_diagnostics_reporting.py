@@ -9,27 +9,26 @@ from docx import Document
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.execution_diagnostics import build_execution_diagnostics
-from src.config.scene import SceneWorkspace
 from src.config.master_library import default_master
 from src.config.resolver import resolve_config
+from src.config.scene import SceneWorkspace
 from src.config.style_source_report_summary import build_style_source_report_summary
 from src.config.template import StyleConfig, TemplateConfig
+from src.execution_diagnostics import build_execution_diagnostics
 from src.modules.base import BaseModule, ModuleMeta
 from src.pipeline.context import PipelineContext
 from src.pipeline.result import PipelineResult
-from src.pipeline.runner import Pipeline
-from src.pipeline.runner import build_coverage_boundary_report_items
+from src.pipeline.runner import Pipeline, build_coverage_boundary_report_items
 from src.pipeline.tracker import ChangeTracker
 from src.report_writer import write_json_report, write_markdown_report
+from src.shared.engine.application_section_word_limits import (
+    inspect_application_section_word_limits,
+)
 from src.shared.engine.official_numbering_preservation import (
     inspect_official_numbering_preservation,
 )
 from src.shared.engine.technical_chapter_inventory import (
     inspect_technical_chapter_inventory,
-)
-from src.shared.engine.application_section_word_limits import (
-    inspect_application_section_word_limits,
 )
 
 
@@ -1149,7 +1148,48 @@ def test_report_writer_emits_academic_citation_and_formula_confidence(tmp_path):
         before="chapter-aware numbering normalization",
         after="skipped due to missing chapter context",
     )
+    tracker.record(
+        rule_name="formula_convert",
+        target="2 个公式",
+        section="global",
+        change_type="convert",
+        before="source formula",
+        after="editable OMML",
+    )
+    tracker.record(
+        rule_name="formula_convert",
+        target="1 个未自动改写的公式",
+        section="global",
+        change_type="review",
+        before="low-confidence source",
+        after="preserved for manual review",
+    )
+    tracker.record(
+        rule_name="formula_to_table",
+        target="1 个块公式",
+        section="global",
+        change_type="structure",
+        before="standalone paragraph",
+        after="two-column equation table",
+    )
     context = PipelineContext(
+        formula_runtime={
+            "output_mode": "latex",
+            "matched": 3,
+            "converted": 2,
+            "skipped": 1,
+            "source_counts": {"latex": 3},
+            "latex_exchange": [{"location": "paragraph:1", "latex": "x"}],
+            "latex_wrappers_removed": 2,
+            "styled_formula_paragraphs": 2,
+        },
+        mathtype_office_fallback=[
+            {
+                "changed": True,
+                "detail": "replaced=1",
+                "stats": {"found": 1, "replaced": 1},
+            }
+        ],
         count_result={
             "profile_id": "thesis_cn",
             "profile_name": "Chinese thesis count",
@@ -1194,13 +1234,28 @@ def test_report_writer_emits_academic_citation_and_formula_confidence(tmp_path):
     assert evidence["citation"]["linked_citation_count"] == 1
     assert evidence["citation"]["unresolved_citation_count"] == 1
     assert evidence["formula"]["equation_count"] == 1
+    assert evidence["formula"]["converted_source_count"] == 2
+    assert evidence["formula"]["skipped_conversion_count"] == 1
+    assert evidence["formula"]["created_equation_table_count"] == 1
     assert evidence["formula"]["formatted_equation_table_count"] == 1
     assert evidence["formula"]["skipped_number_count"] == 1
+    assert evidence["formula"]["output_mode"] == "latex"
+    assert evidence["formula"]["matched_source_count"] == 3
+    assert evidence["formula"]["latex_exchange_count"] == 1
+    assert evidence["formula"]["latex_wrappers_removed"] == 2
+    assert evidence["formula"]["office_fallback"][0]["changed"] is True
     assert any(issue["domain"] == "formula" for issue in evidence["issues"])
+    assert any(
+        issue["reason"] == "preserved for manual review"
+        for issue in evidence["formula"]["issues"]
+    )
     assert any(issue["domain"] == "citation" for issue in evidence["issues"])
     assert "## 学术引用与公式置信度" in markdown
     assert "Citation: status=needs_review, references=2, linked=1, unresolved=1" in markdown
-    assert "Formula: status=needs_review, equations=1, tables=1" in markdown
+    assert (
+        "Formula: status=needs_review, equations=1, converted=2, "
+        "conversion_skipped=1, created_tables=1, tables=1"
+    ) in markdown
     assert "skipped due to missing chapter context" in markdown
 
 
@@ -1551,6 +1606,7 @@ def test_report_writer_emits_exam_delivery_runtime_evidence(tmp_path):
     assert "Master DOCX: `config_library/masters/exam/builtin/default_exam_v20.docx`" in markdown
     assert "student: `dist/exam_student.docx`" in markdown
     assert "assets=1/1" in markdown
+    assert "fixed_layout=answer_sheet" in markdown
     assert "Preview excerpt: 一、选择题" in markdown
 
 

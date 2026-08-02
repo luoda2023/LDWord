@@ -165,7 +165,11 @@ def evaluate_paths(
                 PathRejectionCode.SOURCE_NOT_DIRECTORY,
                 raw,
             )
-        if policy.suffixes and path.suffix.casefold() not in policy.suffixes:
+        if (
+            policy.suffixes
+            and path.is_file()
+            and path.suffix.casefold() not in policy.suffixes
+        ):
             return PathProposalResult.rejected(
                 PathRejectionCode.SUFFIX_NOT_ALLOWED,
                 path.suffix.casefold(),

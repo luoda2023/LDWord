@@ -11,6 +11,7 @@
 正式发布前建议先运行：
 
 ```powershell
+# 仅移除明确的旧 build/dist 生成目录，不删除虚拟环境、日志或用户数据
 .\clean_public_release.bat
 
 .\check_public_release.bat
@@ -24,6 +25,11 @@
 ## 必须保留
 
 - `README.md`
+- `CHANGELOG.md`
+- `RELEASE_NOTES.md`
+- `SECURITY.md`
+- `CONTRIBUTING.md`
+- `CODE_OF_CONDUCT.md`
 - `LICENSE`
 - `THIRD_PARTY_NOTICES.md`
 - `licenses/components.json`
@@ -33,6 +39,7 @@
 - `main.py`
 - `src/`
 - `defaults/`
+- `docs/user/`（Markdown 正文、演示截图和快速开始示例）
 
 ---
 
@@ -65,12 +72,20 @@
 ## 发布前自查
 
 - [ ] `README.md` 已说明 MIT 源码口径
+- [ ] `docs/user/` 中的快速开始、完整手册、截图和示例文件已同步到当前版本
+- [ ] 二进制发布包根目录包含两份用户文档 PDF 和快速开始示例 DOCX
 - [ ] `THIRD_PARTY_NOTICES.md` 已说明第三方依赖许可证
 - [ ] `licenses/manifest.json` 中的组件数量、版本和许可文件均通过发布检查
 - [ ] Lucide、Feather、Qt、PDFium、Python 与 OpenSSL 等随包内容均已纳入许可清单
 - [ ] `requirements.txt` 使用 `PySide6_Essentials`，不再依赖 `PyQt5`
-- [ ] 若刚执行过安装 / 打包 / 预览，先运行 `.\clean_public_release.bat`
-- [ ] 运行 `.\check_public_release.bat --strict`
+- [ ] 当前候选提交已冻结，`git status --porcelain` 为空，并已推送到真实发布远端
+- [ ] 使用 `scripts/stage_source_release.py` 从候选提交导出隔离源码树
+- [ ] 对隔离源码树运行 `.\check_public_release.bat --strict --root <staging>`
 - [ ] GitHub Actions 中 `Scene Matrix Release Gate` 已通过
-- [ ] 运行 `pytest tests -v`
+- [ ] 运行 `python scripts/engineering_gate.py`、场景门禁和 `pytest -q tests`
+- [ ] 官方构建使用 CPython 3.12 x64 且 `scripts/verify_release_environment.py` 通过
+- [ ] 正式 EXE 的 Windows 版本资源、数字签名和时间戳均验证通过
+- [ ] 最终 ZIP 附带 CycloneDX SBOM、RELEASE_MANIFEST、SHA-256 和门禁日志
+- [ ] Windows 10/11、Office 有/无、多 DPI、非 ASCII 路径与覆盖升级人工矩阵已签字
+- [ ] `SECURITY.md` 中的私密漏洞报告入口和行为事件联系渠道已由项目所有者配置
 - [ ] 确认 `build/`、`dist/`、`.venv/` 等目录不会进入公开仓库

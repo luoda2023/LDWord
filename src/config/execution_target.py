@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.config.master_library import get_master
 from src.config.official_document_profiles import (
     get_official_document_assembly_contract,
 )
+from src.config.master_library import resolve_official_master_for_contract
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +57,14 @@ class ExecutionTarget:
         return None
 
 
+def get_master(*args, **kwargs):
+    """Load master-library discovery only for modes that actually use it."""
+
+    from src.config.master_library import get_master
+
+    return get_master(*args, **kwargs)
+
+
 def resolve_execution_target(
     *,
     mode_id: str,
@@ -89,12 +97,12 @@ def resolve_execution_target(
         requested_master_id = str(
             getattr(scene, "master_id", "") or ""
         ).strip()
-        master = (
+        requested_master = (
             get_master(requested_master_id, "official")
             if requested_master_id
             else None
         )
-        if requested_master_id and master is None:
+        if requested_master_id and requested_master is None:
             return ExecutionTarget(
                 mode_id=normalized_mode,
                 document_path=normalized_document,
@@ -102,12 +110,15 @@ def resolve_execution_target(
                 master_id=requested_master_id,
                 issues=(f"master_ref_unresolved:{requested_master_id}",),
             )
-        if (
-            master is not None
-            and str(getattr(master, "source_type", "") or "") == "builtin"
-            and tuple(getattr(master, "supported_assembly_types", ()) or ())
-            and profile_id
-            not in tuple(getattr(master, "supported_assembly_types", ()) or ())
+        master = resolve_official_master_for_contract(
+            contract,
+            requested=requested_master,
+        )
+        if master is not None and (
+            tuple(getattr(master, "supported_assembly_types", ()) or ())
+            and profile_id not in tuple(
+                getattr(master, "supported_assembly_types", ()) or ()
+            )
         ):
             return ExecutionTarget(
                 mode_id=normalized_mode,
@@ -116,7 +127,7 @@ def resolve_execution_target(
                 master_id=requested_master_id,
                 master_path=str(getattr(master, "docx_path", "") or ""),
                 issues=(
-                    f"master_ref_incompatible:{requested_master_id}:{profile_id}",
+                    f"master_ref_incompatible:{master.master_id}:{profile_id}",
                 ),
             )
         if master is not None:

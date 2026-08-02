@@ -12,9 +12,31 @@ from dataclasses import dataclass, field
 
 _FRONT_PHASE_ID = "front"
 _BODY_PHASE_ID = "body"
-_FRONT_PHASE_SELECTORS = ("front_matter",)
-_BODY_PHASE_SELECTORS = ("body", "back_matter")
-_DEFAULT_SUPPRESS_HEADER_FOOTER_SELECTORS = ("pre_numbering",)
+_PRE_NUMBERING_SELECTORS = ("cover",)
+_FRONT_PHASE_SELECTORS = ("abstract_cn", "abstract_en", "toc")
+_BODY_PHASE_SELECTORS = (
+    "body",
+    "references",
+    "errata",
+    "appendix",
+    "acknowledgment",
+    "resume",
+)
+
+
+def _set_selector_membership(
+    selectors: list[str],
+    selector: str,
+    enabled: bool,
+) -> None:
+    normalized = [
+        str(item or "").strip()
+        for item in selectors or []
+        if str(item or "").strip() and str(item or "").strip() != selector
+    ]
+    if enabled:
+        normalized.insert(0, selector)
+    selectors[:] = normalized
 
 
 @dataclass
@@ -83,23 +105,42 @@ class HeaderConfig:
     styleref_level: int = 1
     border: bool = True
     border_style: HeaderFooterBorderConfig = field(default_factory=HeaderFooterBorderConfig)
-    hide_on_cover: bool = True
+    hidden_selectors: list[str] = field(
+        default_factory=lambda: list(_PRE_NUMBERING_SELECTORS)
+    )
     typography: HeaderFooterTypographyConfig = field(
         default_factory=HeaderFooterTypographyConfig
     )
+
+    @property
+    def hide_on_cover(self) -> bool:
+        return "cover" in set(self.hidden_selectors or [])
+
+    @hide_on_cover.setter
+    def hide_on_cover(self, value: bool) -> None:
+        _set_selector_membership(self.hidden_selectors, "cover", bool(value))
 
 
 @dataclass
 class FooterConfig:
     enabled: bool = True
-    content_mode: str = "page_number"   # "page_number" | "fixed" | "page_number_with_text" | "none"
+    content_mode: str = "none"          # "none" | "fixed"; page numbers are owned by page_number_plan
     fixed_text: str = ""
     alignment: str = "center"           # "left" | "center" | "right"
-    page_number_template: str = "{page}"
-    hide_on_cover: bool = True
+    hidden_selectors: list[str] = field(
+        default_factory=lambda: list(_PRE_NUMBERING_SELECTORS)
+    )
     typography: HeaderFooterTypographyConfig = field(
         default_factory=HeaderFooterTypographyConfig
     )
+
+    @property
+    def hide_on_cover(self) -> bool:
+        return "cover" in set(self.hidden_selectors or [])
+
+    @hide_on_cover.setter
+    def hide_on_cover(self, value: bool) -> None:
+        _set_selector_membership(self.hidden_selectors, "cover", bool(value))
 
 
 @dataclass
@@ -112,13 +153,35 @@ class PageNumberPhaseConfig:
     start_value: int = 1
 
 
+@dataclass
+class PageNumberVariantConfig:
+    """Presentation policy for a Word first/even-page footer variant.
+
+    Number format and sequence remain section-owned by ``PageNumberPhaseConfig``.
+    A page variant may independently override visibility, template, and
+    alignment without pretending that Word can restart numbering by parity.
+    """
+
+    visibility: str = "inherit"          # "inherit" | "show" | "hide"
+    template: str = ""                    # empty inherits PageNumberPlanConfig.template
+    alignment: str = "inherit"            # "inherit" | "left" | "center" | "right"
+
+
 def default_continuous_page_number_phases() -> list[PageNumberPhaseConfig]:
     """Return the product default page-number plan for generic templates."""
 
     return [
         PageNumberPhaseConfig(
+            phase_id="pre_numbering",
+            selectors=list(_PRE_NUMBERING_SELECTORS),
+            visible=False,
+            number_format="decimal",
+            start_mode="restart",
+            start_value=1,
+        ),
+        PageNumberPhaseConfig(
             phase_id="main",
-            selectors=["all_numbered_content"],
+            selectors=[*_FRONT_PHASE_SELECTORS, *_BODY_PHASE_SELECTORS],
             visible=True,
             number_format="decimal",
             start_mode="restart",
@@ -129,7 +192,12 @@ def default_continuous_page_number_phases() -> list[PageNumberPhaseConfig]:
 
 @dataclass
 class PageNumberPlanConfig:
+    enabled: bool = True
+    template: str = "{page}"
+    alignment: str = "center"
     phases: list[PageNumberPhaseConfig] = field(default_factory=list)
+    first: PageNumberVariantConfig = field(default_factory=PageNumberVariantConfig)
+    even: PageNumberVariantConfig = field(default_factory=PageNumberVariantConfig)
     on_missing_doc_tree: str = "warn_and_fallback"
     validation_mode: str = "strict"     # "strict" | "warn"
 
@@ -141,9 +209,6 @@ class HeaderFooterConfig:
     behavior: HeaderFooterBehaviorConfig = field(default_factory=HeaderFooterBehaviorConfig)
     variants: HeaderFooterVariantsConfig = field(default_factory=HeaderFooterVariantsConfig)
     page_number_plan: PageNumberPlanConfig = field(default_factory=PageNumberPlanConfig)
-    suppress_header_footer_selectors: list[str] = field(
-        default_factory=lambda: list(_DEFAULT_SUPPRESS_HEADER_FOOTER_SELECTORS)
-    )
 
     def _get_phase(
         self,
@@ -242,18 +307,11 @@ class HeaderFooterConfig:
 
     @property
     def page_number_enabled(self) -> bool:
-        return self.footer_enabled and str(self.footer.content_mode or "page_number") in {
-            "page_number",
-            "page_number_with_text",
-        }
+        return bool(getattr(self.page_number_plan, "enabled", True))
 
     @page_number_enabled.setter
     def page_number_enabled(self, value: bool) -> None:
-        if bool(value):
-            self.footer.enabled = True
-            self.footer.content_mode = "page_number_with_text" if self.footer.fixed_text else "page_number"
-        else:
-            self.footer.content_mode = "fixed" if self.footer.fixed_text else "none"
+        self.page_number_plan.enabled = bool(value)
 
     @property
     def footer_text(self) -> str:
@@ -274,11 +332,22 @@ class HeaderFooterConfig:
 
     @property
     def page_number_template(self) -> str:
-        return str(self.footer.page_number_template or "{page}")
+        return str(getattr(self.page_number_plan, "template", "{page}") or "{page}")
 
     @page_number_template.setter
     def page_number_template(self, value: str) -> None:
-        self.footer.page_number_template = str(value or "{page}")
+        self.page_number_plan.template = str(value or "{page}")
+
+    @property
+    def page_number_alignment(self) -> str:
+        return str(getattr(self.page_number_plan, "alignment", "center") or "center")
+
+    @page_number_alignment.setter
+    def page_number_alignment(self, value: str) -> None:
+        normalized = str(value or "center").strip().lower()
+        self.page_number_plan.alignment = (
+            normalized if normalized in {"left", "center", "right"} else "center"
+        )
 
     @property
     def styleref_level(self) -> int:
@@ -370,35 +439,64 @@ class HeaderFooterConfig:
 
     @property
     def hide_cover_header_footer(self) -> bool:
-        selectors = {
-            str(selector or "").strip()
-            for selector in (self.suppress_header_footer_selectors or [])
-            if str(selector or "").strip()
-        }
         return (
-            bool(self.header.hide_on_cover)
-            and bool(self.footer.hide_on_cover)
-            and bool(selectors & {"cover", "pre_numbering"})
+            "cover" in set(self.header.hidden_selectors or [])
+            and "cover" in set(self.footer.hidden_selectors or [])
         )
 
     @hide_cover_header_footer.setter
     def hide_cover_header_footer(self, value: bool) -> None:
         hide = bool(value)
-        self.header.hide_on_cover = hide
-        self.footer.hide_on_cover = hide
-        if hide:
-            selectors = [
+        for target in (self.header.hidden_selectors, self.footer.hidden_selectors):
+            normalized = [
                 str(selector or "").strip()
-                for selector in (self.suppress_header_footer_selectors or [])
-                if str(selector or "").strip()
+                for selector in target
+                if str(selector or "").strip() and str(selector or "").strip() != "cover"
             ]
-            if not selectors:
-                selectors = list(_DEFAULT_SUPPRESS_HEADER_FOOTER_SELECTORS)
-            elif "cover" not in selectors and "pre_numbering" not in selectors:
-                selectors.insert(0, "pre_numbering")
-            self.suppress_header_footer_selectors = selectors
-        else:
-            self.suppress_header_footer_selectors = []
+            if hide:
+                normalized.insert(0, "cover")
+            target[:] = normalized
+
+    @property
+    def suppress_header_footer_selectors(self) -> list[str]:
+        """Legacy API projection; canonical JSON stores per-channel selectors."""
+
+        header_hidden = {
+            str(selector or "").strip()
+            for selector in (self.header.hidden_selectors or [])
+            if str(selector or "").strip()
+        }
+        footer_hidden = {
+            str(selector or "").strip()
+            for selector in (self.footer.hidden_selectors or [])
+            if str(selector or "").strip()
+        }
+        ordered = [
+            *_PRE_NUMBERING_SELECTORS,
+            *_FRONT_PHASE_SELECTORS,
+            *_BODY_PHASE_SELECTORS,
+        ]
+        common = header_hidden & footer_hidden
+        return [selector for selector in ordered if selector in common]
+
+    @suppress_header_footer_selectors.setter
+    def suppress_header_footer_selectors(self, selectors: list[str]) -> None:
+        """Legacy API write-through for callers not yet migrated to channel scopes."""
+
+        normalized: list[str] = []
+        for selector in selectors or []:
+            value = str(selector or "").strip()
+            if not value:
+                continue
+            if value == "pre_numbering":
+                values = _PRE_NUMBERING_SELECTORS
+            else:
+                values = (value,)
+            for candidate in values:
+                if candidate not in normalized:
+                    normalized.append(candidate)
+        self.header.hidden_selectors = list(normalized)
+        self.footer.hidden_selectors = list(normalized)
 
     @property
     def front_matter_page_number_format(self) -> str:
@@ -505,21 +603,23 @@ class CaptionConfig:
 class FormulaTableConfig:
     """Formula-table visual parameters."""
 
-    formula_font_name: str = "Times New Roman"
+    # Keep the proven V0.2 thesis defaults.  These values now live under the
+    # thesis formula policy instead of leaking through every template.
+    formula_font_name: str = "Cambria Math"
     formula_font_size_pt: float = 12.0
-    formula_font_size_display: str = "12"
+    formula_font_size_display: str = ""
     formula_line_spacing: float = 1.0
-    formula_space_before_pt: float = 6.0
+    formula_space_before_pt: float = 0.0
     formula_space_before_unit: str = "pt"
-    formula_space_after_pt: float = 6.0
+    formula_space_after_pt: float = 0.0
     formula_space_after_unit: str = "pt"
     block_alignment: str = "center"
     table_alignment: str = "center"
     formula_cell_alignment: str = "center"
     number_alignment: str = "right"
     number_font_name: str = "Times New Roman"
-    number_font_size_pt: float = 12.0
-    number_font_size_display: str = "12"
+    number_font_size_pt: float = 10.5
+    number_font_size_display: str = ""
     auto_shrink_number_column: bool = True
 
 
@@ -527,6 +627,7 @@ class FormulaTableConfig:
 class FormulaStyleConfig:
     """Formula-style parameters."""
 
+    enabled: bool = True
     unify_font: bool = True
     unify_size: bool = True
     unify_spacing: bool = True
@@ -536,6 +637,7 @@ class FormulaStyleConfig:
 class EquationNumberingConfig:
     """Equation numbering parameters."""
 
+    enabled: bool = True
     numbering_format: str = "chapter.seq"
 
 

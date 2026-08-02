@@ -55,6 +55,7 @@ class AssistantTurnRequest:
     disclosure_grant: Mapping[str, Any] = field(default_factory=dict)
     history_disclosure_grant: Mapping[str, Any] = field(default_factory=dict)
     conversation_cursor: str = ""
+    template_authoring_mode_id: str = ""
 
     def __post_init__(self) -> None:
         for name in ("turn_id", "session_id", "provider_profile_id", "model_id"):
@@ -77,6 +78,11 @@ class AssistantTurnRequest:
             "history_disclosure_grant",
             dict(plain_data(self.history_disclosure_grant)),
         )
+        object.__setattr__(
+            self,
+            "template_authoring_mode_id",
+            str(self.template_authoring_mode_id or "").strip(),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +101,7 @@ class AssistantTurnRequest:
                 self.history_disclosure_grant
             ),
             "conversation_cursor": self.conversation_cursor,
+            "template_authoring_mode_id": self.template_authoring_mode_id,
         }
 
 

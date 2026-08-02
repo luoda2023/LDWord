@@ -268,7 +268,7 @@ def build_expert_toggle_text(is_expanded: bool) -> str:
 
 def build_non_numbered_toggle_text(is_expanded: bool) -> str:
     prefix = "▾" if is_expanded else "▸"
-    return f"{prefix} 非编号标题"
+    return f"{prefix} 特殊标题（不参与编号）"
 
 
 def parse_csv_items(text: str) -> list[str]:

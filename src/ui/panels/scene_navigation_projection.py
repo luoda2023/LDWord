@@ -8,7 +8,7 @@ from src.config.default_delivery_identity import project_default_delivery_identi
 from src.config.delivery_preset_display import DELIVERY_PRESET_DISPLAY_LABELS
 from src.config.master_library import default_master
 from src.shared.engine.exam_paper_style import exam_blank_style_label
-from src.ui.adapters.config_selector_models import master_display_label
+from src.ui.adapters.config_selector_models import master_display_label, plan_display_label
 from src.ui.panels.scene_material_requirement_block import _profile_material_schema_ids
 from src.config.scene_surface_registry import (
     scene_uses_exam_paper_surface,
@@ -16,7 +16,6 @@ from src.config.scene_surface_registry import (
     scene_uses_plan_preview_surface,
 )
 from src.ui.panels.scene_product_summary_projection import (
-    FAILURE_POLICY_LABELS,
     FORMAT_DISPLAY_LABELS,
     scene_document_scope_display_name,
 )
@@ -26,13 +25,16 @@ SCENE_RULES_ALIAS_CARDS = frozenset(
     (
         "scn_scope",
         "scn_output",
+        # Compatibility only: old repair links now land on the plan rules
+        # page.  There is no visible risk/cleanup navigation card.
+        "scn_cleanup",
     )
 )
 
 NAV_SCOPE_MODE_LABELS = {
     "all": "全部内容",
     "body": "仅正文",
-    "selected": "指定区域",
+    "selected": "自选区域",
 }
 
 NAV_OUTPUT_FIELDS = (
@@ -44,6 +46,24 @@ NAV_OUTPUT_FIELDS = (
     "material_manifest",
     "material_package",
 )
+
+
+def template_navigation_context_payload(preview_context) -> dict[str, object]:
+    return {
+        "entry_context_title": preview_context.title,
+        "entry_context_detail": preview_context.detail,
+        "entry_context_action": preview_context.action,
+        "template_preview_groups": preview_context.detail_card_ids,
+        "template_preview_coverage": preview_context.coverage_labels,
+    }
+
+
+def scene_display_label(scene, descriptors) -> str:
+    scene_id = str(getattr(scene, "scene_id", "") or "").strip()
+    for descriptor in descriptors:
+        if descriptor.config_id == scene_id:
+            return plan_display_label(descriptor)
+    return str(getattr(scene, "name", "") or "").strip() or scene_id or "当前方案"
 
 
 def _normalise_scene_detail_card_id(card_id: str) -> str:
@@ -87,6 +107,7 @@ def build_scene_navigation_card_snapshots(
     scene_label: str,
     template_label: str,
     scene_dirty: bool,
+    scene_save_state: str = "",
     current_template=None,
     delivery_preset=None,
     exam_paper_config=None,
@@ -96,6 +117,7 @@ def build_scene_navigation_card_snapshots(
             scene_label=scene_label,
             template_label=template_label,
             scene_dirty=scene_dirty,
+            scene_save_state=scene_save_state,
         ),
         "scn_exam_paper": plan_preview_navigation_snapshot(scene, exam_paper_config),
         "scn_rules": rules_navigation_snapshot(
@@ -103,7 +125,74 @@ def build_scene_navigation_card_snapshots(
             current_template=current_template,
             delivery_preset=delivery_preset,
         ),
+        "scn_formula": formula_navigation_snapshot(scene),
+        "scn_chem_typography": chem_typography_navigation_snapshot(scene),
         "scn_content": content_navigation_snapshot(scene),
+    }
+
+
+def formula_navigation_snapshot(scene) -> dict[str, str]:
+    rules = getattr(scene, "thesis_formula_rules", None)
+    enabled = bool(rules is not None and getattr(rules, "formula_enabled", False))
+    if rules is None:
+        return {
+            "subtitle": "仅用于论文方案",
+            "badge_text": "不可用",
+            "badge_variant": "neutral",
+        }
+    workflow_count = sum(
+        1
+        for child in (
+            rules.formula_convert,
+            rules.formula_to_table,
+            rules.equation_numbering,
+            rules.formula_style,
+        )
+        if bool(getattr(child, "enabled", False))
+    )
+    output_label = (
+        {
+            "word_native": "Word 原生公式",
+            "latex": "LaTeX 逻辑",
+            "keep_source": "保留原文",
+        }.get(str(rules.formula_convert.output_mode or ""), "公式策略")
+        if bool(rules.formula_convert.enabled)
+        else "不转换"
+    )
+    if not enabled:
+        badge_text, badge_variant = "已关闭", "neutral"
+    elif not workflow_count:
+        badge_text, badge_variant = "待配置", "warning"
+    else:
+        badge_text, badge_variant = "已启用", "success"
+    return {
+        "subtitle": f"{output_label} · {workflow_count} 项处理",
+        "badge_text": badge_text,
+        "badge_variant": badge_variant,
+    }
+
+
+def chem_typography_navigation_snapshot(scene) -> dict[str, str]:
+    rules = getattr(scene, "thesis_formula_rules", None)
+    if rules is None:
+        return {
+            "subtitle": "仅用于论文方案",
+            "badge_text": "不可用",
+            "badge_variant": "neutral",
+        }
+    chem = rules.chem_typography
+    enabled = bool(chem.enabled)
+    scope_count = sum(1 for active in (chem.scopes or {}).values() if bool(active))
+    if not enabled:
+        badge_text, badge_variant = "已关闭", "neutral"
+    elif not scope_count:
+        badge_text, badge_variant = "待配置", "warning"
+    else:
+        badge_text, badge_variant = "已启用", "success"
+    return {
+        "subtitle": f"{scope_count} 个范围 · {chem.western_font or 'Times New Roman'}",
+        "badge_text": badge_text,
+        "badge_variant": badge_variant,
     }
 
 
@@ -112,11 +201,25 @@ def overview_navigation_snapshot(
     scene_label: str,
     template_label: str,
     scene_dirty: bool,
+    scene_save_state: str = "",
 ) -> dict[str, str]:
+    state = str(scene_save_state or "").strip()
+    if not state:
+        state = "pending" if scene_dirty else "saved"
+    badge_by_state = {
+        "pending": ("待自动保存", "neutral"),
+        "saving": ("保存中", "neutral"),
+        "failed": ("保存失败", "warning"),
+        "saved": ("已保存", "success"),
+    }
+    badge_text, badge_variant = badge_by_state.get(
+        state,
+        badge_by_state["pending" if scene_dirty else "saved"],
+    )
     return {
         "subtitle": f"{scene_label} · {template_label}",
-        "badge_text": "未保存" if scene_dirty else "方案",
-        "badge_variant": "warning" if scene_dirty else "success",
+        "badge_text": badge_text,
+        "badge_variant": badge_variant,
     }
 
 
@@ -200,25 +303,6 @@ def official_document_navigation_snapshot(scene) -> dict[str, str]:
         "subtitle": f"{master_label} 路 {schema_text}",
         "badge_text": "公文版式",
         "badge_variant": "info" if master is not None else "warning",
-    }
-
-
-def cleanup_navigation_snapshot(scene) -> dict[str, str]:
-    profile = scene.compliance_profile
-    preflight = profile.object_preflight
-    checks = len(profile.enabled_checks or [])
-    scan_targets = len(preflight.scan_targets or [])
-    enabled = bool(preflight.enabled or checks)
-    return {
-        "subtitle": _nav_join(
-            (
-                f"检查 {checks} 项",
-                f"扫描目标 {scan_targets} 个",
-                FAILURE_POLICY_LABELS.get(profile.failure_policy, profile.failure_policy),
-            )
-        ),
-        "badge_text": "已开启" if enabled else "未开启",
-        "badge_variant": "success" if enabled else "neutral",
     }
 
 

@@ -182,7 +182,7 @@ def test_heading_recognition_exposes_only_body_headings_for_downstream_numbering
     assert [heading.para_index for heading in context.doc_tree.headings] == [3]
 
 
-def test_heading_recognition_detects_pre_numbering_statement_pages():
+def test_heading_recognition_does_not_invent_statement_or_authorization_roles():
     doc = Document()
     doc.add_paragraph("硕士学位论文")
     doc.add_paragraph("原创性声明")
@@ -196,10 +196,10 @@ def test_heading_recognition_detects_pre_numbering_statement_pages():
     context = _apply_heading_recognition(doc)
     doc_tree = context.doc_tree
 
-    assert doc_tree.get_section("statement") is not None
-    assert doc_tree.get_section("authorization") is not None
-    assert doc_tree.get_section_for_paragraph(1) == "statement"
-    assert doc_tree.get_section_for_paragraph(3) == "authorization"
+    assert doc_tree.get_section("statement") is None
+    assert doc_tree.get_section("authorization") is None
+    assert doc_tree.get_special_title_match(1) is None
+    assert doc_tree.get_special_title_match(3) is None
     assert doc_tree.get_section_for_paragraph(5) == "abstract_cn"
     assert doc_tree.get_section_for_paragraph(7) == "body"
 
@@ -276,3 +276,58 @@ def test_heading_recognition_keeps_appendix_section_at_first_appendix_title():
     assert appendix.start_index == 2
     assert context.doc_tree.get_section_for_paragraph(2) == "appendix"
     assert context.doc_tree.get_section_for_paragraph(4) == "appendix"
+
+
+def test_heading_recognition_builds_literal_special_title_range_without_role_mapping():
+    doc = Document()
+    doc.add_heading("第一章 绪论", level=1)
+    doc.add_paragraph("正文内容。")
+    doc.add_paragraph("鸣谢")
+    doc.add_paragraph("感谢所有参与者。")
+    doc.add_heading("第二章 方法", level=1)
+    config = ResolvedConfig()
+    config.heading_model.non_numbered_title_texts = ["鸣谢"]
+    config.heading_model.non_numbered_prefixes = []
+    context = PipelineContext()
+
+    HeadingRecognitionModule().apply(doc, config, ChangeTracker(), context)
+
+    from src.config.special_title_rules import special_title_selector
+
+    selector = special_title_selector("exact", "鸣谢")
+    assert context.doc_tree.special_title_matches == {2: selector}
+    assert [
+        (item.section_type, item.start_index, item.end_index)
+        for item in context.doc_tree.special_title_ranges
+    ] == [(selector, 2, 4)]
+
+
+def test_one_prefix_rule_can_create_multiple_disjoint_ranges():
+    doc = Document()
+    doc.add_paragraph("附录 A")
+    doc.add_paragraph("第一组附录内容。")
+    doc.add_heading("第一章 正文", level=1)
+    doc.add_paragraph("正文内容。")
+    doc.add_paragraph("附录 B")
+    doc.add_paragraph("第二组附录内容。")
+    config = ResolvedConfig()
+    config.heading_model.non_numbered_title_texts = []
+    config.heading_model.non_numbered_prefixes = ["附录"]
+    context = PipelineContext()
+
+    HeadingRecognitionModule().apply(doc, config, ChangeTracker(), context)
+
+    from src.config.special_title_rules import special_title_selector
+
+    selector = special_title_selector("prefix", "附录")
+    assert context.doc_tree.special_title_matches == {
+        0: selector,
+        4: selector,
+    }
+    assert [
+        (item.section_type, item.start_index, item.end_index)
+        for item in context.doc_tree.special_title_ranges
+    ] == [
+        (selector, 0, 2),
+        (selector, 4, 6),
+    ]

@@ -35,6 +35,7 @@ class ToggleSwitch(QAbstractButton):
     THUMB_D = 18
     THUMB_MARGIN = 3
     OFF_TRACK_BORDER_W = 1.0
+    ANIMATION_DURATION_MS = 160
 
     def __init__(self, parent=None, *, checked: bool = False):
         super().__init__(parent)
@@ -48,7 +49,7 @@ class ToggleSwitch(QAbstractButton):
         )
 
         self._anim = QPropertyAnimation(self, b"thumb_position", self)
-        self._anim.setDuration(250)
+        self._anim.setDuration(self.ANIMATION_DURATION_MS)
 
         self.clicked.connect(self._on_click)
         self.setFixedSize(self.sizeHint())

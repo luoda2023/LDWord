@@ -1,48 +1,58 @@
-"""Delivery evidence planning and publication for production execution.
+"""Publish delivery-preset reports, comparisons, and intermediate evidence.
 
-This module owns delivery-specific path semantics and auxiliary artifacts.  It
-does not execute pipelines or depend on the workbench runner, so artifact
-publication can be tested and failed independently of orchestration.
+The production pipeline owns the primary DOCX transaction.  This module owns
+only auxiliary delivery artifacts and records each publication failure without
+hiding a successfully published primary document.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import os
+import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.application.materials import ExecutionMaterialSnapshot
 from src.config.atomic_io import atomic_write_text
 from src.config.delivery_preset_display import delivery_preset_display_name
-from src.config.material_context import MaterialExecutionContext
 from src.execution_diagnostics import build_execution_diagnostics
 from src.product_report_writer import write_json_report, write_markdown_report
 from src.reporting.execution_payload import plain_data
-from src.reporting.material_assembly import (
-    extract_attachment_bundles,
-    extract_material_assembly,
-    material_assembly_error_payload,
-    material_assembly_receipt_payload,
-)
 from src.services.artifact_failure import capture_artifact_write
+from src.services.production_runtime.material_artifacts import (
+    MaterialArtifactOutcome,
+    publish_material_artifacts,
+)
 from src.shared.engine.docx_compare import write_compare_docx
 
-from .material_artifacts import (
-    material_package_path_map,
-    material_package_receipt_payload,
-    write_material_manifest,
-    write_material_package_artifacts,
-)
 
-
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class ResultArtifactOutcome:
-    compare_paths: dict[str, str]
-    report_paths: list[str]
-    intermediate_paths: dict[str, str]
-    material_manifest_paths: dict[str, str]
-    material_package_paths: dict[str, str]
-    material_package_receipt: dict[str, object]
-    artifact_failures: list[dict[str, str]]
+    compare_paths: dict[str, str] = field(default_factory=dict)
+    report_paths: list[str] = field(default_factory=list)
+    intermediate_paths: dict[str, str] = field(default_factory=dict)
+    material_manifest_paths: dict[str, str] = field(default_factory=dict)
+    material_package_paths: dict[str, str] = field(default_factory=dict)
+    material_package_receipt: dict[str, object] = field(default_factory=dict)
+    artifact_failures: list[dict[str, str]] = field(default_factory=list)
+
+    def to_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "compare_paths": dict(self.compare_paths),
+            "report_paths": list(self.report_paths),
+            "intermediate_paths": dict(self.intermediate_paths),
+        }
+        if self.material_manifest_paths:
+            payload["material_manifest_paths"] = dict(
+                self.material_manifest_paths
+            )
+        if self.material_package_paths:
+            payload["material_package_paths"] = dict(self.material_package_paths)
+            payload["material_package_receipt"] = dict(
+                self.material_package_receipt
+            )
+        return payload
 
 
 def finalize_result_artifacts(
@@ -56,23 +66,19 @@ def finalize_result_artifacts(
     elapsed: float,
     modules_enabled: int,
     modules_total: int,
-    material_diagnostics: list[dict],
-    material_context: MaterialExecutionContext,
-    style_source_summary: dict[str, object] | None,
-    include_material_artifacts: bool,
+    material_snapshot: ExecutionMaterialSnapshot | None,
 ) -> ResultArtifactOutcome:
-    """Publish configured evidence consistently for every terminal branch."""
+    """Publish configured evidence for a non-cancelled terminal result."""
 
     failures: list[dict[str, str]] = []
-    status = str(getattr(result, "status", "failed") or "failed")
-    successful = bool(getattr(result, "success", False)) and status != "cancelled"
-
+    successful = bool(getattr(result, "success", False)) and str(
+        getattr(result, "status", "") or ""
+    ) != "cancelled"
     compare_paths = (
         capture_artifact_write(
             failures,
             "compare_docx",
             lambda: _write_compare_docx_artifacts(
-                result,
                 input_path=input_path,
                 output_dir=output_dir,
                 output_paths=output_paths,
@@ -97,15 +103,12 @@ def finalize_result_artifacts(
             elapsed=elapsed,
             modules_enabled=modules_enabled,
             modules_total=modules_total,
-            material_diagnostics=material_diagnostics,
-            material_context=material_context,
-            style_source_summary=style_source_summary,
         ),
         [],
     )
     intermediate_paths = capture_artifact_write(
         failures,
-        "intermediates",
+        "structured_intermediate",
         lambda: write_structured_intermediates(
             result,
             input_path=input_path,
@@ -119,91 +122,63 @@ def finalize_result_artifacts(
         ),
         {},
     )
-
-    material_manifest_paths: dict[str, str] = {}
-    material_package_paths: dict[str, str] = {}
-    material_package_receipt: dict[str, object] = {}
-    if include_material_artifacts and status != "cancelled":
-        material_manifest_paths = capture_artifact_write(
-            failures,
-            "material_manifest",
-            lambda: write_material_manifest(
-                input_path=input_path,
-                output_dir=output_dir,
-                config=config,
-                material_context=material_context,
-                material_diagnostics=material_diagnostics,
-                output_paths=output_paths,
-                compare_paths=compare_paths,
-                report_paths=report_paths,
-                intermediate_paths=intermediate_paths,
-                result=result,
-            ),
-            {},
-        )
-        material_package_result = capture_artifact_write(
-            failures,
-            "material_package",
-            lambda: write_material_package_artifacts(
-                input_path=input_path,
-                output_dir=output_dir,
-                config=config,
-                material_manifest_paths=material_manifest_paths,
-                material_context=material_context,
-                output_paths=output_paths,
-                compare_paths=compare_paths,
-                report_paths=report_paths,
-                intermediate_paths=intermediate_paths,
-                result=result,
-            ),
-            None,
-        )
-        material_package_paths = material_package_path_map(material_package_result)
-        material_package_receipt = material_package_receipt_payload(
-            material_package_result
-        )
-
+    material_outcome = capture_artifact_write(
+        failures,
+        "material_artifacts",
+        lambda: publish_material_artifacts(
+            input_path=input_path,
+            output_dir=output_dir,
+            config=config,
+            material_snapshot=material_snapshot,
+            output_paths=output_paths,
+            report_paths=report_paths,
+            compare_paths=compare_paths,
+            intermediate_paths=intermediate_paths,
+        ),
+        MaterialArtifactOutcome(),
+    )
     return ResultArtifactOutcome(
         compare_paths=compare_paths,
         report_paths=report_paths,
         intermediate_paths=intermediate_paths,
-        material_manifest_paths=material_manifest_paths,
-        material_package_paths=material_package_paths,
-        material_package_receipt=material_package_receipt,
+        material_manifest_paths=material_outcome.material_manifest_paths,
+        material_package_paths=material_outcome.material_package_paths,
+        material_package_receipt=material_outcome.material_package_receipt,
         artifact_failures=failures,
     )
 
 
 def should_force_delivery_presets(config) -> bool:
-    presets = list(getattr(config, "delivery_presets", []) or [])
-    if len(presets) > 1:
-        return True
-    if len(presets) != 1:
-        return False
+    """Return whether the scene describes business delivery variants."""
 
+    presets = list(getattr(config, "delivery_presets", ()) or ())
+    if len(presets) != 1:
+        return bool(presets)
     preset = presets[0]
     preset_id = str(getattr(preset, "preset_id", "") or "").strip()
-    default_id = str(getattr(config, "default_delivery_preset_id", "") or "").strip()
-    if preset_id and preset_id != "final":
-        return True
-    if default_id and default_id != "final":
-        return True
-
+    default_id = str(
+        getattr(config, "default_delivery_preset_id", "") or ""
+    ).strip()
     output_dir_template = str(
         getattr(preset, "output_dir_template", "") or ""
     ).strip()
-    if output_dir_template and output_dir_template != "{document_dir}/output":
-        return True
-
-    filename_template = str(getattr(preset, "filename_template", "") or "").strip()
-    if filename_template and filename_template != "{stem}_{preset_id}":
-        return True
-
-    return False
+    filename_template = str(
+        getattr(preset, "filename_template", "") or ""
+    ).strip()
+    return any(
+        (
+            preset_id not in {"", "final"},
+            default_id not in {"", "final"},
+            output_dir_template not in {"", "{document_dir}/output"},
+            filename_template not in {"", "{stem}_{preset_id}"},
+        )
+    )
 
 
 def primary_output_path(config, output_paths: dict[str, str]) -> str:
-    default_id = str(getattr(config, "default_delivery_preset_id", "") or "").strip()
+    default_id = str(
+        getattr(config, "default_delivery_preset_id", "") or ""
+    ).strip()
     return primary_output_path_for_default(default_id, output_paths)
 
 
@@ -225,58 +200,42 @@ def plan_delivery_artifact_paths(
     config,
     output_paths: dict[str, str],
 ) -> dict[str, str]:
-    """Plan every auxiliary delivery target before any group may execute."""
+    """Plan auxiliary paths and reject cross-preset path collisions."""
 
     planned: dict[str, str] = {}
-    for preset in list(getattr(config, "delivery_presets", []) or []):
+    identities: set[str] = set()
+    for preset in list(getattr(config, "delivery_presets", ()) or ()):
         preset_id = str(getattr(preset, "preset_id", "") or "").strip()
         if not preset_id:
             continue
         artifacts = getattr(preset, "artifacts", None)
-        artifact_dir = delivery_report_dir(output_dir, input_path, preset)
-        artifact_stem = delivery_report_stem(input_path, preset)
-
+        directory = delivery_report_dir(output_dir, input_path, preset)
+        stem = delivery_report_stem(input_path, preset)
         candidates: list[tuple[str, Path]] = []
         if bool(getattr(artifacts, "report_json", False)):
-            candidates.append(
-                ("report_json", artifact_dir / f"{artifact_stem}_changes.json")
-            )
+            candidates.append(("report_json", directory / f"{stem}_changes.json"))
         if bool(getattr(artifacts, "report_markdown", False)):
             candidates.append(
-                ("report_markdown", artifact_dir / f"{artifact_stem}_changes.md")
+                ("report_markdown", directory / f"{stem}_changes.md")
             )
-        revised_path = _preset_output_path(
-            preset_id=preset_id,
-            output_paths=output_paths,
-            fallback_output_path="",
-            config=config,
-        )
-        if (
-            input_path.suffix.casefold() == ".docx"
-            and revised_path
-            and bool(getattr(artifacts, "compare_docx", False))
+        if bool(getattr(artifacts, "compare_docx", False)) and output_paths.get(
+            preset_id
         ):
-            candidates.append(
-                ("compare_docx", artifact_dir / f"{artifact_stem}_compare.docx")
-            )
+            candidates.append(("compare_docx", directory / f"{stem}_compare.docx"))
         if bool(getattr(preset, "include_structured_intermediate", False)):
             candidates.append(
-                (
-                    "structured_intermediate",
-                    artifact_dir / f"{artifact_stem}_intermediate.json",
-                )
+                ("structured_intermediate", directory / f"{stem}_intermediate.json")
             )
-
-        for artifact_kind, artifact_path in candidates:
-            artifact_id = f"{preset_id}:{artifact_kind}"
-            if artifact_id in planned:
-                raise ValueError(f"duplicate planned artifact id: {artifact_id}")
-            planned[artifact_id] = str(artifact_path)
+        for artifact_kind, path in candidates:
+            identity = os.path.normcase(str(path.resolve(strict=False)))
+            if identity in identities:
+                raise ValueError(f"delivery_artifact_path_collision:{path}")
+            identities.add(identity)
+            planned[f"{preset_id}:{artifact_kind}"] = str(path)
     return planned
 
 
 def _write_compare_docx_artifacts(
-    result,
     *,
     input_path: Path,
     output_dir: Path,
@@ -284,44 +243,49 @@ def _write_compare_docx_artifacts(
     fallback_output_path: str,
     config,
 ) -> dict[str, str]:
-    del result
     compare_paths: dict[str, str] = {}
-    if input_path.suffix.lower() != ".docx":
+    if input_path.suffix.casefold() != ".docx":
         return compare_paths
-    for preset in list(getattr(config, "delivery_presets", []) or []):
+    plan_delivery_artifact_paths(
+        input_path=input_path,
+        output_dir=output_dir,
+        config=config,
+        output_paths=output_paths,
+    )
+    for preset in list(getattr(config, "delivery_presets", ()) or ()):
         preset_id = str(getattr(preset, "preset_id", "") or "").strip()
-        if not preset_id:
-            continue
-
         artifacts = getattr(preset, "artifacts", None)
-        if not bool(getattr(artifacts, "compare_docx", False)):
+        if not preset_id or not bool(getattr(artifacts, "compare_docx", False)):
             continue
-
         revised_path = _preset_output_path(
             preset_id=preset_id,
             output_paths=output_paths,
             fallback_output_path=fallback_output_path,
             config=config,
         )
-        if not revised_path:
+        revised = Path(revised_path) if revised_path else None
+        if revised is None or not revised.is_file():
             continue
-        revised = Path(revised_path)
-        if not revised.exists():
-            continue
-
-        compare_dir = delivery_report_dir(output_dir, input_path, preset)
-        compare_dir.mkdir(parents=True, exist_ok=True)
-        compare_path = (
-            compare_dir / f"{delivery_report_stem(input_path, preset)}_compare.docx"
+        target = delivery_report_dir(output_dir, input_path, preset) / (
+            f"{delivery_report_stem(input_path, preset)}_compare.docx"
         )
-        write_compare_docx(
-            input_path,
-            revised,
-            compare_path,
-            compare_text=bool(getattr(artifacts, "compare_text", True)),
-            compare_formatting=bool(getattr(artifacts, "compare_formatting", True)),
-        )
-        compare_paths[preset_id] = str(compare_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix=".alavette-compare-",
+            dir=target.parent,
+        ) as temporary_directory:
+            stage = Path(temporary_directory) / target.name
+            write_compare_docx(
+                input_path,
+                revised,
+                stage,
+                compare_text=bool(getattr(artifacts, "compare_text", True)),
+                compare_formatting=bool(
+                    getattr(artifacts, "compare_formatting", True)
+                ),
+            )
+            os.replace(stage, target)
+        compare_paths[preset_id] = str(target)
     return compare_paths
 
 
@@ -337,65 +301,37 @@ def write_structured_intermediates(
     modules_enabled: int,
     modules_total: int,
 ) -> dict[str, str]:
-    intermediate_paths: dict[str, str] = {}
-    for preset in list(getattr(config, "delivery_presets", []) or []):
+    paths: dict[str, str] = {}
+    for preset in list(getattr(config, "delivery_presets", ()) or ()):
         if not bool(getattr(preset, "include_structured_intermediate", False)):
             continue
         preset_id = str(getattr(preset, "preset_id", "") or "").strip()
         if not preset_id:
             continue
-
-        artifact_dir = delivery_report_dir(output_dir, input_path, preset)
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        artifact_path = (
-            artifact_dir
-            / f"{delivery_report_stem(input_path, preset)}_intermediate.json"
-        )
-        output_path = _preset_output_path(
-            preset_id=preset_id,
-            output_paths=output_paths,
-            fallback_output_path=fallback_output_path,
-            config=config,
-        )
+        directory = delivery_report_dir(output_dir, input_path, preset)
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{delivery_report_stem(input_path, preset)}_intermediate.json"
         payload = _structured_intermediate_payload(
             result,
             input_path=input_path,
-            output_path=output_path,
+            output_path=_preset_output_path(
+                preset_id=preset_id,
+                output_paths=output_paths,
+                fallback_output_path=fallback_output_path,
+                config=config,
+            ),
             preset=preset,
-            config=config,
             elapsed=elapsed,
             modules_enabled=modules_enabled,
             modules_total=modules_total,
         )
         atomic_write_text(
-            artifact_path,
+            path,
             json.dumps(payload, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
-        intermediate_paths[preset_id] = str(artifact_path)
-    return intermediate_paths
-
-
-def _preset_output_path(
-    *,
-    preset_id: str,
-    output_paths: dict[str, str],
-    fallback_output_path: str,
-    config,
-) -> str:
-    direct = str(output_paths.get(preset_id) or "")
-    if direct:
-        return direct
-
-    default_id = str(getattr(config, "default_delivery_preset_id", "") or "").strip()
-    if preset_id == default_id:
-        return str(fallback_output_path or "")
-
-    presets = list(getattr(config, "delivery_presets", []) or [])
-    if len(presets) == 1:
-        return str(fallback_output_path or "")
-
-    return ""
+        paths[preset_id] = str(path)
+    return paths
 
 
 def _structured_intermediate_payload(
@@ -404,18 +340,15 @@ def _structured_intermediate_payload(
     input_path: Path,
     output_path: str,
     preset,
-    config,
     elapsed: float,
     modules_enabled: int,
     modules_total: int,
 ) -> dict[str, object]:
     diagnostics = build_execution_diagnostics(result)
-    assembly_receipt = material_assembly_receipt_payload(result)
-    assembly_error = material_assembly_error_payload(result)
-    material_assembly = extract_material_assembly(result)
     return {
         "kind": "delivery_structured_intermediate",
         "schema_version": 1,
+        "visibility": "local_diagnostic",
         "input": str(input_path),
         "output": str(output_path or ""),
         "status": str(getattr(result, "status", "failed") or "failed"),
@@ -423,28 +356,11 @@ def _structured_intermediate_payload(
         "modules_enabled": modules_enabled,
         "modules_total": modules_total,
         "preset": delivery_preset_payload(preset),
-        "diagnostics": {
-            "count": diagnostics["count"],
-            "items": diagnostics["items"],
-        },
+        "diagnostics": diagnostics,
         "counts": _extract_count_result(result),
         "changes": _extract_change_records(result),
-        "runtime_inputs": _runtime_inputs_payload(config),
-        "context": pipeline_context_payload(
-            getattr(result, "context", None),
-            material_assembly_receipt=assembly_receipt,
-            material_assembly_error=assembly_error,
-        ),
-        "result": {
-            "material_assembly_receipt": assembly_receipt,
-            "material_assembly_error": assembly_error,
-        },
-        "material_assembly": material_assembly,
-        "attachment_bundles": extract_attachment_bundles(result),
-        "material_dependency_usage": dict(
-            material_assembly.get("dependency_usage") or {}
-        ),
-        "failed_items": list(getattr(result, "failed_items", []) or []),
+        "context": pipeline_context_payload(getattr(result, "context", None)),
+        "failed_items": plain_data(list(getattr(result, "failed_items", ()) or ())),
     }
 
 
@@ -454,11 +370,13 @@ def delivery_preset_payload(preset) -> dict[str, object]:
         "label": str(getattr(preset, "label", "") or ""),
         "display_label": delivery_preset_display_name(preset),
         "target_template_id": str(getattr(preset, "target_template_id", "") or ""),
-        "output_dir_template": str(getattr(preset, "output_dir_template", "") or ""),
+        "output_dir_template": str(
+            getattr(preset, "output_dir_template", "") or ""
+        ),
         "filename_template": str(getattr(preset, "filename_template", "") or ""),
         "artifacts": plain_data(getattr(preset, "artifacts", None)),
         "content_visibility_rules": plain_data(
-            list(getattr(preset, "content_visibility_rules", []) or [])
+            list(getattr(preset, "content_visibility_rules", ()) or ())
         ),
         "include_structured_intermediate": bool(
             getattr(preset, "include_structured_intermediate", False)
@@ -467,71 +385,33 @@ def delivery_preset_payload(preset) -> dict[str, object]:
     }
 
 
-def _runtime_inputs_payload(config) -> dict[str, object]:
-    return {
-        "entity_data": dict(getattr(config, "entity_data", {}) or {}),
-        "entity_assets_dir": str(getattr(config, "entity_assets_dir", "") or ""),
-        "images": plain_data(list(getattr(config, "images", []) or [])),
-        "replacements": plain_data(list(getattr(config, "replacements", []) or [])),
-    }
-
-
-def pipeline_context_payload(
-    context,
-    *,
-    material_assembly_receipt: dict[str, object] | None = None,
-    material_assembly_error: dict[str, object] | None = None,
-) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "material_assembly_receipt": material_assembly_receipt,
-        "material_assembly_error": material_assembly_error,
-    }
+def pipeline_context_payload(context) -> dict[str, object]:
     if context is None:
-        return payload
-    payload.update(
-        {
-            "source_doc_path": str(getattr(context, "source_doc_path", "") or ""),
-            "source_doc_dir": str(getattr(context, "source_doc_dir", "") or ""),
-            "working_doc_path": str(getattr(context, "working_doc_path", "") or ""),
-            "working_doc_dir": str(getattr(context, "working_doc_dir", "") or ""),
-            "content_visibility_receipts": plain_data(
-                getattr(context, "content_visibility_receipts", None) or {}
-            ),
-            "entity_values": dict(getattr(context, "entity_values", None) or {}),
-            "source_values": dict(getattr(context, "source_values", None) or {}),
-            "document_scope": plain_data(
-                getattr(context, "document_scope_receipt", None) or {}
-            ),
-            "exam_question_schema": plain_data(
-                getattr(context, "exam_question_schema", None)
-            ),
-            "journal_rule_source_governance": plain_data(
-                getattr(context, "journal_rule_source_governance", None)
-            ),
-            "journal_citations": plain_data(
-                getattr(context, "journal_citations", None)
-            ),
-            "journal_submission_package": plain_data(
-                getattr(context, "journal_submission_package", None)
-            ),
-            "official_document_assembly": plain_data(
-                getattr(context, "official_document_assembly", None)
-            ),
-            "official_numbering_preservation": plain_data(
-                getattr(context, "official_numbering_preservation", None)
-            ),
-            "technical_chapter_inventory": plain_data(
-                getattr(context, "technical_chapter_inventory", None)
-            ),
-            "application_section_word_limits": plain_data(
-                getattr(context, "application_section_word_limits", None)
-            ),
-            "inserted_images": plain_data(
-                getattr(context, "inserted_images", None) or []
-            ),
-        }
+        return {}
+    names = (
+        "source_doc_path",
+        "source_doc_dir",
+        "working_doc_path",
+        "working_doc_dir",
+        "content_visibility_receipts",
+        "entity_values",
+        "source_values",
+        "document_scope_receipt",
+        "exam_question_schema",
+        "journal_rule_source_governance",
+        "journal_citations",
+        "journal_submission_package",
+        "official_document_assembly",
+        "official_numbering_preservation",
+        "technical_chapter_inventory",
+        "application_section_word_limits",
+        "inserted_images",
     )
-    return payload
+    return {
+        name: plain_data(getattr(context, name, None))
+        for name in names
+        if getattr(context, name, None) not in (None, "", [], {})
+    }
 
 
 def _extract_change_records(result) -> list[dict[str, object]]:
@@ -554,17 +434,15 @@ def _extract_change_records(result) -> list[dict[str, object]]:
     ]
 
 
-def _extract_count_result(result) -> dict | None:
+def _extract_count_result(result) -> dict[str, object] | None:
     context = getattr(result, "context", None)
-    count_result = getattr(context, "count_result", None) if context is not None else None
+    count_result = getattr(context, "count_result", None) if context else None
     if count_result is None:
         return None
     to_dict = getattr(count_result, "to_dict", None)
     if callable(to_dict):
-        return to_dict()
-    if isinstance(count_result, dict):
-        return count_result
-    return None
+        return plain_data(to_dict())
+    return plain_data(count_result) if isinstance(count_result, dict) else None
 
 
 def write_enabled_result_reports(
@@ -578,12 +456,7 @@ def write_enabled_result_reports(
     elapsed: float,
     modules_enabled: int,
     modules_total: int,
-    material_diagnostics: list[dict] | None = None,
-    material_context: MaterialExecutionContext | None = None,
-    style_source_summary: dict[str, object] | None = None,
 ) -> list[str]:
-    """Write only configured reports for either success or failure evidence."""
-
     if should_force_delivery_presets(config):
         return write_delivery_reports(
             result,
@@ -594,46 +467,28 @@ def write_enabled_result_reports(
             elapsed=elapsed,
             modules_enabled=modules_enabled,
             modules_total=modules_total,
-            material_diagnostics=list(material_diagnostics or []),
-            material_context=material_context,
-            style_source_summary=style_source_summary,
         )
-
-    output_cfg = getattr(config, "output", None)
-    report_paths: list[str] = []
-    final_output_path = (
-        Path(fallback_output_path) if str(fallback_output_path or "") else None
-    )
+    output = getattr(config, "output", None)
+    final_path = Path(fallback_output_path) if fallback_output_path else None
     output_dir.mkdir(parents=True, exist_ok=True)
-    if bool(getattr(output_cfg, "report_json", True)):
-        report_json = output_dir / f"{input_path.stem}_changes.json"
-        write_json_report(
-            result,
-            input_path=input_path,
-            output_path=final_output_path,
-            report_path=report_json,
-            elapsed=elapsed,
-            modules_enabled=modules_enabled,
-            modules_total=modules_total,
-            extra_diagnostics=list(material_diagnostics or []),
-            style_source_summary=style_source_summary,
-        )
-        report_paths.append(str(report_json))
-    if bool(getattr(output_cfg, "report_markdown", True)):
-        report_markdown = output_dir / f"{input_path.stem}_changes.md"
-        write_markdown_report(
-            result,
-            input_path=input_path,
-            output_path=final_output_path,
-            report_path=report_markdown,
-            elapsed=elapsed,
-            modules_enabled=modules_enabled,
-            modules_total=modules_total,
-            extra_diagnostics=list(material_diagnostics or []),
-            style_source_summary=style_source_summary,
-        )
-        report_paths.append(str(report_markdown))
-    return report_paths
+    paths: list[str] = []
+    common = {
+        "result": result,
+        "input_path": input_path,
+        "output_path": final_path,
+        "elapsed": elapsed,
+        "modules_enabled": modules_enabled,
+        "modules_total": modules_total,
+    }
+    if bool(getattr(output, "report_json", True)):
+        path = output_dir / f"{input_path.stem}_changes.json"
+        write_json_report(report_path=path, **common)
+        paths.append(str(path))
+    if bool(getattr(output, "report_markdown", True)):
+        path = output_dir / f"{input_path.stem}_changes.md"
+        write_markdown_report(report_path=path, **common)
+        paths.append(str(path))
+    return paths
 
 
 def write_delivery_reports(
@@ -646,56 +501,36 @@ def write_delivery_reports(
     elapsed: float,
     modules_enabled: int,
     modules_total: int,
-    material_diagnostics: list[dict] | None = None,
-    material_context: MaterialExecutionContext | None = None,
-    style_source_summary: dict[str, object] | None = None,
 ) -> list[str]:
-    del material_context
-    report_paths: list[str] = []
-    for preset in list(getattr(config, "delivery_presets", []) or []):
+    paths: list[str] = []
+    for preset in list(getattr(config, "delivery_presets", ()) or ()):
         preset_id = str(getattr(preset, "preset_id", "") or "").strip()
         if not preset_id:
             continue
         artifacts = getattr(preset, "artifacts", None)
-        output_path = output_paths.get(preset_id, "")
-        output_report_path = Path(output_path) if output_path else None
-        preset_payload = delivery_preset_payload(preset)
-        report_stem = delivery_report_stem(input_path, preset)
-        report_dir = delivery_report_dir(output_dir, input_path, preset)
-        report_dir.mkdir(parents=True, exist_ok=True)
-
+        directory = delivery_report_dir(output_dir, input_path, preset)
+        directory.mkdir(parents=True, exist_ok=True)
+        stem = delivery_report_stem(input_path, preset)
+        common = {
+            "result": result,
+            "input_path": input_path,
+            "output_path": (
+                Path(output_paths[preset_id]) if output_paths.get(preset_id) else None
+            ),
+            "elapsed": elapsed,
+            "modules_enabled": modules_enabled,
+            "modules_total": modules_total,
+            "delivery_preset": delivery_preset_payload(preset),
+        }
         if bool(getattr(artifacts, "report_json", False)):
-            report_json = report_dir / f"{report_stem}_changes.json"
-            write_json_report(
-                result,
-                input_path=input_path,
-                output_path=output_report_path,
-                report_path=report_json,
-                elapsed=elapsed,
-                modules_enabled=modules_enabled,
-                modules_total=modules_total,
-                extra_diagnostics=list(material_diagnostics or []),
-                style_source_summary=style_source_summary,
-                delivery_preset=preset_payload,
-            )
-            report_paths.append(str(report_json))
-
+            path = directory / f"{stem}_changes.json"
+            write_json_report(report_path=path, **common)
+            paths.append(str(path))
         if bool(getattr(artifacts, "report_markdown", False)):
-            report_md = report_dir / f"{report_stem}_changes.md"
-            write_markdown_report(
-                result,
-                input_path=input_path,
-                output_path=output_report_path,
-                report_path=report_md,
-                elapsed=elapsed,
-                modules_enabled=modules_enabled,
-                modules_total=modules_total,
-                extra_diagnostics=list(material_diagnostics or []),
-                style_source_summary=style_source_summary,
-                delivery_preset=preset_payload,
-            )
-            report_paths.append(str(report_md))
-    return report_paths
+            path = directory / f"{stem}_changes.md"
+            write_markdown_report(report_path=path, **common)
+            paths.append(str(path))
+    return paths
 
 
 class _SafeReportFormatDict(dict):
@@ -705,43 +540,60 @@ class _SafeReportFormatDict(dict):
 
 def delivery_report_stem(input_path: Path, preset) -> str:
     template = str(getattr(preset, "filename_template", "") or "").strip()
-    if not template:
-        template = "{stem}_{preset_id}"
-    rendered = template.format_map(
-        _SafeReportFormatDict(
-            {
-                "document_dir": str(input_path.parent),
-                "output_dir": "",
-                "stem": input_path.stem,
-                "suffix": input_path.suffix or ".docx",
-                "preset_id": str(getattr(preset, "preset_id", "") or ""),
-                "preset_label": delivery_preset_display_name(preset),
-            }
-        )
+    rendered = (template or "{stem}_{preset_id}").format_map(
+        _report_format_values(input_path, Path(), preset)
     )
-    return Path(rendered).stem or (
-        f"{input_path.stem}_{getattr(preset, 'preset_id', 'final')}"
-    )
+    return Path(rendered).stem or f"{input_path.stem}_final"
 
 
-def delivery_report_dir(base_output_dir: Path, input_path: Path, preset) -> Path:
+def delivery_report_dir(
+    base_output_dir: Path,
+    input_path: Path,
+    preset,
+) -> Path:
     template = str(getattr(preset, "output_dir_template", "") or "").strip()
-    if not template or template == "{document_dir}/output":
+    if template in {"", "{document_dir}/output"}:
         return base_output_dir
     rendered = template.format_map(
-        _SafeReportFormatDict(
-            {
-                "document_dir": str(input_path.parent),
-                "output_dir": str(base_output_dir),
-                "stem": input_path.stem,
-                "suffix": input_path.suffix or ".docx",
-                "preset_id": str(getattr(preset, "preset_id", "") or ""),
-                "preset_label": delivery_preset_display_name(preset),
-            }
-        )
+        _report_format_values(input_path, base_output_dir, preset)
     )
     path = Path(rendered)
     return path if path.is_absolute() else base_output_dir / path
+
+
+def _report_format_values(
+    input_path: Path,
+    output_dir: Path,
+    preset,
+) -> _SafeReportFormatDict:
+    return _SafeReportFormatDict(
+        {
+            "document_dir": str(input_path.parent),
+            "output_dir": str(output_dir),
+            "stem": input_path.stem,
+            "suffix": input_path.suffix or ".docx",
+            "preset_id": str(getattr(preset, "preset_id", "") or ""),
+            "preset_label": delivery_preset_display_name(preset),
+        }
+    )
+
+
+def _preset_output_path(
+    *,
+    preset_id: str,
+    output_paths: dict[str, str],
+    fallback_output_path: str,
+    config,
+) -> str:
+    if output_paths.get(preset_id):
+        return str(output_paths[preset_id])
+    default_id = str(
+        getattr(config, "default_delivery_preset_id", "") or ""
+    ).strip()
+    presets = list(getattr(config, "delivery_presets", ()) or ())
+    if preset_id == default_id or len(presets) == 1:
+        return str(fallback_output_path or "")
+    return ""
 
 
 __all__ = [

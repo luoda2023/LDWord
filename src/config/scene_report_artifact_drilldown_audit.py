@@ -18,7 +18,6 @@ from src.config.scene_coverage_manifest import (
 )
 from src.config.scene_source_evidence import scan_scene_source_markers
 
-
 SCENE_REPORT_ARTIFACT_DRILLDOWN_AUDIT_ID = (
     "scene_report_artifact_drilldown_audit"
 )
@@ -300,7 +299,7 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
         ("RecentRunPanel.artifact_items", "QuickExecutionDetail.artifact_log"),
         ("artifact_label", "report_paths"),
         (),
-        ("test_execution_adapter_preserves_delivery_artifact_paths",),
+        ("test_v1_execution_adapter_projects_delivery_artifacts_and_report_groups",),
         (
             _evidence(
                 "state.artifact_item",
@@ -336,10 +335,11 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
             ),
             _evidence(
                 "test.artifact_state",
-                "tests/test_workbench_execution_center.py",
+                "tests/test_workbench_artifact_projection_v1.py",
                 "test",
-                "def test_execution_adapter_preserves_delivery_artifact_paths",
-                "assert [item.kind for item in state.artifact_items] ==",
+                "def test_v1_execution_adapter_projects_delivery_artifacts_and_report_groups",
+                'by_path["delivery/material_package.zip"].kind',
+                'by_path["delivery/scene_sample_manifest.json"].kind',
             ),
         ),
     ),
@@ -349,29 +349,30 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
         "delivery_artifact",
         ("output", "compare", "report", "intermediate", "material_manifest", "material_package"),
         (
-            "WorkbenchProductionRunner",
+            "finalize_result_artifacts",
             "_write_compare_docx_artifacts",
             "write_structured_intermediates",
-            "write_material_manifest",
-            "write_material_package_artifacts",
+            "write_enabled_result_reports",
+            "publish_material_artifacts",
         ),
         ("QuickExecutionDetail.report_paths",),
         ("output_paths", "compare_paths", "intermediate_paths", "material_manifest_paths", "material_package_paths"),
         (),
         (
-            "test_workbench_runner_uses_delivery_preset_artifacts_for_outputs_and_reports",
-            "test_workbench_runner_writes_technical_long_document_delivery_package",
-            "test_workbench_runner_writes_material_package_for_failed_delivery_run",
+            "test_workbench_runner_publishes_delivery_artifact_chain",
+            "test_delivery_reports_follow_preset_artifact_toggles",
+            "test_failed_run_still_publishes_reports_and_material_package",
         ),
         (
             _evidence(
                 "runtime.delivery_artifacts",
                 "src/services/production_runtime/delivery_reporting.py",
                 "runtime",
+                "def finalize_result_artifacts",
                 "_write_compare_docx_artifacts",
                 "write_structured_intermediates",
-                "write_material_manifest",
-                "write_material_package_artifacts",
+                "write_enabled_result_reports",
+                "publish_material_artifacts",
             ),
             _evidence(
                 "runtime.payload_artifacts",
@@ -383,10 +384,11 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
             ),
             _evidence(
                 "test.delivery_artifacts",
-                "tests/test_output_runtime_semantics.py",
+                "tests/test_delivery_reporting_v1.py",
                 "test",
-                "def test_workbench_runner_uses_delivery_preset_artifacts_for_outputs_and_reports",
-                'assert sorted(Path(path).name for path in payload["report_paths"])',
+                "def test_workbench_runner_publishes_delivery_artifact_chain",
+                'payload["material_package_paths"]["zip"]',
+                "def test_failed_run_still_publishes_reports_and_material_package",
             ),
         ),
     ),
@@ -399,7 +401,7 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
         ("RecentRunPanel group headers",),
         ("group_id", "group_label"),
         (),
-        ("test_execution_adapter_preserves_delivery_artifact_paths",),
+        ("test_v1_execution_adapter_projects_delivery_artifacts_and_report_groups",),
         (
             _evidence(
                 "runtime.grouping",
@@ -411,9 +413,10 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
             ),
             _evidence(
                 "test.grouping",
-                "tests/test_workbench_execution_center.py",
+                "tests/test_workbench_artifact_projection_v1.py",
                 "test",
-                'assert state.artifact_items[3].group_id == "review"',
+                "def test_v1_execution_adapter_projects_delivery_artifacts_and_report_groups",
+                'by_path["delivery/source_review_changes.md"].group_id == "review"',
                 "source_review_changes.md",
             ),
         ),
@@ -487,8 +490,8 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
         ),
         ("question_figure_batch_apply_transaction_task_summary",),
         (
-            "test_question_figure_transaction_task_issue_items_route_active_task_to_report",
-            "test_workbench_panel_routes_issue_repair_targets_to_existing_surfaces",
+            "test_v1_question_figure_transaction_task_routes_to_report_artifact",
+            "test_workbench_issue_navigation_registry_maps_targets_to_surfaces",
             "test_recent_run_panel_labels_question_figure_transaction_task_anchors",
         ),
         (
@@ -518,10 +521,10 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
             ),
             _evidence(
                 "test.question_figure_transaction_task_drilldown",
-                "tests/test_workbench_detail_architecture.py",
+                "tests/test_workbench_artifact_projection_v1.py",
                 "test",
-                "def test_workbench_panel_routes_issue_repair_targets_to_existing_surfaces",
-                "opened_artifacts[-1]",
+                "def test_v1_question_figure_transaction_task_routes_to_report_artifact",
+                'navigation.action_kind == "transaction_artifact"',
                 "question-figure-batch-apply-transaction-task-summary",
             ),
             _evidence(
@@ -542,7 +545,7 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
         ("QuickExecutionDetail execution log",),
         ("report_paths", "artifact_items"),
         (),
-        ("test_quick_execution_detail_logs_delivery_artifacts",),
+        ("test_v1_quick_result_log_lists_delivery_artifacts",),
         (
             _evidence(
                 "ui.quick_result_presenter_log",
@@ -557,9 +560,9 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
             ),
             _evidence(
                 "test.quick_detail_log",
-                "tests/test_quick_execution_detail_architecture.py",
+                "tests/test_workbench_artifact_projection_v1.py",
                 "test",
-                "def test_quick_execution_detail_logs_delivery_artifacts",
+                "def test_v1_quick_result_log_lists_delivery_artifacts",
                 "material_package.zip",
             ),
         ),
@@ -575,7 +578,7 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
         (),
         (
             "test_report_writer_emits_scene_sample_fixture_manifest_evidence",
-            "test_workbench_runner_writes_material_package_for_failed_delivery_run",
+            "test_failed_run_still_publishes_reports_and_material_package",
         ),
         (
             _evidence(
@@ -648,8 +651,8 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
         ("output_target_preflight", "output_target.warning"),
         ("output_target",),
         (
-            "test_output_target_preflight_items_preserve_result_repair_targets",
-            "test_workbench_panel_routes_issue_repair_targets_to_existing_surfaces",
+            "test_v1_output_target_issue_preserves_repair_route",
+            "test_workbench_issue_navigation_registry_maps_targets_to_surfaces",
         ),
         (
             _evidence(
@@ -678,10 +681,11 @@ N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS: tuple[
             ),
             _evidence(
                 "test.output_target_issue",
-                "tests/test_workbench_execution_center.py",
+                "tests/test_workbench_artifact_projection_v1.py",
                 "test",
-                "def test_output_target_preflight_items_preserve_result_repair_targets",
-                'repair_target_type == "output_target"',
+                "def test_v1_output_target_issue_preserves_repair_route",
+                'items[0].repair_target_type == "output_target"',
+                "navigation.card_id",
             ),
         ),
     ),

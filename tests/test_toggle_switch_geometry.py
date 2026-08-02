@@ -46,3 +46,11 @@ def test_toggle_switch_thumb_stays_vertically_centered_on_track_rect():
 
     assert thumb_y == 3.0
     assert (thumb_y + switch.THUMB_D / 2.0) == track_rect.center().y()
+
+
+def test_toggle_switch_uses_responsive_motion_duration():
+    _app()
+    switch = ToggleSwitch()
+
+    assert switch.ANIMATION_DURATION_MS == 160
+    assert switch._anim.duration() == switch.ANIMATION_DURATION_MS

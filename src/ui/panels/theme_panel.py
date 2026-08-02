@@ -10,7 +10,7 @@ from __future__ import annotations
 from src.qt_api import (
     QColor, QColorDialog, QDialog, QFont, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QPainter, QPainterPath,
-    QPushButton, QRect, QRectF, QVBoxLayout, QWidget, Qt, Signal,
+    QPushButton, QRect, QRectF, QSize, QVBoxLayout, QWidget, Qt, Signal,
 )
 
 from src.shared.ui.theme import (
@@ -26,6 +26,7 @@ from src.shared.ui.flow_layout import FlowLayout
 from src.shared.ui.input_metrics import build_framed_input_stylesheet
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
 from src.shared.ui.typography_policy import TextRole, apply_text_role
+from src.shared.ui.workspace_dialog import WorkspaceDialog
 from src.ui.base_panel import BasePanel
 
 # ── 预设注册表 ──────────────────────────────────────
@@ -412,14 +413,16 @@ class _ColorButton(QFrame):
         """)
 
 
-class _ThemeEditorDialog(QDialog):
+class _ThemeEditorDialog(WorkspaceDialog):
     """自定义主题颜色编辑器。"""
 
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("新建自定义配色")
-        self.setFixedSize(420, 460)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        super().__init__(
+            title="新建自定义配色",
+            subtitle="调整核心色彩并实时预览界面效果",
+            preferred_size=QSize(500, 620),
+            parent=parent,
+        )
 
         self._core_colors: dict[str, str] = {
             "primary": "#4A7FC5",
@@ -433,10 +436,11 @@ class _ThemeEditorDialog(QDialog):
 
         self._setup_ui()
         self._apply_theme()
-        bind_theme(self, self._apply_theme)
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
+        body = QWidget(self._surface)
+        body.setObjectName("theme_editor_body")
+        layout = QVBoxLayout(body)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(16)
 
@@ -520,6 +524,7 @@ class _ThemeEditorDialog(QDialog):
         btn_row.addWidget(self._cancel_btn)
         btn_row.addWidget(self._confirm_btn)
         layout.addLayout(btn_row)
+        self._surface_layout.addWidget(body, 1)
 
     def _on_color_changed(self, key: str, color: str):
         self._core_colors[key] = color
@@ -549,8 +554,8 @@ class _ThemeEditorDialog(QDialog):
             padding_y=0,
         )
         apply_text_role(self._name_input, TextRole.BODY)
-        self.setStyleSheet(f"""
-            _ThemeEditorDialog {{
+        self._apply_shell_theme(f"""
+            QWidget#theme_editor_body {{
                 background: {t.bg_window};
             }}
             #editor_label {{
@@ -566,14 +571,14 @@ class _ThemeEditorDialog(QDialog):
                 color: {t.text_hint}; background: transparent;
             }}
             {input_qss}
-            QPushButton {{
+            QWidget#theme_editor_body QPushButton {{
                 background: {t.bg_card};
                 border: 1px solid {t.border};
                 border-radius: {t.radius_sm}px;
                 font-size: 13px;
                 color: {t.text_primary};
             }}
-            QPushButton:hover {{
+            QWidget#theme_editor_body QPushButton:hover {{
                 background: {t.bg_hover};
                 border-color: {t.primary};
             }}

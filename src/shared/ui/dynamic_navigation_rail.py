@@ -139,6 +139,7 @@ class DynamicNavigationRail(QWidget):
         if label in self._section_labels:
             self._section_labels.remove(label)
         try:
+            label.hide()
             label.setParent(None)
             label.deleteLater()
         except RuntimeError:
@@ -164,6 +165,7 @@ class DynamicNavigationRail(QWidget):
         card = self._cards.pop(card_id, None)
         if card is None:
             return
+        card.hide()
         card.setParent(None)
         card.deleteLater()
         if self._selected_key == card_id:

@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -27,8 +28,11 @@ def test_user_header_footer_preset_can_be_saved_updated_and_deleted(tmp_path, mo
     cfg.variants.first.header.fixed_text = "首页页眉"
     cfg.variants.even.header.mode = "styleref"
     cfg.variants.even.header.alignment = "right"
-    cfg.variants.even.footer.mode = "page_number_with_text"
+    cfg.variants.even.footer.mode = "fixed"
     cfg.variants.even.footer.fixed_text = "偶数页"
+    cfg.page_number_plan.even.visibility = "show"
+    cfg.page_number_plan.even.template = "第 {page} 页"
+    cfg.page_number_plan.even.alignment = "right"
     cfg.page_number_plan.phases = [
         PageNumberPhaseConfig(
             phase_id="body",
@@ -56,8 +60,11 @@ def test_user_header_footer_preset_can_be_saved_updated_and_deleted(tmp_path, mo
     assert loaded.variants.first.header.fixed_text == "首页页眉"
     assert loaded.variants.even.header.mode == "styleref"
     assert loaded.variants.even.header.alignment == "right"
-    assert loaded.variants.even.footer.mode == "page_number_with_text"
+    assert loaded.variants.even.footer.mode == "fixed"
     assert loaded.variants.even.footer.fixed_text == "偶数页"
+    assert loaded.page_number_plan.even.visibility == "show"
+    assert loaded.page_number_plan.even.template == "第 {page} 页"
+    assert loaded.page_number_plan.even.alignment == "right"
     assert loaded.page_number_plan.phases[0].start_value == 3
 
     cfg.header.fixed_text = "覆盖页眉"
@@ -80,3 +87,104 @@ def test_user_header_footer_preset_rejects_duplicate_display_names(tmp_path, mon
     presets.save_user_preset("我的页眉页脚", HeaderFooterConfig())
     with pytest.raises(ValueError, match="名称已存在"):
         presets.save_user_preset("我的页眉页脚", HeaderFooterConfig())
+
+
+def test_legacy_user_preset_migrates_footer_page_modes_to_variant_strategy(
+    tmp_path,
+    monkeypatch,
+):
+    import src.config.header_footer_presets as presets
+
+    monkeypatch.setattr(presets, "USER_PRESET_DIR", tmp_path)
+    (tmp_path / "user.legacy.json").write_text(
+        json.dumps(
+            {
+                "preset_id": "user.legacy",
+                "name": "旧版奇偶页",
+                "header_footer": {
+                    "variants": {
+                        "even": {
+                            "footer": {
+                                "mode": "page_number_with_text",
+                                "fixed_text": "偶数页",
+                                "template": "第 {page} 页",
+                            }
+                        }
+                    },
+                    "page_number_plan": {"enabled": True},
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = presets.get_preset_config("user.legacy")
+
+    assert loaded is not None
+    assert loaded.variants.even.footer.mode == "fixed"
+    assert loaded.variants.even.footer.fixed_text == "偶数页"
+    assert loaded.page_number_plan.even.visibility == "show"
+    assert loaded.page_number_plan.even.template == "第 {page} 页"
+
+def test_loading_user_preset_removes_obsolete_implicit_scope_roles(
+    tmp_path,
+    monkeypatch,
+):
+    import src.config.header_footer_presets as presets
+    from src.config.special_title_rules import special_title_selector
+
+    monkeypatch.setattr(presets, "USER_PRESET_DIR", tmp_path)
+    selector = special_title_selector("exact", "原创性声明")
+    (tmp_path / "user.legacy.json").write_text(
+        json.dumps(
+            {
+                "preset_id": "user.legacy",
+                "name": "旧范围",
+                "header_footer": {
+                    "header": {
+                        "hidden_selectors": [
+                            "statement",
+                            selector,
+                        ]
+                    },
+                    "footer": {
+                        "hidden_selectors": [
+                            "authorization",
+                            "front_note",
+                        ]
+                    },
+                    "page_number_plan": {
+                        "phases": [
+                            {
+                                "phase_id": "legacy",
+                                "selectors": [
+                                    "statement",
+                                    selector,
+                                    "body",
+                                ],
+                                "visible": True,
+                                "number_format": "decimal",
+                                "start_mode": "restart",
+                                "start_value": 1,
+                            }
+                        ]
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = presets.get_preset_config("user.legacy")
+
+    assert loaded is not None
+    assert loaded.header.hidden_selectors == [selector]
+    assert loaded.footer.hidden_selectors == []
+    legacy_phase = next(
+        phase
+        for phase in loaded.page_number_plan.phases
+        if phase.phase_id == "legacy"
+    )
+    assert legacy_phase.selectors == [selector, "body"]

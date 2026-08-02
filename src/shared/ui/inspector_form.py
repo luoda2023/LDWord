@@ -123,17 +123,14 @@ class InspectorForm(QWidget):
         return self._items_size(minimum=True)
 
     def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt API contract
-        return any(item.hasHeightForWidth() for item in self._items)
+        return any(item.hasHeightForWidth() for item in self._visible_items())
 
     def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt API contract
         margins = self._layout.contentsMargins()
         available_width = max(0, int(width or 0) - margins.left() - margins.right())
         heights = [
-            item.heightForWidth(available_width)
-            if item.hasHeightForWidth()
-            else item.sizeHint().height()
-            for item in self._items
-            if not item.isHidden()
+            self._item_height_for_width(item, available_width)
+            for item in self._visible_items()
         ]
         spacing = self._layout.spacing() * max(0, len(heights) - 1)
         return sum(heights) + spacing + margins.top() + margins.bottom()
@@ -146,7 +143,7 @@ class InspectorForm(QWidget):
                 refresh()
 
     def _items_size(self, *, minimum: bool) -> QSize:
-        visible_items = [item for item in self._items if not item.isHidden()]
+        visible_items = self._visible_items()
         if not visible_items:
             return super().minimumSizeHint() if minimum else super().sizeHint()
         margins = self._layout.contentsMargins()
@@ -156,11 +153,31 @@ class InspectorForm(QWidget):
         ]
         spacing = self._layout.spacing() * max(0, len(sizes) - 1)
         return QSize(
-            max(size.width() for size in sizes) + margins.left() + margins.right(),
-            sum(size.height() for size in sizes)
+            max(
+                max(size.width(), item.minimumWidth())
+                for item, size in zip(visible_items, sizes)
+            )
+            + margins.left()
+            + margins.right(),
+            sum(
+                max(size.height(), item.minimumHeight())
+                for item, size in zip(visible_items, sizes)
+            )
             + spacing
             + margins.top()
             + margins.bottom(),
+        )
+
+    def _visible_items(self) -> list[QWidget]:
+        return [item for item in self._items if not item.isHidden()]
+
+    def _item_height_for_width(self, item: QWidget, width: int) -> int:
+        if item.hasHeightForWidth():
+            return max(item.heightForWidth(width), item.minimumHeight())
+        return max(
+            item.sizeHint().height(),
+            item.minimumSizeHint().height(),
+            item.minimumHeight(),
         )
 
     def _empty_cell(self) -> QWidget:

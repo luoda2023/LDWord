@@ -9,6 +9,11 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
 from lxml import etree
 
+from src.formula_core.normalize import (
+    looks_like_bibliographic_reference_text,
+    looks_like_caption_text,
+    looks_like_formula_text,
+)
 from src.modules.base import BaseModule, ModuleMeta
 from src.config.feature_configs import normalize_table_smart_levels
 from src.config.table_style_presets import color_palette, color_variant
@@ -40,8 +45,37 @@ _CELL_PADDING = 216
 _CJK_CHAR_W = 210
 _ASCII_CHAR_W = 115
 _M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+_O_NS = "urn:schemas-microsoft-com:office:office"
 
-_RE_EQUATION_TEXT = re.compile(r"[=≈≠≤≥∑∫∏√→←↔⇌±]")
+_RE_EQUATION_NUMBER = re.compile(
+    r"^\s*[\(\[（【]?\s*\d+(?:\s*[.\-:—–/]\s*\d+)?\s*[\)\]）】]?\s*$"
+)
+_RE_EQUATION_OLE = re.compile(r"(?:equation|mathtype|eqn)", re.IGNORECASE)
+_RE_EQUATION_SOURCE = re.compile(
+    r"(?:\$\$.+?\$\$|(?<!\$)\$[^$\r\n]+?\$(?!\$)|\\\(.+?\\\)|\\\[.+?\\\])"
+)
+_RE_EQUATION_NUMBER_TAIL = re.compile(
+    r"[\(\[（【]\s*\d+(?:\s*[.\-:—–/]\s*\d+)?\s*[\)\]）】]\s*$"
+)
+
+_RE_EQUATION_ARROW = re.compile(r"(?:→|←|↔|⇌|->|<-|<->)")
+_RE_CJK_TEXT = re.compile(r"[\u4e00-\u9fff]")
+_RE_PROSE_PUNCT = re.compile(r"[，。；：！？、]")
+_RE_OMML_FORMULA_ANCHOR = re.compile(
+    r"(=|≈|≠|≤|≥|∑|∫|∏|√|→|←|↔|⇌|±|∂)"
+)
+_RE_COMPACT_FORMULA_TEXT = re.compile(
+    r"^[A-Za-z\u0391-\u03a9\u03b1-\u03c90-9\s()+\-*/^_\\{}\[\].,]+$"
+)
+_RE_COMPACT_PLUS_TIMES_EXPR = re.compile(
+    r"[A-Za-z\u0391-\u03a9\u03b1-\u03c90-9\)\]}]\s*[+*]\s*"
+    r"[A-Za-z\u0391-\u03a9\u03b1-\u03c90-9\(\[{\\]"
+)
+_RE_COMPACT_SLASH_EXPR = re.compile(
+    r"[A-Za-z\u0391-\u03a9\u03b1-\u03c90-9\)\]}]\s*/\s*"
+    r"[A-Za-z\u0391-\u03a9\u03b1-\u03c90-9\(\[{\\]"
+)
+_MAX_UNMARKED_EQUATION_TABLE_ROWS = 20
 _RE_HEADER_TRAILING_UNIT = re.compile(r"^(?P<head>.+?)\s*\((?P<unit>[^()]{1,80})\)\s*$")
 _RE_TRAILING_PAREN_CHUNK = re.compile(r"^(?P<head>.+?)(?P<paren>[（(][^()（）]{1,80}[）)])\s*$")
 _TABLE_ALIGNMENTS = frozenset({"left", "center", "right"})
@@ -1423,21 +1457,194 @@ def _set_cell_plain_text(tc, text: str) -> None:
     text_node.text = text
 
 
-def _is_equation_table(table: Table) -> bool:
-    tbl_el = table._element
+def _is_equation_table(table: Table | object) -> bool:
+    """Return whether *table* has the structural shape of an equation table.
+
+    Native math by itself is deliberately not sufficient: ordinary data
+    tables may legitimately contain equations.  An equation table must either
+    carry our explicit marker, or place formula content before a final empty /
+    equation-number cell.
+    """
+    tbl_el = getattr(table, "_element", table)
     rows = tbl_el.findall(qn("w:tr"))
-    if len(rows) > 5:
+
+    tbl_pr = tbl_el.find(qn("w:tblPr"))
+    has_explicit_marker = False
+    if tbl_pr is not None:
+        for tag in ("w:tblCaption", "w:tblDescription"):
+            hint = tbl_pr.find(qn(tag))
+            value = (hint.get(qn("w:val")) or "") if hint is not None else ""
+            if value.strip().casefold() == "alavette-equation-table":
+                has_explicit_marker = True
+                break
+    if has_explicit_marker:
+        return True
+    if not rows or len(rows) > _MAX_UNMARKED_EQUATION_TABLE_ROWS:
         return False
 
-    if tbl_el.find(f".//{{{_M_NS}}}oMathPara") is not None:
-        return True
-    if tbl_el.find(f".//{{{_M_NS}}}oMath") is not None:
-        return True
-
     for tr in rows:
-        for tc in tr.findall(qn("w:tc")):
-            text = _get_cell_text(tc).strip()
-            if text and _RE_EQUATION_TEXT.search(text) and len(rows) <= 3:
+        cells = tr.findall(qn("w:tc"))
+        if len(cells) < 2:
+            continue
+        number_text = _get_cell_text(cells[-1]).strip()
+        has_number_slot = not number_text or bool(_RE_EQUATION_NUMBER.match(number_text))
+        if not has_number_slot:
+            continue
+        for formula_cell in cells[:-1]:
+            has_native_math = _cell_has_formula_math_anchor(formula_cell)
+            has_equation_ole = any(
+                _RE_EQUATION_OLE.search(
+                    str(ole.get("ProgID") or ole.get(f"{{{_O_NS}}}ProgID") or "")
+                )
+                for ole in formula_cell.findall(f".//{{{_O_NS}}}OLEObject")
+            )
+            if has_native_math or has_equation_ole:
+                return True
+            if (
+                number_text
+                and _RE_EQUATION_NUMBER.match(number_text)
+                and _looks_like_formula_cell_text(_get_cell_text(formula_cell))
+            ):
                 return True
 
+        if not number_text:
+            formula_text = " ".join(
+                _get_cell_text(tc).strip() for tc in cells[:-1]
+            )
+            tail_match = _RE_EQUATION_NUMBER_TAIL.search(formula_text)
+            if tail_match is not None:
+                prefix = formula_text[: tail_match.start()].strip()
+                if _looks_like_formula_cell_text(prefix):
+                    return True
+            # A bare inline wrapper such as ``$x$`` is valid formula content
+            # but not sufficient structural evidence for an equation table.
+            # Unwrapped high-confidence formula text retains the 0.2 fallback.
+            if (
+                formula_text
+                and not _RE_EQUATION_SOURCE.search(formula_text)
+                and _looks_like_formula_cell_text(formula_text)
+            ):
+                return True
+
+    # A text-only fallback requires both a mathematical operator in the
+    # formula region and an equation-number-looking final cell.  Ordinary data
+    # tables that merely contain "=" must not be routed to this module.
+    for tr in rows:
+        cells = tr.findall(qn("w:tc"))
+        if len(cells) < 2:
+            continue
+        formula_text = " ".join(_get_cell_text(tc).strip() for tc in cells[:-1])
+        number_text = _get_cell_text(cells[-1]).strip()
+        if (
+            formula_text
+            and _looks_like_formula_cell_text(formula_text)
+            and _RE_EQUATION_NUMBER.match(number_text)
+        ):
+            return True
+
     return False
+
+
+def _looks_like_equation_text(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if _RE_EQUATION_ARROW.search(value):
+        return True
+    if "=" in value and not _RE_CJK_TEXT.search(value):
+        left, right = (part.strip() for part in value.split("=", 1))
+        compact = bool(left and right and not re.search(r"\s", left + right))
+        math_signal = bool(
+            re.search(r"[0-9\^_{}\(\)\[\]+\-*/Α-Ͽ]", left + right)
+            or len(left) <= 2
+        )
+        if compact and math_signal:
+            return True
+    return bool(
+        re.search(r"\s\+\s", value)
+        and re.search(r"[A-Za-z\u0391-\u03a9\u03b1-\u03c9]", value)
+    )
+
+
+def _looks_like_formula_cell_text(text: str) -> bool:
+    """Conservative text-only formula evidence used by table and row gates."""
+
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if looks_like_caption_text(value) or looks_like_bibliographic_reference_text(value):
+        return False
+    if _RE_EQUATION_SOURCE.search(value) or _looks_like_equation_text(value):
+        return True
+    if _RE_COMPACT_FORMULA_TEXT.fullmatch(value):
+        if _RE_COMPACT_PLUS_TIMES_EXPR.search(value):
+            return True
+        if (
+            "/" in value
+            and re.search(r"[(){}\[\]]", value)
+            and _RE_COMPACT_SLASH_EXPR.search(value)
+        ):
+            return True
+
+    matched, confidence, _source_type = looks_like_formula_text(value)
+    if not matched:
+        return False
+    if value.startswith("\\"):
+        return float(confidence) >= 0.60
+    return float(confidence) >= 0.72
+
+
+def _extract_cell_omml_linear_text(tc) -> str:
+    return "".join(
+        str(value)
+        for value in tc.xpath(
+            ".//*[namespace-uri()='%s' and local-name()='t']/text()" % _M_NS
+        )
+    ).strip()
+
+
+def _cell_has_formula_math_anchor(tc) -> bool:
+    has_math = bool(
+        tc.findall(f".//{{{_M_NS}}}oMath")
+        or tc.findall(f".//{{{_M_NS}}}oMathPara")
+    )
+    if not has_math:
+        return False
+
+    linear = _extract_cell_omml_linear_text(tc)
+    if not linear:
+        return True
+    if looks_like_caption_text(linear) or looks_like_bibliographic_reference_text(linear):
+        return False
+    if len(linear) > 240:
+        return False
+    if _RE_OMML_FORMULA_ANCHOR.search(linear):
+        return True
+
+    chinese_count = len(_RE_CJK_TEXT.findall(linear))
+    prose_punct_count = len(_RE_PROSE_PUNCT.findall(linear))
+    matched, confidence, _source_type = looks_like_formula_text(linear)
+    if (
+        matched
+        and float(confidence) >= 0.78
+        and chinese_count <= max(2, int(len(linear) * 0.12))
+    ):
+        return True
+    if chinese_count >= max(6, int(len(linear) * 0.16)) and prose_punct_count:
+        return False
+    if chinese_count >= max(12, int(len(linear) * 0.28)):
+        return False
+    if any(
+        marker in linear
+        for marker in (
+            "体积比为",
+            "混合液中",
+            "搅拌",
+            "透析",
+            "分别得到",
+            "分别表示",
+            "其中，",
+        )
+    ):
+        return False
+    return True

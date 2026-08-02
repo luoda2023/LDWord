@@ -56,7 +56,7 @@ DICT_PAYLOAD_FIELDS = (
 
 LIST_PAYLOAD_FIELDS = (
     "items",
-    "pending_profile_ids",
+    "pending_record_ids",
     "failed_items",
     "material_diagnostics",
     "content_visibility_preview",

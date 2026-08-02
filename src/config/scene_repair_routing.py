@@ -11,7 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-
 ALLOWED_REPAIR_ROUTE_LAYERS: tuple[str, ...] = (
     "template",
     "scene",
@@ -82,8 +81,9 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
             ),
             _evidence(
                 "src/ui/adapters/workbench_product_issue_navigation.py",
-                "SCENE_TARGET_CARD_MAP",
-                '"control_contract": "scn_cleanup"',
+                "EXECUTION_DIAGNOSTIC_TARGET_TYPES",
+                '"control_contract"',
+                'feature_card_id="quick_execute"',
             ),
         ),
         notes="Shared style controls repair through the contract owner, not ad hoc scene-only widgets.",
@@ -212,6 +212,7 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
         owner_layer="material",
         repair_target_types=(
             "material",
+            "material_package",
             "field",
             "asset",
             "schema",
@@ -222,35 +223,37 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
             "profile_question_figure_item",
         ),
         issue_categories=("material_field", "material_asset", "material_schema", "batch_issue"),
-        primary_surface="AssetsPanel / ScenePanel content material schema editor",
-        action_contract="Open material fields, assets, schema selection, or profile-scoped material repair.",
+        primary_surface="AssetsPanel canonical Material Package V1 editor",
+        action_contract=(
+            "Open the canonical package editor for fields, resources, records, "
+            "or package-contract repair."
+        ),
         evidence=(
             _evidence(
-                "src/ui/adapters/workbench_material_issues.py",
-                'repair_target_type="field"',
-                'repair_target_type="asset"',
-                'repair_target_type="schema"',
-                'question_figure_item',
+                "src/ui/panels/workbench/material_state.py",
+                "def choose_material_package",
+                "def material_execution_gate",
+                "ExecutionGateAction(",
+                '"material_package"',
             ),
             _evidence(
-                "src/ui/adapters/workbench_execution_adapter.py",
-                "def batch_execution_issue_items",
-                'payload.get("repair_target_type")',
-                'payload.get("repair_target_key")',
+                "src/ui/adapters/workbench_product_issue_navigation.py",
+                '"material_package"',
+                'panel_id="assets"',
+                "def workbench_issue_navigation_for_target",
             ),
             _evidence(
-                "src/ui/bridge.py",
-                "request_material_repair_target",
-                "material_profile_repair_target_requested",
-            ),
-            _evidence(
-                "src/ui/panels/assets/material_repair_navigation_presenter.py",
-                "consume_material_repair_target",
-                "consume_material_profile_repair_target",
-                "_focus_question_figure_item",
+                "src/ui/panels/assets_panel.py",
+                "class AssetsPanel",
+                "def _refresh_fields",
+                "def _refresh_resources",
+                "def prepare_pending_material_changes",
             ),
         ),
-        notes="Material repairs are fact-source repairs: fields, assets, schema ids, question-figure rows, or batch profile items.",
+        notes=(
+            "Legacy profile targets remain accepted as navigation aliases, but "
+            "all persisted edits are Material Package V1 transactions."
+        ),
     ),
     SceneRepairRoute(
         route_id="output_delivery",
@@ -301,7 +304,7 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
                 "scan_targets",
             ),
             _evidence(
-                "tests/test_workbench_execution_session_architecture.py",
+                "tests/test_workbench_panel.py",
                 "test_start_execution_requires_object_preflight_confirmation_before_worker",
                 "test_start_execution_blocks_on_strict_object_preflight_findings",
             ),
@@ -363,8 +366,8 @@ SCENE_REPAIR_ROUTES: tuple[SceneRepairRoute, ...] = (
                 '"plugin_manual_gate" if gate is not None else "coverage_boundary"',
             ),
             _evidence(
-                "tests/test_workbench_execution_center.py",
-                "test_coverage_boundary_issue_items_expose_plugin_boundary_for_planned_family",
+                "tests/test_workbench_issue_navigation.py",
+                "test_coverage_boundary_issue_exposes_plugin_manual_gate_for_planned_family",
                 'repair_target_type == "plugin_manual_gate"',
             ),
         ),
@@ -503,11 +506,11 @@ def _duplicate_target_types() -> tuple[tuple[str, str, str], ...]:
 
 __all__ = [
     "ALLOWED_REPAIR_ROUTE_LAYERS",
-    "REQUIRED_SCENE_REPAIR_ROUTE_IDS",
     "REPAIR_ROUTE_BY_CATEGORY",
     "REPAIR_ROUTE_BY_TARGET_TYPE",
-    "SCENE_REPAIR_ROUTE_MAP",
+    "REQUIRED_SCENE_REPAIR_ROUTE_IDS",
     "SCENE_REPAIR_ROUTES",
+    "SCENE_REPAIR_ROUTE_MAP",
     "SceneRepairRoute",
     "SceneRepairRouteAuditResult",
     "SceneRepairRouteEvidence",

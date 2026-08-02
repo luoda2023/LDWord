@@ -140,6 +140,7 @@ class Drawer(QWidget):
         while self._body_layout.count():
             item = self._body_layout.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().setParent(None)
         self._body_layout.addWidget(widget)
 
@@ -151,6 +152,7 @@ class Drawer(QWidget):
             return None
         widget = item.widget()
         if widget is not None:
+            widget.hide()
             widget.setParent(None)
         return widget
 

@@ -89,7 +89,11 @@ class AssistantSessionRecovery:
                                 else "recovery"
                             ),
                             title="已恢复上次文档任务结果",
-                            body=f"应用已从本地执行记录恢复任务终态：{status}。",
+                            body=(
+                                ""
+                                if status in {"success", "partial_success"}
+                                else f"应用已从本地执行记录恢复任务终态：{status}。"
+                            ),
                             payload={
                                 "execution_id": execution_id,
                                 "actions": actions,
@@ -175,6 +179,72 @@ class AssistantSessionRecovery:
                         interaction_type="recovery",
                         title="上次内容起草已中断",
                         body="未完成的模型输出不会作为文档输入；可以从原计划重新生成草稿。",
+                        payload={
+                            "actions": [
+                                {
+                                    "id": "generate_content_draft",
+                                    "label": "重新生成内容草稿",
+                                }
+                            ]
+                        },
+                    ),
+                )
+                interrupted_jobs += 1
+            elif job_status == "content_generation_ready":
+                job.update(
+                    {
+                        "status": "plan_ready",
+                        "error_text": "assistant_content_generation_not_started",
+                        "recovery_required": True,
+                    }
+                )
+                session = self.coordinator.update_state(
+                    session,
+                    document_job=job,
+                    turn_status="completed",
+                )
+                session = self.coordinator.append_message(
+                    session,
+                    AssistantMessage.interaction(
+                        role=ROLE_ASSISTANT,
+                        interaction_type="recovery",
+                        title="内容生成尚未开始",
+                        body="上次已完成材料授权，但内容生成尚未真正启动；原计划仍保留。",
+                        payload={
+                            "actions": [
+                                {
+                                    "id": "generate_content_draft",
+                                    "label": "继续生成内容草稿",
+                                }
+                            ]
+                        },
+                    ),
+                )
+                interrupted_jobs += 1
+            elif (
+                job_status == "needs_official_field_completion"
+                and session.pending_continuation.get("kind")
+                != "official_field_completion"
+            ):
+                job.update(
+                    {
+                        "status": "failed",
+                        "error_text": "assistant_official_field_completion_interrupted",
+                        "recovery_required": True,
+                    }
+                )
+                session = self.coordinator.update_state(
+                    session,
+                    document_job=job,
+                    turn_status="failed",
+                )
+                session = self.coordinator.append_message(
+                    session,
+                    AssistantMessage.interaction(
+                        role=ROLE_ASSISTANT,
+                        interaction_type="recovery",
+                        title="公文字段补充已中断",
+                        body="缺失字段的确认记录不完整，没有把未确认草稿送入正式生产。",
                         payload={
                             "actions": [
                                 {

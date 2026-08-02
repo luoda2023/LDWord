@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.qt_api import QApplication, QBoxLayout, QLabel, QPoint, QPushButton, Qt, QVBoxLayout, QWidget
+from src.config.special_title_rules import special_title_selector
 from src.config.template import TemplateConfig
 from src.shared.ui.adaptive_pair_row import AdaptivePairRow
 from src.shared.ui.dashed_separator import DashedSeparator
@@ -21,7 +22,6 @@ from src.ui.bridge import PanelBridge
 from src.ui.panels.template_caption_detail import CaptionDetail
 from src.ui.panels.template_elements_detail import ElementsDetail
 from src.ui.panels.template_elements_page_plan import PageSelectorEditor, SUPPRESS_HEADER_FOOTER_SELECTOR_OPTIONS
-from src.ui.panels.template_formula_detail import FormulaDetail
 from src.ui.panels.template_other_detail import OtherDetail
 from src.ui.panels.template_table_detail import TableCaptionDetail
 from src.ui.panels.template_panel import TemplatePanel
@@ -63,7 +63,9 @@ def test_table_and_elements_details_reuse_shared_controls():
     assert "InspectorForm(" in header_footer_source
     assert ".add_grid(" in header_footer_source
     assert ".add_split_columns(" not in header_footer_source
-    assert "_page_toggle_group" in header_footer_source
+    assert "_page_toggle_group" not in header_footer_source
+    assert "_exclusion_preset_combo" not in header_footer_source
+    assert "PAGE_NUMBER_VARIANT_VISIBILITY_OPTIONS" in header_footer_source
     assert "column_stretches=(0, 0, 0)" not in header_footer_source
     assert "template_form_row" in header_footer_source
     assert "TemplateSummaryCard(" in elements_source
@@ -74,7 +76,8 @@ def test_table_and_elements_details_reuse_shared_controls():
     assert "class TocDetailSection" in toc_source
     assert "HeaderFooterDetailSection(self)" in elements_source
     assert "TocDetailSection(self)" in elements_source
-    assert "self._header_footer_detail.set_header_footer(template.header_footer)" in elements_source
+    assert "template.header_footer," in elements_source
+    assert "template.heading_model," in elements_source
     assert "self._toc_detail.set_template(template)" in elements_source
     assert "Card(parent=owner._editor_column)" in header_footer_source
     assert "高级：Word 页眉页脚" not in header_footer_source
@@ -84,7 +87,7 @@ def test_table_and_elements_details_reuse_shared_controls():
     assert "_footer_enabled_toggle" in header_footer_source
     assert 'owner._add_card_header(self._scheme_card, "list", "页眉页脚预设")' in header_footer_source
     assert 'owner._add_card_header(self._normal_page_card, "panel-top", "页眉")' in header_footer_source
-    assert 'owner._add_card_header(self._footer_card, "panel-bottom", "页脚")' in header_footer_source
+    assert 'owner._add_card_header(self._footer_card, "panel-bottom", "页脚文字")' in header_footer_source
     assert 'owner._add_card_header(self._page_number_card, "list-ordered", "页码")' in header_footer_source
     assert "PageNumberPlanSection(owner, container=self._page_number_card, embedded=True)" in header_footer_source
     assert 'FlowSection("编号分组", expanded=True' in page_plan_source
@@ -365,6 +368,50 @@ def test_inspector_form_keeps_short_fixed_pairs_compact():
         app.processEvents()
 
 
+def test_inspector_form_ignores_hidden_height_for_width_items_and_respects_row_minimums():
+    app = _app()
+    host = QWidget()
+    form = InspectorForm(parent=host)
+    host_layout = QVBoxLayout(host)
+    host_layout.addWidget(form)
+
+    combo = StyledComboBox(form)
+    combo.addItem("全部显示", "none")
+    preset_row = form.add_field("不显示范围", combo)
+    selector = PageSelectorEditor(
+        form,
+        options=(("cover", "封面"),),
+        hint_text="",
+        allow_custom_input=False,
+    )
+    custom_row = form.add_field("选择页面", selector)
+    custom_row.hide()
+
+    try:
+        host.resize(960, 180)
+        host.show()
+        app.processEvents()
+
+        assert not form.hasHeightForWidth()
+        assert form.sizeHint().height() >= preset_row.minimumHeight()
+        assert form.minimumSizeHint().height() >= preset_row.minimumHeight()
+
+        custom_row.show()
+        app.processEvents()
+
+        assert form.hasHeightForWidth()
+        assert form.heightForWidth(form.width()) >= (
+            preset_row.minimumHeight() + custom_row.minimumHeight()
+        )
+
+        custom_row.hide()
+        app.processEvents()
+        assert not form.hasHeightForWidth()
+    finally:
+        host.close()
+        app.processEvents()
+
+
 def test_template_form_grid_defaults_to_no_horizontal_separators():
     _app()
     host = QWidget()
@@ -520,13 +567,15 @@ def test_template_elements_header_footer_uses_main_form_baseline():
         assert {row.label_width for row in header_typography_rows} == {expected_header_label_width}
         expected_footer_label_width = max(row.preferred_label_width() for row in footer_typography_rows)
         assert {row.label_width for row in footer_typography_rows} == {expected_footer_label_width}
-        assert detail._header_footer_detail._hide_cover_row.isHidden()
-        assert detail._header_footer_detail._page_toggle_group.isHidden()
-        assert (
-            detail._header_footer_detail._suppress_selector_row.label_width
-            == detail._header_footer_detail._suppress_selector_row.preferred_label_width()
+        assert not hasattr(detail._header_footer_detail, "_hide_cover_row")
+        assert not hasattr(detail._header_footer_detail, "_page_toggle_group")
+        assert not hasattr(detail._header_footer_detail, "_exclusion_preset_combo")
+        assert not any(
+            combo.currentText() == "全部显示"
+            for combo in detail.findChildren(StyledComboBox)
         )
-        assert detail._header_footer_detail._suppress_selector_row._label.alignment() & Qt.AlignTop
+        assert detail._header_footer_detail._header_scope_row._label.alignment() & Qt.AlignTop
+        assert detail._header_footer_detail._footer_scope_row._label.alignment() & Qt.AlignTop
         font_cn_top = detail._header_footer_detail._font_cn_row.mapTo(
             detail, detail._header_footer_detail._font_cn_row.rect().topLeft()
         ).y()
@@ -670,45 +719,54 @@ def test_header_footer_shows_scheme_preview_and_collapses_structure_settings():
         if header_footer._scheme_combo.currentData() is None:
             assert header_footer._scheme_combo.display_text() == "当前配置（自定义）"
         assert header_footer._scheme_note.isHidden()
-        assert header_footer._quick_preview_label.isHidden()
+        assert header_footer._quick_preview_label.isVisible()
         preview = header_footer._quick_preview_label.text()
-        assert "顶部：跟随 1 级标题" in preview
-        assert "底部文字：不显示" in preview
-        assert "页码：全文阿拉伯从 1 起" in preview
-        assert "排除：封面及声明页" in preview
-        assert header_footer._exclusion_preset_row.isVisible()
-        assert header_footer._exclusion_preset_combo.currentData() == "pre_numbering"
-        assert header_footer._suppress_selector_row.isHidden()
+        assert "页眉：跟随 1 级标题" in preview
+        assert "页脚文字：不显示" in preview
+        assert "页码：" in preview
+        assert "页眉隐藏：封面" in preview
+        assert "页脚文字隐藏：封面" in preview
+        assert "区域结果（只读）：" in preview
+        assert "封面：页眉无 · 页脚文字无 · 页码隐藏但计数" in preview
+        assert "目录：页眉有 · 页脚文字无 · 页码阿拉伯，从 1 起" in preview
+        assert header_footer._header_scope_row.isVisible()
+        assert header_footer._footer_scope_row.isVisible()
+        assert not hasattr(header_footer, "_exclusion_preset_row")
+        assert not any(
+            label.text() == "不显示页面"
+            for label in detail._header_titles
+        )
 
         header_footer._scheme_combo.setCurrentIndex(header_footer._scheme_combo.findData("continuous"))
         app.processEvents()
 
-        assert template.header_footer.suppress_header_footer_selectors == []
-        assert template.header_footer.page_number_plan.phases[0].selectors == ["all_numbered_content"]
+        assert template.header_footer.header.hidden_selectors == []
+        assert template.header_footer.footer.hidden_selectors == []
+        assert template.header_footer.page_number_plan.phases[0].phase_id == "pre_numbering"
         preview = header_footer._quick_preview_label.text()
-        assert "顶部：跟随 1 级标题" in preview
-        assert "底部文字：不显示" in preview
-        assert "页码：全文阿拉伯从 1 起" in preview
-        assert "排除：" not in preview
-        assert header_footer._exclusion_preset_row.isVisible()
-        assert header_footer._exclusion_preset_combo.currentData() == "none"
+        assert "页眉：跟随 1 级标题" in preview
+        assert "页脚文字：不显示" in preview
+        assert "页码：" in preview
+        assert "页眉隐藏：" not in preview
+        assert "页脚文字隐藏：" not in preview
 
         header_footer._scheme_combo.setCurrentIndex(header_footer._scheme_combo.findData("no_page_number"))
         app.processEvents()
 
         assert template.header_footer.footer.content_mode == "none"
-        assert template.header_footer.suppress_header_footer_selectors == []
-        assert template.header_footer.page_number_plan.phases[0].selectors == ["all_numbered_content"]
+        assert template.header_footer.page_number_enabled is False
+        assert template.header_footer.header.hidden_selectors == []
+        assert template.header_footer.footer.hidden_selectors == []
         assert header_footer._page_number_card.isHidden() is False
         assert header_footer._preset_row.isHidden() is False
         assert header_footer._numbering_mode_combo.currentData() == "continuous"
         assert header_footer._page_advanced_section.isHidden()
         preview = header_footer._quick_preview_label.text()
-        assert "顶部：跟随 1 级标题" in preview
-        assert "底部文字：不显示" in preview
+        assert "页眉：跟随 1 级标题" in preview
+        assert "页脚文字：不显示" in preview
         assert "页码：" not in preview
 
-        header_footer._exclusion_preset_combo.setCurrentIndex(header_footer._exclusion_preset_combo.findData("pre_numbering"))
+        header_footer._header_scope_editor.set_selectors(["cover"])
         app.processEvents()
 
         assert header_footer._scheme_combo.currentData() is None
@@ -768,7 +826,7 @@ def test_header_footer_preset_action_row_keeps_buttons_fully_visible():
         app.processEvents()
 
 
-def test_header_footer_section_exclusion_row_reclaims_height_after_toggle():
+def test_header_footer_scope_rows_live_in_channel_cards_without_blank_card():
     app = _app()
     detail = ElementsDetail()
 
@@ -779,48 +837,29 @@ def test_header_footer_section_exclusion_row_reclaims_height_after_toggle():
         app.processEvents()
 
         header_footer = detail._header_footer_detail
-        card = header_footer._structure_card
-        row = header_footer._suppress_selector_row
-        editor = card.parentWidget()
+        assert header_footer._structure_card is header_footer._normal_page_card
+        assert not hasattr(header_footer, "_exclusion_preset_row")
+        assert header_footer._header_scope_row.isVisible()
+        assert header_footer._footer_scope_row.isVisible()
+        for width in (480, 960, 1335):
+            detail.resize(width, 1200)
+            app.processEvents()
+            app.processEvents()
+            assert header_footer._header_scope_row.geometry().height() > 0
+            assert header_footer._footer_scope_row.geometry().height() > 0
+            assert header_footer._header_scope_row.geometry().bottom() <= (
+                header_footer._header_scope_form.rect().bottom()
+            )
+            assert header_footer._footer_scope_row.geometry().bottom() <= (
+                header_footer._footer_scope_form.rect().bottom()
+            )
 
-        assert header_footer._exclusion_preset_row.isVisible()
-        assert row.isHidden()
-        header_footer._exclusion_preset_combo.setCurrentIndex(
-            header_footer._exclusion_preset_combo.findData("custom")
-        )
-        app.processEvents()
-        app.processEvents()
-
-        assert row.isVisible()
-        expanded_heights = (row.geometry().height(), card.geometry().height(), editor.geometry().height())
-
-        header_footer._exclusion_preset_combo.setCurrentIndex(
-            header_footer._exclusion_preset_combo.findData("none")
-        )
-        app.processEvents()
-        app.processEvents()
-        collapsed_heights = (row.geometry().height(), card.geometry().height(), editor.geometry().height())
-
-        assert row.isHidden()
-        assert expanded_heights[1] > collapsed_heights[1] + 40
-        assert expanded_heights[2] > collapsed_heights[2] + 40
-
-        header_footer._exclusion_preset_combo.setCurrentIndex(
-            header_footer._exclusion_preset_combo.findData("custom")
-        )
-        app.processEvents()
-        app.processEvents()
-        reexpanded_heights = (row.geometry().height(), card.geometry().height(), editor.geometry().height())
-
-        assert row.isVisible()
-        assert reexpanded_heights[1] > collapsed_heights[1] + 40
-        assert reexpanded_heights[2] > collapsed_heights[2] + 40
     finally:
         detail.close()
         app.processEvents()
 
 
-def test_header_footer_section_exclusion_preset_and_custom_selectors_write_config():
+def test_header_footer_independent_scope_selectors_write_config():
     app = _app()
     detail = ElementsDetail(scope="header_footer")
 
@@ -832,41 +871,32 @@ def test_header_footer_section_exclusion_preset_and_custom_selectors_write_confi
         app.processEvents()
 
         header_footer = detail._header_footer_detail
-        header_footer._exclusion_preset_combo.setCurrentIndex(
-            header_footer._exclusion_preset_combo.findData("cover")
+        references_selector = special_title_selector("exact", "参考文献")
+        appendix_selector = special_title_selector("prefix", "附录")
+        header_footer._header_scope_editor.set_selectors(["cover"])
+        header_footer._header_scope_editor._emit_changed()
+        header_footer._footer_scope_editor.set_selectors(
+            [references_selector, appendix_selector]
         )
+        header_footer._footer_scope_editor._emit_changed()
         app.processEvents()
 
-        assert template.header_footer.suppress_header_footer_selectors == ["cover"]
-        assert "排除：封面" in header_footer._quick_preview_label.text()
-
-        header_footer._exclusion_preset_combo.setCurrentIndex(
-            header_footer._exclusion_preset_combo.findData("custom")
-        )
-        app.processEvents()
-
-        custom_index = header_footer._exclusion_preset_combo.findData("custom")
-        assert header_footer._exclusion_preset_combo.itemText(custom_index) == "自选范围"
-        assert header_footer._suppress_selector_row.isVisible()
-        assert header_footer._suppress_selector_row.label_text == "选择范围"
-        assert header_footer._suppress_selector_editor._custom_edit.isHidden()
-        header_footer._suppress_selector_editor._selector_buttons["cover"].click()
-        header_footer._suppress_selector_editor._selector_buttons["references"].click()
-        header_footer._suppress_selector_editor._selector_buttons["appendix"].click()
-        app.processEvents()
-
-        assert template.header_footer.suppress_header_footer_selectors == ["references", "appendix"]
+        assert template.header_footer.header.hidden_selectors == ["cover"]
+        assert template.header_footer.footer.hidden_selectors == [
+            references_selector,
+            appendix_selector,
+        ]
         preview = header_footer._quick_preview_label.text()
-        assert "排除：参考文献、附录" in preview
+        assert "页眉隐藏：封面" in preview
+        assert "页脚文字隐藏：参考文献、附录" in preview
     finally:
         detail.close()
         app.processEvents()
 
 
-def test_template_caption_formula_other_details_share_single_label_baseline():
+def test_template_other_detail_uses_single_label_baseline():
     app = _app()
     details = (
-        (FormulaDetail(), ("公式字体", "公式字号", "块对齐", "编号方式", "统一间距")),
         (
             OtherDetail(),
             ("启用文字水印", "水印文字", "水印颜色", "旋转角度", "水印字号"),
@@ -890,22 +920,12 @@ def test_template_caption_formula_other_details_share_single_label_baseline():
         app.processEvents()
 
 
-def test_hidden_formula_and_watermark_editors_preserve_their_owned_fields():
+def test_hidden_watermark_editor_preserves_its_owned_fields():
     app = _app()
-    formula = FormulaDetail()
     other = OtherDetail()
     template = TemplateConfig()
     try:
-        formula.set_template(template)
         other.set_template(template)
-
-        formula._table_alignment_combo.setCurrentIndex(
-            formula._table_alignment_combo.findData("right")
-        )
-        formula._number_font_combo.set_font_name("Arial")
-        formula._line_spacing.set_value(1.5, "multiple")
-        formula._space_before.set_value(9.0, "pt")
-        formula._auto_shrink_number.click()
 
         other._watermark_enabled.setChecked(True)
         other._watermark_text.setText("内部传阅")
@@ -915,35 +935,20 @@ def test_hidden_formula_and_watermark_editors_preserve_their_owned_fields():
         other._on_form_edited()
         app.processEvents()
 
-        assert template.formula_table.table_alignment == "right"
-        assert template.formula_table.number_font_name == "Arial"
-        assert template.formula_table.formula_line_spacing == 1.5
-        assert template.formula_table.formula_space_before_pt == 9.0
-        assert template.formula_table.auto_shrink_number_column is False
         assert template.watermark.enabled is True
         assert template.watermark.text == "内部传阅"
         assert template.watermark.color == "#336699"
         assert template.watermark.rotation == -30
         assert template.watermark.font_size == 56
         assert not hasattr(template, "output")
-        assert {item.key for item in formula._summary_card.summary_grid.items()} == {
-            "formula_typography",
-            "formula_layout",
-            "formula_numbering",
-        }
         assert {item.key for item in other._summary_card.summary_grid.items()} == {"watermark"}
 
-        formula.set_save_enabled(True)
         other.set_save_enabled(True)
-        formula._restore_btn.click()
         other._restore_btn.click()
         app.processEvents()
 
-        assert template.formula_table.table_alignment == "center"
-        assert template.formula_table.auto_shrink_number_column is True
         assert template.watermark.enabled is False
     finally:
-        formula.close()
         other.close()
         app.processEvents()
 
@@ -1431,6 +1436,51 @@ def test_page_selector_editor_does_not_stretch_chips_into_blank_space():
         app.processEvents()
 
 
+def test_page_selector_editor_expands_to_show_wrapped_special_title_options():
+    app = _app()
+    root = QWidget()
+    layout = QVBoxLayout(root)
+    options = (
+        ("cover", "封面"),
+        ("body", "其余正文"),
+        (special_title_selector("exact", "摘要"), "摘要"),
+        (special_title_selector("exact", "目录"), "目录"),
+        (special_title_selector("exact", "参考文献"), "参考文献"),
+        (special_title_selector("prefix", "附录"), "附录"),
+        (special_title_selector("prefix", "附件"), "附件"),
+    )
+    editor = PageSelectorEditor(root, options=options, allow_custom_input=False)
+    row = template_form_row(
+        "隐藏页脚文字范围",
+        editor,
+        parent=root,
+    )
+    row.set_label_alignment(Qt.AlignLeft | Qt.AlignTop)
+    layout.addWidget(row)
+
+    try:
+        root.resize(420, 260)
+        root.show()
+        app.processEvents()
+        app.processEvents()
+
+        button_rows = {
+            button.y()
+            for button in editor._selector_buttons.values()
+        }
+        lowest_button = max(
+            button.geometry().bottom()
+            for button in editor._selector_buttons.values()
+        )
+        assert len(button_rows) >= 2
+        assert lowest_button <= editor._chips.height()
+        assert editor._chips.geometry().bottom() <= editor.height()
+        assert editor.height() >= editor.heightForWidth(editor.width()) - 1
+    finally:
+        root.close()
+        app.processEvents()
+
+
 def test_elements_detail_projects_default_page_number_phase_without_model_mutation():
     app = _app()
     detail = ElementsDetail()
@@ -1446,10 +1496,12 @@ def test_elements_detail_projects_default_page_number_phase_without_model_mutati
         phases = template.header_footer.page_number_plan.phases
         assert phases == []
         projected = detail._header_footer_detail.phase_rows_to_configs()
-        assert len(projected) == 1
-        assert projected[0].phase_id == "main"
-        assert projected[0].selectors == ["all_numbered_content"]
-        assert projected[0].number_format == "decimal"
+        assert len(projected) == 2
+        assert projected[0].phase_id == "pre_numbering"
+        assert projected[0].selectors == ["cover"]
+        assert projected[0].visible is False
+        assert projected[1].phase_id == "main"
+        assert projected[1].number_format == "decimal"
         assert detail._page_validation_mode_combo.isHidden()
         assert detail._page_missing_doc_tree_combo.isHidden()
         assert detail._page_validation_mode_combo.isVisible() is False
@@ -1469,10 +1521,10 @@ def test_template_panel_elements_detail_summary_and_dependent_state():
         toc_detail = panel._toc_detail
 
         assert "跟随" in detail._summary_grid.value_for("header")
-        phase_row = detail._page_phase_rows[0]
+        phase_row = detail._page_phase_rows[1]
         assert phase_row.section.is_expanded() is True
         assert "main" not in phase_row.section._toggle_button.text()
-        assert "全文" in phase_row.section._toggle_button.text()
+        assert "项" in phase_row.section._toggle_button.text()
         assert detail._header_text_row.isHidden() is True
         assert detail._styleref_level_row.isHidden() is False
 
@@ -1497,27 +1549,30 @@ def test_template_panel_elements_detail_summary_and_dependent_state():
         detail._bottom_text_mode_combo.setCurrentIndex(detail._bottom_text_mode_combo.findData("none"))
         app.processEvents()
 
-        assert panel._current_template.header_footer.page_number_enabled is False
+        assert panel._current_template.header_footer.page_number_enabled is True
         assert panel._current_template.header_footer.footer.content_mode == "none"
         assert detail._page_number_card.isHidden() is False
         assert detail._preset_row.isHidden() is False
         assert detail._numbering_mode_combo.currentData() == "continuous"
         assert detail._page_advanced_section.isHidden()
-        assert detail._summary_grid.value_for("page_number") == "不显示页码"
+        assert detail._summary_grid.value_for("page_number") != "不显示页码"
 
-        detail._bottom_text_mode_combo.setCurrentIndex(detail._bottom_text_mode_combo.findData("page_number_with_text"))
+        detail._page_number_enabled_toggle.click()
+        detail._bottom_text_mode_combo.setCurrentIndex(detail._bottom_text_mode_combo.findData("fixed"))
         detail._footer_text_edit.setText("Confidential")
         detail._footer_alignment_combo.setCurrentIndex(detail._footer_alignment_combo.findData("right"))
+        detail._page_number_alignment_combo.setCurrentIndex(detail._page_number_alignment_combo.findData("right"))
+        detail._page_number_enabled_toggle.click()
         app.processEvents()
 
         assert panel._current_template.header_footer.page_number_enabled is True
-        assert panel._current_template.header_footer.footer.content_mode == "page_number_with_text"
+        assert panel._current_template.header_footer.footer.content_mode == "fixed"
         assert panel._current_template.header_footer.footer_text == "Confidential"
         assert panel._current_template.header_footer.footer_alignment == "right"
         assert detail._summary_grid.value_for("footer_text") == "固定文字"
         assert "Confidential" in detail._summary_grid.detail_for("footer_text")
         assert "页脚右侧" in detail._summary_grid.value_for("page_number")
-        assert "全文阿拉伯数字从 1 起" in detail._summary_grid.detail_for("page_number")
+        assert "阿拉伯数字" in detail._summary_grid.detail_for("page_number")
         assert detail._preset_row.isHidden() is False
 
         detail._header_enabled_toggle.click()
@@ -1534,17 +1589,17 @@ def test_template_panel_elements_detail_summary_and_dependent_state():
         app.processEvents()
 
         assert panel._current_template.header_footer.footer_enabled is False
-        assert panel._current_template.header_footer.footer.content_mode == "page_number_with_text"
-        assert panel._current_template.header_footer.page_number_enabled is False
+        assert panel._current_template.header_footer.footer.content_mode == "fixed"
+        assert panel._current_template.header_footer.page_number_enabled is True
         assert detail._bottom_text_mode_row.isEnabled() is False
-        assert detail._page_number_enabled_row.isEnabled() is False
+        assert detail._page_number_enabled_row.isEnabled() is True
         assert detail._footer_alignment_row.isEnabled() is False
         assert detail._footer_font_cn_row.isEnabled() is False
         assert detail._page_plan_section.isHidden() is False
-        assert detail._preset_row.isEnabled() is False
+        assert detail._preset_row.isEnabled() is True
         assert detail._page_advanced_section.isHidden()
-        assert detail._summary_grid.value_for("footer_text") == "页脚关闭"
-        assert detail._summary_grid.value_for("page_number") == "不显示页码"
+        assert detail._summary_grid.value_for("footer_text") == "页脚文字关闭"
+        assert detail._summary_grid.value_for("page_number") != "不显示页码"
 
         assert not hasattr(toc_detail, "_toc_enabled_toggle")
         assert toc_detail._toc_mode_row.isEnabled() is True
@@ -1738,8 +1793,12 @@ def test_template_panel_elements_detail_supports_fixed_header_text_and_plain_toc
         assert panel._current_template.header_footer.header_text == "固定页眉"
         assert panel._current_template.toc.mode == "plain"
         assert "固定页眉" in panel._overview_detail._rows["header_footer"]._value.text()
-        assert "页码：全文阿拉伯数字从 1 起" in panel._overview_detail._rows["header_footer"]._value.text()
-        assert "页码：全文阿拉伯数字从 1 起" in panel._nav_cards["tpl_header_footer"]._full_subtitle
+        header_footer_summary = panel._overview_detail._rows["header_footer"]._value.text()
+        assert "页码：" in header_footer_summary
+        assert "阿拉伯数字" in header_footer_summary
+        nav_summary = panel._nav_cards["tpl_header_footer"]._full_subtitle
+        assert "页码：" in nav_summary
+        assert "阿拉伯数字" in nav_summary
         assert bridge.is_template_dirty() is True
     finally:
         panel.close()
@@ -1753,24 +1812,27 @@ def test_template_panel_elements_detail_supports_page_number_strategy_fields():
 
     try:
         detail = panel._header_footer_detail
-        detail._exclusion_preset_combo.setCurrentIndex(detail._exclusion_preset_combo.findData("none"))
+        detail._header_scope_editor.set_selectors([])
+        detail._header_scope_editor._emit_changed()
+        detail._footer_scope_editor.set_selectors([])
+        detail._footer_scope_editor._emit_changed()
         detail._preset_split_restart_btn.click()
         app.processEvents()
 
-        front_phase = detail._page_phase_rows[0]
+        front_phase = detail._page_phase_rows[1]
         front_phase.format_combo.setCurrentIndex(front_phase.format_combo.findData("lowerRoman"))
         app.processEvents()
 
-        body_phase = detail._page_phase_rows[1]
+        body_phase = detail._page_phase_rows[2]
         body_phase.start_mode_combo.setCurrentIndex(body_phase.start_mode_combo.findData("continue"))
         app.processEvents()
 
-        body_phase = detail._page_phase_rows[1]
+        body_phase = detail._page_phase_rows[2]
         body_phase.start_value_spin.setValue(3)
         app.processEvents()
 
         header_footer = panel._current_template.header_footer
-        assert len(header_footer.page_number_plan.phases) == 2
+        assert len(header_footer.page_number_plan.phases) == 3
         assert header_footer.hide_cover_header_footer is False
         assert header_footer.front_matter_page_number_format == "lowerRoman"
         assert header_footer.restart_body_page_number is False
@@ -1795,15 +1857,33 @@ def test_template_panel_header_footer_supports_page_variant_controls():
         detail._first_header_mode_combo.setCurrentIndex(detail._first_header_mode_combo.findData("fixed"))
         detail._first_header_alignment_combo.setCurrentIndex(detail._first_header_alignment_combo.findData("left"))
         detail._first_header_text_edit.setText("首页页眉")
-        detail._first_footer_mode_combo.setCurrentIndex(detail._first_footer_mode_combo.findData("template"))
+        detail._first_footer_mode_combo.setCurrentIndex(detail._first_footer_mode_combo.findData("fixed"))
         detail._first_footer_alignment_combo.setCurrentIndex(detail._first_footer_alignment_combo.findData("left"))
-        detail._first_footer_text_edit.setText("第 {page} 页")
+        detail._first_footer_text_edit.setText("首页文字")
+        detail._first_page_number_visibility_combo.setCurrentIndex(
+            detail._first_page_number_visibility_combo.findData("hide")
+        )
+        detail._first_page_number_alignment_combo.setCurrentIndex(
+            detail._first_page_number_alignment_combo.findData("left")
+        )
+        detail._first_page_number_display_combo.setCurrentIndex(
+            detail._first_page_number_display_combo.findData("page")
+        )
         detail._even_header_mode_combo.setCurrentIndex(detail._even_header_mode_combo.findData("styleref"))
         detail._even_header_alignment_combo.setCurrentIndex(detail._even_header_alignment_combo.findData("right"))
         detail._even_header_level_combo.setCurrentIndex(detail._even_header_level_combo.findData(3))
-        detail._even_footer_mode_combo.setCurrentIndex(detail._even_footer_mode_combo.findData("page_number_with_text"))
+        detail._even_footer_mode_combo.setCurrentIndex(detail._even_footer_mode_combo.findData("fixed"))
         detail._even_footer_alignment_combo.setCurrentIndex(detail._even_footer_alignment_combo.findData("right"))
         detail._even_footer_text_edit.setText("内部")
+        detail._even_page_number_visibility_combo.setCurrentIndex(
+            detail._even_page_number_visibility_combo.findData("show")
+        )
+        detail._even_page_number_alignment_combo.setCurrentIndex(
+            detail._even_page_number_alignment_combo.findData("right")
+        )
+        detail._even_page_number_display_combo.setCurrentIndex(
+            detail._even_page_number_display_combo.findData("plain")
+        )
         app.processEvents()
 
         header_footer = panel._current_template.header_footer
@@ -1819,12 +1899,18 @@ def test_template_panel_header_footer_supports_page_variant_controls():
         assert header_footer.variants.even.header.mode == "styleref"
         assert header_footer.variants.even.header.alignment == "right"
         assert header_footer.variants.even.header.styleref_level == 3
-        assert header_footer.variants.first.footer.mode == "template"
+        assert header_footer.variants.first.footer.mode == "fixed"
         assert header_footer.variants.first.footer.alignment == "left"
-        assert header_footer.variants.first.footer.template == "第 {page} 页"
-        assert header_footer.variants.even.footer.mode == "page_number_with_text"
+        assert header_footer.variants.first.footer.fixed_text == "首页文字"
+        assert header_footer.variants.even.footer.mode == "fixed"
         assert header_footer.variants.even.footer.alignment == "right"
         assert header_footer.variants.even.footer.fixed_text == "内部"
+        assert header_footer.page_number_plan.first.visibility == "hide"
+        assert header_footer.page_number_plan.first.alignment == "left"
+        assert header_footer.page_number_plan.first.template == "第 {page} 页"
+        assert header_footer.page_number_plan.even.visibility == "show"
+        assert header_footer.page_number_plan.even.alignment == "right"
+        assert header_footer.page_number_plan.even.template == "{page}"
         assert detail._scheme_combo.currentData() is None
         assert detail._scheme_combo.display_text() == "当前配置（自定义）"
         assert bridge.is_template_dirty() is True
@@ -1849,12 +1935,14 @@ def test_header_footer_page_variant_rows_follow_toggles():
         assert header_footer._first_footer_variant_grid.isHidden()
         assert header_footer._even_header_variant_grid.isHidden()
         assert header_footer._even_footer_variant_grid.isHidden()
+        assert header_footer._first_page_number_variant_grid.isHidden()
+        assert header_footer._even_page_number_variant_grid.isHidden()
         assert header_footer._header_variant_separator.isHidden()
         assert header_footer._normal_header_title_label.text() == "普通页页眉"
         assert header_footer._first_header_title_label.isHidden()
         assert header_footer._even_header_title_label.isHidden()
         assert header_footer._even_header_separator.isHidden()
-        assert header_footer._normal_footer_title_label.text() == "普通页页脚"
+        assert header_footer._normal_footer_title_label.text() == "普通页页脚文字"
         assert header_footer._first_footer_title_label.isHidden()
         assert header_footer._even_footer_title_label.isHidden()
         assert header_footer._even_footer_separator.isHidden()
@@ -1869,13 +1957,15 @@ def test_header_footer_page_variant_rows_follow_toggles():
         assert header_footer._first_footer_variant_grid.isVisible()
         assert header_footer._even_header_variant_grid.isHidden()
         assert header_footer._even_footer_variant_grid.isHidden()
+        assert header_footer._first_page_number_variant_grid.isVisible()
+        assert header_footer._even_page_number_variant_grid.isHidden()
         assert header_footer._header_variant_separator.isVisible()
         assert header_footer._normal_header_title_label.text() == "普通页页眉（首页以外）"
         assert header_footer._first_header_title_label.isVisible()
         assert header_footer._even_header_title_label.isHidden()
         assert header_footer._even_header_separator.isHidden()
         assert header_footer._footer_variant_separator.isVisible()
-        assert header_footer._normal_footer_title_label.text() == "普通页页脚（首页以外）"
+        assert header_footer._normal_footer_title_label.text() == "普通页页脚文字（首页以外）"
         assert header_footer._first_footer_title_label.isVisible()
         assert header_footer._even_footer_title_label.isHidden()
         assert header_footer._even_footer_separator.isHidden()
@@ -1897,7 +1987,7 @@ def test_header_footer_page_variant_rows_follow_toggles():
         assert header_footer._first_footer_text_row.isHidden()
 
         header_footer._first_footer_mode_combo.setCurrentIndex(
-            header_footer._first_footer_mode_combo.findData("page_number_with_text")
+            header_footer._first_footer_mode_combo.findData("fixed")
         )
         app.processEvents()
 
@@ -1909,10 +1999,12 @@ def test_header_footer_page_variant_rows_follow_toggles():
 
         assert header_footer._even_header_variant_grid.isVisible()
         assert header_footer._even_footer_variant_grid.isVisible()
+        assert header_footer._first_page_number_variant_grid.isVisible()
+        assert header_footer._even_page_number_variant_grid.isVisible()
         assert header_footer._normal_header_title_label.text() == "奇数页页眉（首页以外）"
         assert header_footer._even_header_title_label.isVisible()
         assert header_footer._even_header_separator.isVisible()
-        assert header_footer._normal_footer_title_label.text() == "奇数页页脚（首页以外）"
+        assert header_footer._normal_footer_title_label.text() == "奇数页页脚文字（首页以外）"
         assert header_footer._even_footer_title_label.isVisible()
         assert header_footer._even_footer_separator.isVisible()
         even_title_y = header_footer._even_header_title_label.mapTo(
@@ -1939,7 +2031,7 @@ def test_header_footer_page_variant_rows_follow_toggles():
             header_footer._even_header_mode_combo.findData("styleref")
         )
         header_footer._even_footer_mode_combo.setCurrentIndex(
-            header_footer._even_footer_mode_combo.findData("page_number_with_text")
+            header_footer._even_footer_mode_combo.findData("fixed")
         )
         app.processEvents()
 
@@ -1956,11 +2048,13 @@ def test_header_footer_page_variant_rows_follow_toggles():
         assert header_footer._first_header_mode_row.isHidden()
         assert header_footer._even_header_variant_grid.isVisible()
         assert header_footer._even_footer_variant_grid.isVisible()
+        assert header_footer._first_page_number_variant_grid.isHidden()
+        assert header_footer._even_page_number_variant_grid.isVisible()
         assert header_footer._normal_header_title_label.text() == "奇数页页眉"
         assert header_footer._first_header_title_label.isHidden()
         assert header_footer._even_header_title_label.isVisible()
         assert header_footer._even_header_separator.isHidden()
-        assert header_footer._normal_footer_title_label.text() == "奇数页页脚"
+        assert header_footer._normal_footer_title_label.text() == "奇数页页脚文字"
         assert header_footer._first_footer_title_label.isHidden()
         assert header_footer._even_footer_title_label.isVisible()
         assert header_footer._even_footer_separator.isHidden()
@@ -1979,6 +2073,8 @@ def test_header_footer_page_variant_rows_follow_toggles():
         assert header_footer._even_header_alignment_row.isEnabled() is False
         assert header_footer._even_footer_mode_row.isEnabled() is False
         assert header_footer._even_footer_alignment_row.isEnabled() is False
+        assert header_footer._even_page_number_visibility_row.isEnabled() is True
+        assert header_footer._even_page_number_alignment_row.isEnabled() is True
     finally:
         detail.close()
         app.processEvents()
@@ -2213,6 +2309,7 @@ def test_template_panel_elements_detail_supports_custom_phase_rows():
 
     try:
         detail = panel._header_footer_detail
+        appendix_selector = special_title_selector("prefix", "附录")
         detail._add_phase_btn.click()
         app.processEvents()
 
@@ -2235,7 +2332,7 @@ def test_template_panel_elements_detail_supports_custom_phase_rows():
         app.processEvents()
 
         new_phase = detail._page_phase_rows[-1]
-        new_phase.selector_editor._selector_buttons["appendix"].click()
+        new_phase.selector_editor._selector_buttons[appendix_selector].click()
         app.processEvents()
         assert new_phase.section._toggle_button.text() == "附录：阿拉伯数字，从 1 起"
 
@@ -2245,9 +2342,9 @@ def test_template_panel_elements_detail_supports_custom_phase_rows():
         assert new_phase.section._toggle_button.text() == "附录：不显示页码"
 
         phases = panel._current_template.header_footer.page_number_plan.phases
-        assert len(phases) == 2
+        assert len(phases) == 3
         assert phases[-1].phase_id == "appendix"
-        assert phases[-1].selectors == ["appendix"]
+        assert phases[-1].selectors == [appendix_selector]
         assert phases[-1].visible is False
         assert bridge.is_template_dirty() is True
     finally:
@@ -2262,6 +2359,7 @@ def test_template_panel_elements_detail_preserves_phase_row_instances_while_edit
 
     try:
         detail = panel._header_footer_detail
+        appendix_selector = special_title_selector("prefix", "附录")
         detail._add_phase_btn.click()
         app.processEvents()
 
@@ -2271,11 +2369,13 @@ def test_template_panel_elements_detail_preserves_phase_row_instances_while_edit
 
         assert detail._page_phase_rows[-1] is new_phase
 
-        new_phase.selector_editor._selector_buttons["appendix"].click()
+        new_phase.selector_editor._selector_buttons[appendix_selector].click()
         app.processEvents()
 
         assert detail._page_phase_rows[-1] is new_phase
-        assert panel._current_template.header_footer.page_number_plan.phases[-1].selectors == ["appendix"]
+        assert panel._current_template.header_footer.page_number_plan.phases[-1].selectors == [
+            appendix_selector
+        ]
     finally:
         panel.close()
         app.processEvents()
@@ -2292,22 +2392,24 @@ def test_template_panel_elements_detail_can_duplicate_and_reorder_phase_rows():
         first.selector_editor._selector_buttons["body"].click()
         detail._add_phase_btn.click()
         app.processEvents()
-        trailing = detail._page_phase_rows[1]
+        original_main = detail._page_phase_rows[1]
+        trailing = detail._page_phase_rows[2]
 
         first.duplicate_btn.click()
         app.processEvents()
 
-        assert len(detail._page_phase_rows) == 3
+        assert len(detail._page_phase_rows) == 4
         copied = detail._page_phase_rows[1]
         assert detail._page_phase_rows[0] is first
         assert detail._page_phase_rows[0].section is first.section
-        assert detail._page_phase_rows[2] is trailing
-        assert detail._page_phase_rows[2].section is trailing.section
+        assert detail._page_phase_rows[2] is original_main
+        assert detail._page_phase_rows[3] is trailing
         assert copied is not first
         assert copied.section is not first.section
         assert detail._page_phase_rows_layout.itemAt(0).widget() is first.section
         assert detail._page_phase_rows_layout.itemAt(1).widget() is copied.section
-        assert detail._page_phase_rows_layout.itemAt(2).widget() is trailing.section
+        assert detail._page_phase_rows_layout.itemAt(2).widget() is original_main.section
+        assert detail._page_phase_rows_layout.itemAt(3).widget() is trailing.section
         phases = panel._current_template.header_footer.page_number_plan.phases
         assert phases[1].phase_id.endswith("_copy")
         assert phases[1].selectors == phases[0].selectors
@@ -2316,10 +2418,11 @@ def test_template_panel_elements_detail_can_duplicate_and_reorder_phase_rows():
         copied.move_up_btn.click()
         app.processEvents()
 
-        assert detail._page_phase_rows == [copied, first, trailing]
+        assert detail._page_phase_rows == [copied, first, original_main, trailing]
         assert detail._page_phase_rows_layout.itemAt(0).widget() is copied.section
         assert detail._page_phase_rows_layout.itemAt(1).widget() is first.section
-        assert detail._page_phase_rows_layout.itemAt(2).widget() is trailing.section
+        assert detail._page_phase_rows_layout.itemAt(2).widget() is original_main.section
+        assert detail._page_phase_rows_layout.itemAt(3).widget() is trailing.section
         phases = panel._current_template.header_footer.page_number_plan.phases
         assert phases[0].phase_id.endswith("_copy")
     finally:
@@ -2428,25 +2531,27 @@ def test_template_panel_elements_detail_shows_page_plan_diagnostics_inline():
         app.processEvents()
 
 
-def test_template_panel_elements_detail_phase_preview_shows_hidden_range_warning():
+def test_header_hidden_scope_does_not_mask_page_number_phase_preview():
     app = _app()
     bridge = PanelBridge()
     panel = TemplatePanel(bridge)
 
     try:
         detail = panel._header_footer_detail
-        detail._exclusion_preset_combo.setCurrentIndex(detail._exclusion_preset_combo.findData("custom"))
-        detail._suppress_selector_editor.set_selectors(["appendix"])
+        appendix_selector = special_title_selector("prefix", "附录")
+        detail._header_scope_editor.set_selectors([appendix_selector])
+        detail._header_scope_editor._emit_changed()
         detail._add_phase_btn.click()
         app.processEvents()
 
         new_phase = detail._page_phase_rows[-1]
-        new_phase.selector_editor._selector_buttons["appendix"].click()
+        new_phase.selector_editor._selector_buttons[appendix_selector].click()
         app.processEvents()
 
         preview = new_phase.selector_preview.text()
-        assert "这一组都在分区排除中，不会显示页码" in preview
-        assert "附录：阿拉伯数字，从 1 起（不含附录）" in new_phase.section._toggle_button.text()
+        assert "不显示页面" not in preview
+        assert "同时出现在多个编号分组中" not in preview
+        assert new_phase.section._toggle_button.text() == "附录：阿拉伯数字，从 1 起"
     finally:
         panel.close()
         app.processEvents()

@@ -3,14 +3,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from scripts.verify_scene_matrix_release_gate import (  # noqa: E402
+from scripts.verify_scene_matrix_release_gate import (
     build_scene_matrix_release_gate_payload,
 )
-from src.config.scene_report_artifact_drilldown_audit import (  # noqa: E402
+from src.config.scene_report_artifact_drilldown_audit import (
     N2_180_REPORT_ARTIFACT_DRILLDOWN_SPECS,
     audit_scene_report_artifact_drilldown_report,
     build_scene_report_artifact_drilldown_audit_report,
@@ -51,7 +50,7 @@ def test_scene_report_artifact_drilldown_audit_locks_n2_180_channels():
 
     runtime_maps = rows["runtime_delivery_artifact_maps"]
     assert "material_package" in runtime_maps.artifact_kind_ids
-    assert "write_material_package_artifacts" in runtime_maps.runtime_surface_ids
+    assert "publish_material_artifacts" in runtime_maps.runtime_surface_ids
     assert "material_package_paths" in runtime_maps.report_surface_ids
 
     grouping = rows["artifact_grouping_and_report_inference"]

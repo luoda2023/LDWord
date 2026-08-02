@@ -35,7 +35,6 @@ from src.config.scene_rule_source_governance import (
     scene_rule_sources_for_pack,
 )
 
-
 SLOT_STATUS_OK = "ok"
 SLOT_STATUS_BOUNDARY = "boundary"
 SLOT_STATUS_NOT_APPLICABLE = "not_applicable"
@@ -75,7 +74,9 @@ class ScenePackSlotAuditResult:
 
     @property
     def missing_slot_ids(self) -> tuple[str, ...]:
-        return tuple(slot.slot_id for slot in self.slots if slot.status == SLOT_STATUS_GAP)
+        return tuple(
+            slot.slot_id for slot in self.slots if slot.status == SLOT_STATUS_GAP
+        )
 
     @property
     def boundary_slot_ids(self) -> tuple[str, ...]:
@@ -176,16 +177,22 @@ PACK_TEST_EVIDENCE: dict[str, tuple[tuple[str, str], ...]] = {
         ("tests/test_scene_rule_source_governance.py", "school_thesis_rule_defaults"),
     ),
     "english_journal": (
-        ("tests/test_journal_rule_source_governance.py", "journal_en_default_rules"),
+        ("tests/test_scene_rule_source_governance.py", "journal_en_default_rules"),
         ("tests/test_scene_family_application.py", "journal_en"),
     ),
     "exam_education": (
-        ("tests/test_exam_question_schema_runtime.py", "manual_confirmation_required"),
+        (
+            "tests/test_execution_diagnostics_reporting.py",
+            "manual_confirmation_required",
+        ),
         ("tests/test_scene_family_application.py", "exam_teaching"),
     ),
     "bidding_materials": (
         ("tests/test_scene_coverage_manifest.py", "bidding_materials"),
-        ("tests/test_scene_rule_source_governance.py", "procurement_bidding_rule_defaults"),
+        (
+            "tests/test_scene_rule_source_governance.py",
+            "procurement_bidding_rule_defaults",
+        ),
     ),
     "official_policy": (
         ("tests/test_scene_natural_request_router.py", "official_policy_documents"),
@@ -196,24 +203,39 @@ PACK_TEST_EVIDENCE: dict[str, tuple[tuple[str, str], ...]] = {
         ("tests/test_scene_family_application.py", "long_document_publishing"),
     ),
     "application_reports": (
-        ("tests/test_scene_rule_source_governance.py", "project_application_rule_defaults"),
-        ("tests/test_material_execution_context.py", "project_application"),
+        (
+            "tests/test_scene_rule_source_governance.py",
+            "project_application_rule_defaults",
+        ),
+        ("tests/test_material_schema_registry.py", "project_application"),
     ),
     "contract_delivery": (
         ("tests/test_material_field_consistency.py", "contract_delivery"),
         ("tests/test_scene_family_application.py", "contract_delivery"),
     ),
     "batch_forms": (
-        ("tests/test_scene_repair_routing.py", "form_batch_documents.table.row_height_pt"),
-        ("tests/test_table_format_semantics.py", "form_batch_documents.table.row_height_pt"),
+        (
+            "tests/test_scene_family_application.py",
+            "form_batch_documents",
+        ),
+        (
+            "tests/test_table_format_semantics.py",
+            "form_batch_documents.table.row_height_pt",
+        ),
     ),
     "professional_disclosure": (
-        ("tests/test_scene_rule_source_governance.py", "professional_disclosure_boundary_rules"),
-        ("tests/test_output_runtime_semantics.py", "regulated_disclosure_documents"),
+        (
+            "tests/test_scene_rule_source_governance.py",
+            "professional_disclosure_boundary_rules",
+        ),
+        (
+            "tests/test_scene_boundary_capability_matrix.py",
+            "regulated_disclosure_documents",
+        ),
     ),
     "import_ai_boundary": (
         ("tests/test_scene_natural_request_router.py", "import_ai_boundary"),
-        ("tests/test_workbench_execution_center.py", "import_ai_boundary"),
+        ("tests/test_scene_boundary_capability_matrix.py", "import_ai_boundary"),
     ),
 }
 
@@ -223,7 +245,10 @@ def audit_scene_pack_slots(
 ) -> tuple[ScenePackSlotAuditResult, ...]:
     root_path = Path(root)
     context = _GlobalSlotContext(root_path)
-    return tuple(_audit_pack_slots(pack, root_path, context) for pack in list_scene_coverage_packs())
+    return tuple(
+        _audit_pack_slots(pack, root_path, context)
+        for pack in list_scene_coverage_packs()
+    )
 
 
 def audit_scene_pack_slot_gaps(
@@ -371,7 +396,12 @@ def _profile_family_slot(
             detail="This pack is intentionally a plugin/manual boundary rather than a core family.",
             source_refs=("src/config/plugin_manual_gate.py",),
         )
-    return _slot(pack, "profile_family", SLOT_STATUS_GAP, detail="No owner family, scene, or boundary.")
+    return _slot(
+        pack,
+        "profile_family",
+        SLOT_STATUS_GAP,
+        detail="No owner family, scene, or boundary.",
+    )
 
 
 def _material_schema_slot(
@@ -379,9 +409,7 @@ def _material_schema_slot(
     families: tuple[PlannedSceneFamily, ...],
 ) -> ScenePackSlotEvidence:
     schema_ids = _unique(
-        schema_id
-        for family in families
-        for schema_id in family.material_schema_ids
+        schema_id for family in families for schema_id in family.material_schema_ids
     )
     if schema_ids:
         return _slot(
@@ -408,7 +436,12 @@ def _material_schema_slot(
             SLOT_STATUS_NOT_APPLICABLE,
             detail="This pack does not assert material-schema ownership.",
         )
-    return _slot(pack, "material_schema", SLOT_STATUS_GAP, detail="Material schema axis has no schema evidence.")
+    return _slot(
+        pack,
+        "material_schema",
+        SLOT_STATUS_GAP,
+        detail="Material schema axis has no schema evidence.",
+    )
 
 
 def _count_profile_slot(
@@ -416,9 +449,7 @@ def _count_profile_slot(
     families: tuple[PlannedSceneFamily, ...],
 ) -> ScenePackSlotEvidence:
     profile_ids = _unique(
-        profile_id
-        for family in families
-        for profile_id in family.count_profiles
+        profile_id for family in families for profile_id in family.count_profiles
     )
     if profile_ids:
         return _slot(
@@ -445,7 +476,12 @@ def _count_profile_slot(
             SLOT_STATUS_NOT_APPLICABLE,
             detail="This pack does not assert count-profile governance.",
         )
-    return _slot(pack, "count_profile", SLOT_STATUS_GAP, detail="Count profile axis has no profile evidence.")
+    return _slot(
+        pack,
+        "count_profile",
+        SLOT_STATUS_GAP,
+        detail="Count profile axis has no profile evidence.",
+    )
 
 
 def _delivery_preset_slot(
@@ -453,9 +489,7 @@ def _delivery_preset_slot(
     families: tuple[PlannedSceneFamily, ...],
 ) -> ScenePackSlotEvidence:
     preset_ids = _unique(
-        preset_id
-        for family in families
-        for preset_id in family.delivery_presets
+        preset_id for family in families for preset_id in family.delivery_presets
     )
     if preset_ids:
         return _slot(
@@ -484,7 +518,12 @@ def _delivery_preset_slot(
             detail="Delivery is represented as confirmation, confidence, or boundary artifacts.",
             source_refs=("src/config/plugin_manual_gate.py",),
         )
-    return _slot(pack, "delivery_preset", SLOT_STATUS_GAP, detail="No delivery preset or artifact boundary evidence.")
+    return _slot(
+        pack,
+        "delivery_preset",
+        SLOT_STATUS_GAP,
+        detail="No delivery preset or artifact boundary evidence.",
+    )
 
 
 def _word_risk_surface_slot(pack: SceneCoveragePack) -> ScenePackSlotEvidence:
@@ -497,7 +536,12 @@ def _word_risk_surface_slot(pack: SceneCoveragePack) -> ScenePackSlotEvidence:
             detail="Word/OOXML risk surfaces are declared by the coverage pack.",
             source_refs=("src/config/scene_coverage_manifest.py",),
         )
-    return _slot(pack, "word_risk_surface", SLOT_STATUS_GAP, detail="No Word/OOXML risk surface evidence.")
+    return _slot(
+        pack,
+        "word_risk_surface",
+        SLOT_STATUS_GAP,
+        detail="No Word/OOXML risk surface evidence.",
+    )
 
 
 def _ui_control_contract_slot(
@@ -550,7 +594,12 @@ def _rule_source_slot(pack: SceneCoveragePack) -> ScenePackSlotEvidence:
             SLOT_STATUS_NOT_APPLICABLE,
             detail="No high-risk external rule source is asserted for this pack in N2.132.",
         )
-    return _slot(pack, "rule_source", SLOT_STATUS_GAP, detail="Required rule source governance is missing.")
+    return _slot(
+        pack,
+        "rule_source",
+        SLOT_STATUS_GAP,
+        detail="Required rule source governance is missing.",
+    )
 
 
 def _report_issue_artifact_slot(pack: SceneCoveragePack) -> ScenePackSlotEvidence:
@@ -561,9 +610,17 @@ def _report_issue_artifact_slot(pack: SceneCoveragePack) -> ScenePackSlotEvidenc
             SLOT_STATUS_OK,
             evidence_items=pack.implemented_closures[:4],
             detail="Pack has implemented closures that identify report, issue, or artifact evidence.",
-            source_refs=("src/config/scene_coverage_manifest.py", "src/report_writer.py"),
+            source_refs=(
+                "src/config/scene_coverage_manifest.py",
+                "src/report_writer.py",
+            ),
         )
-    return _slot(pack, "report_issue_artifact", SLOT_STATUS_GAP, detail="No report/issue/artifact evidence.")
+    return _slot(
+        pack,
+        "report_issue_artifact",
+        SLOT_STATUS_GAP,
+        detail="No report/issue/artifact evidence.",
+    )
 
 
 def _repair_route_slot(
@@ -572,7 +629,11 @@ def _repair_route_slot(
     context: _GlobalSlotContext,
 ) -> ScenePackSlotEvidence:
     expected_route_ids = _expected_repair_route_ids(pack, families)
-    missing = tuple(route_id for route_id in expected_route_ids if route_id not in SCENE_REPAIR_ROUTE_MAP)
+    missing = tuple(
+        route_id
+        for route_id in expected_route_ids
+        if route_id not in SCENE_REPAIR_ROUTE_MAP
+    )
     if context.repair_audit.is_clean and not missing and expected_route_ids:
         return _slot(
             pack,

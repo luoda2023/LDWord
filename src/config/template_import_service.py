@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from functools import wraps
 import hashlib
 import os
 from pathlib import Path
+from threading import RLock
 import time
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, ParamSpec, TypeVar
+from uuid import uuid4
 
 from src.config.atomic_io import atomic_write_text
 from src.config.library import (
@@ -47,6 +50,22 @@ from src.config.work_mode import get_work_mode
 
 
 _MAX_IMPORT_BYTES = 16 * 1024 * 1024
+_IMPORT_OPERATION_LOCK = RLock()
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _serialize_import_operation(
+    operation: Callable[_P, _R],
+) -> Callable[_P, _R]:
+    """Keep assistant commits and watched-inbox recovery mutually exclusive."""
+
+    @wraps(operation)
+    def serialized(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with _IMPORT_OPERATION_LOCK:
+            return operation(*args, **kwargs)
+
+    return serialized
 
 
 class LegacyTemplateImportAdapter:
@@ -99,6 +118,7 @@ class _LoadedExternalTemplate:
     contract: TemplateAuthoringContract | None
 
 
+@_serialize_import_operation
 def process_template_import_inbox(
     mode_id: str,
     *,
@@ -252,6 +272,139 @@ def process_template_import_inbox(
         warnings=tuple(warnings),
         pending_count=pending_count,
     )
+
+
+@_serialize_import_operation
+def import_template_authoring_result_text(
+    mode_id: str,
+    result_text: str,
+) -> TemplateImportBatch:
+    """Validate and commit exactly one assistant-produced authoring result.
+
+    Unlike the watched-inbox entry point, this function never consumes other
+    files the user may have placed in the workbench.  The provider output is
+    first persisted in the recoverable processing area, then goes through the
+    same strict contract, boundary, round-trip, archive, and audit checks.
+    """
+
+    workspace = ensure_template_authoring_workspace(mode_id)
+    workspace.processing_dir.mkdir(parents=True, exist_ok=True)
+    source = workspace.processing_dir / f"assistant-{uuid4().hex}.json"
+    atomic_write_text(source, str(result_text or ""), encoding="utf-8")
+
+    try:
+        loaded = _load_external_template_strict(
+            source,
+            mode_id=workspace.mode_id,
+            baseline_path=workspace.baseline_path,
+        )
+        template_id = allocate_template_id(
+            name=loaded.template.name,
+            mode_id=workspace.mode_id,
+            equivalent_template=loaded.template,
+        )
+        target_path = template_user_dir(workspace.mode_id) / f"{template_id}.json"
+        target_existed = target_path.exists()
+    except (TemplateImportError, PermissionError, OSError) as exc:
+        issue = _reject_source(
+            source,
+            workspace,
+            code=(
+                "validation_failed"
+                if isinstance(exc, TemplateImportError)
+                else "source_unreadable"
+            ),
+            stage=("validation" if isinstance(exc, TemplateImportError) else "read"),
+            reason=str(exc),
+        )
+        return TemplateImportBatch(rejections=(issue,))
+
+    try:
+        entry = save_template_to_library(
+            loaded.template,
+            template_id=template_id,
+            mode_id=workspace.mode_id,
+        )
+        _verify_saved_template(entry.path, loaded.template)
+    except (OSError, ValueError, TypeError) as exc:
+        if not target_existed:
+            try:
+                target_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        failed_source = source
+        try:
+            failed_source = _move_to_unique_destination(
+                source,
+                workspace.failed_dir,
+            )
+        except OSError:
+            pass
+        reason = f"正式写入用户模板库失败：{exc}"
+        try:
+            _write_failure_explanation(failed_source, reason)
+        except OSError:
+            pass
+        return TemplateImportBatch(
+            rejections=(
+                TemplateImportIssue(
+                    code="commit_failed",
+                    stage="commit",
+                    message=f"{failed_source.name}：{reason}",
+                    source_path=failed_source,
+                ),
+            )
+        )
+
+    try:
+        archived_path = _move_to_unique_destination(
+            source,
+            workspace.archive_dir,
+        )
+    except (PermissionError, OSError) as exc:
+        success = TemplateImportSuccess(
+            entry=entry,
+            archived_path=source,
+            observations=loaded.observations,
+            contract=loaded.contract,
+        )
+        return TemplateImportBatch(
+            successes=(success,),
+            warnings=(
+                TemplateImportIssue(
+                    code="archive_pending",
+                    stage="archive",
+                    message=(
+                        f"{source.name}：模板已写入，但来源文件尚未归档，"
+                        f"后台将继续重试：{exc}"
+                    ),
+                    source_path=source,
+                ),
+            ),
+            pending_count=1,
+        )
+
+    success = TemplateImportSuccess(
+        entry=entry,
+        archived_path=archived_path,
+        observations=loaded.observations,
+        contract=loaded.contract,
+    )
+    warnings: list[TemplateImportIssue] = []
+    try:
+        _write_success_record(workspace, success=success)
+    except OSError as exc:
+        warnings.append(
+            TemplateImportIssue(
+                code="audit_record_failed",
+                stage="audit",
+                message=(
+                    f"{archived_path.name}：模板已导入，但成功记录写入失败：{exc}"
+                ),
+                source_path=archived_path,
+            )
+        )
+    return TemplateImportBatch(successes=(success,), warnings=tuple(warnings))
 
 
 def _import_candidates(
@@ -497,5 +650,6 @@ __all__ = [
     "TemplateImportError",
     "TemplateImportIssue",
     "TemplateImportSuccess",
+    "import_template_authoring_result_text",
     "process_template_import_inbox",
 ]

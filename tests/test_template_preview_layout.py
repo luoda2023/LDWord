@@ -1,10 +1,12 @@
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from PySide6.QtTest import QTest
 
 from src.config.builtin_templates import create_builtin_template
 from src.config.resolver import resolve_template_baseline
+from src.config.template import StyleConfig
 from src.modules.registry import create_all_modules
 from src.pipeline.module_selection import build_module_selection_plan
 from src.qt_api import QApplication, Qt
@@ -147,6 +149,58 @@ def test_compact_density_changes_sample_text_not_projected_style_values():
         for block_layout in page.block_layouts
         if block_layout.block.compact_text
     )
+
+
+def test_heading_space_before_is_rendered_above_text_not_as_extra_space_after():
+    template = create_builtin_template("default")
+    template.styles["heading2"] = StyleConfig(
+        size_pt=14,
+        space_before_pt=24,
+        space_after_pt=6,
+    )
+    body = template.styles.get("body") or template.styles["normal"]
+    body.space_before_pt = 0
+    body.space_after_pt = 0
+    projection = build_template_preview_projection(
+        resolve_template_baseline(template),
+        mode=TemplatePreviewMode.TEMPLATE_BASELINE,
+    )
+
+    layout = build_template_preview_layout(projection, 900)
+    block_layouts = [
+        item
+        for page in layout.pages
+        for item in page.block_layouts
+    ]
+    heading_index = next(
+        index
+        for index, item in enumerate(block_layouts)
+        if item.block.kind is PreviewBlockKind.HEADING
+        and item.block.level == 2
+    )
+    heading_layout = block_layouts[heading_index]
+    body_layout = block_layouts[heading_index + 1]
+    base_gap = 4.0 if layout.compact else 6.0
+
+    assert body_layout.block.kind is PreviewBlockKind.BODY
+    assert heading_layout.space_before_px == pytest.approx(
+        24 * heading_layout.pt_scale
+    )
+    assert heading_layout.space_after_px == pytest.approx(
+        6 * heading_layout.pt_scale
+    )
+    visible_gap = (
+        body_layout.rect.top()
+        + body_layout.space_before_px
+        - (
+            heading_layout.rect.bottom()
+            - heading_layout.space_after_px
+        )
+    )
+    assert visible_gap == pytest.approx(
+        base_gap + heading_layout.space_after_px
+    )
+    assert visible_gap < heading_layout.space_before_px
 
 
 def test_widget_opens_whole_preview_and_skips_equal_projection_rebuild():

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from src.assistant.contracts.document_plan import DocumentPlan, OutputPolicy
 from src.assistant.contracts.jobs import (
+    JOB_CONTENT_DRAFT_READY,
+    JOB_CONTENT_GENERATION_RUNNING,
     JOB_EXECUTION_RUNNING,
+    JOB_FAILED,
     JOB_NEEDS_EXECUTION_APPROVAL,
+    JOB_NEEDS_OFFICIAL_FIELD_COMPLETION,
     JOB_PLAN_READY,
     JOB_PREFLIGHT_RUNNING,
     JOB_SUCCESS,
@@ -113,6 +118,33 @@ def test_disclosure_grant_is_bound_to_provider_model_fields_and_fingerprint():
     assert ToolRiskLevel.DOCUMENT_PRODUCTION > ToolRiskLevel.PROVIDER_DISCLOSURE
 
 
+def test_disclosure_grant_rejects_expired_or_malformed_expiry():
+    now = datetime.now(timezone.utc)
+    common = {
+        "grant_id": "grant-expiry",
+        "session_id": "session-1",
+        "provider_id": "provider-a",
+        "model_id": "model-a",
+        "allowed_refs": ("document-1",),
+        "allowed_fields": ("paragraphs",),
+    }
+    expired = DisclosureGrant(
+        **common,
+        expires_at=(now - timedelta(seconds=1)).isoformat(),
+    )
+    malformed = DisclosureGrant(**common, expires_at="not-a-time")
+
+    for grant in (expired, malformed):
+        assert not grant.permits(
+            session_id="session-1",
+            provider_id="provider-a",
+            model_id="model-a",
+            refs=("document-1",),
+            fields=("paragraphs",),
+            now=now,
+        )
+
+
 def test_document_job_state_machine_accepts_the_approval_path_and_rejects_skips():
     assert validate_document_job_transition("", JOB_PLAN_READY) == (
         JOB_PLAN_READY
@@ -139,3 +171,21 @@ def test_document_job_state_machine_accepts_the_approval_path_and_rejects_skips(
             JOB_PLAN_READY,
             JOB_EXECUTION_RUNNING,
         )
+
+
+def test_document_job_state_machine_accepts_restoring_a_failed_draft_revision():
+    assert validate_document_job_transition(
+        JOB_FAILED,
+        JOB_CONTENT_DRAFT_READY,
+    ) == JOB_CONTENT_DRAFT_READY
+
+
+def test_document_job_state_machine_accepts_official_field_completion_path():
+    assert validate_document_job_transition(
+        JOB_CONTENT_GENERATION_RUNNING,
+        JOB_NEEDS_OFFICIAL_FIELD_COMPLETION,
+    ) == JOB_NEEDS_OFFICIAL_FIELD_COMPLETION
+    assert validate_document_job_transition(
+        JOB_NEEDS_OFFICIAL_FIELD_COMPLETION,
+        JOB_CONTENT_DRAFT_READY,
+    ) == JOB_CONTENT_DRAFT_READY

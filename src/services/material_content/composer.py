@@ -19,9 +19,10 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from docx import Document
 
-from src.config.content_materials import DocumentFragment
+from src.config.attachment_materials import AttachmentBinding
+from src.config.content_artifacts import ContentMaterialBinding
+from src.config.content_materials import ContentInsertionRule, DocumentFragment
 from src.config.library import CONFIG_LIBRARY_ROOT
-from src.config.material_snapshot import MaterialSnapshot
 from src.modules.structure.heading_recognition import rebuild_document_index
 from src.pipeline.context import PipelineContext
 from src.services.material_content.docx_renderer import (
@@ -70,18 +71,73 @@ CancelCheck = Callable[[], bool]
 
 
 @dataclass(frozen=True, slots=True)
+class ContentComposeInputs:
+    """Recipe-local inputs for one atomic composition operation."""
+
+    input_id: str = ""
+    content_bindings: tuple[ContentMaterialBinding, ...] = ()
+    content_rules: tuple[ContentInsertionRule, ...] = ()
+    attachment_bindings: tuple[AttachmentBinding, ...] = ()
+
+    def __post_init__(self) -> None:
+        for name, values, expected_type in (
+            ("content_bindings", self.content_bindings, ContentMaterialBinding),
+            ("content_rules", self.content_rules, ContentInsertionRule),
+            ("attachment_bindings", self.attachment_bindings, AttachmentBinding),
+        ):
+            if type(values) is not tuple or any(
+                not isinstance(item, expected_type) for item in values
+            ):
+                raise TypeError(f"{name}_invalid")
+        binding_ids = tuple(item.content_id for item in self.content_bindings)
+        rule_ids = tuple(item.rule_id for item in self.content_rules)
+        roles = tuple(item.role for item in self.attachment_bindings)
+        for name, values in (
+            ("content_binding", binding_ids),
+            ("content_rule", rule_ids),
+            ("attachment_role", roles),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"{name}_duplicate")
+        known_bindings = set(binding_ids)
+        if any(item.content_id not in known_bindings for item in self.content_rules):
+            raise ValueError("content_rule_binding_missing")
+        payload = {
+            "content_bindings": [
+                item.to_dict() for item in self.content_bindings
+            ],
+            "content_rules": [item.to_dict() for item in self.content_rules],
+            "attachment_bindings": [
+                item.to_dict() for item in self.attachment_bindings
+            ],
+        }
+        computed = "sha256:" + sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if self.input_id and self.input_id != computed:
+            raise ValueError("content_compose_input_id_mismatch")
+        object.__setattr__(self, "input_id", computed)
+
+
+@dataclass(frozen=True, slots=True)
 class ContentComposeRequest:
     source_docx_path: str
     output_docx_path: str
-    snapshot: MaterialSnapshot
+    inputs: ContentComposeInputs
 
     def __post_init__(self) -> None:
         if not isinstance(self.source_docx_path, str) or not self.source_docx_path.strip():
             raise ValueError("source_docx_path must not be empty")
         if not isinstance(self.output_docx_path, str) or not self.output_docx_path.strip():
             raise ValueError("output_docx_path must not be empty")
-        if not isinstance(self.snapshot, MaterialSnapshot):
-            raise TypeError("snapshot must be a MaterialSnapshot")
+        if not isinstance(self.inputs, ContentComposeInputs):
+            raise TypeError("inputs must be ContentComposeInputs")
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,7 +235,7 @@ class DocumentIndexEvidence:
 @dataclass(frozen=True, slots=True)
 class ComposeReceipt:
     receipt_id: str
-    snapshot_id: str
+    compose_input_id: str
     source_docx_path: str
     output_docx_path: str
     source_sha256: str
@@ -208,7 +264,7 @@ class ComposeReceipt:
 
     def canonical_payload(self) -> dict[str, object]:
         return {
-            "snapshot_id": self.snapshot_id,
+            "compose_input_id": self.compose_input_id,
             "source_docx_path": self.source_docx_path,
             "output_docx_path": self.output_docx_path,
             "source_sha256": self.source_sha256,
@@ -273,10 +329,10 @@ class ContentMaterialComposer:
             raise TypeError("request must be a ContentComposeRequest")
         _check_cancel(cancel_check, "start")
         source, output = _validate_paths(request)
-        snapshot = request.snapshot
-        snapshot_diagnostics = _validate_snapshot(snapshot, self._repository)
-        if snapshot_diagnostics:
-            raise ContentComposeError(snapshot_diagnostics)
+        inputs = request.inputs
+        input_diagnostics = _validate_inputs(inputs, self._repository)
+        if input_diagnostics:
+            raise ContentComposeError(input_diagnostics)
 
         try:
             source_payload = capture_bounded_file(source)
@@ -301,10 +357,10 @@ class ContentMaterialComposer:
                 (_diagnostic("target_open_failed", str(exc), "target", path=str(source)),)
             ) from exc
 
-        binding_by_id = {item.content_id: item for item in snapshot.content_bindings}
+        binding_by_id = {item.content_id: item for item in inputs.content_bindings}
         fragments: dict[str, DocumentFragment] = {}
         import_diagnostics: list[ContentComposeDiagnostic] = []
-        for binding in snapshot.content_bindings:
+        for binding in inputs.content_bindings:
             try:
                 fragment = self._repository.load_fragment(binding.artifact_ref)
                 fragments[binding.content_id] = fragment
@@ -322,7 +378,7 @@ class ContentMaterialComposer:
         _check_cancel(cancel_check, "imported")
 
         preflight_diagnostics: list[ContentComposeDiagnostic] = []
-        for rule in snapshot.content_rules:
+        for rule in inputs.content_rules:
             preflight = self._renderer.preflight(
                 document, fragments[rule.content_id], rule
             )
@@ -341,7 +397,7 @@ class ContentMaterialComposer:
                         path=str(source),
                     )
                 )
-        for binding in snapshot.attachment_bindings:
+        for binding in inputs.attachment_bindings:
             preflight = self._attachment_renderer.preflight(document, binding)
             for finding in preflight.diagnostics:
                 preflight_diagnostics.append(
@@ -358,7 +414,7 @@ class ContentMaterialComposer:
 
         try:
             resource_materialization = materialize_content_fragment_resources(
-                snapshot.content_bindings,
+                inputs.content_bindings,
                 fragments,
                 self._repository,
             )
@@ -378,11 +434,11 @@ class ContentMaterialComposer:
         render_receipts: list[ContentRenderReceipt] = []
         attachment_render_receipts: list[AttachmentRenderReceipt] = []
         try:
-            for rule in snapshot.content_rules:
+            for rule in inputs.content_rules:
                 render_receipts.append(
                     self._renderer.render(document, fragments[rule.content_id], rule)
                 )
-            for binding in snapshot.attachment_bindings:
+            for binding in inputs.attachment_bindings:
                 attachment_render_receipts.append(
                     self._attachment_renderer.render(document, binding)
                 )
@@ -470,7 +526,7 @@ class ContentMaterialComposer:
             output_sha256 = _file_sha256(staging)
             receipt = ComposeReceipt(
                 receipt_id="",
-                snapshot_id=snapshot.snapshot_id,
+                compose_input_id=inputs.input_id,
                 source_docx_path=str(source),
                 output_docx_path=str(output),
                 source_sha256=source_sha256,
@@ -481,7 +537,7 @@ class ContentMaterialComposer:
                         fragments[rule.content_id],
                         self._repository,
                     )
-                    for rule in snapshot.content_rules
+                    for rule in inputs.content_rules
                 ),
                 render_receipts=tuple(
                     _render_summary(item) for item in render_receipts
@@ -508,7 +564,7 @@ class ContentMaterialComposer:
 def compose_content_materials(
     source_docx_path: str | Path,
     output_docx_path: str | Path,
-    snapshot: MaterialSnapshot,
+    inputs: ContentComposeInputs,
     *,
     repository: ContentArtifactRepository | None = None,
     cancel_check: CancelCheck | None = None,
@@ -516,7 +572,7 @@ def compose_content_materials(
     request = ContentComposeRequest(
         source_docx_path=str(source_docx_path),
         output_docx_path=str(output_docx_path),
-        snapshot=snapshot,
+        inputs=inputs,
     )
     return ContentMaterialComposer(repository=repository).compose(
         request, cancel_check=cancel_check
@@ -548,20 +604,20 @@ def _validate_paths(request):
     return source, output
 
 
-def _validate_snapshot(snapshot, repository):
+def _validate_inputs(inputs, repository):
     diagnostics: list[ContentComposeDiagnostic] = []
-    bindings = {item.content_id: item for item in snapshot.content_bindings}
+    bindings = {item.content_id: item for item in inputs.content_bindings}
     rule_counts: dict[str, int] = {}
-    for rule in snapshot.content_rules:
+    for rule in inputs.content_rules:
         rule_counts[rule.content_id] = rule_counts.get(rule.content_id, 0) + 1
-    for binding in snapshot.content_bindings:
+    for binding in inputs.content_bindings:
         count = rule_counts.get(binding.content_id, 0)
         if count != 1:
             diagnostics.append(
                 _diagnostic(
                     "binding_rule_cardinality_invalid",
                     f"content binding requires exactly one rule, found {count}",
-                    "snapshot",
+                    "inputs",
                     content_id=binding.content_id,
                 )
             )
@@ -572,21 +628,21 @@ def _validate_snapshot(snapshot, repository):
                 _diagnostic(
                     exc.code,
                     "compiled content artifact is missing or invalid",
-                    "snapshot",
+                    "inputs",
                     content_id=binding.content_id,
                 )
             )
     for content_id, count in rule_counts.items():
         if content_id not in bindings:
             diagnostics.append(
-                _diagnostic("rule_binding_missing", "content rule has no binding", "snapshot", content_id=content_id)
+                _diagnostic("rule_binding_missing", "content rule has no binding", "inputs", content_id=content_id)
             )
         elif count > 1:
             diagnostics.append(
                 _diagnostic(
                     "duplicate_content_rules",
                     f"content id has {count} rules with the same canonical anchor",
-                    "snapshot",
+                    "inputs",
                     content_id=content_id,
                 )
             )
@@ -900,6 +956,7 @@ __all__ = [
     "ContentComposeCancelledError",
     "ContentComposeDiagnostic",
     "ContentComposeError",
+    "ContentComposeInputs",
     "ContentComposeRequest",
     "ContentArtifactEvidence",
     "ContentMaterialComposer",

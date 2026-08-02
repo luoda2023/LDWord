@@ -26,14 +26,12 @@ def test_document_structure_preview_detects_page_start_candidates(tmp_path):
 
     assert [(item.section_type, item.label, item.title) for item in items] == [
         ("cover", "封面", "博士学位论文"),
-        ("statement", "声明页", "原创性声明"),
         ("abstract_cn", "中文摘要", "摘要"),
         ("toc", "目录", "目录"),
         ("body", "正文", "第一章 绪论"),
     ]
-    assert suppression_selectors_before(items, 4) == [
+    assert suppression_selectors_before(items, 3) == [
         "cover",
-        "statement",
         "abstract_cn",
         "toc",
     ]

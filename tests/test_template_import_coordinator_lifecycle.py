@@ -335,7 +335,6 @@ def test_accepted_close_cancels_delayed_panel_creation(qapp, monkeypatch) -> Non
 
     window = MainWindow(
         enable_background_services=False,
-        include_optional_panels=True,
     )
     created_panel_ids: list[str] = []
 
@@ -349,26 +348,19 @@ def test_accepted_close_cancels_delayed_panel_creation(qapp, monkeypatch) -> Non
         for index, spec in enumerate(window._panel_specs)
         if spec.id == "assets"
     )
-    window._schedule_idle_preload(80)
     window._show_panel(assets_index)
-    idle_timer = window._idle_preload_timer
-    async_timer = window._async_panel_load_timers[assets_index]
+    panel_timer = window._panel_load_timers[assets_index]
     startup_timeouts: list[bool] = []
-    idle_timeouts: list[bool] = []
-    async_timeouts: list[bool] = []
+    panel_timeouts: list[bool] = []
     window._startup_ready_timer.timeout.connect(lambda: startup_timeouts.append(True))
-    idle_timer.timeout.connect(lambda: idle_timeouts.append(True))
-    async_timer.timeout.connect(lambda: async_timeouts.append(True))
+    panel_timer.timeout.connect(lambda: panel_timeouts.append(True))
     loaded_before_close = set(window._loaded_panel_indexes)
 
-    assert idle_timer.isActive()
-    assert async_timer.isActive()
+    assert panel_timer.isActive()
     assert window.close() is True
-    assert not idle_timer.isActive()
-    assert not async_timer.isActive()
-    assert window._async_panel_load_timers == {}
-    assert window._async_panel_loads_in_progress == set()
-    assert window._preload_queue == []
+    assert not panel_timer.isActive()
+    assert window._panel_load_timers == {}
+    assert window._panel_loads_in_progress == set()
 
     deadline = time.monotonic() + 0.15
     while time.monotonic() < deadline:
@@ -376,11 +368,9 @@ def test_accepted_close_cancels_delayed_panel_creation(qapp, monkeypatch) -> Non
         time.sleep(0.005)
 
     # Even an escaped/stale callback is lifecycle-gated after close acceptance.
-    window._preload_next()
-    window._finish_async_panel_load(assets_index)
+    window._finish_panel_load(assets_index)
     assert window._show_panel(assets_index) is None
     assert startup_timeouts == []
-    assert idle_timeouts == []
-    assert async_timeouts == []
+    assert panel_timeouts == []
     assert created_panel_ids == []
     assert window._loaded_panel_indexes == loaded_before_close

@@ -59,22 +59,10 @@ UI_CAPABILITY_GROUPS: tuple[UICapabilityGroup, ...] = (
         module_names=("table_format", "caption", "figure_table_center"),
     ),
     UICapabilityGroup(
-        group_id="formula",
-        label="公式处理",
-        description="公式转换·低置信度处理·化学式修正，外观跟随模板",
-        module_names=("equation_table_format", "chem_typography"),
-    ),
-    UICapabilityGroup(
         group_id="citation",
         label="引用处理",
         description="引用链接·参考条目编号·上标跟随，文献样式跟随模板",
         module_names=("reference_format", "citation_link"),
-    ),
-    UICapabilityGroup(
-        group_id="cleanup",
-        label="风险检查",
-        description="Markdown残留·空白清理·对象风险·结构校验",
-        module_names=("md_cleanup", "whitespace_normalize", "validation"),
     ),
     UICapabilityGroup(
         group_id="content_fill",
@@ -93,9 +81,7 @@ CAPABILITY_FEATURE_CARD_ORDER: tuple[str, ...] = tuple(group.group_id for group 
 
 CAPABILITY_FEATURE_CARD_DEFINITIONS: dict[str, tuple[str, str]] = {
     "table_chart": ("图表处理", "table"),
-    "formula": ("公式处理", "sigma"),
     "citation": ("引用处理", "book-open"),
-    "cleanup": ("风险检查", "scan"),
     "content_fill": ("资料包填充", "pen-tool"),
 }
 
@@ -296,7 +282,7 @@ def _scene_document_scope_summary(scene: SceneWorkspace) -> str:
     if scope.mode != "selected":
         return labels.get(scope.mode, "全部内容")
     roles = "、".join(document_scope_role_label(role) for role in scope.selected_roles)
-    return f"指定区域：{roles}" if roles else "指定区域"
+    return f"自选区域：{roles}" if roles else "自选区域"
 
 
 def build_scene_profile_summary(scene: SceneWorkspace) -> str:

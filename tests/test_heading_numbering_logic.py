@@ -150,8 +150,8 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
 
     assert build_expert_toggle_text(False) == "▾ 展开模板编辑"
     assert build_expert_toggle_text(True) == "▴ 收起模板编辑"
-    assert build_non_numbered_toggle_text(False) == "▸ 非编号标题"
-    assert build_non_numbered_toggle_text(True) == "▾ 非编号标题"
+    assert build_non_numbered_toggle_text(False) == "▸ 特殊标题（不参与编号）"
+    assert build_non_numbered_toggle_text(True) == "▾ 特殊标题（不参与编号）"
 
 
 def test_panel_and_adapter_delegate_heading_numbering_pure_logic_to_shared_module():

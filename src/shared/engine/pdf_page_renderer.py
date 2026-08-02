@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -91,9 +92,17 @@ def _render_with_pdftoppm(
         return (), "pdftoppm_unavailable"
 
     prefix = output_dir / f"{pdf_path.stem}_page"
+    command = [pdftoppm, "-png", str(pdf_path), str(prefix)]
+    if Path(pdftoppm).suffix.casefold() in {".bat", ".cmd"}:
+        command = [
+            os.environ.get("COMSPEC") or "cmd.exe",
+            "/d",
+            "/c",
+            *command,
+        ]
     try:
         completed = subprocess.run(
-            [pdftoppm, "-png", str(pdf_path), str(prefix)],
+            command,
             check=False,
             capture_output=True,
             text=True,

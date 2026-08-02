@@ -110,6 +110,7 @@ from src.ui.heading_numbering_logic import (
     validate_display_template,
 )
 from src.ui.panels.template_summary_projection import build_template_detail_summary_items
+from src.ui.panels.heading_numbering_widget_state import set_disabled_visual as _set_disabled_visual, set_state_property as _set_state_property, select_combo_value as _select
 
 
 HEADING_INSPECTOR_ROW_HEIGHT = 44
@@ -1202,20 +1203,32 @@ class HeadingNumberingPanel(BasePanel):
 
     def _build_non_numbered_section(self) -> None:
         self._nn_section = FlowSection(build_non_numbered_toggle_text(False), expanded=False, parent=self)
-        self._nn_section.expanded_changed.connect(self._sync_non_numbered_section_title)
+        self._nn_section.expanded_changed.connect(
+            lambda expanded: self._nn_section._toggle_button.setText(
+                build_non_numbered_toggle_text(expanded)
+            )
+        )
+        self._nn_scope_note = QLabel(
+            "完整标题按全文匹配，标题前缀按开头匹配。"
+            "每个逗号分隔项都是一条独立规则，并同步成为页眉、页脚文字和页码的独立范围选项。",
+            self,
+        )
+        self._nn_scope_note.setObjectName("hn_scope_note")
+        self._nn_scope_note.setWordWrap(True)
+        self._nn_section.add_widget(self._nn_scope_note)
 
         self._nn_texts_edit = QLineEdit(self)
         apply_size_class(self._nn_texts_edit, "md")
-        self._nn_texts_edit.setPlaceholderText("如: 参考文献, 致谢, 摘要")
+        self._nn_texts_edit.setPlaceholderText("摘要, 目录, 参考文献, 缩略语表")
         self._nn_section.add_widget(
-            self._form_row("跳过完整文本", self._nn_texts_edit, parent=self._nn_section)
+            self._form_row("完整标题", self._nn_texts_edit, parent=self._nn_section)
         )
 
         self._nn_prefix_edit = QLineEdit(self)
         apply_size_class(self._nn_prefix_edit, "md")
-        self._nn_prefix_edit.setPlaceholderText("如: 附录, 附件, Appendix")
+        self._nn_prefix_edit.setPlaceholderText("附录, 附件")
         self._nn_section.add_widget(
-            self._form_row("跳过前缀文本", self._nn_prefix_edit, parent=self._nn_section)
+            self._form_row("标题前缀", self._nn_prefix_edit, parent=self._nn_section)
         )
 
         self._nn_style_mode_combo = StyledComboBox(self)
@@ -1266,10 +1279,6 @@ class HeadingNumberingPanel(BasePanel):
         )
 
         self._nn_section.add_widget(self._nn_style_editor)
-
-    def _sync_non_numbered_section_title(self, expanded: bool) -> None:
-        if hasattr(self._nn_section, "_toggle_button"):
-            self._nn_section._toggle_button.setText(build_non_numbered_toggle_text(expanded))
 
     # ━━ Helpers ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1874,13 +1883,27 @@ class HeadingNumberingPanel(BasePanel):
         self._rebuild_level_list()
 
     def _on_nn_texts_changed(self, text: str) -> None:
-        if self._adapter.has_template:
+        if self._is_syncing_ui or not self._adapter.has_template:
+            return
+        try:
             self._adapter.set_non_numbered_texts(parse_csv_items(text))
+        except ValueError as exc:
+            Toast.show_warning(str(exc))
+            QTimer.singleShot(0, self._sync_non_numbered_ui)
+            return
+        if self._adapter.has_template:
             self._mark_dirty()
 
     def _on_nn_prefix_changed(self, text: str) -> None:
-        if self._adapter.has_template:
+        if self._is_syncing_ui or not self._adapter.has_template:
+            return
+        try:
             self._adapter.set_non_numbered_prefixes(parse_csv_items(text))
+        except ValueError as exc:
+            Toast.show_warning(str(exc))
+            QTimer.singleShot(0, self._sync_non_numbered_ui)
+            return
+        if self._adapter.has_template:
             self._mark_dirty()
 
     # ── Heading format writes ────────────────────
@@ -2140,12 +2163,13 @@ class HeadingNumberingPanel(BasePanel):
         if not self._adapter.has_template:
             return
         self._nn_texts_edit.blockSignals(True)
-        self._nn_texts_edit.setText(format_csv_items(self._adapter.get_non_numbered_texts()))
+        self._nn_texts_edit.setText(
+            format_csv_items(self._adapter.get_non_numbered_texts())
+        )
         self._nn_texts_edit.blockSignals(False)
         self._nn_prefix_edit.blockSignals(True)
         self._nn_prefix_edit.setText(format_csv_items(self._adapter.get_non_numbered_prefixes()))
         self._nn_prefix_edit.blockSignals(False)
-
     def set_save_enabled(self, enabled: bool) -> None:
         self._save_enabled = bool(enabled)
         self._refresh_action_state()
@@ -2369,27 +2393,3 @@ class HeadingNumberingPanel(BasePanel):
         policy.setVerticalPolicy(QSizePolicy.Fixed)
         widget.setSizePolicy(policy)
         widget.updateGeometry()
-
-# ── Utility ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-def _set_disabled_visual(widget, muted: bool) -> None:
-    widget.setProperty("muted", muted)
-    style = widget.style()
-    style.unpolish(widget)
-    style.polish(widget)
-    widget.update()
-
-
-def _set_state_property(widget, name: str, value) -> None:
-    widget.setProperty(name, value)
-    style = widget.style()
-    style.unpolish(widget)
-    style.polish(widget)
-    widget.update()
-
-
-def _select(combo: StyledComboBox, value) -> None:
-    for i in range(combo.count()):
-        if combo.itemData(i) == value:
-            combo.setCurrentIndex(i)
-            return

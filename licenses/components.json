@@ -72,6 +72,24 @@
       "homepage": "https://lxml.de/"
     },
     {
+      "id": "latex2mathml",
+      "name": "latex2mathml",
+      "distribution": "latex2mathml",
+      "purpose": "LaTeX 公式转换为 MathML",
+      "license_expression": "MIT",
+      "homepage": "https://github.com/roniemartinez/latex2mathml"
+    },
+    {
+      "id": "olefile",
+      "name": "olefile",
+      "distribution": "olefile",
+      "purpose": "MathType/OLE 复合文档解析",
+      "license_expression": "BSD-2-Clause AND HPND",
+      "display_license": "BSD-2-Clause + PIL",
+      "homepage": "https://www.decalage.info/python/olefile",
+      "license_files": ["LICENSE.txt"]
+    },
+    {
       "id": "typing-extensions",
       "name": "typing_extensions",
       "distribution": "typing_extensions",

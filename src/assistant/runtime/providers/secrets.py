@@ -96,7 +96,10 @@ class WindowsCredentialSecretStore:
             {
                 "Type": win32cred.CRED_TYPE_GENERIC,
                 "TargetName": self._target(profile_id),
-                "CredentialBlob": normalized.encode("utf-16-le"),
+                # pywin32 accepts a Unicode value here and performs the
+                # CREDENTIALW UTF-16 conversion itself. Passing pre-encoded
+                # bytes fails with "cannot be converted to Unicode".
+                "CredentialBlob": normalized,
                 "Persist": win32cred.CRED_PERSIST_LOCAL_MACHINE,
                 "UserName": "Alavette Form",
                 "Comment": "Alavette Form AI provider secret",

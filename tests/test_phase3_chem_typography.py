@@ -8,12 +8,14 @@ from docx import Document
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from src.config.formula_policy import ChemTypographyOptions
 from src.config.resolver import resolve_config
-from src.config.scene import ChemTypographyOptions
 from src.config.scene import SceneWorkspace
 from src.config.template import TemplateConfig
-from src.modules.special.chem_typography import _apply_chem_typography
-from src.modules.special.chem_typography import ChemTypographyModule
+from src.modules.special.chem_typography import (
+    ChemTypographyModule,
+    _apply_chem_typography,
+)
 from src.modules.structure.heading_recognition import DocTree
 from src.pipeline.context import PipelineContext
 from src.pipeline.tracker import ChangeTracker
@@ -100,13 +102,14 @@ def test_apply_chem_typography_does_not_superscript_roman_oxidation_state():
     assert _paragraph_marks(para) == '.................'
 
 
-def test_module_keeps_current_global_behavior_when_all_scopes_are_false():
+def test_module_treats_all_disabled_scopes_as_no_operation():
     doc = Document()
     body_para = doc.add_paragraph('Body TiO2/In2S3')
     ref_para = doc.add_paragraph('[1] TiO2/In2S3 photocatalyst')
 
-    scene = SceneWorkspace()
-    scene.chem_typography.scopes = {
+    scene = SceneWorkspace(mode_id="thesis")
+    scene.ensure_thesis_formula_rules().chem_typography.enabled = True
+    scene.ensure_thesis_formula_rules().chem_typography.scopes = {
         'references': False,
         'body': False,
         'headings': False,
@@ -125,8 +128,8 @@ def test_module_keeps_current_global_behavior_when_all_scopes_are_false():
 
     ChemTypographyModule().apply(doc, config, tracker, context)
 
-    assert _paragraph_marks(body_para) == '........_..._._'
-    assert _paragraph_marks(ref_para) == '......._..._._..............'
+    assert _paragraph_marks(body_para) == '.' * len(body_para.text)
+    assert _paragraph_marks(ref_para) == '.' * len(ref_para.text)
 
 
 def test_module_explicit_scopes_limit_body_headings_and_references():
@@ -136,8 +139,9 @@ def test_module_explicit_scopes_limit_body_headings_and_references():
     body_para = doc.add_paragraph('Body TiO2/In2S3')
     ref_para = doc.add_paragraph('[1] TiO2/In2S3 photocatalyst')
 
-    scene = SceneWorkspace()
-    scene.chem_typography.scopes = {
+    scene = SceneWorkspace(mode_id="thesis")
+    scene.ensure_thesis_formula_rules().chem_typography.enabled = True
+    scene.ensure_thesis_formula_rules().chem_typography.scopes = {
         'references': False,
         'body': True,
         'headings': False,
@@ -168,8 +172,9 @@ def test_module_explicit_tables_scope_formats_table_cell_paragraphs():
     cell_para = table.cell(0, 0).paragraphs[0]
     cell_para.text = 'TiO2/In2S3'
 
-    scene = SceneWorkspace()
-    scene.chem_typography.scopes = {
+    scene = SceneWorkspace(mode_id="thesis")
+    scene.ensure_thesis_formula_rules().chem_typography.enabled = True
+    scene.ensure_thesis_formula_rules().chem_typography.scopes = {
         'references': False,
         'body': False,
         'headings': False,

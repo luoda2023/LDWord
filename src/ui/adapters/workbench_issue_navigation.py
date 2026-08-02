@@ -18,6 +18,7 @@ from src.ui.adapters.workbench_issue_projection import (
     workbench_issue_action_target,
 )
 from src.ui.adapters.workbench_product_issue_navigation import (
+    EXECUTION_DIAGNOSTIC_TARGET_TYPES,
     MATERIAL_TARGET_TYPES,
     PROFILE_CANDIDATE_TARGET_TYPES,
     PROFILE_MATERIAL_TARGET_TYPES,
@@ -144,6 +145,7 @@ def registered_workbench_issue_navigation_target_types() -> tuple[str, ...]:
         *PROFILE_CANDIDATE_TARGET_TYPES,
         *PROFILE_MATERIAL_TARGET_TYPES,
         *MATERIAL_TARGET_TYPES,
+        *EXECUTION_DIAGNOSTIC_TARGET_TYPES,
         *TEMPLATE_TARGET_CARD_MAP,
         *SCENE_TARGET_CARD_MAP,
         *WORKBENCH_FEATURE_TARGET_MAP,

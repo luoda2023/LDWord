@@ -8,8 +8,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.config.feature_configs import PageNumberPhaseConfig
+from src.config.header_footer_presets import toc_roman_body_decimal_phases
 from src.config.resolved import ResolvedConfig
-from src.modules.basic.header_footer import HeaderFooterModule
+from src.config.special_title_rules import special_title_selector
+from src.modules.basic.header_footer import HeaderFooterModule, _paragraph_has_field
 from src.modules.basic.section_format import SectionFormatModule
 from src.modules.structure.heading_recognition import DocSection, DocTree
 from src.pipeline.context import PipelineContext
@@ -90,19 +92,17 @@ def _field_instr_texts(para):
     return [" ".join((instr or "").split()) for _kind, _elem, instr in iter_field_instructions(para._element)]
 
 
-def test_page_number_planner_marks_body_heading_and_phase_change_boundaries():
+def test_page_number_planner_marks_semantic_and_phase_change_boundaries():
     plan = build_page_number_execution_plan(_build_doc(), _build_context(), _build_config().header_footer)
 
     assert [(item.start_index, item.section_type, item.phase_id) for item in plan.boundaries] == [
         (1, "toc", "front"),
         (2, "body", "body"),
-        (4, "body", "body"),
         (6, "appendix", "appendix"),
     ]
     assert plan.boundaries[0].reasons == ("section_start", "phase_change")
     assert plan.boundaries[1].reasons == ("section_start", "phase_change")
-    assert plan.boundaries[2].reasons == ("body_heading",)
-    assert plan.boundaries[3].reasons == ("section_start", "phase_change")
+    assert plan.boundaries[2].reasons == ("section_start", "phase_change")
 
 
 def test_section_format_and_header_footer_share_phase_plan_without_restarting_same_body_phase():
@@ -113,18 +113,23 @@ def test_section_format_and_header_footer_share_phase_plan_without_restarting_sa
     SectionFormatModule().apply(doc, config, ChangeTracker(), context)
     HeaderFooterModule().apply(doc, config, ChangeTracker(), context)
 
-    cover, toc, body_first, body_second, appendix = list(doc.sections)
+    cover, toc, body, appendix = list(doc.sections)
 
     assert _page_num_type(toc) == ("upperRoman", "1")
-    assert _page_num_type(body_first) == ("decimal", "1")
-    assert _page_num_type(body_second) == ("decimal", None)
+    assert _page_num_type(body) == ("decimal", "1")
     assert _page_num_type(appendix) == ("lowerRoman", "1")
 
     appendix_instrs = _field_instr_texts(appendix.footer.paragraphs[0])
     assert any("PAGE \\* roman" in instr for instr in appendix_instrs)
+    for section in doc.sections:
+        child_tags = [child.tag for child in section._sectPr]
+        if qn("w:type") in child_tags:
+            assert child_tags.index(qn("w:type")) < child_tags.index(qn("w:pgSz"))
+        if qn("w:pgNumType") in child_tags:
+            assert child_tags.index(qn("w:pgNumType")) < child_tags.index(qn("w:cols"))
 
 
-def test_pre_numbering_suppresses_statement_pages_before_front_matter():
+def test_pre_numbering_selector_suppresses_only_cover():
     doc = Document()
     for text in ["封面", "原创性声明", "授权书", "摘要", "第一章 绪论"]:
         doc.add_paragraph(text)
@@ -133,8 +138,7 @@ def test_pre_numbering_suppresses_statement_pages_before_front_matter():
         doc_tree=DocTree(
             sections=[
                 DocSection("cover", 0, 1),
-                DocSection("statement", 1, 2),
-                DocSection("authorization", 2, 3),
+                DocSection("body", 1, 3),
                 DocSection("abstract_cn", 3, 4),
                 DocSection("body", 4, 5),
             ]
@@ -165,10 +169,10 @@ def test_pre_numbering_suppresses_statement_pages_before_front_matter():
     SectionFormatModule().apply(doc, config, ChangeTracker(), context)
     HeaderFooterModule().apply(doc, config, ChangeTracker(), context)
 
-    cover, statement, authorization, abstract, body = list(doc.sections)
-    for suppressed_section in (cover, statement, authorization):
-        assert not any("PAGE" in instr for instr in _field_instr_texts(suppressed_section.footer.paragraphs[0]))
-        assert suppressed_section.header.paragraphs[0].text == ""
+    cover, unclassified_body, abstract, body = list(doc.sections)
+    assert not any("PAGE" in instr for instr in _field_instr_texts(cover.footer.paragraphs[0]))
+    assert cover.header.paragraphs[0].text == ""
+    assert any("PAGE" in instr for instr in _field_instr_texts(unclassified_body.footer.paragraphs[0]))
 
     assert _page_num_type(abstract) == ("upperRoman", "1")
     assert any("PAGE \\* ROMAN" in instr for instr in _field_instr_texts(abstract.footer.paragraphs[0]))
@@ -195,7 +199,7 @@ def test_header_footer_validate_warns_for_cover_hide_even_when_page_numbers_are_
 
     assert issues
     assert issues[0].level == "warning"
-    assert "分区排除" in issues[0].message
+    assert "页眉和页脚文字范围" in issues[0].message
     assert issues[0].location == "context.doc_tree"
 
 
@@ -231,7 +235,7 @@ def test_empty_page_number_plan_defaults_to_continuous_decimal():
 
     assert collect_static_page_number_diagnostics(config.header_footer) == []
     assert [(section.phase_id, section.number_format, section.start_value) for section in plan.sections[:3]] == [
-        (None, "decimal", None),
+        ("pre_numbering", "decimal", 1),
         ("main", "decimal", 1),
         ("main", "decimal", None),
     ]
@@ -273,11 +277,151 @@ def test_collect_static_page_number_diagnostics_flags_duplicate_phase_ids():
     assert any("编号分组名称" in item.message and "重复" in item.message for item in diagnostics)
 
 
-def test_collect_static_page_number_diagnostics_warns_when_hidden_range_masks_rule():
+def test_header_hidden_range_does_not_override_page_number_rule():
     config = _build_config()
-    config.header_footer.suppress_header_footer_selectors = ["toc"]
+    config.header_footer.header.hidden_selectors = ["toc"]
 
     diagnostics = collect_static_page_number_diagnostics(config.header_footer)
 
-    assert any(item.level == "warning" for item in diagnostics)
-    assert any("包含已排除部分" in item.message for item in diagnostics)
+    assert diagnostics == []
+    doc = _build_doc()
+    context = _build_context()
+    SectionFormatModule().apply(doc, config, ChangeTracker(), context)
+    plan = build_page_number_execution_plan(doc, context, config.header_footer)
+    toc = next(section for section in plan.sections if section.section_type == "toc")
+    assert toc.header_visible is False
+    assert toc.footer_text_visible is True
+    assert toc.page_number_visible is True
+
+
+def test_hidden_abstract_pages_count_into_roman_toc_then_body_restarts_decimal():
+    doc = Document()
+    for text in ["封面", "摘要", "Abstract", "目录", "第一章 绪论"]:
+        doc.add_paragraph(text)
+    context = PipelineContext(
+        doc_tree=DocTree(
+            sections=[
+                DocSection("cover", 0, 1),
+                DocSection("abstract_cn", 1, 2),
+                DocSection("abstract_en", 2, 3),
+                DocSection("toc", 3, 4),
+                DocSection("body", 4, 5),
+            ]
+        ),
+        heading_map={4: 1},
+    )
+    config = ResolvedConfig()
+    phases = toc_roman_body_decimal_phases()
+    phases[2].start_mode = "continue"
+    config.header_footer.page_number_plan.phases = phases
+
+    SectionFormatModule().apply(doc, config, ChangeTracker(), context)
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), context)
+
+    cover, abstract_cn, abstract_en, toc, body = list(doc.sections)
+    assert not _paragraph_has_field(cover.footer.paragraphs[0], "PAGE")
+    assert not _paragraph_has_field(abstract_cn.footer.paragraphs[0], "PAGE")
+    assert not _paragraph_has_field(abstract_en.footer.paragraphs[0], "PAGE")
+    assert _page_num_type(abstract_cn) == ("upperRoman", "1")
+    assert _page_num_type(abstract_en) == ("upperRoman", None)
+    assert _page_num_type(toc) == ("upperRoman", None)
+    assert _paragraph_has_field(toc.footer.paragraphs[0], "PAGE")
+    assert _page_num_type(body) == ("decimal", "1")
+    assert _paragraph_has_field(body.footer.paragraphs[0], "PAGE")
+
+
+def test_toc_only_roman_preset_restarts_toc_at_i():
+    phases = toc_roman_body_decimal_phases()
+
+    assert phases[1].phase_id == "front_hidden"
+    assert phases[1].visible is False
+    assert phases[2].phase_id == "toc"
+    assert phases[2].number_format == "upperRoman"
+    assert phases[2].start_mode == "restart"
+    assert phases[2].start_value == 1
+    assert phases[3].phase_id == "body"
+    assert phases[3].number_format == "decimal"
+    assert phases[3].start_mode == "restart"
+    assert phases[3].start_value == 1
+
+
+def test_header_footer_text_and_page_number_visibility_are_three_channels():
+    doc = _build_doc()
+    context = _build_context()
+    config = _build_config()
+    config.header_footer.header.hidden_selectors = ["toc"]
+    config.header_footer.footer.hidden_selectors = ["appendix"]
+    config.header_footer.footer.content_mode = "fixed"
+    config.header_footer.footer_text = "内部资料"
+
+    SectionFormatModule().apply(doc, config, ChangeTracker(), context)
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), context)
+
+    _cover, toc, body, appendix = list(doc.sections)
+    assert toc.header.paragraphs[0].text == ""
+    assert "内部资料" in toc.footer.paragraphs[0].text
+    assert _paragraph_has_field(toc.footer.paragraphs[0], "PAGE")
+    assert appendix.header.paragraphs[0].text != ""
+    assert "内部资料" not in appendix.footer.paragraphs[0].text
+    assert _paragraph_has_field(appendix.footer.paragraphs[0], "PAGE")
+
+
+def test_literal_special_title_scope_has_its_own_boundaries_and_phase_priority():
+    doc = Document()
+    for text in ["第一章 绪论", "摘要", "摘要正文", "第二章 方法", "方法正文"]:
+        doc.add_paragraph(text)
+    selector = special_title_selector("exact", "摘要")
+    context = PipelineContext(
+        doc_tree=DocTree(
+            sections=[DocSection("body", 0, 5)],
+            special_title_matches={1: selector},
+            special_title_ranges=[DocSection(selector, 1, 3)],
+        ),
+        heading_map={0: 1, 1: 1, 3: 1},
+    )
+    config = ResolvedConfig()
+    config.header_footer.header.hidden_selectors = [selector]
+    config.header_footer.footer.hidden_selectors = ["body"]
+    config.header_footer.page_number_plan.phases = [
+        PageNumberPhaseConfig(
+            phase_id="body",
+            selectors=["body"],
+            visible=True,
+            number_format="decimal",
+            start_mode="restart",
+            start_value=1,
+        ),
+        PageNumberPhaseConfig(
+            phase_id="summary",
+            selectors=[selector],
+            visible=True,
+            number_format="upperRoman",
+            start_mode="restart",
+            start_value=1,
+        ),
+    ]
+
+    before_breaks = build_page_number_execution_plan(
+        doc,
+        context,
+        config.header_footer,
+    )
+    assert [
+        (item.start_index, item.reasons)
+        for item in before_breaks.boundaries
+    ] == [
+        (1, ("special_title_start", "phase_change")),
+        (3, ("special_title_end", "phase_change")),
+    ]
+
+    SectionFormatModule().apply(doc, config, ChangeTracker(), context)
+    plan = build_page_number_execution_plan(doc, context, config.header_footer)
+
+    assert [item.start_index for item in plan.sections] == [0, 1, 3]
+    assert plan.sections[1].phase_id == "summary"
+    assert plan.sections[1].number_format == "upperRoman"
+    assert plan.sections[1].header_visible is False
+    assert plan.sections[1].footer_text_visible is True
+    assert plan.sections[2].phase_id == "body"
+    assert plan.sections[2].header_visible is True
+    assert plan.sections[2].footer_text_visible is False

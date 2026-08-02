@@ -79,17 +79,47 @@ class FormRow(QWidget):
             self._label.sizeHint().height(),
         ]
         if width is not None and self._widget.hasHeightForWidth():
-            content_heights.append(self._widget.heightForWidth(self._available_widget_width(width)))
+            content_heights.append(
+                self._bounded_height(
+                    self._widget,
+                    self._widget.heightForWidth(
+                        self._available_widget_width(width)
+                    ),
+                )
+            )
         else:
-            content_heights.append(self._widget.sizeHint().height())
-            content_heights.append(self._widget.minimumSizeHint().height())
+            content_heights.append(
+                self._bounded_height(self._widget, self._widget.sizeHint().height())
+            )
+            content_heights.append(
+                self._bounded_height(
+                    self._widget,
+                    self._widget.minimumSizeHint().height(),
+                )
+            )
         if self._suffix is not None:
-            content_heights.append(self._suffix.sizeHint().height())
-            content_heights.append(self._suffix.minimumSizeHint().height())
+            content_heights.append(
+                self._bounded_height(self._suffix, self._suffix.sizeHint().height())
+            )
+            content_heights.append(
+                self._bounded_height(
+                    self._suffix,
+                    self._suffix.minimumSizeHint().height(),
+                )
+            )
         row_height = max(content_heights) + margins.top() + margins.bottom()
         if self._minimum_row_height is not None:
             row_height = max(row_height, self._minimum_row_height)
         return row_height
+
+    @staticmethod
+    def _bounded_height(widget: QWidget, height: int) -> int:
+        """Match the height that Qt's layout can actually assign to a child."""
+
+        return max(
+            widget.minimumHeight(),
+            min(max(0, int(height)), widget.maximumHeight()),
+        )
 
     def _available_widget_width(self, width: int) -> int:
         margins = self._layout.contentsMargins()

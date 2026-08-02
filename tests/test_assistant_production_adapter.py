@@ -1,16 +1,34 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 from docx import Document
 
 from src.assistant.adapters import production_adapter as module
-from src.assistant.adapters.production_adapter import AssistantProductionAdapter
+from src.assistant.adapters.production_adapter import (
+    AUTHORING_ONLY_MATERIAL_WARNING,
+    MATERIAL_USAGE_AUTHORING_ONLY,
+    AssistantProductionAdapter,
+)
 from src.assistant.adapters.workspace_state_adapter import WorkspaceSnapshot
 from src.assistant.application.plan_builder import FormDocumentPlanBuilder
+from src.assistant.contracts.material_snapshot import MaterialExecutionEnvelope
 from src.assistant.contracts.document_plan import DocumentPlan, OutputPolicy
 from src.assistant.contracts.execution import ExecutionApproval
+from src.assistant.contracts.task_plan import (
+    SOURCE_ROLE_PRODUCTION_INPUT,
+    GenerationContract,
+    ProductionContract,
+    SourceArtifactRef,
+)
+from src.application.materials import (
+    ExecutionMaterialRecord,
+    ExecutionMaterialSnapshot,
+)
+from src.application.materials import execution as material_execution
+from src.domain.materials import MaterialPackageRef
 
 
 def _plan(input_path: Path, output_root: Path) -> DocumentPlan:
@@ -55,6 +73,98 @@ def _approval(preflight):
     )
 
 
+def test_exam_master_selection_is_projected_onto_the_runtime_scene(tmp_path):
+    input_path = tmp_path / "exam.md"
+    input_path.write_text("# 试卷\n\n1. 题目", encoding="utf-8")
+    plan = replace(
+        _plan(input_path, tmp_path / "out"),
+        work_mode_id="exam",
+        scene_ref={"id": "exam", "master_id": "school_exam_master"},
+        production_contract=ProductionContract(terminal_assembler="exam"),
+    )
+    scene = SimpleNamespace(
+        master_id="default_exam",
+        exam_paper=SimpleNamespace(answer_policy="student_plus_answer"),
+        delivery_presets=(),
+    )
+
+    issue = module._apply_plan_scene_contract(scene, plan)
+
+    assert issue == ""
+    assert scene.master_id == "school_exam_master"
+
+
+def _custom_material_snapshot() -> ExecutionMaterialSnapshot:
+    snapshot = ExecutionMaterialSnapshot(
+        snapshot_id="",
+        run_id="run-cross-mode",
+        package_ref=MaterialPackageRef(
+            package_id=f"pkg_{'a' * 32}",
+            revision=f"sha256:{'b' * 64}",
+        ),
+        work_mode_id="custom",
+        material_contract_id="generic_document_v1",
+        recipe_id="document_batch",
+        scene_id="custom",
+        document_type="",
+        package_display_name="用户材料",
+        package_field_values={},
+        package_field_owners={},
+        groups=(),
+        records=(
+            ExecutionMaterialRecord(
+                record_id=f"rec_{'c' * 32}",
+                display_name="材料记录",
+                group_id="",
+                field_values={"subject": "材料中的主题"},
+                field_owners={"subject": "record"},
+                resources={},
+                resource_owners={},
+            ),
+        ),
+    )
+    return replace(
+        snapshot,
+        snapshot_id=material_execution._snapshot_content_id(snapshot),
+    )
+
+
+def _generated_cross_mode_plan(
+    input_path: Path,
+    output_root: Path,
+    material_snapshot: ExecutionMaterialSnapshot,
+) -> DocumentPlan:
+    base = _plan(input_path, output_root)
+    return replace(
+        base,
+        work_mode_id="exam",
+        scene_ref={"id": "custom", "generation_mode": "generated_draft"},
+        source_artifacts=(
+            SourceArtifactRef(
+                artifact_id="artifact-generated-cross-mode",
+                role=SOURCE_ROLE_PRODUCTION_INPUT,
+                media_type=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ),
+                path=str(input_path),
+                name=input_path.name,
+                digest=f"sha256:{module.file_sha256(input_path)}",
+                source_kind="assistant_generated",
+            ),
+        ),
+        generation_contract=GenerationContract(
+            required=True,
+            artifact_kind="narrative_document",
+            prompt_profile_id="narrative_generation_v1",
+            validator_id="",
+        ),
+        material_snapshot_ref=MaterialExecutionEnvelope.capture(
+            material_snapshot
+        ).reference(),
+    )
+
+
 def test_preflight_binds_input_plan_and_resource_hashes(tmp_path, monkeypatch):
     input_path = tmp_path / "input.docx"
     Document().save(input_path)
@@ -72,7 +182,7 @@ def test_preflight_binds_input_plan_and_resource_hashes(tmp_path, monkeypatch):
         "template",
     }
     assert preflight.resource_fingerprints["materials"] == (
-        preflight.material_context_digest
+        preflight.material_snapshot_digest
     )
 
 
@@ -103,6 +213,128 @@ def test_approved_plan_is_the_only_path_to_form_execution(tmp_path, monkeypatch)
     assert result["assistant_input_hash_unchanged"] is True
     assert calls[0][0].input_path == input_path
     assert calls[0][0].plan_id == "custom"
+
+
+def test_generated_draft_uses_cross_mode_material_for_authoring_only(
+    tmp_path,
+    monkeypatch,
+):
+    input_path = tmp_path / "generated.docx"
+    document = Document()
+    document.add_paragraph("根据材料生成的结构化草稿")
+    document.save(input_path)
+    _patch_resources(monkeypatch, tmp_path)
+    snapshot = _custom_material_snapshot()
+    plan = _generated_cross_mode_plan(
+        input_path,
+        tmp_path / "out",
+        snapshot,
+    )
+    calls = []
+
+    def executor(request, **_kwargs):
+        calls.append(request)
+        return {
+            "status": "success",
+            "output_path": str(tmp_path / "out" / "result.docx"),
+            "output_paths": {},
+            "report_paths": [],
+            "failed_count": 0,
+            "artifact_failure_count": 0,
+            "error_text": "",
+        }
+
+    adapter = AssistantProductionAdapter(executor=executor)
+    preflight = adapter.build_preflight(
+        plan,
+        material_snapshot=snapshot,
+    )
+    result = adapter.execute_approved_plan(
+        plan,
+        preflight,
+        _approval(preflight),
+        material_snapshot=snapshot,
+    )
+
+    assert preflight.ready, preflight.issues
+    assert AUTHORING_ONLY_MATERIAL_WARNING in preflight.warnings
+    assert (
+        preflight.resource_fingerprints["material_usage"]
+        == MATERIAL_USAGE_AUTHORING_ONLY
+    )
+    assert result["status"] == "success"
+    assert calls and calls[0].material_snapshot is None
+
+
+def test_existing_document_rejects_cross_mode_execution_material(
+    tmp_path,
+    monkeypatch,
+):
+    input_path = tmp_path / "existing.docx"
+    Document().save(input_path)
+    _patch_resources(monkeypatch, tmp_path)
+    snapshot = _custom_material_snapshot()
+    plan = replace(
+        _plan(input_path, tmp_path / "out"),
+        work_mode_id="exam",
+        material_snapshot_ref=MaterialExecutionEnvelope.capture(
+            snapshot
+        ).reference(),
+    )
+
+    preflight = AssistantProductionAdapter().build_preflight(
+        plan,
+        material_snapshot=snapshot,
+    )
+
+    assert not preflight.ready
+    assert "execution_material_mode_mismatch" in preflight.issues
+
+
+def test_exam_execution_receives_authoritative_scale_and_visual_gate(
+    tmp_path,
+    monkeypatch,
+):
+    input_path = tmp_path / "input.docx"
+    Document().save(input_path)
+    _patch_resources(monkeypatch, tmp_path)
+    calls = []
+
+    def executor(request, **kwargs):
+        calls.append((request, kwargs))
+        return {
+            "status": "success",
+            "output_path": str(tmp_path / "out" / "result.docx"),
+            "output_paths": {},
+            "report_paths": [],
+            "failed_count": 0,
+            "artifact_failure_count": 0,
+            "error_text": "",
+        }
+
+    plan = _plan(input_path, tmp_path / "out")
+    plan = replace(
+        plan,
+        scene_ref={"id": "my_school_exam", "scale_profile_id": "term"},
+        production_contract=replace(
+            plan.production_contract,
+            terminal_assembler="exam",
+        ),
+    )
+    adapter = AssistantProductionAdapter(executor=executor)
+    preflight = adapter.build_preflight(plan)
+
+    result = adapter.execute_approved_plan(
+        plan,
+        preflight,
+        _approval(preflight),
+    )
+
+    assert result["status"] == "success"
+    assert calls
+    request = calls[0][0]
+    assert request.exam_scale_profile_id == "term"
+    assert request.exam_visual_quality_required is True
 
 
 def test_execution_rejects_changed_input_or_resource(tmp_path, monkeypatch):

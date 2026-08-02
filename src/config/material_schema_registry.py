@@ -1,8 +1,7 @@
 """Planning-level material schema registry.
 
-This registry gives scene families a shared vocabulary for the material fields
-and asset roles they need. It is intentionally metadata-only today: runtime
-material values still live in ``EntityArchive`` / ``MaterialExecutionContext``.
+This registry gives scene families a shared vocabulary for the canonical
+material fields and resource roles they need.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ class MaterialFieldSpec:
 
 @dataclass(frozen=True, slots=True)
 class MaterialAssetRoleSpec:
-    """One explicitly typed image or attachment role.
+    """One explicitly typed content, image, or attachment role.
 
     ``accepted_types`` describes file formats only; it must never be used to
     infer whether the file enters the inline-image pipeline or the delivery
@@ -49,8 +48,10 @@ class MaterialAssetRoleSpec:
 
     def __post_init__(self) -> None:
         domain = str(self.material_domain or "").strip().casefold()
-        if domain not in {"image", "attachment"}:
-            raise ValueError("material_domain must be image or attachment")
+        if domain not in {"content", "image", "attachment"}:
+            raise ValueError(
+                "material_domain must be content, image, or attachment"
+            )
         accepted_types = tuple(
             str(item or "").strip().casefold()
             for item in tuple(self.accepted_types or ())
@@ -131,6 +132,36 @@ class MaterialSchemaRecommendation:
 
 MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
     MaterialSchema(
+        schema_id="generic_document_v1",
+        label="Generic document materials",
+        family="custom",
+        description="Common named fields and optional resources for general documents.",
+        fields=(
+            MaterialFieldSpec("title", "Document title", required=False),
+            MaterialFieldSpec("subtitle", "Subtitle", required=False),
+            MaterialFieldSpec("author", "Author", required=False),
+            MaterialFieldSpec("organization", "Organization", required=False),
+            MaterialFieldSpec("date", "Date", required=False),
+            MaterialFieldSpec("body", "Body", required=False),
+        ),
+        asset_roles=(
+            MaterialAssetRoleSpec("logo", "Logo", required=False),
+            MaterialAssetRoleSpec(
+                "attachment",
+                "Attachment",
+                required=False,
+                accepted_types=("docx", "pdf", "xlsx", "zip"),
+                cardinality="multiple",
+                max_items=None,
+                material_domain="attachment",
+            ),
+        ),
+        boundaries=(
+            "does not infer document placement from resource roles",
+            "does not require optional fields or resources for no-material runs",
+        ),
+    ),
+    MaterialSchema(
         schema_id="bid_materials_v1",
         label="Bidding materials",
         family="bidding",
@@ -189,6 +220,9 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
             MaterialFieldSpec("archive_status", "Archive status", required=False),
             MaterialFieldSpec("archive_no", "Archive number", required=False),
             MaterialFieldSpec("retention_period", "Retention period", required=False),
+            MaterialFieldSpec("meeting_title", "Meeting title", required=False),
+            MaterialFieldSpec("meeting_date", "Meeting date", required=False),
+            MaterialFieldSpec("participants", "Participants", required=False),
         ),
         asset_roles=(
             MaterialAssetRoleSpec("seal", "Official seal", required=False),

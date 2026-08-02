@@ -49,6 +49,7 @@ from src.shared.ui.text_projection import (
 
 def test_material_token_edit_copies_and_enters_inline_rename(qapp):
     edit = MaterialTokenEdit("{{@text:标题1}}")
+    assert edit._expanded_popup is None
     edit.show()
 
     QTest.mouseClick(edit, Qt.LeftButton)
@@ -57,6 +58,25 @@ def test_material_token_edit_copies_and_enters_inline_rename(qapp):
 
     QTest.mouseDClick(edit, Qt.LeftButton)
     assert not edit.isReadOnly()
+
+
+def test_projected_text_popup_is_created_only_for_actual_overflow_edit(qapp):
+    edit = MaterialTokenEdit("{{@attach:" + ("超长名称" * 8) + "}}")
+    name = MaterialNameEdit("普通行名称")
+    edit.resize(180, 32)
+    edit.show()
+    name.show()
+    qapp.processEvents()
+
+    assert edit._expanded_popup is None
+    assert name._expanded_popup is None
+
+    QTest.mouseDClick(edit.displaySurface(), Qt.LeftButton)
+    qapp.processEvents()
+
+    assert edit._expanded_popup is not None
+    assert edit._expanded_popup.isVisible()
+    assert name._expanded_popup is None
 
 
 def test_material_token_edit_freezes_affixes_and_elides_only_display(qapp):
@@ -723,15 +743,19 @@ def test_asset_column_guide_keeps_navigation_after_source_column_collapses(qapp)
     assert guide.name_label.width() == wide.name_width
     assert guide.actions_label.width() == wide.actions_width
 
-    guide.resize(760, 32)
+    guide.resize(700, 32)
     qapp.processEvents()
-    narrow = guide.metrics()
+    medium = guide.metrics()
+    assert medium.source_visible is True
+    assert not guide.source_label.isHidden()
+
+    narrow = guide._sync_metrics(660, force=True)
     assert narrow.guide_visible is True
     assert narrow.source_visible is False
     assert guide.maximumHeight() == 32
     assert guide.source_label.isHidden()
     assert not guide.name_label.isHidden()
-    assert resolve_asset_column_metrics(guide.width(), action_count=5) == narrow
+    assert resolve_asset_column_metrics(660, action_count=5) == narrow
 
     compact = resolve_asset_column_metrics(620, action_count=5)
     assert compact.guide_visible is False

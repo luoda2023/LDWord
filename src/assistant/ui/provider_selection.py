@@ -47,7 +47,11 @@ class ProviderSelectionCoordinator:
             return session
         if session.model_id == profile.model_id:
             return session
-        return self._sessions.update_state(session, model_id=profile.model_id)
+        return self._sessions.update_state(
+            session,
+            model_id=profile.model_id,
+            touch_activity=False,
+        )
 
     def failure_message(self, profile_id: str, error: Exception) -> str:
         readiness = self._router.readiness(profile_id)

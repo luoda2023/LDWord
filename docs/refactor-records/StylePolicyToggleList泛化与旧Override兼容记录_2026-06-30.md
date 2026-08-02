@@ -1,4 +1,4 @@
-# StylePolicyToggleList 泛化与旧 Override 兼容记录
+﻿# StylePolicyToggleList 泛化与旧 Override 兼容记录
 
 日期：2026-06-30
 
@@ -286,7 +286,7 @@ python -X utf8 -m pytest tests\test_scene_panel_architecture.py -q
 59 passed in 64.83s (0:01:04)
 ```
 
-备注：当前 `.git` worktree 元数据仍指向旧的 `C:\Users\Administrator\...` 路径，`git status` 会被该陈旧指针拦截；本轮验证以源码检查、兼容探针和 pytest 输出为准。
+备注：当前 `.git` worktree 元数据仍指向旧的 `<LOCAL_PATH>` 路径，`git status` 会被该陈旧指针拦截；本轮验证以源码检查、兼容探针和 pytest 输出为准。
 
 ## 8. 下一步建议
 

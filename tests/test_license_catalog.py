@@ -12,7 +12,7 @@ def test_packaged_license_catalog_contains_assets_runtime_and_raw_documents():
     catalog = load_license_catalog()
     by_id = {component.component_id: component for component in catalog.components}
 
-    assert catalog.component_count == 16
+    assert catalog.component_count == 18
     assert by_id["alavette-flow-derived"].license_expression == "MIT"
     assert "Alavette Flow Contributors" in catalog.read_document(
         by_id["alavette-flow-derived"].documents[0]
@@ -29,6 +29,8 @@ def test_packaged_license_catalog_contains_assets_runtime_and_raw_documents():
         "GPL-3.0-only",
     }
     assert len(by_id["pypdfium2"].documents) >= 19
+    assert by_id["latex2mathml"].license_expression == "MIT"
+    assert by_id["olefile"].license_expression == "BSD-2-Clause AND HPND"
     assert "ISC License" in catalog.read_document(
         by_id["lucide-icons"].documents[0]
     )

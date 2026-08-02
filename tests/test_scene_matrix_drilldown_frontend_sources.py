@@ -1,24 +1,25 @@
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.config.scene_coverage_manifest import list_scene_coverage_packs  # noqa: E402
-from src.config.scene_family_registry import list_planned_scene_families  # noqa: E402
-from src.config.scene_matrix_drilldown import (  # noqa: E402
+from src.config.scene_coverage_manifest import list_scene_coverage_packs
+from src.config.scene_family_registry import list_planned_scene_families
+from src.config.scene_matrix_drilldown import (
     REQUIRED_SCENE_MATRIX_DRILLDOWN_IDS,
     SCENE_MATRIX_DRILLDOWN_PROJECTION_PROFILE_MAP,
     audit_scene_matrix_drilldown_report,
     build_scene_matrix_drilldown_report,
 )
-from src.config.scene_request_cell_fixture_registry import (  # noqa: E402
+from src.config.scene_request_cell_fixture_registry import (
     list_scene_request_cell_fixtures,
 )
-from src.config.scene_sample_fixture_registry import list_scene_sample_fixtures  # noqa: E402
-from src.shared.engine.count_engine import list_count_profiles  # noqa: E402
-from tests._scene_matrix_drilldown_projection_references import (  # noqa: E402
+from src.config.scene_sample_fixture_registry import (
+    list_scene_sample_fixtures,
+)
+from src.shared.engine.count_engine import list_count_profiles
+from tests._scene_matrix_drilldown_projection_references import (
     _delivery_reference_ids,
     _external_handoff_contract_reference_ids,
     _input_render_reference_ids,
@@ -47,23 +48,18 @@ from tests._scene_matrix_drilldown_projection_references import (  # noqa: E402
     _word_risk_surface_reference_ids,
 )
 
+
 def test_scene_matrix_drilldown_indexes_required_frontend_sources():
     report = build_scene_matrix_drilldown_report(project_root=ROOT)
     payload = report.to_payload()
     items = {item.drilldown_id: item for item in report.items}
     coverage_pack_ids = {pack.pack_id for pack in list_scene_coverage_packs()}
-    planned_family_ids = {
-        family.family_id for family in list_planned_scene_families()
-    }
-    request_cell_ids = {
-        cell.sample_id for cell in list_scene_request_cell_fixtures()
-    }
+    planned_family_ids = {family.family_id for family in list_planned_scene_families()}
+    request_cell_ids = {cell.sample_id for cell in list_scene_request_cell_fixtures()}
     sample_fixture_ids = {
         fixture.fixture_id for fixture in list_scene_sample_fixtures()
     }
-    count_profile_ids = {
-        profile.profile_id for profile in list_count_profiles()
-    }
+    count_profile_ids = {profile.profile_id for profile in list_count_profiles()}
     delivery_reference_ids = _delivery_reference_ids()
     material_reference_ids = _material_reference_ids()
     input_source_reference_ids, render_source_reference_ids = (
@@ -75,18 +71,14 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
     target_plugin_reference_ids = _target_plugin_reference_ids()
     risk_domain_reference_ids = _risk_domain_reference_ids()
     maturity_gap_reference_ids = _maturity_gap_reference_ids()
-    external_handoff_contract_reference_ids = (
-        _external_handoff_contract_reference_ids()
-    )
+    external_handoff_contract_reference_ids = _external_handoff_contract_reference_ids()
     projection_test_reference_ids = _projection_test_reference_ids()
     projection_source_reference_ids = _projection_source_reference_ids(report)
     projection_source_reference_map = _projection_source_reference_map()
     projection_surface_reference_map = _projection_surface_reference_map()
     projection_path_reference_map = _projection_path_reference_map()
     projection_evidence_reference_map = _projection_evidence_reference_map()
-    projection_release_marker_reference_map = (
-        _projection_release_marker_reference_map()
-    )
+    projection_release_marker_reference_map = _projection_release_marker_reference_map()
     projection_release_link_reference_map = _projection_release_link_reference_map()
     projection_retained_gap_exit_reference_map = (
         _projection_retained_gap_exit_reference_map()
@@ -94,9 +86,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
     projection_control_runtime_reference_map = (
         _projection_control_runtime_reference_map()
     )
-    projection_release_metric_reference_map = (
-        _projection_release_metric_reference_map()
-    )
+    projection_release_metric_reference_map = _projection_release_metric_reference_map()
     projection_external_handoff_contract_reference_map = (
         _projection_external_handoff_contract_reference_map()
     )
@@ -106,9 +96,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
     projection_requirement_dimension_reference_map = (
         _projection_requirement_dimension_reference_map()
     )
-    projection_target_plugin_reference_map = (
-        _projection_target_plugin_reference_map()
-    )
+    projection_target_plugin_reference_map = _projection_target_plugin_reference_map()
     projection_formula_output_watermark_reference_map = (
         _projection_formula_output_watermark_reference_map()
     )
@@ -164,9 +152,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
             )
             assert set(row.plugin_gate_ids).issubset(plugin_gate_reference_ids)
             assert set(row.risk_domain_ids).issubset(risk_domain_reference_ids)
-            assert set(row.maturity_gap_domain_ids).issubset(
-                maturity_gap_reference_ids
-            )
+            assert set(row.maturity_gap_domain_ids).issubset(maturity_gap_reference_ids)
             for projection_id in (
                 *row.action_behavior_ids,
                 *row.capability_ids,
@@ -179,9 +165,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
                     set(),
                 )
                 assert expected_source_ids.issubset(projection_source_reference_ids)
-                assert expected_source_ids.issubset(
-                    set(getattr(row, field_name))
-                )
+                assert expected_source_ids.issubset(set(getattr(row, field_name)))
                 expected_surface_ids = projection_surface_reference_map.get(
                     (item.drilldown_id, row.row_id, field_name),
                     set(),
@@ -212,9 +196,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
                     (item.drilldown_id, row.row_id, field_name),
                     set(),
                 )
-                assert expected_release_link_ids.issubset(
-                    set(getattr(row, field_name))
-                )
+                assert expected_release_link_ids.issubset(set(getattr(row, field_name)))
                 expected_retained_gap_exit_ids = (
                     projection_retained_gap_exit_reference_map.get(
                         (item.drilldown_id, row.row_id, field_name),
@@ -272,15 +254,11 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
                 assert expected_requirement_dimension_ids.issubset(
                     set(getattr(row, field_name))
                 )
-                expected_target_plugin_ids = (
-                    projection_target_plugin_reference_map.get(
-                        (item.drilldown_id, row.row_id, field_name),
-                        set(),
-                    )
+                expected_target_plugin_ids = projection_target_plugin_reference_map.get(
+                    (item.drilldown_id, row.row_id, field_name),
+                    set(),
                 )
-                assert expected_target_plugin_ids.issubset(
-                    target_plugin_reference_ids
-                )
+                assert expected_target_plugin_ids.issubset(target_plugin_reference_ids)
                 assert expected_target_plugin_ids.issubset(
                     set(getattr(row, field_name))
                 )
@@ -426,8 +404,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         evidence.source_id: evidence.status for evidence in report.source_evidence
     }
     assert (
-        source_status["scene_matrix_drilldown_acceptance_receipt_projection"]
-        == "ready"
+        source_status["scene_matrix_drilldown_acceptance_receipt_projection"] == "ready"
     )
     assert source_status["scene_matrix_drilldown_residual_receipt_projection"] == (
         "ready"
@@ -443,7 +420,9 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         == "ready"
     )
     assert (
-        source_status["scene_matrix_drilldown_source_evidence_payload_consistency_tests"]
+        source_status[
+            "scene_matrix_drilldown_source_evidence_payload_consistency_tests"
+        ]
         == "ready"
     )
     assert (
@@ -462,14 +441,8 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         == "ready"
     )
     assert source_status["scene_matrix_drilldown_item_row_identity_audit"] == "ready"
-    assert (
-        source_status["scene_matrix_drilldown_item_source_evidence_audit"]
-        == "ready"
-    )
-    assert (
-        source_status["scene_matrix_drilldown_row_source_evidence_audit"]
-        == "ready"
-    )
+    assert source_status["scene_matrix_drilldown_item_source_evidence_audit"] == "ready"
+    assert source_status["scene_matrix_drilldown_row_source_evidence_audit"] == "ready"
     assert (
         source_status["scene_matrix_drilldown_row_pack_family_registry_audit"]
         == "ready"
@@ -483,17 +456,14 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         == "ready"
     )
     assert (
-        source_status["scene_matrix_drilldown_row_material_reference_audit"]
-        == "ready"
+        source_status["scene_matrix_drilldown_row_material_reference_audit"] == "ready"
     )
     assert (
         source_status["scene_matrix_drilldown_row_input_object_word_registry_audit"]
         == "ready"
     )
     assert (
-        source_status[
-            "scene_matrix_drilldown_row_plugin_risk_maturity_registry_audit"
-        ]
+        source_status["scene_matrix_drilldown_row_plugin_risk_maturity_registry_audit"]
         == "ready"
     )
     assert (
@@ -529,9 +499,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         == "ready"
     )
     assert (
-        source_status[
-            "scene_matrix_drilldown_projection_release_link_reference_audit"
-        ]
+        source_status["scene_matrix_drilldown_projection_release_link_reference_audit"]
         == "ready"
     )
     assert (
@@ -559,9 +527,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         == "ready"
     )
     assert (
-        source_status[
-            "scene_matrix_drilldown_projection_report_delivery_marker_audit"
-        ]
+        source_status["scene_matrix_drilldown_projection_report_delivery_marker_audit"]
         == "ready"
     )
     assert (
@@ -571,9 +537,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         == "ready"
     )
     assert (
-        source_status[
-            "scene_matrix_drilldown_projection_target_plugin_reference_audit"
-        ]
+        source_status["scene_matrix_drilldown_projection_target_plugin_reference_audit"]
         == "ready"
     )
     assert (
@@ -590,41 +554,19 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         source_status["n2_410_drilldown_source_evidence_release_summary_plan"]
         == "ready"
     )
-    assert (
-        source_status["n2_411_drilldown_source_summary_ready_total_plan"]
-        == "ready"
-    )
-    assert (
-        source_status["n2_412_drilldown_export_source_summary_plan"]
-        == "ready"
-    )
-    assert (
-        source_status["n2_413_drilldown_json_export_source_summary_plan"]
-        == "ready"
-    )
+    assert source_status["n2_411_drilldown_source_summary_ready_total_plan"] == "ready"
+    assert source_status["n2_412_drilldown_export_source_summary_plan"] == "ready"
+    assert source_status["n2_413_drilldown_json_export_source_summary_plan"] == "ready"
     assert (
         source_status["n2_414_drilldown_source_evidence_payload_consistency_plan"]
         == "ready"
     )
+    assert source_status["n2_415_drilldown_source_evidence_unique_id_plan"] == "ready"
+    assert source_status["n2_416_drilldown_item_row_unique_id_plan"] == "ready"
+    assert source_status["n2_417_drilldown_item_source_evidence_trace_plan"] == "ready"
+    assert source_status["n2_418_drilldown_row_source_evidence_trace_plan"] == "ready"
     assert (
-        source_status["n2_415_drilldown_source_evidence_unique_id_plan"]
-        == "ready"
-    )
-    assert (
-        source_status["n2_416_drilldown_item_row_unique_id_plan"]
-        == "ready"
-    )
-    assert (
-        source_status["n2_417_drilldown_item_source_evidence_trace_plan"]
-        == "ready"
-    )
-    assert (
-        source_status["n2_418_drilldown_row_source_evidence_trace_plan"]
-        == "ready"
-    )
-    assert (
-        source_status["n2_419_drilldown_row_pack_family_registry_trace_plan"]
-        == "ready"
+        source_status["n2_419_drilldown_row_pack_family_registry_trace_plan"] == "ready"
     )
     assert (
         source_status["n2_420_drilldown_row_request_fixture_registry_trace_plan"]
@@ -635,17 +577,14 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         == "ready"
     )
     assert (
-        source_status["n2_422_drilldown_row_material_reference_trace_plan"]
-        == "ready"
+        source_status["n2_422_drilldown_row_material_reference_trace_plan"] == "ready"
     )
     assert (
         source_status["n2_423_drilldown_row_input_object_word_registry_trace_plan"]
         == "ready"
     )
     assert (
-        source_status[
-            "n2_424_drilldown_row_plugin_risk_maturity_registry_trace_plan"
-        ]
+        source_status["n2_424_drilldown_row_plugin_risk_maturity_registry_trace_plan"]
         == "ready"
     )
     assert (
@@ -679,8 +618,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         == "ready"
     )
     assert (
-        source_status["n2_432_drilldown_projection_release_link_trace_plan"]
-        == "ready"
+        source_status["n2_432_drilldown_projection_release_link_trace_plan"] == "ready"
     )
     assert (
         source_status[
@@ -695,9 +633,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         == "ready"
     )
     assert (
-        source_status[
-            "n2_435_drilldown_projection_release_metric_reference_trace_plan"
-        ]
+        source_status["n2_435_drilldown_projection_release_metric_reference_trace_plan"]
         == "ready"
     )
     assert (
@@ -707,27 +643,18 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         == "ready"
     )
     assert (
-        source_status[
-            "n2_437_drilldown_projection_report_delivery_marker_trace_plan"
-        ]
+        source_status["n2_437_drilldown_projection_report_delivery_marker_trace_plan"]
         == "ready"
     )
     assert (
-        source_status[
-            "n2_438_drilldown_projection_requirement_dimension_trace_plan"
-        ]
+        source_status["n2_438_drilldown_projection_requirement_dimension_trace_plan"]
         == "ready"
     )
     assert (
-        source_status[
-            "n2_439_drilldown_projection_target_plugin_trace_plan"
-        ]
-        == "ready"
+        source_status["n2_439_drilldown_projection_target_plugin_trace_plan"] == "ready"
     )
     assert (
-        source_status[
-            "n2_440_drilldown_projection_formula_output_watermark_trace_plan"
-        ]
+        source_status["n2_440_drilldown_projection_formula_output_watermark_trace_plan"]
         == "ready"
     )
 
@@ -812,13 +739,9 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
     )
     assert items["release_residual_ratio_ledger"].row_count == 3
     assert (
-        "count_delivery_receipts=4/4"
-        in items["release_residual_ratio_ledger"].detail
+        "count_delivery_receipts=4/4" in items["release_residual_ratio_ledger"].detail
     )
-    assert (
-        "maturity_l5_receipts=6/6"
-        in items["release_residual_ratio_ledger"].detail
-    )
+    assert "maturity_l5_receipts=6/6" in items["release_residual_ratio_ledger"].detail
     assert items["release_residual_explanation"].source_id == (
         "scene_release_residual_explanation_audit"
     )
@@ -871,7 +794,6 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         "scene_product_maturity_upgrade_audit"
     )
     assert items["maturity_upgrade"].row_count == 27
-
 
     assert {row.row_id for row in items["import_handoff"].rows} == {
         "pdf_thesis_import_to_chinese_academic"
@@ -997,8 +919,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         row.row_id == "release_projection_surface_parity"
         and row.status == "ledger_stage_ready"
         and "release_trace_partition_guard" in row.capability_ids
-        and "scene_release_projection_surface_parity_audit"
-        in row.action_behavior_ids
+        and "scene_release_projection_surface_parity_audit" in row.action_behavior_ids
         for row in items["release_closure_ledger"].rows
     )
     assert any(
@@ -1008,8 +929,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         and "boundary_scope_guarded" in row.action_behavior_ids
         and "receipt_alignments=6/6" in row.action_behavior_ids
         and "maturity_l5_receipts=6/6" in row.action_behavior_ids
-        and "pack:professional_disclosure:real plugin ecosystem"
-        in row.capability_ids
+        and "pack:professional_disclosure:real plugin ecosystem" in row.capability_ids
         and "professional_disclosure_boundary_matrix" in row.capability_ids
         and "receipt_alignments=6/6" in row.detail
         and "maturity_l5_receipts=6/6" in row.detail
@@ -1111,8 +1031,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         for row in items["release_acceptance_certificate"].rows
     )
     assert any(
-        row.row_id == "journal_en"
-        and "count_engine_tech_record" in row.capability_ids
+        row.row_id == "journal_en" and "count_engine_tech_record" in row.capability_ids
         for row in items["business_capability_matrix"].rows
     )
     assert {row.row_id for row in items["control_runtime_consistency"].rows}.issuperset(
@@ -1142,7 +1061,8 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         for row in items["word_risk"].rows
     )
     assert any(
-        "json" in row.input_source_ids and "structured_intermediate" in row.render_source_ids
+        "json" in row.input_source_ids
+        and "structured_intermediate" in row.render_source_ids
         for row in items["input_source"].rows
     )
     assert any(
@@ -1152,12 +1072,12 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
     )
     assert any(
         row.row_id == "schema_replacement_recommendation_flow"
-        and "schema_alias_recommendation" in row.capability_ids
+        and "contract_identity_guard" in row.capability_ids
         for row in items["material_repair_flow"].rows
     )
     assert any(
         row.row_id == "batch_profile_material_repair_targets"
-        and "profile_field" in row.action_behavior_ids
+        and "selection" in row.action_behavior_ids
         for row in items["material_repair_flow"].rows
     )
     assert any(
@@ -1166,8 +1086,7 @@ def test_scene_matrix_drilldown_indexes_required_frontend_sources():
         for row in items["fixed_layout_profile"].rows
     )
     assert any(
-        row.row_id == "row_height_ooxml_runtime"
-        and "w:trHeight" in row.capability_ids
+        row.row_id == "row_height_ooxml_runtime" and "w:trHeight" in row.capability_ids
         for row in items["fixed_layout_profile"].rows
     )
     assert any(

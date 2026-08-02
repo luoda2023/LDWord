@@ -63,6 +63,17 @@ def test_commonmark_success_maps_supported_blocks_and_inlines() -> None:
     assert all(len(row.cells) == 2 for row in table.rows)
 
 
+def test_strikethrough_maps_to_shared_inline_semantics() -> None:
+    fragment = parse_markdown_content("keep ~~remove~~ keep")
+    paragraph = fragment.blocks[0]
+
+    assert isinstance(paragraph, ParagraphBlock)
+    assert any(
+        item.text == "remove" and item.strikethrough
+        for item in paragraph.inlines
+    )
+
+
 def test_field_token_is_recognized_across_inline_runs() -> None:
     fragment = parse_markdown_content("前缀 {{@text:FI**EL**D}} 后缀")
     paragraph = fragment.blocks[0]

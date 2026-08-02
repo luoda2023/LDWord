@@ -76,7 +76,7 @@ def test_no_findings_builds_ui_equivalent_immutable_evidence(tmp_path):
         evidence.scene_id = "mutated"
 
 
-def test_warning_finding_and_module_skip_are_canonicalized(tmp_path):
+def test_embedded_part_warning_does_not_disable_safe_section_planner(tmp_path):
     source = _docx_with_parts(
         tmp_path,
         "warning.docx",
@@ -98,13 +98,7 @@ def test_warning_finding_and_module_skip_are_canonicalized(tmp_path):
     assert payload["findings"][0]["severity"] == "warning"
     assert payload["blocking_findings_count"] == 0
     assert payload["blocked"] is False
-    assert payload["module_skips"] == [
-        {
-            "module_name": "section_format",
-            "finding_kinds": ["ole_objects"],
-            "reason": "Skipped because object preflight found ole_objects.",
-        }
-    ]
+    assert payload["module_skips"] == []
 
 
 @pytest.mark.parametrize(

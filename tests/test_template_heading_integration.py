@@ -74,6 +74,156 @@ def test_projected_overview_matches_heading_panel_on_initial_load():
         app.processEvents()
 
 
+def test_special_title_editor_links_one_scope_option_through_its_lifecycle():
+    app = _app()
+    bridge = PanelBridge()
+    panel = TemplatePanel(bridge)
+
+    try:
+        from src.config.special_title_rules import (
+            special_title_selector,
+            special_title_selector_options,
+        )
+
+        heading = panel._heading_detail
+        heading._nn_texts_edit.setText("摘要, 目录, 参考文献, 缩略语表, 鸣谢")
+        app.processEvents()
+
+        assert "鸣谢" in panel._current_template.heading_model.non_numbered_title_texts
+        selector = special_title_selector("exact", "鸣谢")
+        dynamic_selectors = {
+            option_selector
+            for option_selector, _label in special_title_selector_options(
+                panel._current_template.heading_model
+            )
+        }
+        assert set(
+            panel._header_footer_detail
+            ._header_scope_editor
+            ._selector_buttons
+        ) == {"cover", "body", *dynamic_selectors}
+        assert set(
+            panel._header_footer_detail
+            ._footer_scope_editor
+            ._selector_buttons
+        ) == {"cover", "body", *dynamic_selectors}
+        expected_page_selectors = {
+            "all_numbered_content",
+            "front_matter",
+            "body",
+            "back_matter",
+            "cover",
+            *dynamic_selectors,
+        }
+        assert all(
+            set(row.selector_editor._selector_buttons) == expected_page_selectors
+            for row in panel._header_footer_detail._page_phase_rows
+        )
+        assert not {
+            "statement",
+            "authorization",
+            "front_note",
+        }.intersection(expected_page_selectors)
+        assert (
+            selector
+            in panel._header_footer_detail._header_scope_editor._selector_buttons
+        )
+        assert (
+            selector
+            in panel._header_footer_detail._footer_scope_editor._selector_buttons
+        )
+        assert all(
+            selector in row.selector_editor._selector_buttons
+            for row in panel._header_footer_detail._page_phase_rows
+        )
+        assert (
+            panel._header_footer_detail
+            ._header_scope_editor
+            ._selector_buttons[selector]
+            .isChecked()
+            is False
+        )
+        assert all(
+            row.selector_editor._selector_buttons[selector].isChecked() is False
+            for row in panel._header_footer_detail._page_phase_rows
+        )
+
+        panel._header_footer_detail._header_scope_editor._selector_buttons[
+            selector
+        ].click()
+        footer_mode_combo = panel._header_footer_detail._footer_content_combo
+        footer_mode_index = footer_mode_combo.findData("fixed")
+        footer_mode_combo.setCurrentIndex(
+            footer_mode_index
+        )
+        app.processEvents()
+        panel._header_footer_detail._footer_scope_editor._selector_buttons[
+            selector
+        ].click()
+        panel._header_footer_detail._page_phase_rows[0].selector_editor._selector_buttons[
+            selector
+        ].click()
+        app.processEvents()
+
+        renamed_selector = special_title_selector("exact", "鸣谢说明")
+        heading._nn_texts_edit.setText(
+            "摘要, 目录, 参考文献, 缩略语表, 鸣谢说明"
+        )
+        app.processEvents()
+
+        assert (
+            selector
+            not in panel._header_footer_detail._header_scope_editor._selector_buttons
+        )
+        assert (
+            panel._header_footer_detail
+            ._header_scope_editor
+            ._selector_buttons[renamed_selector]
+            .isChecked()
+            is True
+        )
+        assert (
+            panel._header_footer_detail
+            ._footer_scope_editor
+            ._selector_buttons[renamed_selector]
+            .isChecked()
+            is True
+        )
+        assert (
+            panel._header_footer_detail
+            ._page_phase_rows[0]
+            .selector_editor
+            ._selector_buttons[renamed_selector]
+            .isChecked()
+            is True
+        )
+
+        heading._nn_texts_edit.setText("摘要, 目录, 参考文献, 缩略语表")
+        app.processEvents()
+
+        assert (
+            renamed_selector
+            not in panel._header_footer_detail._header_scope_editor._selector_buttons
+        )
+        assert (
+            renamed_selector
+            not in panel._current_template.header_footer.header.hidden_selectors
+        )
+        assert (
+            renamed_selector
+            not in panel._current_template.header_footer.footer.hidden_selectors
+        )
+        assert all(
+            renamed_selector not in phase.selectors
+            for phase in panel._current_template.header_footer.page_number_plan.phases
+        )
+        assert not hasattr(heading, "_nn_role_edits")
+        assert bridge.is_template_dirty() is True
+    finally:
+        panel.close()
+        app.processEvents()
+
+
 def test_heading_detail_restore_recomputes_template_dirty_state():
     app = _app()
     bridge = PanelBridge()
@@ -304,7 +454,14 @@ def test_heading_preview_text_matches_runtime_number_separator_once(tmp_path):
         assert result.success, f"执行失败: {result.error}"
 
         out_doc = Document(result.output_paths["final"])
-        assert out_doc.paragraphs[0].text == "1::绪论"
+        from src.shared.engine.heading_numbering_ooxml import (
+            effective_numbering,
+            managed_level_text,
+        )
+
+        assert out_doc.paragraphs[0].text == "绪论"
+        assert effective_numbering(out_doc.paragraphs[0]) is not None
+        assert managed_level_text(out_doc, 1) == "%1::"
     finally:
         panel.close()
         app.processEvents()
@@ -359,7 +516,7 @@ def test_default_builtin_template_applies_heading_style_in_pipeline(tmp_path):
     run = para.runs[0]
 
     assert run.font.size is not None
-    assert round(run.font.size.pt, 1) == 12.0
+    assert round(run.font.size.pt, 1) == 16.0
     assert run.font.bold is True
     assert para.paragraph_format.first_line_indent is not None
     assert round(para.paragraph_format.first_line_indent.pt, 1) == 0.0

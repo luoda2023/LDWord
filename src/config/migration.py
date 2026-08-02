@@ -10,19 +10,31 @@ migration — 配置迁移 / 归一化层
 from __future__ import annotations
 
 import copy
-from typing import Any, Mapping
+from collections.abc import Mapping
+from dataclasses import asdict
+from typing import Any
 
+from src.config.formula_policy import (
+    THESIS_FORMULA_MODULE_NAMES,
+    ThesisFormulaRules,
+    is_thesis_formula_mode,
+)
 from src.config.heading_normalize import normalize_heading_numbering_payload
-from src.config.style_semantics import normalize_font_size_display_text, normalize_spacing_unit
+from src.config.special_title_rules import parse_special_title_selector
+from src.config.style_semantics import (
+    normalize_font_size_display_text,
+    normalize_spacing_unit,
+)
 from src.modules.default_switches import default_module_switches
 from src.shared.engine.font_resolver import canonicalize_font_name
 from src.shared.engine.units import cn_size_to_pt
-
 
 # ── 模块名 / 开关归一化 ─────────────────────────────
 
 MODULE_SWITCH_ALIASES: dict[str, str] = {
     "equation_table_fmt": "equation_table_format",
+    "formula_to_table": "equation_table_format",
+    "formula_style": "equation_table_format",
     "whitespace": "whitespace_normalize",
 }
 
@@ -81,6 +93,8 @@ def normalize_module_switches(
     normalized = dict(defaults if defaults is not None else get_default_module_switches())
     canonical_items: list[tuple[str, bool]] = []
     unknown_names: list[str] = []
+    legacy_formula_switches: list[bool] = []
+    has_canonical_equation_switch = False
 
     for raw_name, enabled in (module_switches or {}).items():
         raw_name_text = str(raw_name)
@@ -88,6 +102,11 @@ def normalize_module_switches(
         if canonical_name not in normalized:
             unknown_names.append(raw_name_text)
             continue
+        if raw_name_text in {"formula_to_table", "formula_style"}:
+            legacy_formula_switches.append(bool(enabled))
+            continue
+        if raw_name_text in {"equation_table_format", "equation_table_fmt"}:
+            has_canonical_equation_switch = True
         canonical_items.append((canonical_name, bool(enabled)))
 
     if unknown_names:
@@ -96,6 +115,11 @@ def normalize_module_switches(
 
     for canonical_name, enabled in canonical_items:
         normalized[canonical_name] = enabled
+    if legacy_formula_switches and not has_canonical_equation_switch:
+        # The V1 surface consolidates two V0.2 switches.  Enabling either old
+        # structural/style pass must keep the consolidated rule enabled;
+        # dictionary insertion order must not decide the result.
+        normalized["equation_table_format"] = any(legacy_formula_switches)
 
     return normalized
 
@@ -135,6 +159,296 @@ def add_template_compat_aliases(flat: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(flat)
     _add_header_footer_compat_aliases(result)
     return result
+
+
+def upgrade_legacy_user_template_layout_policies(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Apply bounded compatibility upgrades to a user template.
+
+    This compatibility projection is intentionally narrow.  The strict
+    canonical loader still rejects every other missing or unknown field, and
+    callers must not persist the projected payload unless the user saves it.
+    """
+
+    upgraded = copy.deepcopy(dict(payload))
+    # Formula behavior no longer belongs to templates.  Compatible loading may
+    # discard these historical baseline copies because execution now reads the
+    # migrated thesis-plan rule aggregate exclusively.
+    for legacy_formula_root in (
+        "formula_convert",
+        "formula_to_table",
+        "formula_table",
+        "formula_style",
+        "equation_table_format",
+        "equation_numbering",
+        "chem_typography",
+    ):
+        upgraded.pop(legacy_formula_root, None)
+    page_setup = upgraded.get("page_setup")
+    if isinstance(page_setup, Mapping):
+        page_setup = dict(page_setup)
+        page_setup.setdefault("paper_size_mode", "force_template")
+        page_setup.setdefault("orientation_mode", "preserve_source")
+        page_setup.setdefault("margin_mode", "force_template")
+        page_setup.setdefault("paper_size_by_section", {})
+        page_setup.setdefault("orientation_by_section", {})
+        page_setup.setdefault("margin_by_section", {})
+        upgraded["page_setup"] = page_setup
+
+    section = upgraded.get("section")
+    if isinstance(section, Mapping):
+        section = dict(section)
+        legacy_break_type = section.get("section_break_type")
+        section.setdefault(
+            "boundary_mode",
+            "normalize_all" if legacy_break_type else "preserve_source",
+        )
+        section.setdefault("empty_break_policy", "preserve")
+        section.setdefault("caption_table_break_policy", "preserve")
+        header_footer = upgraded.get("header_footer")
+        behavior = (
+            header_footer.get("behavior")
+            if isinstance(header_footer, Mapping)
+            else None
+        )
+        link_to_previous = (
+            str(behavior.get("link_to_previous", "") or "")
+            if isinstance(behavior, Mapping)
+            else ""
+        )
+        section.setdefault(
+            "header_footer_link_mode",
+            "semantic_rebuild"
+            if link_to_previous == "never"
+            else "preserve_source",
+        )
+        upgraded["section"] = section
+
+    header_footer = upgraded.get("header_footer")
+    if isinstance(header_footer, Mapping):
+        header_footer = dict(header_footer)
+        page_number_plan = header_footer.get("page_number_plan")
+        if isinstance(page_number_plan, Mapping):
+            page_number_plan = dict(page_number_plan)
+            inherited_variant = {
+                "visibility": "inherit",
+                "template": "",
+                "alignment": "inherit",
+            }
+            page_number_plan.setdefault("first", copy.deepcopy(inherited_variant))
+            page_number_plan.setdefault("even", copy.deepcopy(inherited_variant))
+            header_footer["page_number_plan"] = page_number_plan
+        upgraded["header_footer"] = header_footer
+    return upgraded
+
+
+_THESIS_FORMULA_RULE_ROOTS = (
+    "formula_convert",
+    "formula_to_table",
+    "formula_table",
+    "formula_style",
+    "equation_numbering",
+    "chem_typography",
+)
+
+
+def upgrade_scene_formula_policy_ownership(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Move flat/template formula state into the thesis-plan rule aggregate.
+
+    This is a deliberately narrow canonical-schema upgrade.  It accepts the
+    immediately previous V1 representation and the corresponding V0.2 formula
+    blocks, but it does not repair unrelated missing or unknown fields.
+    """
+
+    upgraded = copy.deepcopy(dict(payload))
+    mode_id = str(upgraded.get("mode_id", "") or "").strip()
+    if not mode_id:
+        category = str(upgraded.get("category", "") or "").strip().casefold()
+        if category == "thesis":
+            mode_id = "thesis"
+            upgraded["mode_id"] = mode_id
+
+    rule_payload = asdict(ThesisFormulaRules())
+    existing_rules = upgraded.get("thesis_formula_rules")
+    canonical_rules = (
+        copy.deepcopy(dict(existing_rules))
+        if isinstance(existing_rules, Mapping)
+        else None
+    )
+    formula_master_explicit = bool(
+        isinstance(existing_rules, Mapping)
+        and "formula_enabled" in existing_rules
+    )
+    if isinstance(existing_rules, Mapping):
+        _merge_mapping_tree(rule_payload, existing_rules)
+
+    explicit_enabled: set[str] = set()
+    if isinstance(existing_rules, Mapping):
+        for root in (
+            "formula_convert",
+            "formula_to_table",
+            "formula_style",
+            "equation_numbering",
+            "chem_typography",
+        ):
+            value = existing_rules.get(root)
+            if isinstance(value, Mapping) and "enabled" in value:
+                explicit_enabled.add(root)
+
+    for root in _THESIS_FORMULA_RULE_ROOTS:
+        value = upgraded.pop(root, None)
+        if isinstance(value, Mapping):
+            block = copy.deepcopy(dict(value))
+            if "enabled" in block:
+                explicit_enabled.add(root)
+            if root == "formula_table":
+                block = _normalize_formula_table_payload(block)
+            _merge_mapping_tree(rule_payload[root], block)
+
+    equation_table = upgraded.pop("equation_table_format", None)
+    if isinstance(equation_table, Mapping):
+        if equation_table.get("enabled") is not None:
+            explicit_enabled.add("equation_numbering")
+            rule_payload["equation_numbering"]["enabled"] = bool(
+                equation_table.get("enabled")
+            )
+        numbering_format = equation_table.get("numbering_format")
+        if numbering_format not in (None, ""):
+            rule_payload["equation_numbering"]["numbering_format"] = copy.deepcopy(
+                numbering_format
+            )
+    for override_key in ("overrides", "template_overrides"):
+        raw_overrides = upgraded.get(override_key)
+        if not isinstance(raw_overrides, Mapping):
+            continue
+        nested = unflatten_dict(raw_overrides)
+        for root in _THESIS_FORMULA_RULE_ROOTS:
+            value = nested.get(root)
+            if not isinstance(value, Mapping):
+                continue
+            block = copy.deepcopy(dict(value))
+            if root == "formula_table":
+                block = _normalize_formula_table_payload(block)
+            _merge_mapping_tree(rule_payload[root], block)
+        equation_override = nested.get("equation_table_format")
+        if isinstance(equation_override, Mapping):
+            if equation_override.get("enabled") is not None:
+                rule_payload["equation_numbering"]["enabled"] = bool(
+                    equation_override.get("enabled")
+                )
+            numbering_format = equation_override.get("numbering_format")
+            if numbering_format not in (None, ""):
+                rule_payload["equation_numbering"]["numbering_format"] = (
+                    copy.deepcopy(numbering_format)
+                )
+        cleaned = {
+            str(key): copy.deepcopy(value)
+            for key, value in raw_overrides.items()
+            if str(key).split(".", 1)[0]
+            not in {*_THESIS_FORMULA_RULE_ROOTS, "equation_table_format"}
+        }
+        upgraded[override_key] = cleaned
+
+    raw_switches = upgraded.get("module_switches")
+    raw_switches = dict(raw_switches) if isinstance(raw_switches, Mapping) else {}
+    capability_switches = _extract_switches_from_capabilities(
+        upgraded.get("capabilities")
+    )
+    pipeline_switches = _extract_switches_from_pipeline(upgraded.get("pipeline"))
+    switch_sources = {**pipeline_switches, **capability_switches, **raw_switches}
+
+    if isinstance(upgraded.get("pipeline"), list):
+        pipeline_names = {
+            str(name) for name in upgraded.get("pipeline", [])
+        }
+        for root, accepted_names in (
+            ("formula_convert", {"formula_convert"}),
+            ("formula_to_table", {"formula_to_table"}),
+            ("formula_style", {"formula_style"}),
+            (
+                "equation_numbering",
+                {"equation_table_format", "equation_table_fmt"},
+            ),
+            (
+                "chem_typography",
+                {"chem_typography", "chem_typography_restore"},
+            ),
+        ):
+            if root not in explicit_enabled and pipeline_names.isdisjoint(
+                accepted_names
+            ):
+                rule_payload[root]["enabled"] = False
+
+    if "formula_convert" not in explicit_enabled and "formula_convert" in switch_sources:
+        rule_payload["formula_convert"]["enabled"] = bool(
+            switch_sources["formula_convert"]
+        )
+    if "chem_typography" not in explicit_enabled:
+        chem_switch = switch_sources.get(
+            "chem_typography",
+            switch_sources.get("chem_typography_restore"),
+        )
+        if chem_switch is not None:
+            rule_payload["chem_typography"]["enabled"] = bool(chem_switch)
+    for root, switch_name in (
+        ("formula_to_table", "formula_to_table"),
+        ("formula_style", "formula_style"),
+        ("equation_numbering", "equation_table_format"),
+    ):
+        if root not in explicit_enabled and switch_name in switch_sources:
+            rule_payload[root]["enabled"] = bool(switch_sources[switch_name])
+
+    # The immediately previous V1 schema had one composite switch.  Use it as
+    # a fallback for legacy sub-passes that did not persist their own state.
+    if "equation_table_format" in switch_sources:
+        combined_enabled = bool(switch_sources["equation_table_format"])
+        for root in ("formula_to_table", "formula_style", "equation_numbering"):
+            if root not in explicit_enabled and root not in switch_sources:
+                rule_payload[root]["enabled"] = combined_enabled
+
+    if not formula_master_explicit:
+        # Older payloads had no master gate. Infer it from their effective
+        # child workflow so migration neither activates nor suppresses work.
+        rule_payload["formula_enabled"] = any(
+            bool(rule_payload[root].get("enabled", False))
+            for root in (
+                "formula_convert",
+                "formula_to_table",
+                "formula_style",
+                "equation_numbering",
+            )
+        )
+
+    # A mixed transitional payload may contain both the canonical nested owner
+    # and stale V0/V1 root blocks. Legacy blocks only fill gaps; explicitly
+    # persisted canonical values must win the final merge.
+    if canonical_rules is not None:
+        _merge_mapping_tree(rule_payload, canonical_rules)
+
+    cleaned_switches = {
+        str(key): copy.deepcopy(value)
+        for key, value in raw_switches.items()
+        if normalize_module_name(str(key)) not in THESIS_FORMULA_MODULE_NAMES
+    }
+    upgraded["module_switches"] = cleaned_switches
+
+    if is_thesis_formula_mode(mode_id):
+        upgraded["thesis_formula_rules"] = rule_payload
+    else:
+        upgraded["thesis_formula_rules"] = None
+    return upgraded
+
+
+def _merge_mapping_tree(target: dict[str, Any], source: Mapping[str, Any]) -> None:
+    for key, value in source.items():
+        current = target.get(str(key))
+        if isinstance(current, dict) and isinstance(value, Mapping):
+            _merge_mapping_tree(current, value)
+        else:
+            target[str(key)] = copy.deepcopy(value)
 
 
 def _add_header_footer_compat_aliases(flat: dict[str, Any]) -> None:
@@ -179,13 +493,28 @@ def _add_header_footer_compat_aliases(flat: dict[str, Any]) -> None:
     if "header_footer.typography.italic" in flat:
         flat.setdefault("header_footer.italic", flat["header_footer.typography.italic"])
 
-    if "header_footer.footer.content_mode" in flat:
+    if "header_footer.page_number_plan.enabled" in flat:
+        flat.setdefault(
+            "header_footer.page_number_enabled",
+            flat["header_footer.page_number_plan.enabled"],
+        )
+    elif "header_footer.footer.content_mode" in flat:
         footer_mode = str(
             flat.get("header_footer.footer.content_mode", "page_number") or "page_number"
         )
         flat.setdefault(
             "header_footer.page_number_enabled",
             footer_mode in {"page_number", "page_number_with_text"},
+        )
+    if "header_footer.page_number_plan.template" in flat:
+        flat.setdefault(
+            "header_footer.page_number_template",
+            flat["header_footer.page_number_plan.template"],
+        )
+    if "header_footer.page_number_plan.alignment" in flat:
+        flat.setdefault(
+            "header_footer.page_number_alignment",
+            flat["header_footer.page_number_plan.alignment"],
         )
     if "header_footer.footer.enabled" in flat:
         flat.setdefault("header_footer.footer_enabled", flat["header_footer.footer.enabled"])
@@ -195,6 +524,16 @@ def _add_header_footer_compat_aliases(flat: dict[str, Any]) -> None:
         flat.setdefault("header_footer.footer_alignment", flat["header_footer.footer.alignment"])
 
     if (
+        "header_footer.header.hidden_selectors" in flat
+        or "header_footer.footer.hidden_selectors" in flat
+    ):
+        header_hidden = set(flat.get("header_footer.header.hidden_selectors") or [])
+        footer_hidden = set(flat.get("header_footer.footer.hidden_selectors") or [])
+        flat.setdefault(
+            "header_footer.hide_cover_header_footer",
+            "cover" in header_hidden and "cover" in footer_hidden,
+        )
+    elif (
         "header_footer.header.hide_on_cover" in flat
         or "header_footer.footer.hide_on_cover" in flat
     ):
@@ -304,9 +643,6 @@ _CANONICAL_TEMPLATE_SECTION_KEYS = (
     "header_footer",
     "watermark",
     "reference_style",
-    "formula_table",
-    "formula_style",
-    "equation_numbering",
 )
 
 _LEGACY_FLAT_TABLE_KEYS = {
@@ -335,10 +671,13 @@ _HEADER_FOOTER_TOP_LEVEL_KEYS = (
     "update_page_number",
     "update_header_line",
     "page_number_enabled",
+    "page_number_template",
+    "page_number_alignment",
     "footer_text",
     "footer_alignment",
     "header_border",
     "hide_cover_header_footer",
+    "suppress_header_footer_selectors",
     "front_matter_page_number_format",
     "front_matter_page_number_start",
     "body_page_number_format",
@@ -366,8 +705,6 @@ def normalize_template_payload(payload: Mapping[str, Any] | None) -> dict[str, A
             value = copy.deepcopy(dict(raw[key]))
             if key == "reference_style":
                 value = _normalize_reference_style_payload(value)
-            elif key == "formula_table":
-                value = _normalize_formula_table_payload(value)
             normalized[key] = value
 
     # heading_numbering：在 migration 层统一吸收 current / v2 / legacy 输入
@@ -577,7 +914,11 @@ def _normalize_reference_style_payload(payload: dict[str, Any]) -> dict[str, Any
 def _normalize_formula_table_payload(payload: dict[str, Any]) -> dict[str, Any]:
     for slot in ("before", "after"):
         value_key = f"formula_space_{slot}_pt"
+        legacy_value_key = f"formula_space_{slot}_value"
         unit_key = f"formula_space_{slot}_unit"
+        if value_key not in payload and legacy_value_key in payload:
+            payload[value_key] = payload.get(legacy_value_key)
+        payload.pop(legacy_value_key, None)
         if unit_key in payload:
             payload[unit_key] = normalize_spacing_unit(payload.get(unit_key))
         elif value_key in payload:
@@ -604,6 +945,71 @@ def _ensure_runtime_style_aliases(styles: dict[str, dict[str, Any]]) -> None:
             if candidate in styles:
                 styles[target] = copy.deepcopy(styles[candidate])
                 break
+
+
+_PAGE_SCOPE_LEAVES: tuple[str, ...] = (
+    "cover",
+    "abstract_cn",
+    "abstract_en",
+    "toc",
+    "body",
+    "references",
+    "errata",
+    "appendix",
+    "acknowledgment",
+    "resume",
+)
+
+_PAGE_SCOPE_GROUPS: dict[str, tuple[str, ...]] = {
+    "pre_numbering": ("cover",),
+    "front_matter": ("abstract_cn", "abstract_en", "toc"),
+    "abstracts": ("abstract_cn", "abstract_en"),
+    "back_matter": (
+        "references",
+        "errata",
+        "appendix",
+        "acknowledgment",
+        "resume",
+    ),
+    "all_numbered_content": (
+        "abstract_cn",
+        "abstract_en",
+        "toc",
+        "body",
+        "references",
+        "errata",
+        "appendix",
+        "acknowledgment",
+        "resume",
+    ),
+}
+
+_REMOVED_IMPLICIT_PAGE_SCOPE_SELECTORS = frozenset(
+    {"statement", "authorization", "front_note"}
+)
+
+
+def normalize_page_scope_selectors(selectors: Any) -> list[str]:
+    """Expand supported groups and retain only explicit, executable scopes."""
+
+    if not isinstance(selectors, (list, tuple)):
+        return []
+    expanded: list[str] = []
+    for raw_selector in selectors:
+        selector = str(raw_selector or "").strip()
+        if not selector or selector in _REMOVED_IMPLICIT_PAGE_SCOPE_SELECTORS:
+            continue
+        for candidate in _PAGE_SCOPE_GROUPS.get(selector, (selector,)):
+            if candidate in _REMOVED_IMPLICIT_PAGE_SCOPE_SELECTORS:
+                continue
+            if (
+                candidate not in _PAGE_SCOPE_LEAVES
+                and parse_special_title_selector(candidate) is None
+            ):
+                continue
+            if candidate not in expanded:
+                expanded.append(candidate)
+    return expanded
 
 
 def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -643,6 +1049,39 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
         if isinstance(normalized.get("variants"), Mapping)
         else {}
     )
+
+    legacy_variant_footer_modes: dict[str, str] = {}
+    legacy_variant_footer_templates: dict[str, str] = {}
+    for variant_name in ("default", "first", "even"):
+        variant = (
+            _copy_mapping(variants.get(variant_name))
+            if isinstance(variants.get(variant_name), Mapping)
+            else {}
+        )
+        variant_footer = (
+            _copy_mapping(variant.get("footer"))
+            if isinstance(variant.get("footer"), Mapping)
+            else {}
+        )
+        legacy_mode = str(variant_footer.get("mode", "inherit") or "inherit").strip().lower()
+        legacy_variant_footer_modes[variant_name] = legacy_mode
+        legacy_variant_footer_templates[variant_name] = str(
+            variant_footer.get("template", "") or ""
+        )
+        if legacy_mode == "page_number":
+            variant_footer["mode"] = "none"
+            variant_footer["fixed_text"] = ""
+            variant_footer["template"] = ""
+        elif legacy_mode == "page_number_with_text":
+            variant_footer["mode"] = "fixed"
+            variant_footer["template"] = ""
+        elif legacy_mode == "template" and "{page}" in legacy_variant_footer_templates[variant_name]:
+            variant_footer["mode"] = (
+                "fixed" if str(variant_footer.get("fixed_text", "") or "") else "none"
+            )
+            variant_footer["template"] = ""
+        variant["footer"] = variant_footer
+        variants[variant_name] = variant
 
     header_typography = (
         _copy_mapping(header.get("typography"))
@@ -703,8 +1142,6 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
     hide_cover = normalized.get("hide_cover_header_footer")
     if "enabled" not in header:
         header["enabled"] = bool(normalized.get("header_enabled", True))
-    if "hide_on_cover" not in header:
-        header["hide_on_cover"] = True if hide_cover is None else bool(hide_cover)
     header["typography"] = header_typography
     if "content_mode" not in footer:
         page_number_enabled = normalized.get("page_number_enabled")
@@ -712,13 +1149,20 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
             page_number_enabled = bool(update_page_number)
         footer_text = str(normalized.get("footer_text", "") or footer.get("fixed_text", "") or "")
         if page_number_enabled is False:
-            footer["content_mode"] = "fixed" if footer_text else "none"
+            legacy_footer_content_mode = "fixed" if footer_text else "none"
         elif footer_text:
-            footer["content_mode"] = "page_number_with_text"
+            legacy_footer_content_mode = "page_number_with_text"
         else:
-            footer["content_mode"] = "page_number"
+            legacy_footer_content_mode = "page_number"
     else:
-        footer["content_mode"] = str(footer.get("content_mode", "page_number") or "page_number")
+        legacy_footer_content_mode = str(
+            footer.get("content_mode", "page_number") or "page_number"
+        )
+    footer["content_mode"] = (
+        "fixed"
+        if legacy_footer_content_mode in {"fixed", "page_number_with_text"}
+        else "none"
+    )
     if "fixed_text" not in footer:
         footer["fixed_text"] = str(normalized.get("footer_text", "") or "")
     if "alignment" not in footer:
@@ -726,24 +1170,35 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
     footer["alignment"] = str(footer.get("alignment", "center") or "center").strip().lower()
     if footer["alignment"] not in {"left", "center", "right"}:
         footer["alignment"] = "center"
-    if "page_number_template" not in footer:
-        footer["page_number_template"] = str(normalized.get("page_number_template", "{page}") or "{page}")
-    if "hide_on_cover" not in footer:
-        footer["hide_on_cover"] = True if hide_cover is None else bool(hide_cover)
     if "enabled" not in footer:
         footer["enabled"] = bool(normalized.get("footer_enabled", True))
     footer["typography"] = footer_typography
 
     suppress_selectors_raw = normalized.get("suppress_header_footer_selectors")
-    suppress_selectors: list[str] = []
-    if isinstance(suppress_selectors_raw, list):
-        suppress_selectors = [
-            str(selector).strip()
-            for selector in suppress_selectors_raw
-            if str(selector or "").strip()
-        ]
-    elif bool(header.get("hide_on_cover", True)) and bool(footer.get("hide_on_cover", True)):
-        suppress_selectors = ["pre_numbering"]
+    legacy_common_hidden = normalize_page_scope_selectors(suppress_selectors_raw)
+    legacy_header_hide_cover = bool(
+        header.pop("hide_on_cover", True if hide_cover is None else bool(hide_cover))
+    )
+    legacy_footer_hide_cover = bool(
+        footer.pop("hide_on_cover", True if hide_cover is None else bool(hide_cover))
+    )
+    if not legacy_common_hidden and legacy_header_hide_cover and legacy_footer_hide_cover:
+        legacy_common_hidden = list(_PAGE_SCOPE_GROUPS["pre_numbering"])
+
+    header_hidden_explicit = isinstance(header.get("hidden_selectors"), list)
+    footer_hidden_explicit = isinstance(footer.get("hidden_selectors"), list)
+    header_hidden = normalize_page_scope_selectors(header.get("hidden_selectors"))
+    footer_hidden = normalize_page_scope_selectors(footer.get("hidden_selectors"))
+    if not header_hidden_explicit:
+        header_hidden = list(legacy_common_hidden)
+        if not header_hidden and legacy_header_hide_cover:
+            header_hidden = ["cover"]
+    if not footer_hidden_explicit:
+        footer_hidden = list(legacy_common_hidden)
+        if not footer_hidden and legacy_footer_hide_cover:
+            footer_hidden = ["cover"]
+    header["hidden_selectors"] = header_hidden
+    footer["hidden_selectors"] = footer_hidden
 
     phases_raw = page_number_plan.get("phases")
     phases: list[dict[str, Any]] = []
@@ -754,11 +1209,7 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
             phases.append(
                 {
                     "phase_id": str(item.get("phase_id", "") or ""),
-                    "selectors": [
-                        str(selector)
-                        for selector in item.get("selectors", [])
-                        if str(selector or "").strip()
-                    ],
+                    "selectors": normalize_page_scope_selectors(item.get("selectors", [])),
                     "visible": bool(item.get("visible", True)),
                     "number_format": str(item.get("number_format", "decimal") or "decimal"),
                     "start_mode": str(item.get("start_mode", "continue") or "continue"),
@@ -770,7 +1221,7 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
         phases = [
             {
                 "phase_id": "front",
-                "selectors": ["front_matter"],
+                "selectors": ["abstract_cn", "abstract_en", "toc"],
                 "visible": True,
                 "number_format": str(
                     normalized.get("front_matter_page_number_format", "upperRoman")
@@ -784,7 +1235,14 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
             },
             {
                 "phase_id": "body",
-                "selectors": ["body", "back_matter"],
+                "selectors": [
+                    "body",
+                    "references",
+                    "errata",
+                    "appendix",
+                    "acknowledgment",
+                    "resume",
+                ],
                 "visible": True,
                 "number_format": str(
                     normalized.get("body_page_number_format", "decimal") or "decimal"
@@ -801,6 +1259,57 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
             },
         ]
 
+    covered_roles = {
+        selector
+        for phase in phases
+        for selector in phase.get("selectors", [])
+    }
+    hidden_legacy_roles = [
+        role for role in legacy_common_hidden if role not in covered_roles
+    ]
+    if hidden_legacy_roles:
+        phases.insert(
+            0,
+            {
+                "phase_id": "pre_numbering",
+                "selectors": hidden_legacy_roles,
+                "visible": False,
+                "number_format": "decimal",
+                "start_mode": "restart",
+                "start_value": 1,
+            },
+        )
+
+    legacy_page_number_enabled = normalized.get("page_number_enabled")
+    if legacy_page_number_enabled is None and update_page_number is not None:
+        legacy_page_number_enabled = bool(update_page_number)
+    if legacy_page_number_enabled is None:
+        legacy_page_number_enabled = bool(footer.get("enabled", True)) and (
+            legacy_footer_content_mode in {"page_number", "page_number_with_text"}
+        )
+
+    legacy_template = footer.pop("page_number_template", None)
+    page_number_plan["enabled"] = bool(
+        page_number_plan.get("enabled", legacy_page_number_enabled)
+    )
+    page_number_plan["template"] = str(
+        page_number_plan.get(
+            "template",
+            legacy_template
+            if legacy_template is not None
+            else normalized.get("page_number_template", "{page}"),
+        )
+        or "{page}"
+    )
+    page_number_plan["alignment"] = str(
+        page_number_plan.get(
+            "alignment",
+            normalized.get("page_number_alignment", footer.get("alignment", "center")),
+        )
+        or "center"
+    ).strip().lower()
+    if page_number_plan["alignment"] not in {"left", "center", "right"}:
+        page_number_plan["alignment"] = "center"
     page_number_plan["phases"] = phases
     page_number_plan["on_missing_doc_tree"] = str(
         page_number_plan.get("on_missing_doc_tree", "warn_and_fallback")
@@ -810,14 +1319,48 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
         page_number_plan.get("validation_mode", "strict") or "strict"
     )
 
+    for variant_name in ("first", "even"):
+        raw_variant = (
+            _copy_mapping(page_number_plan.get(variant_name))
+            if isinstance(page_number_plan.get(variant_name), Mapping)
+            else {}
+        )
+        legacy_mode = legacy_variant_footer_modes.get(variant_name, "inherit")
+        default_visibility = (
+            "show"
+            if legacy_mode in {"page_number", "page_number_with_text", "template"}
+            else "inherit"
+        )
+        visibility = str(
+            raw_variant.get("visibility", default_visibility) or default_visibility
+        ).strip().lower()
+        if visibility not in {"inherit", "show", "hide"}:
+            visibility = "inherit"
+        alignment = str(raw_variant.get("alignment", "inherit") or "inherit").strip().lower()
+        if alignment not in {"inherit", "left", "center", "right"}:
+            alignment = "inherit"
+        template = str(raw_variant.get("template", "") or "")
+        if not template and legacy_mode in {"page_number", "page_number_with_text", "template"}:
+            template = legacy_variant_footer_templates.get(variant_name, "")
+        page_number_plan[variant_name] = {
+            "visibility": visibility,
+            "template": template,
+            "alignment": alignment,
+        }
+
     return {
         "header": header,
         "footer": footer,
         "behavior": behavior,
         "variants": variants,
         "page_number_plan": page_number_plan,
-        "suppress_header_footer_selectors": suppress_selectors,
     }
+
+
+def normalize_header_footer_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Public compatibility boundary for standalone header/footer presets."""
+
+    return _normalize_header_footer_payload(payload or {})
 
 
 # ── Scene normalize ─────────────────────────────────
@@ -833,7 +1376,6 @@ _SCENE_META_KEYS = (
     "template_id",
     "compatible_template_ids",
     "master_id",
-    "default_material_profile_id",
 )
 
 _LEGACY_SCENE_OPTION_BLOCKS: tuple[tuple[str, str | None, str | None], ...] = (
@@ -841,7 +1383,9 @@ _LEGACY_SCENE_OPTION_BLOCKS: tuple[tuple[str, str | None, str | None], ...] = (
     ("whitespace_normalize", "whitespace", "whitespace_normalize"),
     ("whitespace", "whitespace", "whitespace_normalize"),
     ("citation_link", "citation_link", "citation_link"),
-    ("formula_convert", "formula_convert", None),
+    ("formula_convert", "formula_convert", "formula_convert"),
+    ("formula_to_table", None, "equation_table_format"),
+    ("formula_style", "formula_style", "equation_table_format"),
     ("chem_typography", "chem_typography", "chem_typography"),
     ("equation_table_format", None, "equation_table_format"),
 )
@@ -858,19 +1402,41 @@ _SCENE_LIFTED_TEMPLATE_KEYS = {
     "section",
     "watermark",
     "reference_style",
-    "formula_style",
-    "equation_numbering",
+}
+_SCENE_LIFTED_TEMPLATE_ROOTS = {
+    "page_setup",
+    "styles",
+    "heading_numbering",
+    "heading_model",
+    "section",
+    "watermark",
+    "reference_style",
 }
 
 
 def normalize_scene_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     """将场景 / 混合 legacy payload 归一为当前 SceneWorkspace 结构。"""
-    raw = _copy_mapping(payload)
+    raw = upgrade_scene_formula_policy_ownership(_copy_mapping(payload))
     normalized: dict[str, Any] = {}
 
     for key in _SCENE_META_KEYS:
         if key in raw:
             normalized[key] = copy.deepcopy(raw[key])
+
+    if isinstance(raw.get("thesis_formula_rules"), Mapping):
+        normalized["thesis_formula_rules"] = _copy_mapping(
+            raw.get("thesis_formula_rules")
+        )
+    else:
+        normalized["thesis_formula_rules"] = None
+
+    # 0.2 scenes predate ``mode_id``. Its built-in thesis presets identified
+    # themselves through ``category=thesis``; retain that execution identity
+    # so the explicitly enabled block-formula containerization is not lost.
+    if not str(normalized.get("mode_id", "") or "").strip():
+        legacy_category = str(raw.get("category", "") or "").strip().casefold()
+        if legacy_category == "thesis":
+            normalized["mode_id"] = "thesis"
 
     if isinstance(raw.get("document_scope"), Mapping):
         normalized["document_scope"] = {
@@ -940,10 +1506,20 @@ def normalize_scene_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]
     else:
         switch_defaults = dict(get_default_module_switches())
 
-    switches: dict[str, Any] = dict(switch_defaults)
+    # Keep user-provided switches separate from defaults until canonical
+    # normalization. Otherwise a default canonical ``False`` looks explicit
+    # and suppresses legacy formula aliases that were actually enabled.
+    switches: dict[str, Any] = {}
     switches.update(pipeline_switches)
     switches.update(capability_switches)
     switches.update(copy.deepcopy(dict(direct_switches)))
+
+    legacy_equation_switches: list[bool] = []
+    has_canonical_equation_switch = "equation_table_format" in {
+        *pipeline_switches,
+        *capability_switches,
+        *direct_switches,
+    }
 
     for legacy_key, target_attr, module_name in _LEGACY_SCENE_OPTION_BLOCKS:
         block = raw.get(legacy_key)
@@ -953,13 +1529,33 @@ def normalize_scene_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]
         enabled = block_data.pop("enabled", None)
         if target_attr is not None:
             normalized[target_attr] = block_data
+        if legacy_key == "equation_table_format":
+            numbering_format = block_data.get("numbering_format")
+            if numbering_format not in (None, ""):
+                normalized.setdefault("equation_numbering", {}).setdefault(
+                    "numbering_format",
+                    copy.deepcopy(numbering_format),
+                )
+            if enabled is not None:
+                has_canonical_equation_switch = True
+        if (
+            legacy_key in {"formula_to_table", "formula_style"}
+            and enabled is not None
+        ):
+            legacy_equation_switches.append(bool(enabled))
+            continue
         if module_name is not None and enabled is not None:
             switches[module_name] = bool(enabled)
+
+    if legacy_equation_switches and not has_canonical_equation_switch:
+        switches["equation_table_format"] = any(legacy_equation_switches)
 
     normalized["module_switches"] = normalize_module_switches(
         switches,
         defaults=switch_defaults,
     )
+    for module_name in THESIS_FORMULA_MODULE_NAMES:
+        normalized["module_switches"].pop(module_name, None)
 
     if "strict_mode" in raw:
         normalized["strict_mode"] = bool(raw["strict_mode"])
@@ -1008,7 +1604,7 @@ def _extract_switches_from_capabilities(
     if not isinstance(capabilities, Mapping):
         return {}
     return {
-        normalize_module_name(str(name)): bool(enabled)
+        str(name): bool(enabled)
         for name, enabled in capabilities.items()
     }
 
@@ -1016,7 +1612,7 @@ def _extract_switches_from_capabilities(
 def _extract_switches_from_pipeline(pipeline: Any) -> dict[str, bool]:
     if not isinstance(pipeline, list):
         return {}
-    return {normalize_module_name(str(name)): True for name in pipeline}
+    return {str(name): True for name in pipeline}
 
 
 def _extract_template_overrides_from_payload(
@@ -1031,6 +1627,7 @@ def _extract_template_overrides_from_payload(
         key: val
         for key, val in flat.items()
         if key not in _TEMPLATE_META_KEYS
+        and str(key).split(".", 1)[0] in _SCENE_LIFTED_TEMPLATE_ROOTS
     }
 
 

@@ -14,7 +14,7 @@ from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
 from lxml.etree import XMLSyntaxError
 
-from src.config.asset_resolution import file_content_revision
+from src.shared.files.content_hash import file_content_revision
 from src.config.document_structure_contract import (
     DetectedRegion,
     DocumentStructureEvidence,
@@ -28,7 +28,7 @@ from src.config.section_semantics import canonicalize_section_type
 from src.modules.structure.heading_recognition import analyze_document_tree
 
 
-DETECTOR_REVISION = "logical-regions:v1"
+DETECTOR_REVISION = "logical-regions:v2"
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DOCUMENT_ANALYSIS_ERRORS = (
     OSError,

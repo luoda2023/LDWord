@@ -116,6 +116,11 @@ def test_heading_numbering_apply_honors_start_at_and_child_restart():
     from src.modules.structure.heading_numbering import HeadingNumberingModule
     from src.pipeline.context import PipelineContext
     from src.pipeline.tracker import ChangeTracker
+    from src.shared.engine.heading_numbering_ooxml import (
+        effective_numbering,
+        managed_level_start,
+        managed_level_text,
+    )
 
     doc = Document()
     doc.add_paragraph("Chapter A")
@@ -147,11 +152,24 @@ def test_heading_numbering_apply_honors_start_at_and_child_restart():
 
     HeadingNumberingModule().apply(doc, cfg, ChangeTracker(), context)
 
-    assert doc.paragraphs[0].text == "3 Chapter A"
-    assert doc.paragraphs[1].text == "3.0 Section A"
-    assert doc.paragraphs[2].text == "3.1 Section B"
-    assert doc.paragraphs[3].text == "4 Chapter B"
-    assert doc.paragraphs[4].text == "4.0 Section C"
+    assert [paragraph.text for paragraph in doc.paragraphs] == [
+        "Chapter A",
+        "Section A",
+        "Section B",
+        "Chapter B",
+        "Section C",
+    ]
+    assert [effective_numbering(paragraph).level for paragraph in doc.paragraphs] == [
+        0,
+        1,
+        1,
+        0,
+        1,
+    ]
+    assert managed_level_start(doc, 1) == 3
+    assert managed_level_start(doc, 2) == 0
+    assert managed_level_text(doc, 1) == "%1 "
+    assert managed_level_text(doc, 2) == "%1.%2 "
 
 
 def test_heading_numbering_restart_on_document_keeps_child_counter_continuous():
@@ -159,6 +177,10 @@ def test_heading_numbering_restart_on_document_keeps_child_counter_continuous():
     from src.modules.structure.heading_numbering import HeadingNumberingModule
     from src.pipeline.context import PipelineContext
     from src.pipeline.tracker import ChangeTracker
+    from src.shared.engine.heading_numbering_ooxml import (
+        effective_numbering,
+        managed_level_restart,
+    )
 
     doc = Document()
     doc.add_paragraph("Chapter A")
@@ -187,8 +209,14 @@ def test_heading_numbering_restart_on_document_keeps_child_counter_continuous():
 
     HeadingNumberingModule().apply(doc, cfg, ChangeTracker(), context)
 
-    assert doc.paragraphs[1].text == "1 Section A"
-    assert doc.paragraphs[3].text == "2 Section B"
+    assert [paragraph.text for paragraph in doc.paragraphs] == [
+        "Chapter A",
+        "Section A",
+        "Chapter B",
+        "Section B",
+    ]
+    assert all(effective_numbering(paragraph) is not None for paragraph in doc.paragraphs)
+    assert managed_level_restart(doc, 2) == 0
 
 
 def test_heading_numbering_restart_on_specific_heading_only_resets_on_that_level():
@@ -196,6 +224,10 @@ def test_heading_numbering_restart_on_specific_heading_only_resets_on_that_level
     from src.modules.structure.heading_numbering import HeadingNumberingModule
     from src.pipeline.context import PipelineContext
     from src.pipeline.tracker import ChangeTracker
+    from src.shared.engine.heading_numbering_ooxml import (
+        effective_numbering,
+        managed_level_restart,
+    )
 
     doc = Document()
     doc.add_paragraph("Chapter A")
@@ -223,9 +255,18 @@ def test_heading_numbering_restart_on_specific_heading_only_resets_on_that_level
 
     HeadingNumberingModule().apply(doc, cfg, ChangeTracker(), context)
 
-    assert doc.paragraphs[2].text == "1 Item A"
-    assert doc.paragraphs[4].text == "2 Item B"
-    assert doc.paragraphs[7].text == "1 Item C"
+    assert [paragraph.text for paragraph in doc.paragraphs] == [
+        "Chapter A",
+        "Section A",
+        "Item A",
+        "Section B",
+        "Item B",
+        "Chapter B",
+        "Section C",
+        "Item C",
+    ]
+    assert all(effective_numbering(paragraph) is not None for paragraph in doc.paragraphs)
+    assert managed_level_restart(doc, 3) == 1
 
 
 def test_heading_numbering_excludes_level_from_native_toc_outline():

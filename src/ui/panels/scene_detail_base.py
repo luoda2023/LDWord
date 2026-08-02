@@ -11,18 +11,6 @@ from src.shared.ui.theme import bind_theme, get_theme
 from src.ui.adapters.field_display_names import field_display_context, field_display_name
 
 _SCENE_DETAIL_SUMMARY_COPY: dict[str, dict[str, str]] = {
-    "风险检查": {
-        "main_value": "执行前检查",
-        "main_detail": "配置 Markdown 修复、对象预检、报告粒度和高风险处理。",
-        "risk_value": "高风险先提醒",
-        "risk_detail": "宏、嵌入对象、修订等会按策略提醒、跳过或阻断。",
-    },
-    "模板 Token 校验": {
-        "main_value": "Token 存在性校验",
-        "main_detail": "逐项核对模板 Token 是否存在于当前资料包，并查看填写内容。",
-        "risk_value": "不一致会影响生成",
-        "risk_detail": "模板有而资料包缺少、或资料包要求但模板缺少时会集中提示。",
-    },
     "生成结果": {
         "main_value": "交付版本",
         "main_detail": "配置最终稿、对比稿、报告、资料清单和命名规则。",
@@ -50,8 +38,8 @@ def _scene_detail_summary_items(
             label="风险说明",
             value=copy.get("risk_value", "有风险会提醒"),
             detail=copy.get(
-                "risk_detail",
-                "阻断、跳过或人工确认会在风险检查和执行报告里说明。",
+            "risk_detail",
+                "阻断、跳过或人工确认会在执行状态和处理报告里说明。",
             ),
             variant="warning",
         ),

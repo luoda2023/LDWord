@@ -70,7 +70,11 @@ def test_gui_startup_wires_splash_to_main_window_readiness_signals():
     assert "splash.show()" in source
     assert "win.startup_status_changed.connect(splash.set_status)" in source
     assert "win.startup_ready.connect(_show_main_window)" in source
-    assert "QTimer.singleShot(80, _reveal_main_window)" in source
+    assert source.index("splash.show()") < source.index(
+        "from src.ui.main_window import MainWindow"
+    )
+    assert "QTimer.singleShot(80, _reveal_main_window)" not in source
+    assert "win.setWindowOpacity(0.0)" not in source
     assert "splash.finish_and_close()" in source
 
 

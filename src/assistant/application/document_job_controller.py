@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from src.application.materials.execution import ExecutionMaterialSnapshot
 from src.assistant.adapters.production_adapter import AssistantProductionAdapter
 from src.assistant.adapters.workspace_state_adapter import WorkspaceSnapshot
 from src.assistant.application.execution_lease import (
@@ -17,13 +18,12 @@ from src.assistant.application.plan_builder import FormDocumentPlanBuilder
 from src.assistant.contracts.document_plan import DocumentPlan
 from src.assistant.contracts.execution import ExecutionApproval, PreflightReceipt
 from src.assistant.contracts.permissions import PermissionDecision, ToolRiskLevel
-from src.assistant.tools.gateway import FormToolGateway
-from src.assistant.tools.registry import ToolCall, ToolDefinition, ToolRegistry
 from src.assistant.storage.execution_journal import (
     ExecutionJournalRecord,
     ExecutionJournalStore,
 )
-from src.config.material_context import MaterialExecutionContext
+from src.assistant.tools.gateway import FormToolGateway
+from src.assistant.tools.registry import ToolCall, ToolDefinition, ToolRegistry
 
 
 class DocumentJobController:
@@ -61,7 +61,7 @@ class DocumentJobController:
         self,
         plan: DocumentPlan,
         *,
-        material_context: MaterialExecutionContext | None = None,
+        material_snapshot: ExecutionMaterialSnapshot | None = None,
     ) -> PreflightReceipt:
         call_id = uuid4().hex
         registry = ToolRegistry(
@@ -72,7 +72,7 @@ class DocumentJobController:
                     ToolRiskLevel.LOCAL_CONTENT_READ,
                     lambda args: self.production.build_preflight(
                         DocumentPlan.from_dict(args["plan"]),
-                        material_context=material_context,
+                        material_snapshot=material_snapshot,
                     ).to_dict(),
                 ),
             )
@@ -98,7 +98,12 @@ class DocumentJobController:
         plan: DocumentPlan,
         preflight: PreflightReceipt,
     ) -> ExecutionApproval:
-        if not preflight.ready or preflight.plan_fingerprint != plan.fingerprint:
+        if (
+            not preflight.ready
+            or preflight.plan_id != plan.plan_id
+            or preflight.plan_revision != plan.revision
+            or preflight.plan_fingerprint != plan.fingerprint
+        ):
             raise ValueError("Only the current ready preflight can be approved")
         return ExecutionApproval(
             approval_id=uuid4().hex,
@@ -119,7 +124,7 @@ class DocumentJobController:
         plan: DocumentPlan,
         preflight: PreflightReceipt,
         approval: ExecutionApproval,
-        material_context: MaterialExecutionContext | None = None,
+        material_snapshot: ExecutionMaterialSnapshot | None = None,
         progress_callback: Callable[[int, int, str], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
         execution_id: str = "",
@@ -209,7 +214,7 @@ class DocumentJobController:
                             DocumentPlan.from_dict(args["plan"]),
                             PreflightReceipt.from_dict(args["preflight"]),
                             ExecutionApproval.from_dict(args["approval"]),
-                            material_context=material_context,
+                            material_snapshot=material_snapshot,
                             progress_callback=progress_callback,
                             cancel_check=cancel_check,
                         ),

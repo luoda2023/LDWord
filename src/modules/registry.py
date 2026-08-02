@@ -35,6 +35,7 @@ from src.modules.insert.watermark import WatermarkModule
 
 # ── 特殊 ────────────────────────────────────────
 from src.modules.special.chem_typography import ChemTypographyModule
+from src.modules.special.formula_convert import FormulaConvertModule
 from src.modules.validate.md_cleanup import MdCleanupModule
 from src.modules.validate.whitespace_normalize import WhitespaceNormalizeModule
 from src.modules.validate.validation import ValidationModule
@@ -68,6 +69,7 @@ ALL_MODULES: list[type[BaseModule]] = [
     WatermarkModule,
     # 特殊
     ChemTypographyModule,
+    FormulaConvertModule,
     MdCleanupModule,
     WhitespaceNormalizeModule,
     ValidationModule,

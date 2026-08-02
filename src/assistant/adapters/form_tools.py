@@ -8,7 +8,14 @@ from typing import Any
 
 from docx import Document
 
-from src.assistant.adapters.production_adapter import AssistantProductionAdapter, file_sha256
+from src.application.exam_user_plan_creation import (
+    PlanActivator,
+    create_exam_user_plan_from_docx,
+)
+from src.assistant.adapters.production_adapter import (
+    AssistantProductionAdapter,
+    file_sha256,
+)
 from src.assistant.adapters.workspace_state_adapter import WorkspaceSnapshot
 from src.assistant.contracts.permissions import ToolRiskLevel
 from src.assistant.domain.docx_format_evidence import (
@@ -22,7 +29,6 @@ from src.config.scene_natural_request_router import (
 )
 from src.config.work_mode import list_work_modes
 
-
 SnapshotProvider = Callable[[], WorkspaceSnapshot]
 
 
@@ -30,6 +36,7 @@ def build_form_tool_registry(
     snapshot: WorkspaceSnapshot | SnapshotProvider,
     *,
     production: AssistantProductionAdapter | None = None,
+    plan_activator: PlanActivator | None = None,
 ) -> ToolRegistry:
     snapshot_provider = snapshot if callable(snapshot) else (lambda: snapshot)
     registry = ToolRegistry()
@@ -121,6 +128,23 @@ def build_form_tool_registry(
                     "max_characters": {"type": "integer", "minimum": 1, "maximum": 100000},
                 },
                 "required": ["path"],
+                "additionalProperties": False,
+            },
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            "create_exam_user_plan_from_docx",
+            "把现用完整试卷改造成可复用卷面，并创建仅属于当前用户的试卷方案",
+            ToolRiskLevel.DURABLE_WORKSPACE_WRITE,
+            lambda args: _create_exam_user_plan(args, plan_activator),
+            {
+                "type": "object",
+                "properties": {
+                    "source_path": {"type": "string"},
+                    "plan_name": {"type": "string", "maxLength": 120},
+                },
+                "required": ["source_path"],
                 "additionalProperties": False,
             },
         )
@@ -244,6 +268,34 @@ def _inspect_input_document(args: Mapping[str, Any]) -> dict[str, Any]:
     if bool(args.get("include_format_evidence", False)):
         result["format_evidence"] = extract_docx_format_evidence(path)
     return result
+
+
+def _create_exam_user_plan(
+    args: Mapping[str, Any],
+    plan_activator: PlanActivator | None,
+) -> dict[str, Any]:
+    source_path = str(args.get("source_path") or "").strip()
+    if not source_path:
+        raise ValueError("source_path is required")
+    plan_name = str(args.get("plan_name") or "").strip() or None
+    result = create_exam_user_plan_from_docx(
+        source_path,
+        plan_name=plan_name,
+        activate=plan_activator,
+    )
+    return {
+        "plan_id": result.plan_id,
+        "plan_name": result.plan_name,
+        "plan_file_name": result.plan_path.name,
+        "master_id": result.master_id,
+        "master_file_name": result.master_path.name,
+        "source_sha256": result.source_sha256,
+        "master_sha256": result.master_sha256,
+        "preflight_status": result.preflight_status,
+        "activation_attempted": result.activation_attempted,
+        "activation_succeeded": result.activation_succeeded,
+        "activation_error": result.activation_error,
+    }
 
 
 def _mode_schema() -> dict[str, Any]:

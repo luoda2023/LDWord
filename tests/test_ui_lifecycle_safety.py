@@ -1,6 +1,8 @@
 from PySide6.QtCore import QCoreApplication
 from shiboken6 import isValid
 
+from src.assistant.storage.models import AssistantSessionSummary
+from src.assistant.ui.session_sidebar import AssistantSessionSidebar
 from src.qt_api import QApplication, QEvent, QScrollArea, QVBoxLayout, QWidget
 from src.shared.ui.compact_row_actions import CompactRowActions
 from src.shared.ui.deferred_call import defer_qt_method
@@ -46,6 +48,33 @@ def test_deferred_qt_method_coalesces_identical_calls_in_same_event_loop():
         assert calls == ["once"]
     finally:
         target.close()
+
+
+def test_session_row_focus_sync_is_safe_when_row_is_removed_before_it_runs(qapp):
+    sidebar = AssistantSessionSidebar()
+    sidebar.replace_sessions(
+        (
+            AssistantSessionSummary(
+                session_id="session-to-remove",
+                title="Temporary session",
+                updated_at="2026-07-31T00:00:00+00:00",
+            ),
+        )
+    )
+    sidebar.show()
+    qapp.processEvents()
+
+    row = sidebar.recent_list.session_row("session-to-remove")
+    assert row is not None
+    row.title_button.setFocus()
+    qapp.processEvents()
+    row.title_button.clearFocus()
+    sidebar.replace_sessions(())
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+    assert isValid(row) is False
+    qapp.processEvents()
+    sidebar.close()
 
 
 def test_deferred_layout_receivers_can_be_deleted_before_next_event_loop():

@@ -65,6 +65,19 @@ ALIGNMENT_MAP: dict[str, int] = {
 }
 
 
+def caption_kind_from_text(text: object) -> str | None:
+    """Return the kind-specific style key owner for a caption paragraph."""
+
+    value = str(text or "").strip()
+    if not value:
+        return None
+    if _RE_FIG_CAPTION.match(value) or _RE_FIG_CAPTION_CONT_LINE.match(value):
+        return "figure"
+    if _RE_TBL_CAPTION.match(value):
+        return "table"
+    return None
+
+
 @dataclass
 class CaptionInfo:
     """Detected caption metadata."""

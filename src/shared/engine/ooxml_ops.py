@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from lxml import etree
+from docx.oxml import OxmlElement
 
 # Word Open XML 命名空间
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -43,6 +44,48 @@ def find_or_create(parent, tag: str):
     child = parent.find(qn(tag))
     if child is None:
         child = etree.SubElement(parent, qn(tag))
+    return child
+
+
+def get_or_add_paragraph_properties_first(paragraph_element):
+    """Return ``w:pPr`` and enforce its required first-child position."""
+
+    paragraph_properties = paragraph_element.find(qn("w:pPr"))
+    if paragraph_properties is None:
+        getter = getattr(paragraph_element, "get_or_add_pPr", None)
+        if callable(getter):
+            paragraph_properties = getter()
+        else:
+            paragraph_properties = OxmlElement("w:pPr")
+            paragraph_element.insert(0, paragraph_properties)
+
+    if len(paragraph_element) and paragraph_element[0] is not paragraph_properties:
+        paragraph_element.remove(paragraph_properties)
+        paragraph_element.insert(0, paragraph_properties)
+    return paragraph_properties
+
+
+def find_or_create_before(parent, tag: str, successor_tags: tuple[str, ...]):
+    """Find/create *tag* and keep it before schema-defined successors.
+
+    OOXML complex types use ordered child sequences. Appending ``w:type`` or
+    ``w:pgNumType`` to the end of ``w:sectPr`` produces XML that python-docx
+    can reopen but Microsoft Word may ignore during pagination.
+    """
+
+    child = parent.find(qn(tag))
+    if child is None:
+        child = OxmlElement(tag)
+    else:
+        parent.remove(child)
+
+    successor_qnames = {qn(successor_tag) for successor_tag in successor_tags}
+    for index, existing in enumerate(parent):
+        if existing.tag in successor_qnames:
+            parent.insert(index, child)
+            break
+    else:
+        parent.append(child)
     return child
 
 

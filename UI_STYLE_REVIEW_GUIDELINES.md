@@ -134,7 +134,9 @@ python demo_style_gallery.py
   - `ModuleStepList`：任务管道的待办清单列表。
 
 ### 6. 弹窗对话框体系 (Dialogs)
-- **调用入口**：`info()`, `success()`, `warning()`, `error()`, `confirm()`, `input_text()` (`src/shared/ui/dialogs.py`)
+- **调用入口**：`info()`, `success()`, `warning()`, `error()`, `confirm()`, `decision()`, `input_text()` (`src/shared/ui/dialogs.py`)
+- **业务弹窗边界**：生产 UI 不得直接调用 `QMessageBox` 或 `QInputDialog`。文件、文件夹和颜色等系统资源选择器可继续使用 Qt 原生选择器。
+- **多动作规则**：三选一或多动作确认必须使用 `DialogAction` 显式声明动作 ID、按钮变体、默认动作和 Esc 动作；危险动作不得作为默认按钮。
 - **审阅要点**：
   - 采用了 **无边框双层解耦透明底座** 的自绘逻辑，以解决高分屏文字发虚。
   - 对话框的毛玻璃阴影扩散范围 (`shadow_blur_xl`) 是否高级？

@@ -1,80 +1,34 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions
 set "REPO_ROOT=%~dp0..\.."
 for %%I in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fI"
 cd /d "%REPO_ROOT%"
 
-set "BASE_PY_CMD="
-set "BASE_PY_LABEL="
-
-rem preferred probe order starts with: py -3.14 --version
-for %%V in (3.14 3.13 3.12 3.11 3.10) do (
-    py -%%V --version >nul 2>&1
-    if !errorlevel! == 0 (
-        set "BASE_PY_CMD=py -%%V"
-        set "BASE_PY_LABEL=Python Launcher (%%V)"
-        goto :found_base
-    )
-)
-
-python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
-if %errorlevel%==0 (
-    set "BASE_PY_CMD=python"
-    set "BASE_PY_LABEL=python"
-    goto :found_base
-)
-
-:found_base
-if not defined BASE_PY_CMD (
-    echo [ERROR] No usable Python interpreter found.
-    echo Install Python 3.10+ and run this script again.
-    pause
+py -3.12 --version >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Alavette Form V1.0 release tooling requires CPython 3.12.
     exit /b 1
 )
 
-echo [1/4] Base interpreter: %BASE_PY_LABEL%
 if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" -m pip --version >nul 2>&1
+    ".venv\Scripts\python.exe" -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)"
     if errorlevel 1 (
-        echo [WARN] Existing .venv is missing pip, recreating virtual environment...
-        rmdir /s /q ".venv"
-    )
-)
-if not exist ".venv\Scripts\python.exe" (
-    %BASE_PY_CMD% -m venv ".venv"
-    if errorlevel 1 (
-        echo [ERROR] Failed to create .venv
-        pause
+        echo [ERROR] Existing .venv is not CPython 3.12. Move or remove it explicitly.
         exit /b 1
     )
+) else (
+    py -3.12 -m venv ".venv"
+    if errorlevel 1 exit /b 1
 )
 
-echo [2/4] Ensure pip is available
-".venv\Scripts\python.exe" -m pip --version >nul 2>&1
-if errorlevel 1 (
-    ".venv\Scripts\python.exe" -m ensurepip --upgrade
-    if errorlevel 1 (
-        echo [ERROR] Failed to bootstrap pip in .venv
-        pause
-        exit /b 1
-    )
-)
+echo [1/3] Pin pip
+".venv\Scripts\python.exe" -m pip install "pip==26.1.2"
+if errorlevel 1 exit /b 1
 
-echo [3/4] Upgrade pip
-".venv\Scripts\python.exe" -m pip install --upgrade pip
-if errorlevel 1 (
-    echo [ERROR] Failed to upgrade pip
-    pause
-    exit /b 1
-)
+echo [2/3] Install reviewed release dependencies
+".venv\Scripts\python.exe" -m pip install -c "requirements-release.lock" -e ".[dev,build]"
+if errorlevel 1 exit /b 1
 
-echo [4/4] Install dependencies
-".venv\Scripts\python.exe" -m pip install -e ".[dev,build]"
-if errorlevel 1 (
-    echo [ERROR] Failed to install dependencies
-    pause
-    exit /b 1
-)
-
-echo [OK] Environment is ready. Run "start_app.bat" to start the app.
-exit /b 0
+echo [3/3] Verify environment lock
+".venv\Scripts\python.exe" "scripts\verify_release_environment.py"
+exit /b %errorlevel%

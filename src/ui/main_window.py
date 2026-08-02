@@ -27,6 +27,7 @@ from src.qt_api import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QPushButton,
     QStackedWidget,
     QTimer,
     QVBoxLayout,
@@ -46,14 +47,15 @@ from src.config.library import (
 )
 from src.config.work_mode import get_work_mode
 from src.ui.bridge import PanelBridge, navigation_intent_value
+from src.ui.panel_loading import PanelLoadState
 from src.ui.panel_registry import create_panel
-from src.ui.panel_specs import application_panel_specs
+from src.ui.panel_specs import PANEL_SPECS
 from src.ui.sidebar import Sidebar
 from src.ui.template_import_coordinator import TemplateImportCoordinator
 from src.ui.title_bar import TitleBar
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("alavette.gui.main_window")
 
 
 WORK_MODE_DIRTY_SAVE = "save"
@@ -104,24 +106,59 @@ if sys.platform == "win32":
 class _PlaceholderPanel(QWidget):
     """占位面板 — 面板未实现时显示。"""
 
+    retry_requested = Signal()
+
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self._title = title
         layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.addStretch()
         self._label = QLabel(f"{title}\n\n暂未开放")
         self._label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._label)
+        self._retry_button = QPushButton("重试", self)
+        self._retry_button.setFixedWidth(104)
+        self._retry_button.setVisible(False)
+        self._retry_button.clicked.connect(self.retry_requested.emit)
+        layout.addWidget(self._retry_button, 0, Qt.AlignHCenter)
+        layout.addStretch()
         self._apply_theme()
         bind_theme(self, self._apply_theme)
 
     def set_loading(self, title: str | None = None) -> None:
         label = str(title or self._title or "").strip() or "页面"
-        self._label.setText(f"{label}\n\n正在加载...")
+        self._label.setText(f"{label}\n\n正在打开...")
+        self._retry_button.setVisible(False)
+
+    def set_unloaded(self) -> None:
+        self._label.setText(f"{self._title}\n\n暂未加载")
+        self._retry_button.setVisible(False)
+
+    def set_failed(self, error: str = "") -> None:
+        self._label.setText(f"{self._title}\n\n打开失败")
+        diagnostic = str(error or "").strip()
+        self.setToolTip(diagnostic)
+        self.setAccessibleDescription(diagnostic)
+        self._retry_button.setVisible(True)
 
     def _apply_theme(self) -> None:
         t = get_theme()
         self._label.setStyleSheet(
             f"font-size: {t.font_size_xl}px; color: {t.text_hint};"
+        )
+        self._retry_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                min-height: 32px;
+                color: {t.primary};
+                background: {t.bg_card};
+                border: 1px solid {t.border};
+                border-radius: 8px;
+                padding: 0 14px;
+            }}
+            QPushButton:hover {{ background: {t.primary_light}; }}
+            """
         )
         self.setStyleSheet(
             f"background: {t.bg_window}; border-bottom-right-radius: {t.shell_radius}px;"
@@ -133,6 +170,7 @@ class MainWindow(QMainWindow):
 
     startup_status_changed = Signal(str)
     startup_ready = Signal()
+    panel_load_state_changed = Signal(str, str)
 
     WINDOW_TITLE = APP_DISPLAY_NAME_FULL
     MIN_WIDTH = 800
@@ -144,13 +182,10 @@ class MainWindow(QMainWindow):
         parent=None,
         *,
         enable_background_services: bool = False,
-        include_optional_panels: bool = False,
     ):
         super().__init__(parent)
         self._close_accepted = False
-        self._panel_specs = application_panel_specs(
-            include_optional=include_optional_panels
-        )
+        self._panel_specs = PANEL_SPECS
         self.setWindowTitle(self.WINDOW_TITLE)
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -221,15 +256,24 @@ class MainWindow(QMainWindow):
         self.panel_stack.setObjectName("main_panel_stack")
         self.panel_stack.setFrameShape(QFrame.NoFrame)
         self._loaded_panel_indexes: set[int] = set()
+        self._panel_load_states: dict[int, PanelLoadState] = {}
+        self._panel_load_errors: dict[int, str] = {}
+        self._pending_panel_intents: dict[int, object] = {}
+        self._panel_placeholders: dict[int, _PlaceholderPanel] = {}
+        self._panel_load_timers: dict[int, QTimer] = {}
         for index, spec in enumerate(self._panel_specs):
             if index == 0:
-                panel = create_panel(
-                    spec.id,
-                    self.bridge,
-                ) or _PlaceholderPanel(spec.title)
+                panel = create_panel(spec.id, self.bridge)
                 self._loaded_panel_indexes.add(index)
+                self._panel_load_states[index] = PanelLoadState.READY
             else:
                 panel = _PlaceholderPanel(spec.title)
+                panel.set_unloaded()
+                panel.retry_requested.connect(
+                    lambda _checked=False, target=index: self._request_panel_load(target)
+                )
+                self._panel_placeholders[index] = panel
+                self._panel_load_states[index] = PanelLoadState.UNLOADED
             self.panel_stack.addWidget(panel)
 
         container_layout = QVBoxLayout(self._container)
@@ -262,39 +306,12 @@ class MainWindow(QMainWindow):
         if sys.platform == "win32":
             self._install_native_frame()
 
-        # 窗口首次显示后，在事件循环空闲时逐个预加载剩余面板
-        preload_priority = {
-            "template": 0,
-            "scene": 1,
-            "preferences": 2,
-        }
-        background_preload_panel_ids = {"template", "scene"}
-        self._preload_queue = sorted(
-            [
-                i
-                for i in range(len(self._panel_specs))
-                if i not in self._loaded_panel_indexes
-                and self._panel_specs[i].id in background_preload_panel_ids
-            ],
-            key=lambda i: preload_priority.get(self._panel_specs[i].id, i),
-        )
         self._startup_ready_emitted = False
-        self._startup_detail_preload_done = False
-        self._idle_preload_started = False
-        self._idle_preload_delay_ms = 240
-        self._async_panel_load_ids = (
-            {"assets"} if include_optional_panels else set()
-        )
-        self._async_panel_loads_in_progress: set[int] = set()
-        self._async_panel_load_timers: dict[int, QTimer] = {}
+        self._panel_loads_in_progress: set[int] = set()
 
         self._startup_ready_timer = QTimer(self)
         self._startup_ready_timer.setSingleShot(True)
         self._startup_ready_timer.timeout.connect(self._emit_startup_ready)
-
-        self._idle_preload_timer = QTimer(self)
-        self._idle_preload_timer.setSingleShot(True)
-        self._idle_preload_timer.timeout.connect(self._preload_next)
 
         self._startup_ready_timer.start(0)
 
@@ -441,6 +458,14 @@ class MainWindow(QMainWindow):
         )
 
     def _resolve_dirty_work_mode_switch_action(self, mode) -> str:
+        scene_panel = self._loaded_panel_for_id("scene")
+        pause_autosave = getattr(
+            scene_panel,
+            "pause_pending_scene_autosave",
+            None,
+        )
+        if self.bridge.is_scene_dirty() and callable(pause_autosave):
+            pause_autosave()
         if not self._work_mode_switch_has_dirty():
             return ""
         action = self._prompt_work_mode_dirty_switch_action(mode)
@@ -848,9 +873,16 @@ class MainWindow(QMainWindow):
         panel_index = self._panel_index_from_intent(intent)
         if panel_index < 0:
             return
-        panel = self._show_panel(panel_index, allow_async=False)
+        panel = self._show_panel(panel_index, pending_intent=intent)
+        if self.panel_stack.currentIndex() != panel_index:
+            self.sidebar.select(self.panel_stack.currentIndex())
+            return
         self.sidebar.select(panel_index)
-        if panel is not None and hasattr(panel, "handle_navigation_intent"):
+        if (
+            self._panel_load_states.get(panel_index) is PanelLoadState.READY
+            and panel is not None
+            and hasattr(panel, "handle_navigation_intent")
+        ):
             panel.handle_navigation_intent(intent)
 
     def _panel_index_from_intent(self, intent) -> int:
@@ -869,7 +901,13 @@ class MainWindow(QMainWindow):
     def _intent_value(intent, key: str, default=None):
         return navigation_intent_value(intent, key, default)
 
-    def _show_panel(self, index: int, *, allow_async: bool = True) -> QWidget | None:
+    def _show_panel(
+        self,
+        index: int,
+        *,
+        allow_async: bool = True,
+        pending_intent=None,
+    ) -> QWidget | None:
         if self._close_accepted:
             return None
         if not 0 <= index < self.panel_stack.count():
@@ -884,30 +922,81 @@ class MainWindow(QMainWindow):
                     if getattr(self.sidebar, "_active_index", current_index) != current_index:
                         self.sidebar.select(current_index)
                     return current_panel
-        if (
-            allow_async
-            and index not in self._loaded_panel_indexes
-            and self._panel_specs[index].id in self._async_panel_load_ids
-        ):
+        self._cancel_scheduled_panel_loads(except_index=index)
+        if allow_async and index not in self._loaded_panel_indexes:
             placeholder = self.panel_stack.widget(index)
             if hasattr(placeholder, "set_loading"):
                 placeholder.set_loading(self._panel_specs[index].title)
             self.panel_stack.setCurrentIndex(index)
-            if index not in self._async_panel_loads_in_progress:
-                self._async_panel_loads_in_progress.add(index)
-                timer = QTimer(self)
-                timer.setSingleShot(True)
-                timer.timeout.connect(
-                    lambda panel_index=index: self._finish_async_panel_load(
-                        panel_index
-                    )
-                )
-                self._async_panel_load_timers[index] = timer
-                timer.start(60)
+            self._request_panel_load(index, pending_intent=pending_intent)
             return placeholder
         panel = self._ensure_panel_loaded(index)
         self.panel_stack.setCurrentIndex(index)
         return panel
+
+    def panel_load_state(self, panel_id: str) -> PanelLoadState | None:
+        for index, spec in enumerate(self._panel_specs):
+            if spec.id == panel_id:
+                return self._panel_load_states.get(index, PanelLoadState.UNLOADED)
+        return None
+
+    def _set_panel_load_state(
+        self,
+        index: int,
+        state: PanelLoadState,
+        *,
+        error: str = "",
+    ) -> None:
+        previous = self._panel_load_states.get(index)
+        self._panel_load_states[index] = state
+        if error:
+            self._panel_load_errors[index] = error
+        else:
+            self._panel_load_errors.pop(index, None)
+        if previous is not state and 0 <= index < len(self._panel_specs):
+            self.panel_load_state_changed.emit(self._panel_specs[index].id, state.value)
+
+    def _request_panel_load(self, index: int, *, pending_intent=None) -> None:
+        if self._close_accepted or not 0 <= index < self.panel_stack.count():
+            return
+        if pending_intent is not None:
+            self._pending_panel_intents[index] = pending_intent
+        if index in self._loaded_panel_indexes:
+            return
+        if self._panel_load_states.get(index) in {
+            PanelLoadState.SCHEDULED,
+            PanelLoadState.LOADING,
+        }:
+            return
+        placeholder = self.panel_stack.widget(index)
+        if hasattr(placeholder, "set_loading"):
+            placeholder.set_loading(self._panel_specs[index].title)
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(
+            lambda panel_index=index: self._finish_panel_load(panel_index)
+        )
+        self._panel_load_timers[index] = timer
+        self._set_panel_load_state(index, PanelLoadState.SCHEDULED)
+        self._panel_loads_in_progress.add(index)
+        # Leave one paint opportunity for the selected navigation state and shell.
+        timer.start(16)
+
+    def _cancel_scheduled_panel_loads(self, *, except_index: int) -> None:
+        for index, timer in tuple(self._panel_load_timers.items()):
+            if index == except_index:
+                continue
+            if self._panel_load_states.get(index) is not PanelLoadState.SCHEDULED:
+                continue
+            timer.stop()
+            timer.deleteLater()
+            self._panel_load_timers.pop(index, None)
+            self._pending_panel_intents.pop(index, None)
+            self._panel_loads_in_progress.discard(index)
+            placeholder = self.panel_stack.widget(index)
+            if hasattr(placeholder, "set_unloaded"):
+                placeholder.set_unloaded()
+            self._set_panel_load_state(index, PanelLoadState.UNLOADED)
 
     def _loaded_panel_for_id(self, panel_id: str) -> QWidget | None:
         for index, spec in enumerate(self._panel_specs):
@@ -922,11 +1011,14 @@ class MainWindow(QMainWindow):
                 return self._ensure_panel_loaded(index)
         return None
 
-    def _finish_async_panel_load(self, index: int) -> None:
-        timer = self._async_panel_load_timers.pop(index, None)
+    def _finish_panel_load(self, index: int) -> None:
+        timer = self._panel_load_timers.pop(index, None)
         if timer is not None:
             timer.stop()
             timer.deleteLater()
+        if self._panel_load_states.get(index) is not PanelLoadState.SCHEDULED:
+            self._panel_loads_in_progress.discard(index)
+            return
         try:
             if self._close_accepted:
                 return
@@ -934,14 +1026,36 @@ class MainWindow(QMainWindow):
                 return
             spec = self._panel_specs[index]
             self.startup_status_changed.emit(f"加载{spec.title}")
-            QApplication.processEvents()
+            self._set_panel_load_state(index, PanelLoadState.LOADING)
             should_show_loaded_panel = self.panel_stack.currentIndex() == index
             panel = self._ensure_panel_loaded(index)
-            if should_show_loaded_panel:
-                self.panel_stack.setCurrentIndex(index)
-                panel.updateGeometry()
+        except Exception as exc:
+            logger.error(
+                "Failed to load panel %s",
+                self._panel_specs[index].id
+                if 0 <= index < len(self._panel_specs)
+                else index,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            self._set_panel_load_state(index, PanelLoadState.FAILED, error=str(exc))
+            placeholder = self.panel_stack.widget(index)
+            if hasattr(placeholder, "set_failed"):
+                placeholder.set_failed(str(exc))
+            return
         finally:
-            self._async_panel_loads_in_progress.discard(index)
+            self._panel_loads_in_progress.discard(index)
+        if should_show_loaded_panel:
+            self.panel_stack.setCurrentIndex(index)
+            panel.updateGeometry()
+        intent = self._pending_panel_intents.pop(index, None)
+        if intent is not None and hasattr(panel, "handle_navigation_intent"):
+            try:
+                panel.handle_navigation_intent(intent)
+            except Exception:
+                logger.exception(
+                    "Failed to replay navigation intent for panel %s",
+                    self._panel_specs[index].id,
+                )
 
     def _ensure_panel_loaded(self, index: int) -> QWidget:
         if index in self._loaded_panel_indexes:
@@ -950,71 +1064,22 @@ class MainWindow(QMainWindow):
             return self.panel_stack.widget(index)
 
         spec = self._panel_specs[index]
-        panel = create_panel(
-            spec.id,
-            self.bridge,
-        )
-        self._loaded_panel_indexes.add(index)
-        if panel is None:
-            return self.panel_stack.widget(index)
+        panel = create_panel(spec.id, self.bridge)
+        return self._install_loaded_panel(index, panel)
 
+    def _install_loaded_panel(self, index: int, panel: QWidget) -> QWidget:
+        if index in self._loaded_panel_indexes:
+            panel.deleteLater()
+            return self.panel_stack.widget(index)
         old = self.panel_stack.widget(index)
         self.panel_stack.removeWidget(old)
         old.deleteLater()
         self.panel_stack.insertWidget(index, panel)
-
-        # 从预加载队列中移除（如果还在的话）
-        if hasattr(self, "_preload_queue") and index in self._preload_queue:
-            self._preload_queue.remove(index)
+        self._loaded_panel_indexes.add(index)
+        self._panel_placeholders.pop(index, None)
+        self._set_panel_load_state(index, PanelLoadState.READY)
 
         return panel
-
-    def _preload_next(self) -> None:
-        """在事件循环空闲时逐个创建面板，避免切换时卡顿。"""
-
-        if self._close_accepted:
-            return
-        if not hasattr(self, "_preload_queue"):
-            return
-        if self._preload_next_startup_detail():
-            self._schedule_idle_preload(self._idle_preload_delay_ms)
-            return
-        while self._preload_queue:
-            index = self._preload_queue.pop(0)
-            if index in self._loaded_panel_indexes:
-                continue
-            spec = self._panel_specs[index]
-            self.startup_status_changed.emit(f"后台加载{spec.title}")
-            QApplication.processEvents()
-            self._ensure_panel_loaded(index)
-            self._schedule_idle_preload(self._idle_preload_delay_ms)
-            return
-
-    def _preload_next_startup_detail(self) -> bool:
-        if self._close_accepted:
-            return False
-        if getattr(self, "_startup_detail_preload_done", False):
-            return False
-        found_preloader = False
-        for index in sorted(self._loaded_panel_indexes):
-            panel = self.panel_stack.widget(index)
-            preload = getattr(panel, "preload_one_detail_for_startup", None)
-            if not callable(preload):
-                continue
-            found_preloader = True
-            if preload(self.startup_status_changed.emit):
-                self._startup_detail_preload_done = False
-                return True
-        if found_preloader:
-            self._startup_detail_preload_done = True
-        return False
-
-    def _schedule_idle_preload(self, delay_ms: int | None = None) -> None:
-        if self._close_accepted:
-            return
-        self._idle_preload_started = True
-        delay = self._idle_preload_delay_ms if delay_ms is None else int(delay_ms)
-        self._idle_preload_timer.start(max(0, delay))
 
     def _emit_startup_ready(self) -> None:
         if getattr(self, "_close_accepted", False):
@@ -1030,7 +1095,6 @@ class MainWindow(QMainWindow):
                 self.bridge.current_work_mode_id()
             )
         self.startup_ready.emit()
-        self._schedule_idle_preload(900)
 
     def _on_template_import_batch_processed(self, mode_id: str, batch) -> None:
         self.bridge.template_library_events.import_completed.emit(
@@ -1078,18 +1142,6 @@ class MainWindow(QMainWindow):
             layout = widget.layout()
             if layout is not None:
                 layout.activate()
-
-    def _warmup_panel(self, index: int) -> None:
-        """让面板做一次完整的 show→layout→hide，刷掉首次渲染开销。"""
-        panel = self.panel_stack.widget(index)
-        if panel is None:
-            return
-        saved_index = self.panel_stack.currentIndex()
-        self.panel_stack.setCurrentIndex(index)
-        panel.show()
-        QApplication.processEvents()
-        if saved_index != index:
-            self.panel_stack.setCurrentIndex(saved_index)
 
     def _apply_theme(self) -> None:
         t = get_theme()
@@ -1172,13 +1224,12 @@ class MainWindow(QMainWindow):
 
     def _cancel_pending_lifecycle_callbacks(self) -> None:
         self._startup_ready_timer.stop()
-        self._idle_preload_timer.stop()
-        for timer in self._async_panel_load_timers.values():
+        for timer in self._panel_load_timers.values():
             timer.stop()
             timer.deleteLater()
-        self._async_panel_load_timers.clear()
-        self._async_panel_loads_in_progress.clear()
-        self._preload_queue.clear()
+        self._panel_load_timers.clear()
+        self._panel_loads_in_progress.clear()
+        self._pending_panel_intents.clear()
 
     def _panel_widgets_for_close(self) -> list[QWidget]:
         stack = getattr(self, "panel_stack", None)
@@ -1397,9 +1448,18 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def register_panel(self, index: int, panel: QWidget) -> None:
+        timer = self._panel_load_timers.pop(index, None)
+        if timer is not None:
+            timer.stop()
+            timer.deleteLater()
+        self._panel_loads_in_progress.discard(index)
         old = self.panel_stack.widget(index)
         self.panel_stack.removeWidget(old)
         old.deleteLater()
         self.panel_stack.insertWidget(index, panel)
-        if hasattr(self, "_loaded_panel_indexes"):
-            self._loaded_panel_indexes.add(index)
+        self._loaded_panel_indexes.add(index)
+        self._panel_placeholders.pop(index, None)
+        self._set_panel_load_state(index, PanelLoadState.READY)
+        intent = self._pending_panel_intents.pop(index, None)
+        if intent is not None and hasattr(panel, "handle_navigation_intent"):
+            panel.handle_navigation_intent(intent)

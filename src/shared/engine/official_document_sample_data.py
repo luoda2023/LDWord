@@ -23,6 +23,56 @@ def official_sample_entity_data(profile_id: str) -> dict[str, str]:
         "signer": "",
     }
     variants = {
+        "resolution": {
+            "title": "关于加强档案数字化建设的决议",
+            "body": "会议审议并通过档案数字化建设方案，决定分阶段组织实施。",
+            "organization": "示例市档案工作委员会",
+            "document_no": "示档委〔2026〕1号",
+            "recipient": "各成员单位",
+        },
+        "decision": {
+            "title": "关于表彰档案工作先进集体的决定",
+            "body": "为树立典型、激励担当，决定对有关先进集体予以表彰。",
+            "document_no": "示档发〔2026〕6号",
+            "recipient": "各区县档案主管部门",
+        },
+        "bulletin": {
+            "title": "示例市档案事业发展情况公报",
+            "body": "现将本市档案事业年度发展情况予以公布。",
+            "document_no": "",
+            "recipient": "",
+            "attachment_note": "",
+        },
+        "announcement": {
+            "title": "关于开放一批馆藏档案的公告",
+            "body": "经鉴定审核，现依法向社会开放一批馆藏档案。",
+            "document_no": "",
+            "recipient": "",
+            "attachment_note": "开放档案目录",
+        },
+        "notice_public": {
+            "title": "关于档案馆临时调整开放时间的通告",
+            "body": "因设施维护，档案馆开放时间临时调整，现将有关事项通告如下。",
+            "document_no": "",
+            "recipient": "",
+            "attachment_note": "",
+        },
+        "opinion": {
+            "title": "关于推进基层档案规范化建设的意见",
+            "body": "为提升基层档案治理能力，现就规范化建设提出如下意见。",
+            "document_no": "示档发〔2026〕7号",
+            "recipient": "各区县档案主管部门",
+        },
+        "notice": {
+            "title": "关于开展资料归档检查的通知",
+            "body": "请各部门按要求完成自查，并于本周五前提交归档材料。",
+        },
+        "circular": {
+            "title": "关于年度档案执法检查情况的通报",
+            "body": "现将年度档案执法检查总体情况、发现问题和整改要求予以通报。",
+            "document_no": "示档发〔2026〕9号",
+            "recipient": "各区县档案主管部门",
+        },
         "letter": {
             "title": "关于商请协助提供归档材料的函",
             "body": "为推进资料归集工作，现商请贵单位协助提供相关归档材料。",

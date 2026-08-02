@@ -39,6 +39,9 @@ PROFILE_MATERIAL_TARGET_TYPES: tuple[str, ...] = (
 
 MATERIAL_TARGET_TYPES: tuple[str, ...] = (
     "material",
+    "material_package",
+    "schema",
+    "material_schema",
     "asset",
     "field",
     "question_figure_item",
@@ -58,8 +61,6 @@ SCENE_TARGET_CARD_MAP: dict[str, str] = {
     "profile": "scn_overview",
     "count_profile": "scn_overview",
     "scene_document_scope_field": "scn_rules",
-    "schema": "scn_content",
-    "material_schema": "scn_content",
     "output": "scn_rules",
     "output_target": "scn_rules",
     "delivery": "scn_rules",
@@ -67,17 +68,20 @@ SCENE_TARGET_CARD_MAP: dict[str, str] = {
     "coverage_boundary": "scn_overview",
     "sample_fixture": "scn_overview",
     "parameter_ownership": "scn_overview",
-    "control_contract": "scn_cleanup",
-    "object": "scn_cleanup",
-    "object_preflight": "scn_cleanup",
-    "fixed_layout": "scn_cleanup",
-    "row_height": "scn_cleanup",
-    "content_control": "scn_cleanup",
-    "content_controls": "scn_cleanup",
-    "textbox": "scn_cleanup",
-    "textboxes": "scn_cleanup",
-    "parameter_path": "scn_cleanup",
 }
+
+EXECUTION_DIAGNOSTIC_TARGET_TYPES: tuple[str, ...] = (
+    "control_contract",
+    "object",
+    "object_preflight",
+    "fixed_layout",
+    "row_height",
+    "content_control",
+    "content_controls",
+    "textbox",
+    "textboxes",
+    "parameter_path",
+)
 
 WORKBENCH_FEATURE_TARGET_MAP: dict[str, str] = {
     "plugin": "quick_execute",
@@ -113,14 +117,14 @@ def workbench_issue_navigation_for_target(
             target_type=normalized_type,
             target_key=normalized_key,
             action_kind="material_profile_target",
-            feature_card_id="content_fill",
+            panel_id="assets",
         )
     if normalized_type in MATERIAL_TARGET_TYPES:
         return WorkbenchIssueNavigationProjection(
             target_type=normalized_type,
             target_key=normalized_key,
             action_kind="material_target",
-            feature_card_id="content_fill",
+            panel_id="assets",
         )
     if normalized_type in TEMPLATE_TARGET_CARD_MAP:
         return WorkbenchIssueNavigationProjection(
@@ -135,6 +139,13 @@ def workbench_issue_navigation_for_target(
             target_type=normalized_type,
             target_key=normalized_key,
             action_kind="transaction_artifact",
+            feature_card_id="quick_execute",
+        )
+    if normalized_type in EXECUTION_DIAGNOSTIC_TARGET_TYPES:
+        return WorkbenchIssueNavigationProjection(
+            target_type=normalized_type,
+            target_key=normalized_key,
+            action_kind="feature_card",
             feature_card_id="quick_execute",
         )
     if normalized_type in SCENE_TARGET_CARD_MAP:
@@ -161,6 +172,7 @@ def workbench_issue_navigation_for_target(
 
 
 __all__ = [
+    "EXECUTION_DIAGNOSTIC_TARGET_TYPES",
     "MATERIAL_TARGET_TYPES",
     "PROFILE_CANDIDATE_TARGET_TYPES",
     "PROFILE_MATERIAL_TARGET_TYPES",

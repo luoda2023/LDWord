@@ -4,10 +4,8 @@ import ast
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 LOW_LEVEL_RUNNER_NAMES = {
-    "WorkbenchBatchProductionRunner",
     "WorkbenchProductionRunner",
 }
 APPROVED_RUNNER_CONSTRUCTORS = {
@@ -15,10 +13,6 @@ APPROVED_RUNNER_CONSTRUCTORS = {
         "WorkbenchProductionRunner",
     },
     "src/services/production_runtime/execution_runtime.py": {
-        "WorkbenchProductionRunner",
-    },
-    "src/ui/panels/workbench/execution_session_controller.py": {
-        "WorkbenchBatchProductionRunner",
         "WorkbenchProductionRunner",
     },
 }
@@ -69,9 +63,7 @@ def test_low_level_execution_runners_are_internal_and_not_exported():
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
             and node.target.id == "__all__"
-        ):
-            export_value = node.value
-        elif isinstance(node, ast.Assign) and any(
+        ) or isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name) and target.id == "__all__"
             for target in node.targets
         ):
@@ -95,7 +87,7 @@ def test_low_level_execution_runners_are_internal_and_not_exported():
 
 def test_scripts_do_not_construct_low_level_execution_runners():
     constructor_pattern = re.compile(
-        r"\b(?:WorkbenchBatchProductionRunner|WorkbenchProductionRunner)\s*\("
+        r"\bWorkbenchProductionRunner\s*\("
     )
     script_constructors = {
         path.relative_to(ROOT).as_posix()

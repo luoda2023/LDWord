@@ -741,9 +741,11 @@ class TemplateStylePreview(QWidget):
         later_width = max(8.0, layout.rect.right() - later_left)
         lines = _wrap_text(metrics, text, first_width, later_width)
         line_height = max(1.0, layout.line_height_px or metrics.height())
-        y = layout.rect.top() + metrics.ascent()
+        text_top = layout.rect.top() + layout.space_before_px
+        text_bottom = layout.rect.bottom() - layout.space_after_px
+        y = text_top + metrics.ascent()
         for index, line in enumerate(lines):
-            if y - metrics.ascent() > layout.rect.bottom():
+            if y - metrics.ascent() > text_bottom:
                 break
             left = first_left if index == 0 else later_left
             width = first_width if index == 0 else later_width

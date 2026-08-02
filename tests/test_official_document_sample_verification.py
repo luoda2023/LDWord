@@ -6,6 +6,7 @@ from docx import Document
 from PIL import Image
 
 from src.config.official_document_profiles import get_official_document_assembly_contract
+from src.config.official_document_profiles import list_official_document_profiles
 import src.shared.engine.official_document_sample_verification as official_visual
 from src.shared.engine.docx_page_renderer import (
     DocxPageRenderResult,
@@ -110,6 +111,18 @@ def test_official_document_sample_verification_covers_common_document_types(tmp_
     assert minutes["document_type"] == "minutes"
     assert minutes["meeting_date"]
     assert minutes["participants"]
+
+
+def test_every_official_profile_has_distinct_semantic_sample_material():
+    samples = {
+        profile.profile_id: official_sample_entity_data(profile.profile_id)
+        for profile in list_official_document_profiles()
+    }
+
+    assert len({sample["title"] for sample in samples.values()}) == len(samples)
+    for profile_id, sample in samples.items():
+        assert sample["document_type"] == profile_id
+        assert sample["body"].strip()
 
 
 def test_official_document_sample_verification_records_renderer_evidence(

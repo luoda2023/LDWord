@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -75,6 +74,24 @@ def test_natural_request_router_matches_core_high_frequency_requests():
             "official_policy",
             "meeting_policy_documents",
         ),
+        (
+            "我需要写一个公文",
+            "official_policy_documents",
+            "official_policy",
+            "meeting_policy_documents",
+        ),
+        (
+            "帮我做张六年级语文卷子",
+            "exam_teaching_versions",
+            "exam_education",
+            "exam_teaching",
+        ),
+        (
+            "帮我写一篇论文",
+            "chinese_academic_thesis",
+            "chinese_academic",
+            "thesis_cn",
+        ),
     )
 
     for query, route_id, pack_id, family_id in cases:
@@ -94,6 +111,21 @@ def test_natural_request_router_matches_core_high_frequency_requests():
             assert "plugin_gate=journal_publisher_rule_review_gate" in (
                 build_natural_request_route_summary(result)
             )
+
+
+def test_negated_route_object_does_not_steal_the_positive_target() -> None:
+    result = route_natural_scene_request(
+        "不要写公文，帮我写一份工作总结"
+    )
+
+    assert result.selected_route_id != "official_policy_documents"
+
+
+def test_negated_exam_object_does_not_route_to_exam() -> None:
+    result = route_natural_scene_request("不是试卷，帮我写一份通知")
+
+    assert result.status == "matched"
+    assert result.selected_route_id == "official_policy_documents"
 
 
 def test_natural_request_router_disambiguates_product_manual_and_quote_plan():

@@ -1,97 +1,37 @@
+"""Canonical Workbench worker construction.
+
+Execution consumes either no material or one immutable MaterialRunSelection.
+There is no archive/context compatibility path in this controller.
+"""
+
 from __future__ import annotations
 
-import copy
+from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
-from src.config.entity import EntityArchive
-from src.services.execution_session import (
-    ExecutionSessionSnapshot,
-    build_execution_session_snapshot,
-    cleanup_execution_session_resources,
-    execution_session_frozen_input_path,
+from src.application.materials import (
+    project_execution_material_record_snapshot,
 )
-from src.config.material_batch import (
-    MaterialBatchSelection,
-    build_material_batch_items,
-    check_material_batch_preflight,
-)
-from src.config.material_context import MaterialExecutionContext
-from src.config.official_document_profiles import (
-    get_official_document_profile,
-    resolve_official_batch_document_type_id,
-)
-from src.config.document_scope import document_scope_policy_issue
-from src.services.document_structure_evidence import (
+from src.config.scene import SceneWorkspace
+from src.config.document_structure_contract import (
     DocumentStructureEvidence,
     RegionDecision,
 )
-from src.config.scene import SceneWorkspace
 from src.config.template import TemplateConfig
-from src.config.work_mode import execution_work_mode_issue, resolve_work_mode_id
-from src.config.scene_surface_registry import (
-    scene_uses_exam_paper_surface,
-    scene_uses_official_document_surface,
+from src.document_batch import (
+    DocumentBatchRequest,
+    compile_document_batch_plan,
 )
-from src.ui.adapters.workbench_material_issues import (
-    material_batch_readiness_gate_decision,
-    material_readiness_gate_decision,
+from src.domain.materials import MaterialRunSelection
+from src.services.production_execution import (
+    ProductionExecutionRequest,
+    execute_production_request,
 )
 
 from .diagnostics import log_best_effort_shutdown_failure
-
-
-def _project_official_document_type(
-    context: MaterialExecutionContext,
-    *,
-    document_type_id: str,
-    mode_id: str,
-) -> MaterialExecutionContext:
-    """Project the task-level document type into the legacy runtime payload."""
-
-    normalized_mode = str(mode_id or "").strip()
-    normalized_type = str(document_type_id or "").strip()
-    if normalized_mode != "official" or get_official_document_profile(normalized_type) is None:
-        return context
-    projected = context.clone()
-    projected.mode_id = "official"
-    projected.profile_id = f"official:{normalized_type}"
-    projected.entity_data = {
-        **dict(projected.entity_data or {}),
-        "document_type": normalized_type,
-    }
-    return projected
-
-
-def _selected_official_document_type_ids(
-    archive: EntityArchive,
-    *,
-    profile_ids: list[str] | None,
-    item_metadata: dict[str, dict[str, object]] | None,
-    base_context: MaterialExecutionContext,
-) -> tuple[str, ...]:
-    """Project the exact batch selection into the session resource graph."""
-
-    selected_ids = (
-        {str(profile_id or "").strip() for profile_id in profile_ids}
-        if profile_ids is not None
-        else None
-    )
-    metadata_by_profile = item_metadata or {}
-    document_type_ids: list[str] = []
-    items = build_material_batch_items(
-        archive,
-        profile_ids=(tuple(selected_ids) if selected_ids is not None else None),
-        base_context=base_context,
-    )
-    for item in items:
-        profile_id = str(item.profile_id or "").strip()
-        metadata = dict(metadata_by_profile.get(profile_id, {}) or {})
-        document_type_id = resolve_official_batch_document_type_id(
-            item.context.resolved_entity_data(),
-            metadata,
-        )
-        document_type_ids.append(document_type_id)
-    return tuple(dict.fromkeys(document_type_ids))
+from .material_state import bind_workbench_material
+from .output_path_policy import resolve_workbench_output_root
 
 
 @dataclass(frozen=True)
@@ -100,25 +40,176 @@ class ExecutionBuildResult:
     cancelled: bool = False
     already_running: bool = False
     error_text: str = ""
-    session_snapshot: ExecutionSessionSnapshot | None = None
+    session_snapshot: object | None = None
 
 
-def _failed_build_after_snapshot(
-    snapshot: ExecutionSessionSnapshot,
-    error_text: str,
-) -> ExecutionBuildResult:
-    cleanup_issues = cleanup_execution_session_resources(snapshot)
-    reasons = [str(error_text or "").strip(), *cleanup_issues]
-    return ExecutionBuildResult(
-        worker=None,
-        error_text="；".join(reason for reason in reasons if reason),
-        session_snapshot=snapshot,
-    )
+class _ProductionRunner:
+    def __init__(self, request: ProductionExecutionRequest) -> None:
+        self._request = request
+
+    def run(self, progress_callback, cancel_check):
+        result = execute_production_request(
+            self._request,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
+        return _attach_request_trace(result, self._request)
+
+
+class _DocumentBatchRunner:
+    def __init__(
+        self,
+        snapshot,
+        *,
+        source_paths: tuple[str, ...],
+        output_root: str,
+    ) -> None:
+        self._snapshot = snapshot
+        self._source_paths = source_paths
+        self._output_root = output_root
+
+    def run(self, progress_callback, cancel_check):
+        if cancel_check():
+            return _cancelled()
+        progress_callback(0, 0, "正在准备…")
+        plan = compile_document_batch_plan(
+            self._snapshot,
+            DocumentBatchRequest(
+                source_paths=self._source_paths,
+                output_root=self._output_root,
+            ),
+        )
+        if cancel_check():
+            return _cancelled()
+        progress_callback(0, 0, "正在生成文档")
+        return plan.run()
+
+
+class _FileProductionRunner:
+    def __init__(
+        self,
+        requests: tuple[ProductionExecutionRequest, ...],
+    ) -> None:
+        self._requests = requests
+
+    def run(self, progress_callback, cancel_check):
+        items: list[dict[str, object]] = []
+        output_paths: dict[str, str] = {}
+        total = len(self._requests)
+        for index, request in enumerate(self._requests, start=1):
+            if cancel_check():
+                return _cancelled(items=items)
+            outer_current, outer_total = _composite_file_batch_progress(
+                index=index,
+                file_count=total,
+            )
+            progress_callback(
+                outer_current,
+                outer_total,
+                f"处理 {request.input_path.name}",
+            )
+
+            def _forward_file_progress(
+                inner_current: int,
+                inner_total: int,
+                message: str,
+                *,
+                _index: int = index,
+            ) -> None:
+                current, combined_total = _composite_file_batch_progress(
+                    index=_index,
+                    file_count=total,
+                    inner_current=inner_current,
+                    inner_total=inner_total,
+                )
+                progress_callback(current, combined_total, message)
+
+            result = execute_production_request(
+                request,
+                progress_callback=_forward_file_progress,
+                cancel_check=cancel_check,
+            )
+            result = _attach_request_trace(result, request)
+            status = str(result.get("status") or "failed")
+            path = str(result.get("output_path") or "")
+            items.append(
+                {
+                    "status": status,
+                    "source_path": str(request.input_path),
+                    "output_path": path,
+                    "error_text": str(result.get("error_text") or ""),
+                    "warnings": list(result.get("warnings") or ()),
+                    "format_change_evidence": dict(
+                        result.get("format_change_evidence") or {}
+                    ),
+                }
+            )
+            if path:
+                output_paths[f"{index:04d}"] = path
+        failed = sum(item["status"] == "failed" for item in items)
+        partial = sum(item["status"] == "partial_success" for item in items)
+        cancelled = sum(item["status"] == "cancelled" for item in items)
+        status = (
+            "success"
+            if failed == 0 and partial == 0 and cancelled == 0
+            else (
+                "failed"
+                if failed + cancelled == total
+                else "partial_success"
+            )
+        )
+        progress_callback(total * 1000, total * 1000, "多文档执行完成")
+        format_change_evidence = _batch_format_change_evidence(items)
+        return {
+            "status": status,
+            "summary": f"完成 {total - failed}/{total} 份文档",
+            "output_path": (
+                str(self._requests[0].output_root)
+                if self._requests
+                else ""
+            ),
+            "output_paths": output_paths,
+            "items": items,
+            "format_change_evidence": format_change_evidence,
+            "failed_count": failed,
+            "execution_route": (
+                "production_with_material"
+                if any(
+                    item.material_snapshot is not None
+                    for item in self._requests
+                )
+                else "production"
+            ),
+            "input_paths": [str(item.input_path) for item in self._requests],
+            "output_root": (
+                str(self._requests[0].output_root) if self._requests else ""
+            ),
+            "plan_id": self._requests[0].plan_id if self._requests else "",
+            "template_id": (
+                self._requests[0].template_id if self._requests else ""
+            ),
+            "error_text": (
+                "部分文档执行失败" if failed else ""
+            ),
+        }
+
+
+def build_threaded_runner(runner, *, parent=None) -> ExecutionBuildResult:
+    try:
+        from .execution_thread_handle import ThreadedExecutionHandle
+        from .execution_worker import ExecutionWorker
+
+        worker = ExecutionWorker(runner, parent=None)
+        handle = ThreadedExecutionHandle(worker, parent=parent)
+    except Exception as exc:
+        return ExecutionBuildResult(
+            worker=None,
+            error_text=f"execution_worker_build_failed:{type(exc).__name__}:{exc}",
+        )
+    return ExecutionBuildResult(worker=handle)
 
 
 class WorkbenchExecutionSessionController:
-    """Own active worker lifecycle for the workbench panel."""
-
     def __init__(self, *, resolve_document_path, worker_parent=None) -> None:
         self._resolve_document_path = resolve_document_path
         self._worker_parent = worker_parent
@@ -138,54 +229,33 @@ class WorkbenchExecutionSessionController:
         self,
         worker,
         *,
-        snapshot: ExecutionSessionSnapshot | None = None,
+        snapshot=None,
         timeout_ms: int | None = 1000,
     ) -> list[str]:
-        """Dispose a built worker that could not be prepared or started."""
-
+        del snapshot
         if self._active_worker is worker:
             self._active_worker = None
         shutdown = getattr(worker, "shutdown", None)
         if callable(shutdown):
             try:
                 shutdown(timeout_ms=timeout_ms)
-            except TypeError:
-                try:
-                    shutdown() if timeout_ms is None else shutdown(int(timeout_ms))
-                except Exception as exc:
-                    log_best_effort_shutdown_failure(
-                        "execution session controller",
-                        "discard_worker.shutdown",
-                        exc,
-                    )
             except Exception as exc:
                 log_best_effort_shutdown_failure(
                     "execution session controller",
                     "discard_worker.shutdown",
                     exc,
                 )
-        elif callable(getattr(worker, "request_cancel", None)):
-            try:
-                worker.request_cancel()
-            except Exception as exc:
-                log_best_effort_shutdown_failure(
-                    "execution session controller",
-                    "discard_worker.request_cancel",
-                    exc,
-                )
-        if isinstance(snapshot, ExecutionSessionSnapshot):
-            return list(cleanup_execution_session_resources(snapshot))
         return []
 
-    def build_worker(
+    def build_document_worker(
         self,
         *,
         template: TemplateConfig | None,
         scene: SceneWorkspace | None,
+        selection: MaterialRunSelection | None,
         session_overrides: dict[str, object] | None = None,
-        material_context: MaterialExecutionContext | None = None,
         document_type_id: str = "",
-        mode_id: str = "",
+        mode_id: str,
         plan_id: str = "",
         plan_path: str = "",
         plan_source_type: str = "",
@@ -193,9 +263,6 @@ class WorkbenchExecutionSessionController:
         template_path: str = "",
         template_source_type: str = "",
         output_root: str = "",
-        material_gate_confirmed: bool = False,
-        expected_input_revision: str = "",
-        object_preflight_confirmation_digest: str = "",
         document_structure_evidence: DocumentStructureEvidence | None = None,
         document_scope_decisions: tuple[RegionDecision, ...] = (),
     ) -> ExecutionBuildResult:
@@ -204,397 +271,264 @@ class WorkbenchExecutionSessionController:
                 worker=self._active_worker,
                 already_running=True,
             )
-
-        runtime_scene = copy.deepcopy(scene or SceneWorkspace())
-        runtime_template = copy.deepcopy(template or TemplateConfig())
-        mode_issue = execution_work_mode_issue(
-            runtime_scene,
-            requested_mode_id=mode_id,
-        )
-        if mode_issue:
-            return ExecutionBuildResult(worker=None, error_text=mode_issue)
-        effective_mode_id = resolve_work_mode_id(
-            runtime_scene,
-            requested_mode_id=mode_id,
-        )
-        effective_document_type_id = (
-            str(document_type_id or "").strip()
-            if effective_mode_id == "official"
-            else ""
-        )
-        scope_issue = document_scope_policy_issue(
-            runtime_scene.document_scope,
-            mode_id=effective_mode_id,
-        )
-        if scope_issue:
-            return ExecutionBuildResult(worker=None, error_text=scope_issue)
-        runtime_material = (
-            material_context.clone()
-            if isinstance(material_context, MaterialExecutionContext)
-            else MaterialExecutionContext()
-        )
-        runtime_material = _project_official_document_type(
-            runtime_material,
-            document_type_id=effective_document_type_id,
-            mode_id=effective_mode_id,
-        )
-        defer_material_gate = scene_uses_exam_paper_surface(
-            runtime_scene,
-            mode_id=effective_mode_id,
-        )
-        if not defer_material_gate:
-            material_gate = material_readiness_gate_decision(
-                runtime_scene,
-                runtime_material,
-            )
-            if not material_gate.can_run:
-                return ExecutionBuildResult(
-                    worker=None,
-                    error_text="；".join(material_gate.blocking_reasons),
-                )
-            if material_gate.requires_confirmation and not material_gate_confirmed:
-                return ExecutionBuildResult(
-                    worker=None,
-                    error_text="；".join(material_gate.confirmation_reasons),
-                )
-        doc_path = self._resolve_document_path()
-        if doc_path is None:
+        source = self._resolve_document_path()
+        if source is None:
             return ExecutionBuildResult(worker=None, cancelled=True)
-        snapshot = build_execution_session_snapshot(
-            mode_id=effective_mode_id,
-            scene=runtime_scene,
-            template=runtime_template,
-            material_context=runtime_material,
-            input_path=doc_path,
-            output_root=output_root,
+        return self._build_for_paths(
+            paths=(str(source),),
+            template=template,
+            scene=scene,
+            selection=selection,
+            session_overrides=session_overrides,
+            document_type_id=document_type_id,
+            mode_id=mode_id,
             plan_id=plan_id,
             plan_path=plan_path,
             plan_source_type=plan_source_type,
             template_id=template_id,
             template_path=template_path,
             template_source_type=template_source_type,
-            document_type_id=effective_document_type_id,
-            object_preflight_confirmation_revision=expected_input_revision,
-            object_preflight_confirmation_digest=(
-                object_preflight_confirmation_digest
-            ),
+            output_root=output_root,
+            output_roots_by_path=None,
+            force_record_batch=False,
             document_structure_evidence=document_structure_evidence,
             document_scope_decisions=document_scope_decisions,
-            session_overrides=session_overrides,
-        )
-        if not snapshot.ready:
-            return ExecutionBuildResult(
-                worker=None,
-                error_text="；".join(snapshot.issues),
-                session_snapshot=snapshot,
-            )
-        try:
-            expected_revision = str(expected_input_revision or "").strip()
-            if (
-                expected_revision
-                and snapshot.input_ref.frozen_revision != expected_revision
-            ):
-                return _failed_build_after_snapshot(
-                    snapshot,
-                    "object_preflight_confirmation_stale:input_revision",
-                )
-            frozen_input_path = execution_session_frozen_input_path(snapshot)
-
-            from src.services.production_runtime.exam_markdown_execution_input import (
-                is_exam_markdown_input,
-                prepare_exam_markdown_input,
-            )
-            from src.services.production_runtime.execution_runtime import (
-                WorkbenchProductionRunner,
-            )
-            from .execution_thread_handle import ThreadedExecutionHandle
-            from .execution_worker import ExecutionWorker
-
-            prepared_exam_input = None
-            gate_scene = runtime_scene
-            gate_material = runtime_material
-            if frozen_input_path is not None and is_exam_markdown_input(
-                runtime_scene,
-                frozen_input_path,
-            ):
-                try:
-                    prepared_exam_input = prepare_exam_markdown_input(
-                        scene=runtime_scene,
-                        material_context=runtime_material,
-                        source_path=frozen_input_path,
-                        expected_source_revision=(
-                            snapshot.input_ref.frozen_revision
-                        ),
-                    )
-                except Exception as exc:
-                    return _failed_build_after_snapshot(
-                        snapshot,
-                        f"exam_markdown_prepare_failed:{type(exc).__name__}:{exc}",
-                    )
-                gate_scene = prepared_exam_input.scene
-                gate_material = prepared_exam_input.material_context
-
-            if defer_material_gate:
-                material_gate = material_readiness_gate_decision(
-                    gate_scene,
-                    gate_material,
-                )
-                if not material_gate.can_run:
-                    return _failed_build_after_snapshot(
-                        snapshot,
-                        "；".join(material_gate.blocking_reasons),
-                    )
-                if (
-                    material_gate.requires_confirmation
-                    and not material_gate_confirmed
-                ):
-                    return _failed_build_after_snapshot(
-                        snapshot,
-                        "；".join(material_gate.confirmation_reasons),
-                    )
-
-            runner = WorkbenchProductionRunner(
-                doc_path=str(frozen_input_path or ""),
-                template=runtime_template,
-                scene=runtime_scene,
-                session_overrides=session_overrides,
-                material_context=runtime_material,
-                execution_session=snapshot,
-                output_dir=snapshot.output_namespace,
-                prepared_exam_markdown_input=prepared_exam_input,
-            )
-            worker = ExecutionWorker(runner, parent=None)
-            handle = ThreadedExecutionHandle(
-                worker,
-                parent=self._worker_parent,
-            )
-        except Exception as exc:
-            return _failed_build_after_snapshot(
-                snapshot,
-                f"execution_worker_build_failed:{type(exc).__name__}:{exc}",
-            )
-        return ExecutionBuildResult(
-            worker=handle,
-            session_snapshot=snapshot,
         )
 
-    def build_batch_worker(
+    def build_record_batch_worker(
         self,
         *,
+        document_paths: tuple[str, ...],
         template: TemplateConfig | None,
         scene: SceneWorkspace | None,
-        archive: EntityArchive,
-        profile_ids: list[str] | None = None,
-        base_output_dir: str | None = None,
-        output_dir_template: str = "{entity_name}",
+        selection: MaterialRunSelection,
         session_overrides: dict[str, object] | None = None,
-        base_context: MaterialExecutionContext | None = None,
-        source_kind: str = "",
-        source_path: str = "",
-        item_metadata: dict[str, dict[str, object]] | None = None,
-        retry_of_run_id: str = "",
-        attempt_number: int = 1,
-        mode_id: str = "",
+        document_type_id: str = "",
+        mode_id: str,
         plan_id: str = "",
         plan_path: str = "",
         plan_source_type: str = "",
         template_id: str = "",
         template_path: str = "",
         template_source_type: str = "",
-        material_gate_confirmed: bool = False,
-        expected_input_revision: str = "",
-        object_preflight_confirmation_digest: str = "",
+        output_root: str = "",
         document_structure_evidence: DocumentStructureEvidence | None = None,
         document_scope_decisions: tuple[RegionDecision, ...] = (),
     ) -> ExecutionBuildResult:
-        if self._active_worker is not None:
-            return ExecutionBuildResult(
-                worker=self._active_worker,
-                already_running=True,
-            )
-
-        runtime_scene = copy.deepcopy(scene or SceneWorkspace())
-        runtime_template = copy.deepcopy(template or TemplateConfig())
-        mode_issue = execution_work_mode_issue(
-            runtime_scene,
-            requested_mode_id=mode_id,
-        )
-        if mode_issue:
-            return ExecutionBuildResult(worker=None, error_text=mode_issue)
-        effective_mode_id = resolve_work_mode_id(
-            runtime_scene,
-            requested_mode_id=mode_id,
-        )
-        scope_issue = document_scope_policy_issue(
-            runtime_scene.document_scope,
-            mode_id=effective_mode_id,
-        )
-        if scope_issue:
-            return ExecutionBuildResult(worker=None, error_text=scope_issue)
-        is_official_batch_surface = scene_uses_official_document_surface(
-            runtime_scene,
-            mode_id=effective_mode_id,
-        )
-        if (
-            is_official_batch_surface
-            and str(source_kind or "").strip() != "official_document_table"
-        ):
-            return ExecutionBuildResult(
-                worker=None,
-                error_text=(
-                    "official_batch_source_not_supported:"
-                    "official_document_table_required"
-                ),
-            )
-        runtime_context = (
-            base_context.clone()
-            if isinstance(base_context, MaterialExecutionContext)
-            else MaterialExecutionContext()
-        )
-        readiness_profile_ids = (
-            list(profile_ids)
-            if profile_ids is not None
-            else [
-                str(profile.profile_id or "").strip()
-                for profile in archive.profiles
-                if str(profile.profile_id or "").strip()
-            ]
-        )
-        readiness_selection = MaterialBatchSelection(
-            mode_id=effective_mode_id,
-            scene_id=plan_id,
-            package_id=str(getattr(archive, "package_id", "") or ""),
-            archive=copy.deepcopy(archive),
-            profile_ids=readiness_profile_ids,
-            output_dir_template=output_dir_template,
-            base_context=runtime_context.clone(),
-            source_kind=source_kind,
-            source_path=source_path,
-            item_metadata=copy.deepcopy(item_metadata or {}),
-        )
-        material_gate = material_batch_readiness_gate_decision(
-            runtime_scene,
-            readiness_selection,
-        )
-        if not material_gate.can_run:
-            return ExecutionBuildResult(
-                worker=None,
-                error_text="；".join(material_gate.blocking_reasons),
-            )
-        if material_gate.requires_confirmation and not material_gate_confirmed:
-            return ExecutionBuildResult(
-                worker=None,
-                error_text="；".join(material_gate.confirmation_reasons),
-            )
-        is_official_table_batch = (
-            str(source_kind or "").strip() == "official_document_table"
-            and is_official_batch_surface
-        )
-        if is_official_table_batch:
-            doc_path = ""
-        else:
-            doc_path = self._resolve_document_path()
-            if doc_path is None:
-                return ExecutionBuildResult(worker=None, cancelled=True)
-
-        snapshot = build_execution_session_snapshot(
-            mode_id=effective_mode_id,
-            scene=runtime_scene,
-            template=runtime_template,
-            material_context=runtime_context,
-            input_path=doc_path,
-            output_root=base_output_dir or "",
+        return self._build_for_paths(
+            paths=document_paths,
+            template=template,
+            scene=scene,
+            selection=selection,
+            session_overrides=session_overrides,
+            document_type_id=document_type_id,
+            mode_id=mode_id,
             plan_id=plan_id,
             plan_path=plan_path,
             plan_source_type=plan_source_type,
             template_id=template_id,
             template_path=template_path,
             template_source_type=template_source_type,
-            document_type_id=("per_item" if is_official_table_batch else ""),
-            official_document_type_ids=(
-                _selected_official_document_type_ids(
-                    archive,
-                    profile_ids=profile_ids,
-                    item_metadata=item_metadata,
-                    base_context=runtime_context,
-                )
-                if is_official_table_batch
-                else ()
-            ),
-            object_preflight_confirmation_revision=expected_input_revision,
-            object_preflight_confirmation_digest=(
-                object_preflight_confirmation_digest
-            ),
+            output_root=output_root,
+            output_roots_by_path=None,
+            force_record_batch=True,
             document_structure_evidence=document_structure_evidence,
             document_scope_decisions=document_scope_decisions,
-            session_overrides=session_overrides,
         )
-        if not snapshot.ready:
+
+    def build_file_batch_worker(
+        self,
+        *,
+        document_paths: tuple[str, ...],
+        template: TemplateConfig | None,
+        scene: SceneWorkspace | None,
+        selection: MaterialRunSelection | None,
+        session_overrides: dict[str, object] | None = None,
+        document_type_id: str = "",
+        mode_id: str,
+        plan_id: str = "",
+        plan_path: str = "",
+        plan_source_type: str = "",
+        template_id: str = "",
+        template_path: str = "",
+        template_source_type: str = "",
+        output_root: str = "",
+        output_roots_by_path: Mapping[str, str] | None = None,
+        document_structure_evidence: DocumentStructureEvidence | None = None,
+        document_scope_decisions: tuple[RegionDecision, ...] = (),
+        **_ignored,
+    ) -> ExecutionBuildResult:
+        return self._build_for_paths(
+            paths=document_paths,
+            template=template,
+            scene=scene,
+            selection=selection,
+            session_overrides=session_overrides,
+            document_type_id=document_type_id,
+            mode_id=mode_id,
+            plan_id=plan_id,
+            plan_path=plan_path,
+            plan_source_type=plan_source_type,
+            template_id=template_id,
+            template_path=template_path,
+            template_source_type=template_source_type,
+            output_root=output_root,
+            output_roots_by_path=output_roots_by_path,
+            force_record_batch=False,
+            document_structure_evidence=document_structure_evidence,
+            document_scope_decisions=document_scope_decisions,
+        )
+
+    def _build_for_paths(
+        self,
+        *,
+        paths: tuple[str, ...],
+        template: TemplateConfig | None,
+        scene: SceneWorkspace | None,
+        selection: MaterialRunSelection | None,
+        session_overrides: dict[str, object] | None,
+        document_type_id: str,
+        mode_id: str,
+        plan_id: str,
+        plan_path: str,
+        plan_source_type: str,
+        template_id: str,
+        template_path: str,
+        template_source_type: str,
+        output_root: str,
+        output_roots_by_path: Mapping[str, str] | None,
+        force_record_batch: bool,
+        document_structure_evidence: DocumentStructureEvidence | None,
+        document_scope_decisions: tuple[RegionDecision, ...],
+    ) -> ExecutionBuildResult:
+        if self._active_worker is not None:
+            return ExecutionBuildResult(
+                worker=self._active_worker,
+                already_running=True,
+            )
+        normalized = tuple(
+            str(Path(path).expanduser().resolve())
+            for path in paths
+            if Path(path).expanduser().is_file()
+        )
+        if not normalized:
             return ExecutionBuildResult(
                 worker=None,
-                error_text="；".join(snapshot.issues),
-                session_snapshot=snapshot,
+                error_text="请选择至少一个可读取的输入文档",
             )
-        try:
-            expected_revision = str(expected_input_revision or "").strip()
-            if (
-                expected_revision
-                and snapshot.input_ref.frozen_revision != expected_revision
-            ):
-                return _failed_build_after_snapshot(
-                    snapshot,
-                    "object_preflight_confirmation_stale:input_revision",
-                )
-            frozen_input_path = execution_session_frozen_input_path(snapshot)
-            batch_preflight = check_material_batch_preflight(
-                archive,
-                profile_ids=profile_ids,
-                base_output_dir=snapshot.output_namespace,
-                output_dir_template=output_dir_template,
+        if scene is None or template is None:
+            return ExecutionBuildResult(
+                worker=None,
+                error_text="请先选择有效的处理方案和模板",
             )
-            if not batch_preflight.ok:
-                return _failed_build_after_snapshot(
-                    snapshot,
-                    "；".join(batch_preflight.issues),
-                )
-
-            from src.services.production_runtime.execution_runtime import (
-                WorkbenchBatchProductionRunner,
-            )
-            from .execution_thread_handle import ThreadedExecutionHandle
-            from .execution_worker import ExecutionWorker
-
-            runner = WorkbenchBatchProductionRunner(
-                doc_path=str(frozen_input_path or ""),
-                template=runtime_template,
-                scene=runtime_scene,
-                archive=copy.deepcopy(archive),
-                profile_ids=profile_ids,
-                base_output_dir=snapshot.output_namespace,
-                output_dir_template=output_dir_template,
-                session_overrides=session_overrides,
-                base_context=runtime_context,
-                source_kind=source_kind,
-                source_path=source_path,
-                item_metadata=item_metadata,
-                retry_of_run_id=retry_of_run_id,
-                attempt_number=attempt_number,
-                execution_session=snapshot,
-            )
-            worker = ExecutionWorker(runner, parent=None)
-            handle = ThreadedExecutionHandle(
-                worker,
-                parent=self._worker_parent,
-            )
-        except Exception as exc:
-            return _failed_build_after_snapshot(
-                snapshot,
-                f"batch_execution_worker_build_failed:{type(exc).__name__}:{exc}",
-            )
-        return ExecutionBuildResult(
-            worker=handle,
-            session_snapshot=snapshot,
+        destination = resolve_workbench_output_root(output_root, normalized)
+        destinations, destination_issue = _production_output_roots(
+            normalized,
+            base_root=destination,
+            configured_root=output_root,
+            output_roots_by_path=output_roots_by_path,
         )
+        if destination_issue:
+            return ExecutionBuildResult(
+                worker=None,
+                error_text=destination_issue,
+            )
+        requests: list[ProductionExecutionRequest] = []
+        if selection is not None:
+            if any(Path(path).suffix.casefold() != ".docx" for path in normalized):
+                return ExecutionBuildResult(
+                    worker=None,
+                    error_text="资料批量执行目前只接受 DOCX 输入",
+                )
+            snapshot, issues = bind_workbench_material(
+                selection,
+                work_mode_id=mode_id,
+                recipe_id="document_batch",
+                scene_id=plan_id,
+                document_type=document_type_id if mode_id == "official" else "",
+            )
+            if snapshot is None:
+                return ExecutionBuildResult(
+                    worker=None,
+                    error_text="；".join(
+                        item.message or item.code for item in issues
+                    ),
+                )
+            if (
+                not force_record_batch
+                and len(normalized) > 1
+                and len(selection.selected_record_ids) > 1
+            ):
+                return ExecutionBuildResult(
+                    worker=None,
+                    error_text="多文档与多资料记录需要显式映射，不能自动组合",
+                )
+            group_by_record = len(snapshot.records) > 1
+            for path in normalized:
+                source_destination = destinations[path.casefold()]
+                for record in snapshot.records:
+                    record_destination = source_destination
+                    if group_by_record:
+                        record_destination = (
+                            source_destination
+                            / _safe_output_component(
+                                record.display_name,
+                                fallback=record.record_id,
+                            )
+                        )
+                    requests.append(
+                        _production_request(
+                            path=path,
+                            output_root=record_destination,
+                            mode_id=mode_id,
+                            scene=scene,
+                            template=template,
+                            plan_id=plan_id,
+                            plan_path=plan_path,
+                            plan_source_type=plan_source_type,
+                            template_id=template_id,
+                            template_path=template_path,
+                            template_source_type=template_source_type,
+                            document_type_id=document_type_id,
+                            session_overrides=session_overrides,
+                            material_snapshot=(
+                                project_execution_material_record_snapshot(
+                                    snapshot,
+                                    record.record_id,
+                                )
+                            ),
+                            document_structure_evidence=document_structure_evidence,
+                            document_scope_decisions=document_scope_decisions,
+                        )
+                    )
+        else:
+            requests.extend(
+                _production_request(
+                    path=path,
+                    output_root=destinations[path.casefold()],
+                    mode_id=mode_id,
+                    scene=scene,
+                    template=template,
+                    plan_id=plan_id,
+                    plan_path=plan_path,
+                    plan_source_type=plan_source_type,
+                    template_id=template_id,
+                    template_path=template_path,
+                    template_source_type=template_source_type,
+                    document_type_id=document_type_id,
+                    session_overrides=session_overrides,
+                    material_snapshot=None,
+                    document_structure_evidence=document_structure_evidence,
+                    document_scope_decisions=document_scope_decisions,
+                )
+                for path in normalized
+            )
+        runner = (
+            _ProductionRunner(requests[0])
+            if len(requests) == 1
+            else _FileProductionRunner(tuple(requests))
+        )
+        return build_threaded_runner(runner, parent=self._worker_parent)
 
     @staticmethod
     def start_worker(worker) -> None:
@@ -602,54 +536,213 @@ class WorkbenchExecutionSessionController:
         if callable(start):
             start()
             return
-
         run = getattr(worker, "run", None)
         if callable(run):
             run()
 
-    def shutdown_active_execution(self, timeout_ms: int | None = 1000) -> bool:
+    def shutdown_active_execution(
+        self,
+        timeout_ms: int | None = 1000,
+    ) -> bool:
         worker = self._active_worker
         if worker is None:
             return True
-
         request_cancel = getattr(worker, "request_cancel", None)
         if callable(request_cancel):
             try:
                 request_cancel()
             except Exception as exc:
-                log_best_effort_shutdown_failure("execution session controller", "request_cancel", exc)
-
+                log_best_effort_shutdown_failure(
+                    "execution session controller",
+                    "worker.request_cancel",
+                    exc,
+                )
         shutdown = getattr(worker, "shutdown", None)
         if callable(shutdown):
             try:
                 shutdown(timeout_ms=timeout_ms)
-            except TypeError:
-                try:
-                    if timeout_ms is None:
-                        shutdown()
-                    else:
-                        shutdown(int(timeout_ms))
-                except Exception as exc:
-                    log_best_effort_shutdown_failure(
-                        "execution session controller",
-                        "worker.shutdown",
-                        exc,
-                    )
             except Exception as exc:
-                log_best_effort_shutdown_failure("execution session controller", "worker.shutdown", exc)
-
+                log_best_effort_shutdown_failure(
+                    "execution session controller",
+                    "worker.shutdown",
+                    exc,
+                )
         thread = getattr(worker, "_thread", None)
-        is_running = getattr(thread, "isRunning", None) if thread is not None else None
-        if not callable(is_running):
-            is_running = getattr(worker, "isRunning", None)
-
-        if callable(is_running):
-            try:
-                return not bool(is_running())
-            except Exception as exc:
-                log_best_effort_shutdown_failure("execution session controller", "worker.isRunning", exc)
-                return False
-        return True
+        is_running = getattr(thread, "isRunning", None)
+        return not bool(is_running()) if callable(is_running) else True
 
 
-__all__ = ["ExecutionBuildResult", "WorkbenchExecutionSessionController"]
+def _composite_file_batch_progress(
+    *,
+    index: int,
+    file_count: int,
+    inner_current: int = 0,
+    inner_total: int = 0,
+) -> tuple[int, int]:
+    """Combine one file's internal progress into a stable batch percentage."""
+
+    safe_count = max(1, int(file_count or 0))
+    safe_index = min(max(1, int(index or 1)), safe_count)
+    completed_units = (safe_index - 1) * 1000
+    if int(inner_total or 0) > 0:
+        fraction = min(
+            max(float(inner_current or 0) / float(inner_total), 0.0),
+            1.0,
+        )
+        completed_units += int(fraction * 1000)
+    return completed_units, safe_count * 1000
+
+
+def _cancelled(*, items: list[dict[str, object]] | None = None):
+    return {
+        "status": "cancelled",
+        "output_path": "",
+        "output_paths": {},
+        "report_paths": [],
+        "failed_count": 0,
+        "error_text": "execution_cancelled",
+        "items": list(items or ()),
+    }
+
+
+def _production_request(
+    *,
+    path: str,
+    output_root: Path,
+    mode_id: str,
+    scene: SceneWorkspace,
+    template: TemplateConfig,
+    plan_id: str,
+    plan_path: str,
+    plan_source_type: str,
+    template_id: str,
+    template_path: str,
+    template_source_type: str,
+    document_type_id: str,
+    session_overrides: dict[str, object] | None,
+    material_snapshot,
+    document_structure_evidence: DocumentStructureEvidence | None,
+    document_scope_decisions: tuple[RegionDecision, ...],
+) -> ProductionExecutionRequest:
+    return ProductionExecutionRequest(
+        input_path=Path(path),
+        output_root=Path(output_root),
+        mode_id=mode_id,
+        scene=scene,
+        template=template,
+        plan_id=plan_id,
+        plan_path=plan_path,
+        plan_source_type=plan_source_type,
+        template_id=template_id,
+        template_path=template_path,
+        template_source_type=template_source_type,
+        document_type_id=(document_type_id if mode_id == "official" else ""),
+        session_overrides=dict(session_overrides or {}),
+        output_suffix="-formatted",
+        material_snapshot=material_snapshot,
+        require_format_change=True,
+        document_structure_evidence=document_structure_evidence,
+        document_scope_decisions=document_scope_decisions,
+    )
+
+
+def _production_output_roots(
+    paths: tuple[str, ...],
+    *,
+    base_root: Path,
+    configured_root: str,
+    output_roots_by_path: Mapping[str, str] | None,
+) -> tuple[dict[str, Path], str]:
+    configured = str(configured_root or "").strip()
+    base = Path(base_root).expanduser().resolve()
+    provided = {
+        str(key or "").casefold(): str(value or "").strip()
+        for key, value in dict(output_roots_by_path or {}).items()
+        if str(key or "").strip() and str(value or "").strip()
+    }
+    resolved: dict[str, Path] = {}
+    seen: set[tuple[str, str]] = set()
+    for raw_path in paths:
+        source = Path(raw_path).expanduser().resolve()
+        raw_destination = provided.get(str(source).casefold())
+        destination = (
+            Path(raw_destination).expanduser().resolve()
+            if raw_destination
+            else base
+        )
+        if configured and not _path_is_within(destination, base):
+            return {}, f"workbench_output_path_outside_root:{destination}"
+        if _path_is_within(source, destination):
+            return {}, f"workbench_output_root_contains_input:{source}"
+        identity = (
+            str(destination).casefold(),
+            source.stem.casefold(),
+        )
+        if identity in seen and len(paths) > 1:
+            return {}, f"workbench_output_path_collision:{destination}"
+        seen.add(identity)
+        resolved[str(source).casefold()] = destination
+    return resolved, ""
+
+
+def _batch_format_change_evidence(
+    items: list[dict[str, object]],
+) -> dict[str, object]:
+    evidence = [
+        dict(item.get("format_change_evidence") or {})
+        for item in items
+        if item.get("format_change_evidence")
+    ]
+    compared = [item for item in evidence if item.get("status") == "compared"]
+    unchanged = sum(not bool(item.get("format_changed")) for item in compared)
+    return {
+        "schema_version": "docx-format-change-batch-v1",
+        "status": "compared" if len(compared) == len(items) else "partial",
+        "format_changed": bool(items) and len(compared) == len(items) and unchanged == 0,
+        "documents_total": len(items),
+        "documents_compared": len(compared),
+        "documents_unchanged": unchanged,
+    }
+
+
+def _attach_request_trace(
+    result: dict[str, object],
+    request: ProductionExecutionRequest,
+) -> dict[str, object]:
+    payload = dict(result)
+    payload.setdefault(
+        "execution_route",
+        (
+            "production_with_material"
+            if request.material_snapshot is not None
+            else "production"
+        ),
+    )
+    payload.setdefault("input_paths", [str(request.input_path)])
+    payload.setdefault("output_root", str(request.output_root))
+    payload.setdefault("plan_id", request.plan_id)
+    payload.setdefault("template_id", request.template_id)
+    return payload
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _safe_output_component(value: str, *, fallback: str) -> str:
+    normalized = "".join(
+        "_" if char in '<>:"/\\|?*' or ord(char) < 32 else char
+        for char in str(value or "").strip()
+    ).rstrip(" .")
+    return normalized[:120] or fallback
+
+
+__all__ = [
+    "ExecutionBuildResult",
+    "WorkbenchExecutionSessionController",
+    "build_threaded_runner",
+]

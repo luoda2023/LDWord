@@ -77,10 +77,13 @@ def test_template_panel_delegates_two_phase_close_state_to_one_transaction():
     panel_source = inspect.getsource(TemplatePanel)
     prompt_source = inspect.getsource(TemplateClosePrompt)
     transaction_source = inspect.getsource(TemplateCloseTransaction)
+    prompt_delegate_source = inspect.getsource(
+        TemplatePanel._prompt_close_template_draft_action
+    )
 
     assert "self._close_prompt = TemplateClosePrompt(self)" in panel_source
     assert "self._close_transaction = TemplateCloseTransaction(self)" in panel_source
-    assert "return self._close_prompt.ask(count)" in panel_source
+    assert "return self._close_prompt.ask(count)" in prompt_delegate_source
     assert "BaseDialog(" not in panel_source
     assert "BaseDialog(" in prompt_source
     for protocol_method, transaction_method in (
@@ -90,16 +93,17 @@ def test_template_panel_delegates_two_phase_close_state_to_one_transaction():
         ("finalize_close_pending_changes", "finalize"),
         ("cancel_prepared_close", "cancel"),
     ):
+        protocol_source = inspect.getsource(getattr(TemplatePanel, protocol_method))
         assert (
             f"return self._close_transaction.{transaction_method}()"
-            in panel_source
+            in protocol_source
             or (
                 protocol_method == "finalize_close_pending_changes"
-                and "self._close_transaction.finalize()" in panel_source
+                and "self._close_transaction.finalize()" in protocol_source
             )
             or (
                 protocol_method == "cancel_prepared_close"
-                and "self._close_transaction.cancel()" in panel_source
+                and "self._close_transaction.cancel()" in protocol_source
             )
         )
     for leaked_state in (
@@ -333,7 +337,7 @@ def test_template_panel_selector_shows_complete_template_library():
             for index in range(panel._overview_detail._combo.count())
         ]
 
-        assert option_ids[:len(EXPECTED_CUSTOM_TEMPLATE_IDS)] == EXPECTED_CUSTOM_TEMPLATE_IDS
+        assert set(EXPECTED_CUSTOM_TEMPLATE_IDS).issubset(option_ids)
         assert "thesis_gbt" not in option_ids
     finally:
         panel.close()
@@ -360,7 +364,7 @@ def test_template_panel_selector_ignores_scene_compatible_template_filter():
             for index in range(panel._overview_detail._combo.count())
         ]
 
-        assert option_ids[:len(EXPECTED_THESIS_TEMPLATE_IDS)] == EXPECTED_THESIS_TEMPLATE_IDS
+        assert set(EXPECTED_THESIS_TEMPLATE_IDS).issubset(option_ids)
         assert "default" not in option_ids
     finally:
         panel.close()
@@ -411,10 +415,12 @@ def test_template_panel_registers_overview_rows_and_details_for_every_preview_gr
         }
         assert expected_detail_ids.issubset(panel._detail_map)
         assert expected_detail_ids.issubset(panel._nav_cards)
-        assert {"tpl_formula", "tpl_reference", "tpl_other"}.isdisjoint(
+        assert "tpl_formula" not in panel._nav_cards
+        assert "tpl_formula" not in panel._detail_map
+        assert {"tpl_reference", "tpl_other"}.isdisjoint(
             panel._nav_cards
         )
-        assert {"tpl_formula", "tpl_reference", "tpl_other"}.isdisjoint(
+        assert {"tpl_reference", "tpl_other"}.isdisjoint(
             panel._detail_map
         )
     finally:
@@ -494,7 +500,9 @@ def test_template_panel_module_switches_are_compact_summary_header_controls():
         controls = panel._participation_sections["tpl_page"]
 
         assert controls.parent() is detail._summary_card.header
-        assert set(controls.toggles) == {"page_setup", "section_format"}
+        assert set(controls.toggles) == {"page_setup"}
+        assert controls.toggles["page_setup"].accessibleName() == "应用页面设置"
+        assert not hasattr(controls, "_labels")
         assert not hasattr(controls, "_rows")
         assert controls.isHidden() is False
     finally:
@@ -1171,7 +1179,7 @@ def test_fresh_builtin_heading_level_two_is_enabled_and_not_visually_muted():
         app.processEvents()
 
 
-def test_template_panel_page_participation_rows_update_independently_once():
+def test_template_panel_page_participation_master_updates_both_modules_once():
     app = _app()
     bridge = PanelBridge()
     scene = SceneWorkspace(scene_id="custom", template_id="default")
@@ -1179,12 +1187,15 @@ def test_template_panel_page_participation_rows_update_independently_once():
     panel = TemplatePanel(bridge)
     scene_changed: list[SceneWorkspace] = []
     bridge.scene_changed.connect(scene_changed.append)
+    selector_refreshes: list[bool] = []
+    original_selector_refresh = panel._refresh_template_selector_options
+    panel._refresh_template_selector_options = lambda: selector_refreshes.append(True)
 
     try:
         panel._ensure_detail_loaded("tpl_page")
+        panel._show_detail("tpl_page")
         section = panel._participation_sections["tpl_page"]
         page_toggle = section.toggles["page_setup"]
-        section_toggle = section.toggles["section_format"]
         before_refreshes = panel._projection_refresh_count
 
         page_toggle.click()
@@ -1194,13 +1205,66 @@ def test_template_panel_page_participation_rows_update_independently_once():
         assert updated is not scene
         assert scene.module_switches["page_setup"] is True
         assert updated.module_switches["page_setup"] is False
-        assert updated.module_switches["section_format"] is True
+        assert updated.module_switches["section_format"] is False
         assert bridge.is_scene_dirty() is True
         assert scene_changed == [updated]
-        assert panel._projection_refresh_count == before_refreshes + 1
+        assert selector_refreshes == []
+        assert panel._projection_refresh_count == before_refreshes
+        assert panel._overview_projection_stale is True
         assert page_toggle.isChecked() is False
-        assert section_toggle.isChecked() is True
+        assert panel._nav_cards["tpl_page"]._badge.text() == "跳过"
+
+        page_toggle.click()
+        app.processEvents()
+
+        reenabled = bridge.current_scene()
+        assert reenabled.module_switches["page_setup"] is True
+        assert reenabled.module_switches["section_format"] is True
+        assert scene_changed == [updated, reenabled]
+        assert selector_refreshes == []
+        assert panel._projection_refresh_count == before_refreshes
+        assert page_toggle.isChecked() is True
+        assert panel._nav_cards["tpl_page"]._badge.text() == "执行"
+
+        panel._show_detail("tpl_overview")
+
+        assert panel._projection_refresh_count == before_refreshes + 1
+        assert panel._overview_projection_stale is False
+    finally:
+        panel._refresh_template_selector_options = original_selector_refresh
+        panel.close()
+        app.processEvents()
+
+
+def test_template_panel_page_participation_preserves_legacy_partial_state_until_click():
+    app = _app()
+    bridge = PanelBridge()
+    scene = SceneWorkspace(scene_id="custom", template_id="default")
+    scene.module_switches["page_setup"] = False
+    scene.module_switches["section_format"] = True
+    bridge.set_current_scene(
+        scene,
+        config_id="custom",
+        source="library",
+        emit_signal=False,
+    )
+    panel = TemplatePanel(bridge)
+
+    try:
+        panel._ensure_detail_loaded("tpl_page")
+        section = panel._participation_sections["tpl_page"]
+        page_toggle = section.toggles["page_setup"]
+
+        assert page_toggle.isChecked() is True
+        assert "部分执行" in page_toggle.toolTip()
         assert panel._nav_cards["tpl_page"]._badge.text() == "部分"
+
+        page_toggle.click()
+        app.processEvents()
+
+        updated = bridge.current_scene()
+        assert updated.module_switches["page_setup"] is False
+        assert updated.module_switches["section_format"] is False
     finally:
         panel.close()
         app.processEvents()
@@ -1216,7 +1280,11 @@ def test_template_panel_heading_participation_keeps_recognition_request():
     try:
         panel._ensure_detail_loaded("tpl_heading")
         section = panel._participation_sections["tpl_heading"]
-        assert section._labels["heading_numbering"].text() == "应用标题编号"
+        assert (
+            section.toggles["heading_numbering"].accessibleName()
+            == "应用标题编号"
+        )
+        assert not hasattr(section, "_labels")
         section.toggles[
             "heading_numbering"
         ].click()
@@ -1273,6 +1341,36 @@ def test_template_panel_one_template_edit_refreshes_projection_once():
         assert panel._projection_refresh_count == before + 1
         assert bridge.is_template_dirty() is True
         assert panel._overview_detail._preview.projection.page_geometry.margin_top_cm == 4.1
+    finally:
+        panel.close()
+        app.processEvents()
+
+
+def test_template_panel_detail_edit_defers_hidden_overview_projection():
+    app = _app()
+    bridge = PanelBridge()
+    panel = TemplatePanel(bridge)
+    try:
+        panel._ensure_detail_loaded("tpl_page")
+        panel._show_detail("tpl_page")
+        before = panel._projection_refresh_count
+        panel._current_template.page_setup.margin.top_cm = 4.1
+
+        panel._on_template_edited(panel._current_template)
+        app.processEvents()
+
+        assert panel._projection_refresh_count == before
+        assert panel._overview_projection_stale is True
+
+        panel._show_detail("tpl_overview")
+        app.processEvents()
+
+        assert panel._projection_refresh_count == before + 1
+        assert panel._overview_projection_stale is False
+        assert (
+            panel._overview_detail._preview.projection.page_geometry.margin_top_cm
+            == 4.1
+        )
     finally:
         panel.close()
         app.processEvents()
