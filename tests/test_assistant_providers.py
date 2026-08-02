@@ -375,8 +375,11 @@ def test_openai_compatible_blocks_authorized_cross_origin_redirect():
 
     class TargetHandler(BaseHTTPRequestHandler):
         def do_POST(self):
+            size = int(self.headers.get("Content-Length", "0"))
+            self.rfile.read(size)
             target_requests.append(self.headers.get("Authorization"))
             self.send_response(500)
+            self.send_header("Content-Length", "0")
             self.end_headers()
 
         def log_message(self, _format, *_args):
@@ -386,11 +389,18 @@ def test_openai_compatible_blocks_authorized_cross_origin_redirect():
 
     class RedirectHandler(BaseHTTPRequestHandler):
         def do_POST(self):
+            # Consume the request body before replying.  On Windows, closing a
+            # POST socket with unread bytes can surface as WSAECONNABORTED
+            # before urllib receives the redirect response, making this
+            # credential-boundary test nondeterministic.
+            size = int(self.headers.get("Content-Length", "0"))
+            self.rfile.read(size)
             self.send_response(307)
             self.send_header(
                 "Location",
                 f"http://127.0.0.1:{target.server_port}/v1/chat/completions",
             )
+            self.send_header("Content-Length", "0")
             self.end_headers()
 
         def log_message(self, _format, *_args):
