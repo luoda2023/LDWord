@@ -670,7 +670,7 @@ def test_generic_official_request_uses_one_local_structured_intake(
                 "clarification_id": session.pending_continuation[
                     "clarification_id"
                 ],
-                "selected_choice_ids": ["report"],
+                "selected_choice_ids": ["notice"],
                 "field_values": {
                     "organization": "示例市教育局",
                     "recipient": "各区教育局",
@@ -688,9 +688,9 @@ def test_generic_official_request_uses_one_local_structured_intake(
         assert session.active_plan["work_mode_id"] == "official"
         assert session.active_plan["production_contract"][
             "document_type_id"
-        ] == "report"
+        ] == "notice"
         assert session.active_plan["scene_ref"]["official_field_values"] == {
-            "document_type": "report",
+            "document_type": "notice",
             "organization": "示例市教育局",
             "recipient": "各区教育局",
         }

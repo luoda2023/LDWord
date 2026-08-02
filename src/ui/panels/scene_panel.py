@@ -2821,16 +2821,25 @@ class ScenePanel(SceneFileLifecycleMixin, BasePanel):
     def prepare_close_pending_changes(self) -> bool:
         if not self._resolve_pending_scene_delete():
             return False
+        # A close transaction owns persistence until it commits or is rejected.
+        # Stop an already-expired debounce timer before prompting; otherwise it
+        # can fire immediately after rollback and silently fork a restored
+        # built-in Scene.
+        self.pause_pending_scene_autosave()
         self.cancel_prepared_scene_changes()
         if not self.bridge.is_scene_dirty():
             return True
         action = self._prompt_pending_scene_action("关闭程序")
         if action == SCENE_PENDING_CANCEL:
+            self._schedule_scene_autosave()
             return False
-        return self.prepare_pending_scene_changes(
+        prepared = self.prepare_pending_scene_changes(
             action,
             save_reason="关闭程序前保存修改",
         )
+        if not prepared:
+            self._schedule_scene_autosave()
+        return prepared
 
     def commit_close_pending_changes(self) -> bool:
         return self.commit_prepared_scene_changes()

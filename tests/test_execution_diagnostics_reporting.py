@@ -541,10 +541,11 @@ def test_pipeline_records_official_document_assembly_context_and_output(tmp_path
     ).execute(str(source))
 
     evidence = result.context.official_document_assembly
-    docx_path = output_dir / "official_official.docx"
-    internal_review_path = output_dir / "official_official_internal_review.docx"
-    archive_manifest_path = output_dir / "official_official_archive_manifest.json"
-    archive_manifest_md_path = output_dir / "official_official_archive_manifest.md"
+    output_stem = str(config.entity_data["title"])
+    docx_path = output_dir / f"{output_stem}.docx"
+    internal_review_path = output_dir / f"{output_stem}_internal_review.docx"
+    archive_manifest_path = output_dir / f"{output_stem}_archive_manifest.json"
+    archive_manifest_md_path = output_dir / f"{output_stem}_archive_manifest.md"
     records = result.tracker.get_by_module("official_document_assembly")
 
     assert result.success is True
@@ -552,21 +553,18 @@ def test_pipeline_records_official_document_assembly_context_and_output(tmp_path
     assert evidence.profile_id == "notice"
     assert evidence.master_id == "official_gbt_standard"
     assert evidence.docx_path == docx_path
-    assert evidence.internal_review_docx_path == internal_review_path
-    assert evidence.archive_manifest_path == archive_manifest_path
-    assert evidence.archive_manifest_markdown_path == archive_manifest_md_path
+    assert evidence.internal_review_docx_path is None
+    assert evidence.archive_manifest_path is None
+    assert evidence.archive_manifest_markdown_path is None
     assert evidence.review_pdf_status == "not_requested"
     assert evidence.review_pdf_path is None
     assert result.output_paths == {
         "official_docx": str(docx_path),
-        "internal_review_docx": str(internal_review_path),
-        "archive_manifest": str(archive_manifest_path),
-        "archive_manifest_md": str(archive_manifest_md_path),
     }
     assert docx_path.is_file()
-    assert internal_review_path.is_file()
-    assert archive_manifest_path.is_file()
-    assert archive_manifest_md_path.is_file()
+    assert internal_review_path.exists() is False
+    assert archive_manifest_path.exists() is False
+    assert archive_manifest_md_path.exists() is False
     assert len(records) == 1
     assert records[0].success is True
     assert "review_pdf=not_requested" in records[0].after
@@ -679,7 +677,9 @@ def test_pipeline_generates_opted_in_official_review_pdf(tmp_path, monkeypatch):
     assert evidence.status == "ok"
     assert evidence.review_pdf_status == "generated"
     assert evidence.review_pdf_renderer == "fake_pdf"
-    assert evidence.review_pdf_path == output_dir / "official_official_review.pdf"
+    assert evidence.review_pdf_path == (
+        output_dir / f"{config.entity_data['title']}_review.pdf"
+    )
     assert evidence.review_pdf_path.is_file()
     assert result.output_paths["review_pdf"] == str(evidence.review_pdf_path)
     assert records[0].success is True

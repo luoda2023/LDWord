@@ -40,8 +40,11 @@ def test_all_material_renderers_share_one_strict_token_paragraph_contract() -> N
     planner = (
         ROOT / "src/services/material_assets/image_plan_builder.py"
     ).read_text(encoding="utf-8")
-    renderer = (
+    renderer_adapter = (
         ROOT / "src/services/material_content/docx_renderer.py"
+    ).read_text(encoding="utf-8")
+    renderer = (
+        ROOT / "src/shared/engine/docx_renderer.py"
     ).read_text(encoding="utf-8")
     attachment_renderer = (
         ROOT / "src/services/material_attachments/docx_renderer.py"
@@ -51,6 +54,7 @@ def test_all_material_renderers_share_one_strict_token_paragraph_contract() -> N
     ).read_text(encoding="utf-8")
 
     assert "def is_strict_material_token_paragraph" in owner
+    assert "from src.shared.engine.docx_renderer import" in renderer_adapter
     assert "is_strict_material_token_paragraph(" in planner
     assert "is_strict_material_token_paragraph(" in renderer
     assert "is_strict_material_token_paragraph(" in attachment_renderer

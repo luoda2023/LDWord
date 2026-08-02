@@ -10,6 +10,7 @@ from src.config import library as config_library
 from src.qt_api import QWidget
 from src.ui.bridge import PanelBridge
 from src.ui.main_window import MainWindow, WORK_MODE_DIRTY_SAVE
+from src.ui.panels import scene_file_lifecycle_mixin as scene_file_lifecycle_module
 from src.ui.panels import scene_panel as scene_panel_module
 from src.ui.panels import scene_session_coordinator as scene_session_module
 from src.ui.panels.scene_panel import ScenePanel
@@ -1190,7 +1191,7 @@ def test_watcher_missing_clean_scene_default_load_exception_never_escapes(
         panel._scene_library_watcher.blockSignals(True)
         path.unlink()
         monkeypatch.setattr(
-            scene_panel_module,
+            scene_file_lifecycle_module,
             "default_scene_entry",
             lambda **_kwargs: (_ for _ in ()).throw(
                 RuntimeError("injected watcher default lookup failure")

@@ -49,11 +49,16 @@ def test_large_ui_coordinator_method_budgets_are_non_increasing():
 
 
 def test_provider_presentation_has_one_owner():
-    assistant_source = _source("src/assistant/ui/assistant_panel.py")
+    workflow_source = _source("src/assistant/ui/document_workflow_mixin.py")
+    facade_source = _source("src/assistant/provider_settings_facade.py")
     preferences_source = _source("src/ui/panels/preferences_panel.py")
 
-    for consumer in (assistant_source, preferences_source):
-        assert "from src.assistant.ui.provider_presentation import" in consumer
+    assert "from src.assistant.ui.provider_presentation import" in workflow_source
+    assert "from src.assistant.ui.provider_presentation import" in facade_source
+    assert "from src.assistant.provider_settings_facade import" in preferences_source
+    assert "from src.assistant.ui.provider_presentation import" not in preferences_source
+
+    for consumer in (workflow_source, facade_source, preferences_source):
         assert "def _provider_error_text" not in consumer
         assert "def _provider_connection_badge" not in consumer
         assert "def _provider_connection_status_text" not in consumer
