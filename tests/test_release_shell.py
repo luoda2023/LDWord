@@ -243,6 +243,11 @@ def test_windows_package_script_delegates_to_gated_release_builder():
     assert "version='build\\\\windows_version_info.txt'" in spec
     assert "contents_directory='.'" in spec
     assert "('licenses', 'licenses')" in spec
+    assert (
+        "('src\\\\shared\\\\ui\\\\icons\\\\app_logo.svg', "
+        "'src\\\\shared\\\\ui\\\\icons')"
+    ) in spec
+    assert "('src\\\\shared\\\\ui\\\\icons', 'src\\\\shared\\\\ui\\\\icons')" not in spec
     assert "('RELEASE_NOTES.md', '.')" in spec
     assert "('SECURITY.md', '.')" in spec
     assert "('build\\\\release_config_library', 'config_library')" in spec
