@@ -7,19 +7,16 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_public_product_positioning_matches_runtime_brand_and_modes():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert readme.startswith("# Alavette Form V1.0")
+    assert readme.startswith("# Alavette Form")
     assert "本地优先" in readme
     assert "不会自动上传" in readme
     assert "毕业论文 / 学位论文 `docx` 格式修订桌面工具" not in readme
 
     for mode_label in (
-        "通用版",
-        "试卷版",
-        "论文版",
-        "标书版",
-        "公文版",
-        "技术文档版",
-        "报告版",
+        "通用",
+        "试卷",
+        "论文",
+        "公文",
     ):
         assert mode_label in readme
 

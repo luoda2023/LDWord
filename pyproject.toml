@@ -6,6 +6,32 @@ build-backend = "setuptools.build_meta"
 name = "lark-formatter"
 version = "1.0.0"
 description = "Local-first, scenario-driven document production workflow for Alavette Form V1.0"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "王云雀Alouette" },
+]
+keywords = [
+    "docx",
+    "document-automation",
+    "local-first",
+    "pyside6",
+    "python-docx",
+    "windows",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+    "Topic :: Text Processing",
+]
 requires-python = ">=3.10"
 dependencies = [
     "python-docx>=1.1.0",
@@ -29,6 +55,12 @@ dev = [
 build = [
     "pyinstaller>=6.19.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Alouetter/Alavette-Form"
+Repository = "https://github.com/Alouetter/Alavette-Form.git"
+Issues = "https://github.com/Alouetter/Alavette-Form/issues"
+Security = "https://github.com/Alouetter/Alavette-Form/security/advisories/new"
 
 [tool.setuptools.packages.find]
 include = ["src*"]
