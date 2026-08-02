@@ -2,6 +2,7 @@
 
 from src.shared.ui.icons.catalog import (
     get_app_logo,
+    get_application_icon,
     get_icon,
     get_icon_names,
     invalidate_icon_cache,
@@ -10,6 +11,7 @@ from src.shared.ui.icons.catalog import (
 
 __all__ = [
     "get_app_logo",
+    "get_application_icon",
     "get_icon",
     "get_icon_names",
     "invalidate_icon_cache",

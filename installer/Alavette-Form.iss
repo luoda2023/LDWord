@@ -36,6 +36,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir={#OutputDir}
 OutputBaseFilename={#OutputBaseFilename}
+SetupIconFile=assets\Alavette-Form-Setup.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

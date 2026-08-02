@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from src.shared.ui.icons.catalog import get_app_logo, get_icon, get_icon_names
+from src.shared.ui.icons.catalog import (
+    get_app_logo,
+    get_application_icon,
+    get_icon,
+    get_icon_names,
+)
 from src.ui.icons.catalog import get_icon as get_legacy_icon
 from src.ui.panel_registry import PANEL_SPECS
 
@@ -157,6 +162,9 @@ def test_every_registered_icon_and_app_logo_render(qapp):
     logo = get_app_logo(24)
     assert not logo.isNull()
     assert not logo.pixmap(24, 24).isNull()
+    application_icon = get_application_icon()
+    assert not application_icon.isNull()
+    assert not application_icon.pixmap(32, 32).isNull()
 
 
 def test_unknown_icon_has_visible_fallback_and_strict_validation(qapp):

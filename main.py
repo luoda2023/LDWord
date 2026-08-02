@@ -107,6 +107,9 @@ def _start_gui(font_engine: str | None = None) -> int:
     )
 
     app = QApplication(sys.argv)
+    from src.shared.ui.icons.catalog import get_application_icon
+
+    app.setWindowIcon(get_application_icon())
     instance_lock = QLockFile(
         QDir.temp().filePath("alavette-form-v1-gui.lock")
     )

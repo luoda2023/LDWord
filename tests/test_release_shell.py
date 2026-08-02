@@ -242,9 +242,14 @@ def test_windows_package_script_delegates_to_gated_release_builder():
     spec = (ROOT / "Alavette-Form_V1.0.spec").read_text(encoding="utf-8")
     assert "version='build\\\\windows_version_info.txt'" in spec
     assert "contents_directory='.'" in spec
+    assert "icon='installer\\\\assets\\\\Alavette-Form.ico'" in spec
     assert "('licenses', 'licenses')" in spec
     assert (
         "('src\\\\shared\\\\ui\\\\icons\\\\app_logo.svg', "
+        "'src\\\\shared\\\\ui\\\\icons')"
+    ) in spec
+    assert (
+        "('src\\\\shared\\\\ui\\\\icons\\\\app_icon.png', "
         "'src\\\\shared\\\\ui\\\\icons')"
     ) in spec
     assert "('src\\\\shared\\\\ui\\\\icons', 'src\\\\shared\\\\ui\\\\icons')" not in spec

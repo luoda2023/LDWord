@@ -49,6 +49,7 @@ BASELINE_COMMANDS: tuple[tuple[tuple[str, ...], bool], ...] = (
             "tests/test_architecture_boundaries.py",
             "tests/test_code_health_budget.py",
             "tests/test_icon_catalog_integrity.py",
+            "tests/test_windows_icon_assets.py",
         ),
         False,
     ),

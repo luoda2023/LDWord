@@ -245,6 +245,14 @@ def _render_icon(name: str, size: int, color: str) -> QIcon:
     return _icon_from_svg(svg_str, size)
 
 
+def get_application_icon() -> QIcon:
+    """Return the fixed product icon used by Windows shell surfaces."""
+
+    icon_path = Path(__file__).parent / "app_icon.png"
+    icon = QIcon(str(icon_path))
+    return icon if not icon.isNull() else get_app_logo(256)
+
+
 def get_icon(
     name: str,
     size: int = 20,

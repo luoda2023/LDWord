@@ -35,3 +35,10 @@ def test_installer_signs_setup_and_uninstaller_in_official_mode() -> None:
     assert "#ifdef SignedBuild" in source
     assert "SignTool=release" in source
     assert "SignedUninstaller=yes" in source
+
+
+def test_installer_uses_the_distinct_setup_icon() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+
+    assert "SetupIconFile=assets\\Alavette-Form-Setup.ico" in source
+    assert (ROOT / "installer" / "assets" / "Alavette-Form-Setup.ico").is_file()
