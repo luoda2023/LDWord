@@ -241,10 +241,12 @@ def test_windows_package_script_delegates_to_gated_release_builder():
     } == _required_lazy_shared_ui_hidden_imports()
     spec = (ROOT / "Alavette-Form_V1.0.spec").read_text(encoding="utf-8")
     assert "version='build\\\\windows_version_info.txt'" in spec
+    assert "contents_directory='.'" in spec
     assert "('licenses', 'licenses')" in spec
     assert "('RELEASE_NOTES.md', '.')" in spec
     assert "('SECURITY.md', '.')" in spec
     assert "('build\\\\release_config_library', 'config_library')" in spec
+    assert "src.document_batch.plan" not in hidden_imports
 
 
 def test_windows_clean_script_removes_local_release_artifacts():
