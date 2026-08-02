@@ -41,9 +41,17 @@ class ReleaseBuildError(RuntimeError):
     pass
 
 
-def build_release(*, unsigned_qa: bool = False) -> Path:
+def build_release(
+    *,
+    unsigned_qa: bool = False,
+    skip_full_regression: bool = False,
+) -> Path:
     """Run all release gates and atomically publish a signed or QA-only ZIP."""
 
+    if skip_full_regression and not unsigned_qa:
+        raise ReleaseBuildError(
+            "--skip-full-regression is only allowed with --unsigned-qa"
+        )
     _require_release_python()
     dependency_issues = release_environment_issues(ROOT / "requirements-release.lock")
     if dependency_issues:
@@ -92,12 +100,16 @@ def build_release(*, unsigned_qa: bool = False) -> Path:
         log=evidence_root / "02-scene-release-gate.log",
         env=environment,
     )
-    _run_logged(
-        (str(python), "-m", "pytest", "-q", "tests"),
-        cwd=source_root,
-        log=evidence_root / "03-full-regression.log",
-        env=environment,
-    )
+    full_regression_log = evidence_root / "03-full-regression.log"
+    if skip_full_regression:
+        _write_skipped_full_regression_log(full_regression_log)
+    else:
+        _run_logged(
+            (str(python), "-m", "pytest", "-q", "tests"),
+            cwd=source_root,
+            log=full_regression_log,
+            env=environment,
+        )
     _run_logged(
         (str(python), "-m", "pip", "check"),
         cwd=source_root,
@@ -385,6 +397,20 @@ def _write_scan_log(path: Path, errors: list[str], warnings: list[str]) -> None:
         *(f"WARNING {item}" for item in warnings),
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_skipped_full_regression_log(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "status=skipped\n"
+        "scope=full_pytest_suite\n"
+        "reason=explicit_unsigned_qa_fast_packaging\n"
+        "requested_by=user\n"
+        "release_ready=false\n"
+        "note=Engineering gate, scene matrix, and targeted regressions passed; "
+        "this candidate is not a formal release.\n",
+        encoding="utf-8",
+    )
 
 
 def _trim_qt_addons(package_root: Path) -> None:
@@ -675,9 +701,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Build a clearly labelled QA artifact without a signing certificate.",
     )
+    parser.add_argument(
+        "--skip-full-regression",
+        action="store_true",
+        help="Skip the full pytest suite; only valid with --unsigned-qa.",
+    )
     args = parser.parse_args(argv)
     try:
-        output = build_release(unsigned_qa=args.unsigned_qa)
+        output = build_release(
+            unsigned_qa=args.unsigned_qa,
+            skip_full_regression=args.skip_full_regression,
+        )
     except (
         OSError,
         RuntimeError,

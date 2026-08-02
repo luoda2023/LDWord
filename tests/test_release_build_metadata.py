@@ -36,6 +36,38 @@ def test_unsigned_qa_is_explicit_and_official_signing_fails_closed(monkeypatch):
         release_builder._signing_configuration(unsigned_qa=False)
 
 
+def test_fast_packaging_is_rejected_for_official_release(monkeypatch):
+    monkeypatch.setattr(
+        release_builder,
+        "_require_release_python",
+        lambda: pytest.fail("release environment must not be inspected"),
+    )
+
+    with pytest.raises(
+        release_builder.ReleaseBuildError,
+        match="only allowed with --unsigned-qa",
+    ):
+        release_builder.build_release(skip_full_regression=True)
+
+
+def test_skipped_full_regression_evidence_is_explicit(tmp_path):
+    log = tmp_path / "evidence" / "03-full-regression.log"
+
+    release_builder._write_skipped_full_regression_log(log)
+
+    assert log.read_text(encoding="utf-8").splitlines() == [
+        "status=skipped",
+        "scope=full_pytest_suite",
+        "reason=explicit_unsigned_qa_fast_packaging",
+        "requested_by=user",
+        "release_ready=false",
+        (
+            "note=Engineering gate, scene matrix, and targeted regressions passed; "
+            "this candidate is not a formal release."
+        ),
+    ]
+
+
 def test_official_signing_rejects_malformed_certificate_thumbprint(monkeypatch):
     monkeypatch.setenv("ALAVETTE_SIGN_CERT_SHA1", "not-a-thumbprint")
     monkeypatch.setattr(
@@ -108,13 +140,16 @@ def test_binary_sbom_describes_runtime_payload_not_test_or_build_tools(tmp_path)
 
 
 def test_release_cli_reports_staging_failures_without_traceback(monkeypatch, capsys):
-    def fail_build(*, unsigned_qa):
+    def fail_build(*, unsigned_qa, skip_full_regression):
         assert unsigned_qa is True
+        assert skip_full_regression is True
         raise RuntimeError("worktree is dirty")
 
     monkeypatch.setattr(release_builder, "build_release", fail_build)
 
-    assert release_builder.main(["--unsigned-qa"]) == 1
+    assert (
+        release_builder.main(["--unsigned-qa", "--skip-full-regression"]) == 1
+    )
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "[ERROR] worktree is dirty\n"
