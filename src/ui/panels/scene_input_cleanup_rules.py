@@ -5,7 +5,6 @@ from __future__ import annotations
 from src.config.scene import SceneWorkspace
 from src.qt_api import (
     QCheckBox,
-    QLabel,
     QSizePolicy,
     Qt,
     QVBoxLayout,
@@ -55,15 +54,6 @@ class SceneInputCleanupRulesCard(QWidget):
 
         self._card = Card(parent=self)
         self._card.set_header("输入清理", icon_name="sliders-horizontal")
-
-        self._hint = QLabel(
-            "只处理实际输入中适用的文本。Markdown 规则仅对 Markdown 来源生效；"
-            "对象安全预检和生成后验收由执行链自动完成。",
-            self._card,
-        )
-        self._hint.setObjectName("scn_input_cleanup_hint")
-        self._hint.setWordWrap(True)
-        self._card.add_widget(self._hint)
 
         self._markdown_policy = StyledComboBox(self._card)
         self._markdown_policy.setObjectName("scn_input_cleanup_markdown_policy")
@@ -227,11 +217,7 @@ class SceneInputCleanupRulesCard(QWidget):
         self._whitespace_options_row.setVisible(enabled)
 
     def _apply_theme(self) -> None:
-        theme = get_theme()
-        self._hint.setStyleSheet(
-            f"font-size: {theme.font_size_sm}px; color: {theme.text_secondary};"
-        )
-        stylesheet = build_checkbox_stylesheet(theme)
+        stylesheet = build_checkbox_stylesheet(get_theme())
         for checkbox in self._whitespace_option_checks.values():
             checkbox.setStyleSheet(stylesheet)
 

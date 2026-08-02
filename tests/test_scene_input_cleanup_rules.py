@@ -9,6 +9,7 @@ from src.config.scene import SceneWorkspace
 from src.modules.validate.md_cleanup import MdCleanupModule
 from src.pipeline.context import PipelineContext
 from src.pipeline.tracker import ChangeTracker
+from src.qt_api import QLabel
 from src.ui.panels.scene_card_definitions import CARD_DEFINITIONS
 from src.ui.panels.scene_input_cleanup_rules import SceneInputCleanupRulesCard
 
@@ -31,6 +32,7 @@ def test_input_cleanup_card_projects_scene_without_mutating_it(qapp):
         assert card._markdown_policy.currentData() == "preview_and_cleanup"
         assert card._whitespace_enabled.isChecked() is False
         assert card._whitespace_options_row.isHidden()
+        assert card.findChild(QLabel, "scn_input_cleanup_hint") is None
     finally:
         card.close()
 
