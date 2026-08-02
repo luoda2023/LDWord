@@ -68,6 +68,27 @@ def test_skipped_full_regression_evidence_is_explicit(tmp_path):
     ]
 
 
+def test_release_gate_caches_are_removed_without_touching_source(tmp_path):
+    source_root = tmp_path / "source"
+    keep = source_root / "src" / "module.py"
+    keep.parent.mkdir(parents=True)
+    keep.write_text("VALUE = 1\n", encoding="utf-8")
+    for cache_file in (
+        source_root / ".pytest_cache" / "v" / "cache" / "nodeids",
+        source_root / ".ruff_cache" / "content",
+        source_root / "src" / "__pycache__" / "module.pyc",
+    ):
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_bytes(b"cache")
+
+    release_builder._remove_release_gate_caches(source_root)
+
+    assert keep.read_text(encoding="utf-8") == "VALUE = 1\n"
+    assert not (source_root / ".pytest_cache").exists()
+    assert not (source_root / ".ruff_cache").exists()
+    assert not (source_root / "src" / "__pycache__").exists()
+
+
 def test_official_signing_rejects_malformed_certificate_thumbprint(monkeypatch):
     monkeypatch.setenv("ALAVETTE_SIGN_CERT_SHA1", "not-a-thumbprint")
     monkeypatch.setattr(

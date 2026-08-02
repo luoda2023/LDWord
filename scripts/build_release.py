@@ -116,6 +116,7 @@ def build_release(
         log=evidence_root / "04-pip-check.log",
         env=environment,
     )
+    _remove_release_gate_caches(source_root)
 
     errors, warnings = scan_release_tree(source_root, kind="source")
     _write_scan_log(
@@ -411,6 +412,21 @@ def _write_skipped_full_regression_log(path: Path) -> None:
         "this candidate is not a formal release.\n",
         encoding="utf-8",
     )
+
+
+def _remove_release_gate_caches(source_root: Path) -> None:
+    cache_names = {"__pycache__", ".pytest_cache", ".ruff_cache"}
+    cache_directories = sorted(
+        (
+            path
+            for path in source_root.rglob("*")
+            if path.is_dir() and path.name in cache_names
+        ),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    for cache_directory in cache_directories:
+        _remove_generated_tree(cache_directory, allowed_parent=source_root)
 
 
 def _trim_qt_addons(package_root: Path) -> None:
