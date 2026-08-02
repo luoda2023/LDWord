@@ -1634,6 +1634,7 @@ class ScenePanel(SceneFileLifecycleMixin, BasePanel):
         )
         self._scene_autosave_state = "saved"
         self._scene_autosave_running = False
+        self._scene_close_transaction_active = False
         self._scene_autosave_timer = QTimer(self)
         self._scene_autosave_timer.setSingleShot(True)
         self._scene_autosave_timer.timeout.connect(self._autosave_current_scene)
@@ -1872,7 +1873,11 @@ class ScenePanel(SceneFileLifecycleMixin, BasePanel):
         dirty = bool(self.bridge.is_scene_dirty())
         self._set_scene_detail_save_enabled(dirty)
         if dirty:
-            self._schedule_scene_autosave()
+            if self._scene_close_transaction_active:
+                self._scene_autosave_timer.stop()
+                self._set_scene_autosave_state("pending")
+            else:
+                self._schedule_scene_autosave()
         elif not self._scene_autosave_running:
             self._scene_autosave_timer.stop()
             self._set_scene_autosave_state("saved")
@@ -2810,6 +2815,7 @@ class ScenePanel(SceneFileLifecycleMixin, BasePanel):
     def release_finalized_edit_transaction(self) -> bool:
         result = self._scene_session.release_finalized_changes()
         if result.success:
+            self._scene_close_transaction_active = False
             return True
         if result.error is not None:
             Toast.show_error(f"释放方案保存事务失败: {result.error}")
@@ -2826,26 +2832,32 @@ class ScenePanel(SceneFileLifecycleMixin, BasePanel):
         # can fire immediately after rollback and silently fork a restored
         # built-in Scene.
         self.pause_pending_scene_autosave()
+        self._scene_close_transaction_active = True
         self.cancel_prepared_scene_changes()
         if not self.bridge.is_scene_dirty():
             return True
         action = self._prompt_pending_scene_action("关闭程序")
         if action == SCENE_PENDING_CANCEL:
-            self._schedule_scene_autosave()
+            self._scene_close_transaction_active = False
             return False
         prepared = self.prepare_pending_scene_changes(
             action,
             save_reason="关闭程序前保存修改",
         )
         if not prepared:
-            self._schedule_scene_autosave()
+            self._scene_close_transaction_active = False
         return prepared
 
     def commit_close_pending_changes(self) -> bool:
         return self.commit_prepared_scene_changes()
 
     def rollback_close_pending_changes(self) -> bool:
-        return self.rollback_prepared_scene_changes()
+        try:
+            return self.rollback_prepared_scene_changes()
+        finally:
+            # A rejected close must leave the restored draft untouched.  The
+            # next edit or an explicit save may start persistence again.
+            self._scene_close_transaction_active = False
 
     def finalize_close_pending_changes(
         self,
@@ -2874,6 +2886,7 @@ class ScenePanel(SceneFileLifecycleMixin, BasePanel):
 
     def cancel_prepared_close(self) -> None:
         self.cancel_prepared_scene_changes()
+        self._scene_close_transaction_active = False
 
     def _on_scene_changed(self, index: int) -> None:
         detail_combo = getattr(self._overview, "_combo", None)
