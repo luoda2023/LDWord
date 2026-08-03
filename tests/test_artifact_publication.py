@@ -35,6 +35,16 @@ def test_publish_staged_artifacts_commits_mixed_file_set(tmp_path):
     assert final_document.read_bytes() == b"document"
     assert not tuple(final_preview.parent.glob("*.stage.*"))
     assert not tuple(final_preview.parent.glob("*.backup"))
+    state_directory = final_preview.parent / ".lark-material-transactions"
+    assert state_directory.is_dir()
+    if os.name == "nt":
+        import ctypes
+
+        attributes = ctypes.windll.kernel32.GetFileAttributesW(
+            str(state_directory)
+        )
+        assert attributes != 0xFFFFFFFF
+        assert attributes & 0x2
 
 
 def test_publish_staged_artifacts_restores_all_finals_on_second_replace_failure(

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import copy
 
+from src.config.feature_configs import disabled_output_config
 from src.config.migration import get_default_module_switches
 from src.config.scene import SceneWorkspace
 from src.config.template import TemplateConfig
-
 
 DISABLED_SELECTOR_VALUE = "__disabled__"
 DISABLED_SELECTOR_LABEL = "不启用"
@@ -65,6 +65,7 @@ def project_execution_scene(
     projected = copy.deepcopy(
         scene if isinstance(scene, SceneWorkspace) else SceneWorkspace()
     )
+    material_profile = copy.deepcopy(projected.input_source_profile)
     setattr(
         projected,
         _RUNTIME_PLAN_ENABLED_ATTRIBUTE,
@@ -94,23 +95,45 @@ def project_execution_scene(
         projected.delivery_presets = copy.deepcopy(
             neutral.delivery_presets
         )
+        for preset in projected.delivery_presets:
+            # With no plan there is no owner for comparison/evidence/package
+            # artifacts.  Keep only the final document authorized so an
+            # independent material run has one user-facing output.
+            preset.artifacts = disabled_output_config()
+            preset.artifacts.final_docx = True
+            preset.include_structured_intermediate = False
         projected.exam_paper = copy.deepcopy(neutral.exam_paper)
         projected.template_overrides = {}
         projected.batch_preset = None
         projected.strict_mode = False
         projected.compliance_profile.enabled_checks = []
+        if material_enabled:
+            projected.input_source_profile.require_material_package = (
+                material_profile.require_material_package
+            )
+            projected.input_source_profile.material_schema_id = (
+                material_profile.material_schema_id
+            )
+            projected.input_source_profile.material_schema_ids = list(
+                material_profile.material_schema_ids
+            )
+            projected.input_source_profile.required_material_fields = list(
+                material_profile.required_material_fields
+            )
+            projected.input_source_profile.required_image_roles = list(
+                material_profile.required_image_roles
+            )
         projected.compliance_profile.object_preflight.enabled = False
     elif not template_enabled:
         for module_name in TEMPLATE_CONTROLLED_MODULES:
             switches[module_name] = False
 
-    if not material_enabled:
-        for module_name in MATERIAL_CONTROLLED_MODULES:
-            switches[module_name] = False
+    for module_name in MATERIAL_CONTROLLED_MODULES:
+        switches[module_name] = bool(material_enabled)
 
     projected.module_switches = switches
 
-    if not plan_enabled or not material_enabled:
+    if not material_enabled:
         profile = projected.input_source_profile
         profile.require_material_package = False
         profile.material_schema_id = ""

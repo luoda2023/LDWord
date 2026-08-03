@@ -7,22 +7,21 @@ journal, and either commits every final or restores the complete baseline.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 import errno
-from hashlib import sha256
 import json
 import os
-from pathlib import Path
 import re
-from shutil import copyfile, rmtree
 import tempfile
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
+from shutil import copyfile, rmtree
 from time import monotonic, sleep
 from uuid import uuid4
 
 from src.shared.io.file_evidence import FileEvidence
 from src.shared.io.layout_shadow import is_controlled_layout_shadow
-
 
 _STATE_DIRECTORY = ".lark-material-transactions"
 _JOURNAL_SCHEMA = "lark.material.multi-final-publish-journal"
@@ -191,6 +190,31 @@ def _atomic_write_json(path: Path, payload: Mapping[str, object]) -> None:
         raise
 
 
+def _hide_transaction_state_directory(path: Path) -> None:
+    """Keep crash-recovery state out of normal Windows delivery views."""
+
+    if os.name != "nt" or not path.is_dir():
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        get_attributes = kernel32.GetFileAttributesW
+        get_attributes.argtypes = [wintypes.LPCWSTR]
+        get_attributes.restype = wintypes.DWORD
+        set_attributes = kernel32.SetFileAttributesW
+        set_attributes.argtypes = [wintypes.LPCWSTR, wintypes.DWORD]
+        set_attributes.restype = wintypes.BOOL
+        attributes = int(get_attributes(str(path)))
+        if attributes == 0xFFFFFFFF:
+            return
+        set_attributes(str(path), attributes | 0x2)
+    except (AttributeError, OSError, TypeError, ValueError):
+        # Visibility is cosmetic; publication safety must not depend on it.
+        return
+
+
 class _ExclusiveFileLock:
     """One-byte advisory lock whose lock file is never unlinked."""
 
@@ -201,6 +225,7 @@ class _ExclusiveFileLock:
 
     def acquire(self, *, deadline: float, poll_seconds: float) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        _hide_transaction_state_directory(self.path.parent.parent)
         descriptor = os.open(str(self.path), os.O_RDWR | os.O_CREAT, 0o600)
         try:
             if os.fstat(descriptor).st_size < 1:

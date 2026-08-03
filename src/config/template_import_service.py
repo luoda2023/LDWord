@@ -33,6 +33,8 @@ from src.config.template_authoring_contract import (
 )
 from src.config.template_authoring_layout import (
     BASELINE_FILENAME,
+    CONTRACT_BASELINE_FILENAME,
+    CONTRACT_PROMPT_FILENAME,
     PROMPT_FILENAME,
     TemplateAuthoringWorkspace,
     ensure_template_authoring_workspace,
@@ -46,7 +48,14 @@ from src.config.template_payload_codec import (
     materialize_template_payload,
     validate_authored_template_boundary,
 )
+from src.config.template_authoring_semantics import (
+    TemplateAuthoringSemanticError,
+    validate_authored_template_semantics,
+)
 from src.config.work_mode import get_work_mode
+from src.shared.engine.page_number_planner import (
+    collect_static_page_number_diagnostics,
+)
 
 
 _MAX_IMPORT_BYTES = 16 * 1024 * 1024
@@ -157,6 +166,7 @@ def process_template_import_inbox(
                 source,
                 mode_id=workspace.mode_id,
                 baseline_path=workspace.baseline_path,
+                contracts_dir=workspace.contracts_dir,
             )
             template_id = allocate_template_id(
                 name=loaded.template.name,
@@ -297,6 +307,7 @@ def import_template_authoring_result_text(
             source,
             mode_id=workspace.mode_id,
             baseline_path=workspace.baseline_path,
+            contracts_dir=workspace.contracts_dir,
         )
         template_id = allocate_template_id(
             name=loaded.template.name,
@@ -407,6 +418,45 @@ def import_template_authoring_result_text(
     return TemplateImportBatch(successes=(success,), warnings=tuple(warnings))
 
 
+def revalidate_template_authoring_failure(
+    mode_id: str,
+    failed_result_path: Path | str,
+) -> TemplateImportBatch:
+    """Re-run a preserved failed result against the latest validator.
+
+    The original failure artifact remains untouched as audit evidence.  The
+    retried copy follows the same isolated processing/commit path as a fresh
+    assistant result, so this cannot consume other inbox files.
+    """
+
+    workspace = ensure_template_authoring_workspace(mode_id)
+    source = Path(failed_result_path).expanduser()
+    try:
+        resolved = source.resolve(strict=True)
+        failed_root = workspace.failed_dir.resolve(strict=False)
+        if (
+            not resolved.is_relative_to(failed_root)
+            or not resolved.is_file()
+            or resolved.suffix.casefold() != ".json"
+        ):
+            raise TemplateImportError("只能重新校验当前模式失败记录目录中的 JSON 结果")
+        if resolved.stat().st_size > _MAX_IMPORT_BYTES:
+            raise TemplateImportError("模板 JSON 超过 16 MB，已停止重新校验")
+        result_text = resolved.read_text(encoding="utf-8-sig")
+    except (TemplateImportError, OSError, UnicodeError) as exc:
+        return TemplateImportBatch(
+            rejections=(
+                TemplateImportIssue(
+                    code="revalidation_source_invalid",
+                    stage="read",
+                    message=str(exc),
+                    source_path=source,
+                ),
+            )
+        )
+    return import_template_authoring_result_text(workspace.mode_id, result_text)
+
+
 def _import_candidates(
     workspace: TemplateAuthoringWorkspace,
 ) -> tuple[tuple[Path, bool], ...]:
@@ -438,6 +488,7 @@ def _load_external_template_strict(
     *,
     mode_id: str,
     baseline_path: Path,
+    contracts_dir: Path,
 ) -> _LoadedExternalTemplate:
     if path.stat().st_size > _MAX_IMPORT_BYTES:
         raise TemplateImportError("模板 JSON 超过 16 MB，已停止自动导入")
@@ -463,8 +514,10 @@ def _load_external_template_strict(
 
     try:
         result = TemplateAuthoringResultEnvelope.from_payload(raw)
-        baseline = TemplateAuthoringBaselineEnvelope.from_payload(
-            read_json_object(baseline_path)
+        baseline = _resolve_result_baseline(
+            result,
+            baseline_path=baseline_path,
+            contracts_dir=contracts_dir,
         )
     except TemplateAuthoringContractError as exc:
         raise TemplateImportError(str(exc)) from exc
@@ -476,23 +529,91 @@ def _load_external_template_strict(
     result_template = dict(result.template)
     baseline_template = dict(baseline.template)
     try:
-        validate_authored_template_boundary(
-            result_template,
-            baseline_template=baseline_template,
-            profile=profile,
-        )
         template = materialize_template_payload(
             result_template,
             profile=profile,
             baseline_template=baseline_template,
         )
-    except TemplatePayloadCodecError as exc:
+        validate_authored_template_boundary(
+            result_template,
+            baseline_template=baseline_template,
+            profile=profile,
+        )
+        validate_authored_template_semantics(
+            result_template,
+            baseline_template=baseline_template,
+        )
+        page_number_diagnostics = collect_static_page_number_diagnostics(
+            template.header_footer
+        )
+        if page_number_diagnostics:
+            raise TemplateAuthoringSemanticError(
+                "页码计划未通过静态检查："
+                + "；".join(
+                    item.message for item in page_number_diagnostics[:4]
+                )
+            )
+    except (TemplatePayloadCodecError, TemplateAuthoringSemanticError) as exc:
         raise TemplateImportError(str(exc)) from exc
     return _LoadedExternalTemplate(
         template=template,
         observations=result.observations,
         contract=result.contract,
     )
+
+
+def _resolve_result_baseline(
+    result: TemplateAuthoringResultEnvelope,
+    *,
+    baseline_path: Path,
+    contracts_dir: Path,
+) -> TemplateAuthoringBaselineEnvelope:
+    """Resolve the exact baseline seen by the assistant, including history."""
+
+    current = TemplateAuthoringBaselineEnvelope.from_payload(
+        read_json_object(baseline_path)
+    )
+    if current.contract == result.contract:
+        return current
+
+    bundle_dir = contracts_dir / result.contract.fingerprint
+    historical_path = bundle_dir / CONTRACT_BASELINE_FILENAME
+    prompt_path = bundle_dir / CONTRACT_PROMPT_FILENAME
+    if not historical_path.is_file() or not prompt_path.is_file():
+        differing = _differing_contract_fields(result.contract, current.contract)
+        raise TemplateImportError(
+            "创作结果与当前合同不一致，且找不到对应的历史合同快照："
+            + "、".join(differing)
+        )
+
+    historical = TemplateAuthoringBaselineEnvelope.from_payload(
+        read_json_object(historical_path)
+    )
+    if historical.contract != result.contract:
+        raise TemplateImportError("历史合同快照与创作结果指纹不一致")
+    try:
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise TemplateImportError(f"历史合同提示词无法读取：{exc}") from exc
+    if (
+        hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
+        != historical.contract.prompt_sha256
+    ):
+        raise TemplateImportError("历史合同提示词指纹校验失败")
+    return historical
+
+
+def _differing_contract_fields(
+    actual: TemplateAuthoringContract,
+    expected: TemplateAuthoringContract,
+) -> list[str]:
+    actual_payload = actual.to_payload()
+    expected_payload = expected.to_payload()
+    return [
+        name
+        for name in expected_payload
+        if actual_payload.get(name) != expected_payload.get(name)
+    ]
 
 
 def _validate_result_contract(
@@ -516,11 +637,7 @@ def _validate_result_contract(
     if expected.baseline_template_id != mode.default_template_id:
         raise TemplateImportError("当前模板生成基准与模式默认模板不匹配")
     if result.contract != expected:
-        differing = [
-            name
-            for name in expected.to_payload()
-            if result.contract.to_payload().get(name) != expected.to_payload().get(name)
-        ]
+        differing = _differing_contract_fields(result.contract, expected)
         raise TemplateImportError(
             "创作结果与当前工作模式或基准不匹配：" + "、".join(differing)
         )
@@ -652,4 +769,5 @@ __all__ = [
     "TemplateImportSuccess",
     "import_template_authoring_result_text",
     "process_template_import_inbox",
+    "revalidate_template_authoring_failure",
 ]

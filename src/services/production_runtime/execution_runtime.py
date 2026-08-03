@@ -25,12 +25,12 @@ from src.services.delivery_template_validation import (
 from src.services.exam_markdown_source import load_exam_markdown_source
 from src.services.material_delivery import DeliveryPackageBuildError
 from src.services.official_draft_source import load_official_draft_source
+from src.services.production_runtime import formatting_runtime
 from src.services.production_runtime.delivery_reporting import (
     finalize_result_artifacts,
     primary_output_path,
     should_force_delivery_presets,
 )
-from src.services.production_runtime import formatting_runtime
 from src.services.production_runtime.material_artifacts import (
     material_artifact_payload,
 )
@@ -330,7 +330,7 @@ class WorkbenchProductionRunner:
                 official_master=official_master,
                 exam_master=exam_master,
                 official_document_type_id=self._document_type_id,
-                **formatting_runtime.document_scope_pipeline_kwargs(self._document_scope_context),
+                **formatting_runtime.document_scope_pipeline_kwargs(self._document_scope_context, working_input_path if snapshot is not None else None),
             )
             result = pipeline.execute(str(working_input_path))
             elapsed = time.perf_counter() - started

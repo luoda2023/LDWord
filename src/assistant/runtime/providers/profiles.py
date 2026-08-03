@@ -176,26 +176,69 @@ class ProviderProfileStore:
                 return profile
         raise KeyError(f"Unknown provider profile: {profile_id}")
 
-    def upsert(self, profile: ProviderProfile) -> None:
+    def active_profile_id(self) -> str:
+        profiles = self.list_profiles()
+        stored_profile_id = ""
+        if self.path.is_file():
+            payload = self._read_payload()
+            stored_profile_id = str(payload.get("active_profile_id") or "").strip()
+        return self._resolve_active_profile_id(profiles, stored_profile_id)
+
+    def set_active_profile_id(self, profile_id: str) -> None:
+        normalized = str(profile_id or "").strip()
         profiles = list(self.list_profiles())
+        if not any(item.profile_id == normalized for item in profiles):
+            raise KeyError(f"Unknown provider profile: {normalized}")
+        self._write_profiles(profiles, active_profile_id=normalized)
+
+    def upsert(
+        self,
+        profile: ProviderProfile,
+        *,
+        make_active: bool = False,
+    ) -> None:
+        profiles = list(self.list_profiles())
+        active_profile_id = self.active_profile_id()
         for index, current in enumerate(profiles):
             if current.profile_id == profile.profile_id:
                 profiles[index] = profile
                 break
         else:
             profiles.append(profile)
-        self._write_profiles(profiles)
+        self._write_profiles(
+            profiles,
+            active_profile_id=(
+                profile.profile_id if make_active else active_profile_id
+            ),
+        )
 
     def delete(self, profile_id: str) -> bool:
         if profile_id == "mock-default":
             raise ValueError("The built-in mock profile cannot be deleted")
-        profiles = [
-            item for item in self.list_profiles() if item.profile_id != profile_id
-        ]
-        if len(profiles) == len(self.list_profiles()):
+        current_profiles = list(self.list_profiles())
+        active_profile_id = self.active_profile_id()
+        profiles = [item for item in current_profiles if item.profile_id != profile_id]
+        if len(profiles) == len(current_profiles):
             return False
-        self._write_profiles(profiles)
+        if active_profile_id == profile_id:
+            active_profile_id = self._resolve_active_profile_id(profiles, "")
+        self._write_profiles(profiles, active_profile_id=active_profile_id)
         return True
+
+    @staticmethod
+    def _resolve_active_profile_id(
+        profiles: list[ProviderProfile] | tuple[ProviderProfile, ...],
+        stored_profile_id: str,
+    ) -> str:
+        profile_ids = {item.profile_id for item in profiles}
+        if stored_profile_id in profile_ids:
+            return stored_profile_id
+        for profile in reversed(profiles):
+            if profile.kind != "mock" and profile.enabled:
+                return profile.profile_id
+        if "mock-default" in profile_ids:
+            return "mock-default"
+        return profiles[0].profile_id if profiles else "mock-default"
 
     def _read_payload(self) -> dict[str, Any]:
         with self.path.open("r", encoding="utf-8") as handle:
@@ -207,11 +250,17 @@ class ProviderProfileStore:
             raise ValueError(f"Unsupported provider profile schema: {schema!r}")
         return payload
 
-    def _write_profiles(self, profiles: list[ProviderProfile]) -> None:
+    def _write_profiles(
+        self,
+        profiles: list[ProviderProfile],
+        *,
+        active_profile_id: str,
+    ) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "schema_version": PROVIDER_PROFILE_STORE_SCHEMA_VERSION,
             "contract_kind": "provider_profile_store",
+            "active_profile_id": active_profile_id,
             "profiles": [item.to_dict() for item in profiles],
         }
         temporary = self.path.with_suffix(f".json.{os.getpid()}.tmp")

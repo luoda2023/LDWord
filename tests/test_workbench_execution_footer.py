@@ -182,6 +182,54 @@ def test_failure_shows_sanitized_inline_recovery_without_log_surface(qapp):
         footer.close()
 
 
+def test_material_placeholder_failure_names_the_unmatched_role(qapp):
+    footer = WorkbenchExecutionFooter()
+    try:
+        _set_ready_document_context(footer)
+        error_text = "material.bind.template_resources_unsupported:photo,gallery"
+        footer.set_execution_result(
+            ExecutionResultState(
+                status="failed",
+                summary="执行失败",
+                error_text=error_text,
+                terminal_payload=_terminal_payload(
+                    status="failed",
+                    error_text=error_text,
+                ),
+            )
+        )
+
+        assert footer._status_label.text() == (
+            "生成失败 · 资料包图片缺少对应文档占位符：photo、gallery"
+        )
+    finally:
+        footer.close()
+
+
+def test_output_collision_failure_explains_that_the_old_file_is_kept(qapp):
+    footer = WorkbenchExecutionFooter()
+    try:
+        _set_ready_document_context(footer)
+        error_text = "material.bind.output_path_exists"
+        footer.set_execution_result(
+            ExecutionResultState(
+                status="failed",
+                summary="执行失败",
+                error_text=error_text,
+                terminal_payload=_terminal_payload(
+                    status="failed",
+                    error_text=error_text,
+                ),
+            )
+        )
+
+        assert footer._status_label.text() == (
+            "生成失败 · 输出目标已存在，旧文件已保留；请重试生成"
+        )
+    finally:
+        footer.close()
+
+
 def test_file_batch_progress_includes_current_file_internal_progress():
     assert _composite_file_batch_progress(
         index=1,

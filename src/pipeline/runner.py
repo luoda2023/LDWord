@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import copy
 import os
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-from typing import Callable, Mapping
 from uuid import uuid4
 
 from docx import Document
@@ -42,7 +42,12 @@ from src.modules.base import BaseModule
 from src.modules.structure.heading_recognition import rebuild_document_index
 from src.pipeline.context import PipelineContext
 from src.pipeline.journal_governance_mixin import PipelineJournalGovernanceMixin
-from src.pipeline.module_phases import build_module_phase_graph, order_modules_by_phase
+from src.pipeline.module_phases import (
+    ModuleScopeBehavior,
+    build_module_phase_graph,
+    module_scope_behavior,
+    order_modules_by_phase,
+)
 from src.pipeline.result import PipelineResult
 from src.pipeline.scheduler import (
     validate_data_flow,
@@ -561,6 +566,16 @@ class Pipeline(PipelineValidationMixin, PipelineJournalGovernanceMixin):
             self._emit(step, total_steps, f"Running module: {mod.meta.description}")
 
             try:
+                behavior = module_scope_behavior(mod)
+                if behavior is ModuleScopeBehavior.DOCUMENT_LEVEL:
+                    guard_error = self._document_scope_guard_error(ctx)
+                    if guard_error:
+                        return step, self._failed_result(
+                            error=guard_error,
+                            doc=doc,
+                            original_doc=original_doc,
+                            ctx=ctx,
+                        )
                 issues = mod.validate(doc, self._config, ctx) or []
                 if mod.meta.name == "validation":
                     # ValidationModule.apply normally stores these, but a fatal
@@ -593,6 +608,8 @@ class Pipeline(PipelineValidationMixin, PipelineJournalGovernanceMixin):
                 phase_step = self._phase_steps_by_name[mod.meta.name]
                 if phase_step.invalidates_document_index:
                     self._rebuild_document_index_after_module(doc, ctx, mod)
+                if behavior is ModuleScopeBehavior.DOCUMENT_LEVEL:
+                    ctx.document_scope_guard = capture_document_scope_guard(doc, ctx)
                 self._record_parameter_runtime_consumption(
                     ctx,
                     mod,

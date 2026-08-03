@@ -10,6 +10,7 @@ from src.config.material_schema_registry import (
     resolve_material_schema_ids,
 )
 from src.config.plugin_manual_gate import plugin_manual_gate_execution_issue
+from src.config.special_title_rules import validate_special_title_model
 from src.shared.engine.count_engine import count_profile_registry_issue
 from src.shared.engine.journal_rule_source_governance import (
     journal_rule_source_governance_execution_issues,
@@ -75,6 +76,10 @@ def execution_config_integrity_issues(
     """Return registry/value-domain errors that must always block execution."""
 
     issues = list(delivery_preset_identity_issues(config))
+    try:
+        validate_special_title_model(getattr(config, "heading_model", None))
+    except ValueError as exc:
+        issues.append(f"invalid_special_title_rules:{exc}")
     input_profile = getattr(config, "input_source_profile", None)
     schema_ids = resolve_material_schema_ids(
         str(getattr(input_profile, "material_schema_id", "") or ""),

@@ -47,6 +47,8 @@ def test_page_setup_detail_syncs_widget_values_from_template():
         assert detail._page_inputs["gutter_cm"].value() == 0.8
         assert detail._page_inputs["header_distance_cm"].value() == 1.6
         assert detail._section_break_combo.currentData() == "nextPage"
+        assert detail._paper_by_section_row.isHidden() is True
+        assert detail._orientation_by_section_row.isHidden() is True
         assert isinstance(detail._summary_grid, SummaryGrid)
         assert detail._summary_grid._tile_style == "module"
         assert len(detail._summary_grid.items()) == 3
@@ -114,9 +116,11 @@ def test_page_setup_detail_round_trips_all_section_layout_policies():
         detail.set_template(template)
 
         assert detail._paper_mode_combo.currentData() == "per_section"
+        assert detail._paper_by_section_row.isHidden() is False
         assert detail._paper_by_section_edit.isEnabled() is True
         assert detail._paper_by_section_edit.text() == "body=A4, appendix=A3"
         assert detail._orientation_mode_combo.currentData() == "per_section"
+        assert detail._orientation_by_section_row.isHidden() is False
         assert detail._orientation_by_section_edit.isEnabled() is True
         assert detail._orientation_by_section_edit.text() == (
             "body=portrait, appendix=landscape"
@@ -201,6 +205,7 @@ def test_page_setup_detail_blocks_save_for_invalid_or_empty_per_section_map():
         )
         app.processEvents()
 
+        assert detail._paper_by_section_row.isHidden() is False
         assert "至少填写一个" in detail._validation_alert.message()
         assert detail._save_btn.isEnabled() is False
 
@@ -228,6 +233,7 @@ def test_page_setup_detail_blocks_save_for_invalid_or_empty_per_section_map():
         )
         app.processEvents()
 
+        assert detail._orientation_by_section_row.isHidden() is False
         assert detail._validation_alert.isHidden() is False
         assert "至少填写一个" in detail._validation_alert.message()
         assert detail._save_btn.isEnabled() is False

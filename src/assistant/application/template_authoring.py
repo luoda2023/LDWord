@@ -24,6 +24,7 @@ class AssistantTemplateAuthoringCompletion:
     mode_id: str
     result_text: str
     batch: TemplateImportBatch
+    strategy: str = ""
 
     @property
     def succeeded(self) -> bool:
@@ -48,6 +49,7 @@ def complete_template_authoring(
     *,
     mode_id: str,
     provider_text: str,
+    strategy: str = "",
 ) -> AssistantTemplateAuthoringCompletion:
     """Persist and strictly import one model-produced template envelope."""
 
@@ -57,6 +59,7 @@ def complete_template_authoring(
         mode_id=str(mode_id or "").strip(),
         result_text=normalized,
         batch=batch,
+        strategy=str(strategy or "").strip(),
     )
 
 

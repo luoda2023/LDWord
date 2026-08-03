@@ -8,11 +8,11 @@ grant.
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
-import hashlib
 from pathlib import Path
-import re
 from typing import Any
 
 from docx import Document
@@ -27,9 +27,14 @@ from src.assistant.contracts.task_plan import (
     SOURCE_ROLE_STRUCTURED_SOURCE,
 )
 
-DOCX_FORMAT_EVIDENCE_SCHEMA_VERSION = "docx-format-evidence-v1"
+DOCX_FORMAT_EVIDENCE_SCHEMA_VERSION = "docx-format-evidence-v2"
 STANDARD_FORMAT_REFERENCE_ROLE = SOURCE_ROLE_STANDARD_FORMAT_REFERENCE
 FORMAT_EVIDENCE_DISCLOSURE_FIELD = "document_format_evidence"
+TEMPLATE_AUTHORING_REQUIREMENTS = "requirements"
+TEMPLATE_AUTHORING_FORMAT_CLONE = "format_clone"
+TEMPLATE_AUTHORING_STRATEGIES = frozenset(
+    {TEMPLATE_AUTHORING_REQUIREMENTS, TEMPLATE_AUTHORING_FORMAT_CLONE}
+)
 
 _FORMAT_REQUIREMENT_TERMS = (
     "格式要求",
@@ -105,9 +110,40 @@ _TEMPLATE_AUTHORING_PATTERNS = (
     re.compile(r"(?:另存为|保存为|写入为)(?:一个|一份)?(?:全新|新的|新)?模板"),
 )
 _NEGATION_TERMS = ("不要", "不用", "无需", "不需要", "别", "请勿")
-_MAX_STYLE_ROWS = 24
-_MAX_SECTION_ROWS = 12
-_MAX_TABLE_STYLE_ROWS = 12
+_TEMPLATE_REQUIREMENTS_TERMS = (
+    "按照要求",
+    "按要求",
+    "根据要求",
+    "文本要求",
+    "文字要求",
+    "正文要求",
+    "规范要求",
+    "按照规范",
+    "按规范",
+    "根据规范",
+    "提取要求",
+)
+_TEMPLATE_FORMAT_CLONE_TERMS = (
+    "格式克隆",
+    "样式克隆",
+    "克隆格式",
+    "克隆样式",
+    "克隆这个",
+    "复刻格式",
+    "复刻样式",
+    "复刻这个",
+    "复制格式",
+    "复制样式",
+    "照着格式",
+    "照着样式",
+    "按照这个格式",
+    "按这个格式",
+    "原样复刻",
+)
+_MAX_STYLE_ROWS = 64
+_MAX_SECTION_ROWS = 64
+_MAX_TABLE_STYLE_ROWS = 64
+_MAX_DIRECT_FORMAT_PROFILES = 64
 _MAX_SAMPLE_TEXT = 120
 _OFFICE_NS = "urn:schemas-microsoft-com:office:office"
 _FORMULA_OLE_PROGID_RE = re.compile(
@@ -146,6 +182,27 @@ def is_template_authoring_request(query: str) -> bool:
     return False
 
 
+def resolve_template_authoring_strategy(query: str) -> str:
+    """Resolve one exclusive evidence source for template authoring.
+
+    Ambiguous or mixed requests deliberately return an empty value so the UI
+    can ask the user to choose instead of silently blending text and styling.
+    """
+
+    normalized = _normalize_query(query)
+    if not is_template_authoring_request(normalized):
+        return ""
+    requirements = any(term in normalized for term in _TEMPLATE_REQUIREMENTS_TERMS)
+    format_clone = any(term in normalized for term in _TEMPLATE_FORMAT_CLONE_TERMS)
+    if requirements == format_clone:
+        return ""
+    return (
+        TEMPLATE_AUTHORING_REQUIREMENTS
+        if requirements
+        else TEMPLATE_AUTHORING_FORMAT_CLONE
+    )
+
+
 def is_format_reference_application_request(query: str) -> bool:
     """Identify a sample-analysis request whose production target is absent."""
 
@@ -174,10 +231,15 @@ def is_format_reference_application_request(query: str) -> bool:
 def bind_attachment_semantic_roles(
     refs: Iterable[Mapping[str, object]],
     query: str,
+    *,
+    template_authoring_strategy: str = "",
 ) -> tuple[dict[str, object], ...]:
     """Bind per-turn semantic roles without leaking intent into later turns."""
 
     template_authoring_request = is_template_authoring_request(query)
+    authoring_strategy = str(template_authoring_strategy or "").strip()
+    if authoring_strategy not in TEMPLATE_AUTHORING_STRATEGIES:
+        authoring_strategy = resolve_template_authoring_strategy(query)
     reference_request = (
         is_format_requirements_request(query) or template_authoring_request
     )
@@ -207,8 +269,10 @@ def bind_attachment_semantic_roles(
             row["semantic_role_source"] = "assistant_intent"
             if template_authoring_request:
                 row["template_authoring_source"] = True
+                row["template_authoring_strategy"] = authoring_strategy
             else:
                 row.pop("template_authoring_source", None)
+                row.pop("template_authoring_strategy", None)
             if is_format_reference_application_request(query):
                 row["target_attachment_required"] = True
             else:
@@ -220,6 +284,7 @@ def bind_attachment_semantic_roles(
             == STANDARD_FORMAT_REFERENCE_ROLE
         ):
             row["template_authoring_source"] = True
+            row["template_authoring_strategy"] = authoring_strategy
         elif (
             not reference_request or len(rows) != 1
         ) and row.get("semantic_role_source") == "assistant_intent":
@@ -227,6 +292,7 @@ def bind_attachment_semantic_roles(
             row.pop("semantic_role_source", None)
             row.pop("target_attachment_required", None)
             row.pop("template_authoring_source", None)
+            row.pop("template_authoring_strategy", None)
     return tuple(rows)
 
 
@@ -237,9 +303,11 @@ def attachment_disclosure_fields(
     for item in refs:
         role = str(item.get("semantic_role") or "")
         if role == STANDARD_FORMAT_REFERENCE_ROLE:
-            if bool(item.get("template_authoring_source")):
+            strategy = str(item.get("template_authoring_strategy") or "").strip()
+            if strategy == TEMPLATE_AUTHORING_REQUIREMENTS:
                 fields.append("document_text")
-            fields.append(FORMAT_EVIDENCE_DISCLOSURE_FIELD)
+            elif strategy == TEMPLATE_AUTHORING_FORMAT_CLONE or not bool(item.get("template_authoring_source")):
+                fields.append(FORMAT_EVIDENCE_DISCLOSURE_FIELD)
         elif role in {
             SOURCE_ROLE_PRODUCTION_INPUT,
             SOURCE_ROLE_STRUCTURED_SOURCE,
@@ -291,6 +359,9 @@ def extract_docx_format_evidence(path: str | Path) -> dict[str, object]:
         str(getattr(paragraph.style, "name", "") or "无样式")
         for paragraph in paragraphs
         if _has_direct_paragraph_format(paragraph)
+    )
+    direct_paragraph_profiles, direct_run_profiles = _direct_format_profiles(
+        paragraphs
     )
     settings = document.settings.element
     document_element = document.element
@@ -366,9 +437,11 @@ def extract_docx_format_evidence(path: str | Path) -> dict[str, object]:
                 {"style": name, "count": count}
                 for name, count in direct_by_style.most_common(_MAX_STYLE_ROWS)
             ],
+            "paragraph_profiles": list(direct_paragraph_profiles),
+            "run_profiles": list(direct_run_profiles),
             "interpretation": (
-                "这些计数表示样式之外还存在直接段落或字符格式；"
-                "在提升为标准规则前需要检查其是否为稳定重复模式。"
+                "profiles 是按段落样式和直接属性聚合的实际 Word 格式，"
+                "不包含正文文本；高频稳定模式可用于格式克隆，低频项应视为局部例外。"
             ),
         },
         "evidence_policy": {
@@ -777,6 +850,56 @@ def _table_format_payload(table) -> dict[str, object]:
     }
 
 
+def _direct_format_profiles(
+    paragraphs: tuple[Any, ...],
+) -> tuple[tuple[dict[str, object], ...], tuple[dict[str, object], ...]]:
+    """Aggregate direct formatting without disclosing paragraph/run text."""
+
+    paragraph_counts: Counter[str] = Counter()
+    paragraph_payloads: dict[str, dict[str, object]] = {}
+    run_counts: Counter[str] = Counter()
+    run_payloads: dict[str, dict[str, object]] = {}
+    for paragraph in paragraphs:
+        style_name = str(
+            getattr(getattr(paragraph, "style", None), "name", "")
+            or "无样式"
+        )
+        paragraph_properties = _direct_paragraph_properties(paragraph)
+        if paragraph_properties:
+            payload = {
+                "paragraph_style": style_name,
+                "properties": paragraph_properties,
+            }
+            identity = repr(payload)
+            paragraph_counts[identity] += 1
+            paragraph_payloads[identity] = payload
+        for run in paragraph.runs:
+            run_properties = _direct_run_properties(run)
+            if not run_properties:
+                continue
+            payload = {
+                "paragraph_style": style_name,
+                "properties": run_properties,
+            }
+            identity = repr(payload)
+            run_counts[identity] += 1
+            run_payloads[identity] = payload
+
+    paragraph_rows = tuple(
+        {**paragraph_payloads[identity], "usage_count": count}
+        for identity, count in paragraph_counts.most_common(
+            _MAX_DIRECT_FORMAT_PROFILES
+        )
+    )
+    run_rows = tuple(
+        {**run_payloads[identity], "usage_count": count}
+        for identity, count in run_counts.most_common(
+            _MAX_DIRECT_FORMAT_PROFILES
+        )
+    )
+    return paragraph_rows, run_rows
+
+
 def _has_direct_paragraph_format(paragraph) -> bool:
     p_pr = paragraph._p.pPr
     if p_pr is None:
@@ -788,6 +911,94 @@ def _has_direct_paragraph_format(paragraph) -> bool:
 def _has_direct_run_format(run) -> bool:
     r_pr = run._r.rPr
     return bool(r_pr is not None and len(r_pr))
+
+
+def _direct_paragraph_properties(paragraph) -> dict[str, object]:
+    if not _has_direct_paragraph_format(paragraph):
+        return {}
+    paragraph_format = paragraph.paragraph_format
+    p_pr = paragraph._p.pPr
+    values: dict[str, object] = {
+        "alignment": _enum_text(_safe_attr(paragraph_format, "alignment"))
+        or _xml_text(p_pr, "w:jc", "w:val"),
+        "line_spacing": _line_spacing(paragraph_format),
+        "space_before_pt": _length_pt(
+            _safe_attr(paragraph_format, "space_before")
+        ),
+        "space_after_pt": _length_pt(
+            _safe_attr(paragraph_format, "space_after")
+        ),
+        "left_indent_cm": _length_cm(
+            _safe_attr(paragraph_format, "left_indent")
+        ),
+        "right_indent_cm": _length_cm(
+            _safe_attr(paragraph_format, "right_indent")
+        ),
+        "first_line_indent_cm": _length_cm(
+            _safe_attr(paragraph_format, "first_line_indent")
+        ),
+        "keep_with_next": _safe_attr(paragraph_format, "keep_with_next"),
+        "keep_together": _safe_attr(paragraph_format, "keep_together"),
+        "page_break_before": _safe_attr(
+            paragraph_format,
+            "page_break_before",
+        ),
+        "widow_control": _safe_attr(paragraph_format, "widow_control"),
+        "numbering": _paragraph_numbering(paragraph),
+    }
+    return {
+        name: value
+        for name, value in values.items()
+        if value is not None and value != ""
+    }
+
+
+def _direct_run_properties(run) -> dict[str, object]:
+    if not _has_direct_run_format(run):
+        return {}
+    font = run.font
+    r_pr = run._r.rPr
+    fonts = r_pr.find(qn("w:rFonts")) if r_pr is not None else None
+    color_proxy = _safe_attr(font, "color")
+    color = _safe_attr(color_proxy, "rgb")
+    theme_color = _safe_attr(color_proxy, "theme_color")
+    underline = _enum_text(_safe_attr(font, "underline")) or _xml_text(
+        r_pr,
+        "w:u",
+        "w:val",
+    )
+    highlight = _enum_text(
+        _safe_attr(font, "highlight_color")
+    ) or _xml_text(r_pr, "w:highlight", "w:val")
+    values: dict[str, object] = {
+        "ascii_font": (
+            str(fonts.get(qn("w:ascii")) or "") or None
+            if fonts is not None
+            else None
+        ),
+        "east_asia_font": (
+            str(fonts.get(qn("w:eastAsia")) or "") or None
+            if fonts is not None
+            else None
+        ),
+        "size_pt": _length_pt(_safe_attr(font, "size")),
+        "bold": _safe_attr(font, "bold"),
+        "italic": _safe_attr(font, "italic"),
+        "underline": underline,
+        "strike": _safe_attr(font, "strike"),
+        "double_strike": _safe_attr(font, "double_strike"),
+        "all_caps": _safe_attr(font, "all_caps"),
+        "small_caps": _safe_attr(font, "small_caps"),
+        "superscript": _safe_attr(font, "superscript"),
+        "subscript": _safe_attr(font, "subscript"),
+        "color": str(color) if color is not None else _enum_text(theme_color),
+        "highlight": highlight,
+    }
+    return {
+        name: value
+        for name, value in values.items()
+        if value is not None and value != ""
+    }
 
 
 def _style_font_attr(style, attribute: str) -> str | None:
@@ -806,8 +1017,8 @@ def _font_color(style) -> str | None:
 
 
 def _line_spacing(paragraph_format) -> dict[str, object] | None:
-    value = paragraph_format.line_spacing
-    rule = _enum_text(paragraph_format.line_spacing_rule)
+    value = _safe_attr(paragraph_format, "line_spacing")
+    rule = _enum_text(_safe_attr(paragraph_format, "line_spacing_rule"))
     if value is None and not rule:
         return None
     if hasattr(value, "pt"):
@@ -832,6 +1043,17 @@ def _enum_text(value) -> str | None:
         return None
     name = getattr(value, "name", None)
     return str(name).casefold() if name else str(value)
+
+
+def _safe_attr(value, attribute: str):
+    """Read a python-docx proxy without failing on unknown OOXML enums."""
+
+    if value is None:
+        return None
+    try:
+        return getattr(value, attribute)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
 
 
 def _xml_int(element, attribute: str) -> int | None:
@@ -874,10 +1096,15 @@ __all__ = [
     "DOCX_FORMAT_EVIDENCE_SCHEMA_VERSION",
     "FORMAT_EVIDENCE_DISCLOSURE_FIELD",
     "STANDARD_FORMAT_REFERENCE_ROLE",
+    "TEMPLATE_AUTHORING_FORMAT_CLONE",
+    "TEMPLATE_AUTHORING_REQUIREMENTS",
+    "TEMPLATE_AUTHORING_STRATEGIES",
     "attachment_disclosure_fields",
     "bind_attachment_semantic_roles",
     "extract_docx_format_evidence",
     "format_requirements_system_instruction",
     "is_format_reference_application_request",
     "is_format_requirements_request",
+    "is_template_authoring_request",
+    "resolve_template_authoring_strategy",
 ]

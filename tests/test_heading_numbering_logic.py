@@ -31,7 +31,6 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
         build_detail_state,
         build_editor_enable_state,
         build_expert_toggle_text,
-        build_non_numbered_toggle_text,
         build_restart_mode_options,
         build_restart_trigger_options,
         compose_display_template,
@@ -119,6 +118,12 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
     assert should_show_chain_separator("current_only") is False
     assert should_show_chain_separator("parent.current") is True
     assert parse_csv_items(" 参考文献, 致谢 ,, 摘要 ") == ["参考文献", "致谢", "摘要"]
+    assert parse_csv_items("摘要，目录, 参考文献，，致谢") == [
+        "摘要",
+        "目录",
+        "参考文献",
+        "致谢",
+    ]
     assert format_csv_items(["参考文献", "致谢", "摘要"]) == "参考文献, 致谢, 摘要"
     assert format_csv_items([]) == ""
 
@@ -150,9 +155,6 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
 
     assert build_expert_toggle_text(False) == "▾ 展开模板编辑"
     assert build_expert_toggle_text(True) == "▴ 收起模板编辑"
-    assert build_non_numbered_toggle_text(False) == "▸ 特殊标题（不参与编号）"
-    assert build_non_numbered_toggle_text(True) == "▾ 特殊标题（不参与编号）"
-
 
 def test_panel_and_adapter_delegate_heading_numbering_pure_logic_to_shared_module():
     panel_source = inspect.getsource(HeadingNumberingPanel)

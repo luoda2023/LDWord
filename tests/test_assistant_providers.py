@@ -65,6 +65,41 @@ def test_profile_store_keeps_secret_out_of_json(tmp_path):
     assert store.get("mock-default").kind == "mock"
 
 
+def test_profile_store_persists_active_profile_and_migrates_legacy_selection(tmp_path):
+    path = tmp_path / "providers.json"
+    store = ProviderProfileStore(path)
+    first = ProviderProfile(
+        profile_id="cloud-first",
+        label="云端模型一",
+        kind="openai_compatible",
+        model_id="example-model-1",
+        base_url="https://example.invalid/v1",
+    )
+    second = ProviderProfile(
+        profile_id="cloud-second",
+        label="云端模型二",
+        kind="openai_compatible",
+        model_id="example-model-2",
+        base_url="https://example.invalid/v1",
+    )
+
+    store.upsert(first)
+    store.upsert(second, make_active=True)
+
+    assert ProviderProfileStore(path).active_profile_id() == "cloud-second"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["active_profile_id"] == "cloud-second"
+
+    payload.pop("active_profile_id")
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    assert ProviderProfileStore(path).active_profile_id() == "cloud-second"
+
+    store.set_active_profile_id("cloud-first")
+    assert ProviderProfileStore(path).active_profile_id() == "cloud-first"
+    store.delete("cloud-first")
+    assert ProviderProfileStore(path).active_profile_id() == "cloud-second"
+
+
 @pytest.mark.parametrize(
     "extra_body",
     (

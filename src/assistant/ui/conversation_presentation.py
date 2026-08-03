@@ -16,6 +16,22 @@ from src.assistant.application.output_references import project_output_reference
 
 _IMAGE_SUFFIXES = frozenset({"BMP", "GIF", "JPEG", "JPG", "PNG", "SVG", "WEBP"})
 
+# These cards already communicate their complete state through the header and
+# structured regions (facts, notices, files, progress, and actions).  A free-
+# form description only repeats that information and makes dense conversations
+# harder to scan.  Keep this policy in the projection layer so persisted cards
+# from earlier builds are cleaned up when they are rendered too.
+_BODYLESS_INTERACTION_TYPES = frozenset(
+    {
+        "approval",
+        "disclosure",
+        "format_evidence",
+        "plan",
+        "plan_candidate",
+        "progress",
+    }
+)
+
 _RIGHT_FLOW_ACTION_IDS = frozenset(
     {
         "approve_content_disclosure",
@@ -412,6 +428,46 @@ def _interaction_files(payload: Mapping[str, object]) -> tuple[FilePresentation,
     return tuple(project_file_reference(item) for item in rows)
 
 
+def _reference_is_form_owned(value: object) -> bool:
+    return bool(
+        isinstance(value, Mapping)
+        and str(value.get("owner") or "").strip().casefold() == "form"
+    )
+
+
+def _project_interaction_body(
+    *,
+    kind: str,
+    body: str,
+    payload: Mapping[str, object],
+    choices: tuple[ChoicePresentation, ...],
+    question_inputs: tuple[QuestionInputPresentation, ...],
+) -> str:
+    """Keep only body copy that adds information beyond card structure."""
+
+    if kind in _BODYLESS_INTERACTION_TYPES:
+        return ""
+    if kind == "question" and (choices or question_inputs):
+        return ""
+    if kind == "artifact":
+        references = _sequence_of_mappings(payload.get("references"))
+        action_ids = {
+            str(item.get("id") or "").strip().casefold()
+            for item in _sequence_of_mappings(payload.get("actions"))
+        }
+        is_provider_reference = "runtime_open_reference" in action_ids
+        is_local_form_artifact = bool(
+            payload.get("draft_id")
+            or payload.get("execution_id")
+            or _reference_is_form_owned(payload.get("reference"))
+            or any(_reference_is_form_owned(item) for item in references)
+            or not is_provider_reference
+        )
+        if is_local_form_artifact:
+            return ""
+    return str(body or "").strip()
+
+
 def project_interaction(
     *,
     interaction_type: str,
@@ -570,15 +626,13 @@ def project_interaction(
         )
         if str(item).strip()
     )
-    projected_body = str(body or "")
-    if (
-        kind == "artifact"
-        and bool(raw.get("draft_id") or raw.get("execution_id"))
-    ) or (
-        kind == "progress"
-        and str(raw.get("progress_kind") or "").strip() == "execution"
-    ):
-        projected_body = ""
+    projected_body = _project_interaction_body(
+        kind=kind,
+        body=body,
+        payload=raw,
+        choices=choices,
+        question_inputs=question_inputs,
+    )
     return InteractionPresentation(
         interaction_type=kind,
         eyebrow=labels.get(kind, "文档助手"),

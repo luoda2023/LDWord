@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 from src.services.execution_result_contract import (
@@ -11,14 +11,6 @@ from src.services.execution_result_contract import (
     plain_payload,
 )
 from src.shared.ui.style_presentation_envelope import StylePresentationEnvelope
-
-from src.ui.panels.workbench.state import (
-    ExecutionProgressState,
-    ExecutionResultState,
-    ReadinessState,
-    RecentRunState,
-)
-from src.ui.panels.workbench.execution_flow_projection import normalize_workbench_stage_text
 from src.ui.adapters.workbench_artifact_items import (
     _artifact_browser_label,
     _artifact_label,
@@ -29,7 +21,15 @@ from src.ui.adapters.workbench_artifact_items import (
 from src.ui.adapters.workbench_issue_models import (
     WorkbenchIssueItem,
 )
-
+from src.ui.panels.workbench.execution_flow_projection import (
+    normalize_workbench_stage_text,
+)
+from src.ui.panels.workbench.state import (
+    ExecutionProgressState,
+    ExecutionResultState,
+    ReadinessState,
+    RecentRunState,
+)
 
 
 class WorkbenchExecutionAdapter:
@@ -859,8 +859,10 @@ def _terminal_result_summary(
         partial_summary = (
             f"核心执行已完成，但有 {artifact_failure_count} 个辅助产物失败"
         )
-    else:
+    elif failed_count:
         partial_summary = f"执行完成，但有 {failed_count} 个模块未成功"
+    else:
+        partial_summary = _partial_warning_summary(payload)
     summaries = {
         "success": "本次执行已完成",
         "partial_success": partial_summary,
@@ -870,6 +872,21 @@ def _terminal_result_summary(
     if status not in summaries:
         raise ValueError(f"Unknown execution status: {status!r}")
     return status, summaries[status], failed_count, artifact_failure_count
+
+
+def _partial_warning_summary(payload: Mapping[str, object]) -> str:
+    raw_warnings = payload.get("warnings")
+    warnings = raw_warnings if isinstance(raw_warnings, (list, tuple)) else ()
+    for item in warnings:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        _code, separator, detail = text.partition(":")
+        return f"执行完成，但有提示：{detail.strip() if separator else text}"
+    error_text = str(payload.get("error_text") or "").strip()
+    if error_text:
+        return f"执行完成，但有提示：{error_text}"
+    return "执行完成，但有警告需要确认"
 
 
 def _terminal_result_paths(

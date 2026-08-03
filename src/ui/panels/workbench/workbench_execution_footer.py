@@ -621,6 +621,38 @@ def _user_error_text(presentation: QuickExecutionResultPresentation) -> str:
     lowered = raw.casefold()
     if not raw or raw in {"执行失败", "生成失败"}:
         return "生成过程中出现错误，请重试"
+    if (
+        "output_path_exists" in lowered
+        or "document_batch_output_exists" in lowered
+        or "target_collision" in lowered
+    ):
+        return "输出目标已存在，旧文件已保留；请重试生成"
+    if "material.bind.template_resources_unsupported" in lowered:
+        roles = raw.partition(":")[2].strip().replace(",", "、")
+        return (
+            f"资料包图片缺少对应文档占位符：{roles}"
+            if roles
+            else "资料包图片缺少对应文档占位符"
+        )
+    if "material.bind.template_resource_required_missing" in lowered:
+        role = raw.rpartition(":")[2].strip()
+        return (
+            f"文档图片占位符尚未绑定资料：{role}"
+            if role
+            else "文档图片占位符尚未绑定资料"
+        )
+    if "material.bind.template_fields_required_missing" in lowered:
+        fields = raw.partition(":")[2].strip().replace(",", "、")
+        return (
+            f"文档字段占位符缺少资料：{fields}"
+            if fields
+            else "文档字段占位符缺少资料"
+        )
+    if (
+        "material.bind.template_resource_role_unknown" in lowered
+        or "material.bind.template_resource_domain_mismatch" in lowered
+    ):
+        return "资料包资源角色与文档占位符不兼容"
     if "permissionerror" in lowered or "拒绝访问" in raw or "权限" in raw:
         return "文件正在使用或输出目录没有写入权限"
     if "filenotfounderror" in lowered or "没有找到" in raw or "不存在" in raw:

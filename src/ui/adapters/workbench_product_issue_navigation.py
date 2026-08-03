@@ -110,7 +110,7 @@ def workbench_issue_navigation_for_target(
             target_type=normalized_type,
             target_key=normalized_key,
             action_kind="material_profile_candidate",
-            feature_card_id="content_fill",
+            panel_id="assets",
         )
     if normalized_type in PROFILE_MATERIAL_TARGET_TYPES:
         return WorkbenchIssueNavigationProjection(
@@ -167,7 +167,7 @@ def workbench_issue_navigation_for_target(
         target_type=normalized_type,
         target_key=normalized_key,
         action_kind="feature_card",
-        feature_card_id="content_fill",
+        feature_card_id="quick_execute",
     )
 
 

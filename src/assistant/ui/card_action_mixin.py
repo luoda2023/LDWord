@@ -132,6 +132,31 @@ class AssistantCardActionMixin:
                 parent=self,
             )
             return
+        if action_id == "revalidate_template_authoring_failure":
+            if not isinstance(payload, Mapping) or self._active_session is None:
+                return
+            from src.assistant.application.template_authoring import (
+                AssistantTemplateAuthoringCompletion,
+            )
+            from src.config.template_authoring_workspace import (
+                revalidate_template_authoring_failure,
+            )
+
+            mode_id = str(payload.get("template_authoring_mode_id") or "").strip()
+            failed_path = str(payload.get("failed_result_path") or "").strip()
+            if not mode_id or not failed_path:
+                return
+            batch = revalidate_template_authoring_failure(mode_id, failed_path)
+            completion = AssistantTemplateAuthoringCompletion(
+                mode_id=mode_id,
+                result_text="",
+                batch=batch,
+            )
+            for message in self._template_authoring_messages(completion):
+                self._active_session.messages.append(message)
+            self._render_active_session()
+            self._refresh_session_list()
+            return
         if action_id == "focus_continuation_response":
             composer = (
                 self._composer

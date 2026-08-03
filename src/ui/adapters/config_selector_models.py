@@ -295,11 +295,25 @@ def material_package_selector_options(
 ) -> tuple[SelectorOption, ...]:
     """Return every saved material package visible in one work mode."""
 
+    entries = tuple(list_material_package_entries(mode_id=mode_id))
+    name_counts: dict[str, int] = {}
+    for entry in entries:
+        key = entry.display_name.casefold()
+        name_counts[key] = name_counts.get(key, 0) + 1
+
     return tuple(
         SelectorOption(
             value=entry.qualified_id,
             label=_source_prefixed(
-                entry.display_name,
+                _disambiguated_material_package_label(
+                    entry.display_name,
+                    entry.package_id,
+                    duplicate=name_counts.get(
+                        entry.display_name.casefold(),
+                        0,
+                    )
+                    > 1,
+                ),
                 entry.source_type,
                 "资料包",
                 include_source_prefix=include_source_prefix,
@@ -308,8 +322,20 @@ def material_package_selector_options(
             source_type=entry.source_type,
             disabled=not entry.is_available,
         )
-        for entry in list_material_package_entries(mode_id=mode_id)
+        for entry in entries
     )
+
+
+def _disambiguated_material_package_label(
+    display_name: str,
+    package_id: str,
+    *,
+    duplicate: bool,
+) -> str:
+    if not duplicate:
+        return display_name
+    short_id = str(package_id or "").removeprefix("pkg_")[-6:]
+    return f"{display_name} · {short_id or '未编号'}"
 
 
 def _master_source_noun(mode_id: str) -> str:

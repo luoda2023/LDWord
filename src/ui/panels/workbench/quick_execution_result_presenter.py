@@ -48,12 +48,18 @@ def build_execution_result_presentation(
     error_text = payload_error or state.error_text
     issue_count = len(list(getattr(state, "issue_items", []) or []))
     success = status in {"success", "partial_success"}
+    partial = status == "partial_success"
     cancelled = status == "cancelled"
-    if success:
+    if status == "success":
         status_text = "✓ 本次生成完成"
         if issue_count:
             status_text += f"；{issue_count} 项提醒"
         status_tone = "success"
+    elif partial:
+        status_text = "部分完成，请查看提醒"
+        if issue_count:
+            status_text += f"；{issue_count} 项提醒"
+        status_tone = "warning"
     elif cancelled:
         status_text, status_tone = "已取消", "hint"
     else:
@@ -80,7 +86,7 @@ def build_execution_result_presentation(
         issue_count=issue_count,
         success=success,
         cancelled=cancelled,
-        expand_log=not success and not cancelled,
+        expand_log=partial or (not success and not cancelled),
         execute_button_text="重新生成" if success else "生成文档",
         retry_record_ids=retry_record_ids,
         batch_run_id=str(batch_isolation.get("history_run_id") or "").strip(),
@@ -89,6 +95,7 @@ def build_execution_result_presentation(
             _execution_result_log_entries(
                 state,
                 success=success,
+                partial=partial,
                 cancelled=cancelled,
                 summary=summary,
                 error_text=error_text,
@@ -101,11 +108,20 @@ def _execution_result_log_entries(
     state: ExecutionResultState,
     *,
     success: bool,
+    partial: bool,
     cancelled: bool,
     summary: str,
     error_text: str,
 ) -> list[QuickExecutionLogEntry]:
-    level = "success" if success else "info" if cancelled else "error"
+    level = (
+        "warning"
+        if partial
+        else "success"
+        if success
+        else "info"
+        if cancelled
+        else "error"
+    )
     entries = [
         QuickExecutionLogEntry(
             level,

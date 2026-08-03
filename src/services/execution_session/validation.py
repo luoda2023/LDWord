@@ -90,7 +90,10 @@ def _validate_document_structure_confirmation(
     identity: ResolvedExecutionIdentity,
     graph: ResolvedExecutionResourceGraph,
 ) -> DocumentStructureConfirmation:
-    if identity.mode_id in {"official", "exam"}:
+    if (
+        not execution_plan_is_enabled(request.scene)
+        or identity.mode_id in {"official", "exam"}
+    ):
         return _not_applicable_document_structure_confirmation()
 
     evidence = graph.document_structure_evidence

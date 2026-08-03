@@ -12,7 +12,7 @@ from typing import Any, Mapping
 AUTHORING_BASELINE_KIND = "alavette.template_authoring.baseline"
 AUTHORING_RESULT_KIND = "alavette.template_authoring.result"
 AUTHORING_SCHEMA_VERSION = 1
-AUTHORING_PROMPT_VERSION = 3
+AUTHORING_PROMPT_VERSION = 5
 
 CONTRACT_FIELD_NAMES: tuple[str, ...] = (
     "mode_id",

@@ -24,6 +24,7 @@ from src.config.template_authoring_workspace import (
     AUTHORING_SCHEMA_VERSION,
     ensure_template_authoring_workspace,
     process_template_import_inbox,
+    revalidate_template_authoring_failure,
 )
 from src.config.work_mode import list_template_authoring_work_modes
 
@@ -171,6 +172,189 @@ def test_enveloped_result_imports_and_delivers_boundary_observations(
     assert "引用处理策略属于论文方案" in record
     assert "学生姓名属于逐篇资料" in record
     assert result["contract_fingerprint"] in record
+
+
+def test_enveloped_result_allows_page_phase_redistribution_without_scope_loss(
+    isolated_authoring_library: Path,
+) -> None:
+    workspace = ensure_template_authoring_workspace("custom")
+    result = _result_from_baseline(
+        workspace.baseline_path,
+        name="前置罗马正文阿拉伯模板",
+    )
+    phases = result["template"]["header_footer"]["page_number_plan"]["phases"]
+    phases[1] = {
+        "phase_id": "front_matter",
+        "selectors": ["abstract_cn", "abstract_en", "toc"],
+        "visible": True,
+        "number_format": "upper_roman",
+        "start_mode": "restart",
+        "start_value": 1,
+    }
+    phases.append(
+        {
+            "phase_id": "main",
+            "selectors": [
+                "body",
+                "references",
+                "errata",
+                "appendix",
+                "acknowledgment",
+                "resume",
+            ],
+            "visible": True,
+            "number_format": "decimal",
+            "start_mode": "restart",
+            "start_value": 1,
+        }
+    )
+    source = workspace.inbox_path / "redistributed-page-plan.json"
+    source.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    batch = process_template_import_inbox("custom", settle_seconds=0)
+
+    assert len(batch.successes) == 1
+    assert not batch.rejections
+    imported = load_template(batch.successes[0].entry.path)
+    assert [phase.phase_id for phase in imported.header_footer.page_number_plan.phases] == [
+        "pre_numbering",
+        "front_matter",
+        "main",
+    ]
+    assert imported.header_footer.page_number_plan.phases[1].number_format == "upperRoman"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ("missing_scope", "overlap", "duplicate_phase_id", "invalid_number_format"),
+)
+def test_enveloped_result_rejects_invalid_page_plan_semantics(
+    isolated_authoring_library: Path,
+    case: str,
+) -> None:
+    workspace = ensure_template_authoring_workspace("custom")
+    result = _result_from_baseline(workspace.baseline_path)
+    phases = result["template"]["header_footer"]["page_number_plan"]["phases"]
+    if case == "missing_scope":
+        phases[1]["selectors"].remove("resume")
+    elif case == "overlap":
+        phases[1]["selectors"][-1] = "cover"
+    elif case == "duplicate_phase_id":
+        phases[1]["phase_id"] = phases[0]["phase_id"]
+    else:
+        phases[1]["number_format"] = "invented-format"
+    source = workspace.inbox_path / f"{case}.json"
+    source.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    batch = process_template_import_inbox("custom", settle_seconds=0)
+
+    assert not batch.successes
+    assert len(batch.rejections) == 1
+
+
+def test_enveloped_result_allows_replaceable_collection_fields(
+    isolated_authoring_library: Path,
+) -> None:
+    workspace = ensure_template_authoring_workspace("custom")
+    result = _result_from_baseline(workspace.baseline_path)
+    result["template"]["header_footer"]["header"]["hidden_selectors"] = []
+    result["template"]["heading_model"]["non_numbered_title_texts"] = [
+        "鸣谢",
+        "附录",
+    ]
+    source = workspace.inbox_path / "replaceable-collections.json"
+    source.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    batch = process_template_import_inbox("custom", settle_seconds=0)
+
+    assert len(batch.successes) == 1
+    imported = load_template(batch.successes[0].entry.path)
+    assert imported.header_footer.header.hidden_selectors == []
+    assert imported.heading_model.non_numbered_title_texts == ["鸣谢", "附录"]
+    assert "附录" in imported.heading_model.non_numbered_prefixes
+
+
+def test_result_uses_historical_contract_after_prompt_rollout(
+    isolated_authoring_library: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import src.config.template_authoring_layout as layout
+
+    workspace = ensure_template_authoring_workspace("custom")
+    old_result = _result_from_baseline(
+        workspace.baseline_path,
+        name="升级期间仍在生成的模板",
+    )
+    old_fingerprint = old_result["contract_fingerprint"]
+    rolled_out_prompt = tmp_path / "prompt-v-next.md"
+    rolled_out_prompt.write_text(
+        layout._PROMPT_RESOURCE_PATH.read_text(encoding="utf-8")
+        + "\n\n升级后的附加约束。\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(layout, "_PROMPT_RESOURCE_PATH", rolled_out_prompt)
+    monkeypatch.setattr(
+        layout,
+        "AUTHORING_PROMPT_VERSION",
+        int(old_result["prompt_version"]) + 1,
+    )
+
+    refreshed = ensure_template_authoring_workspace("custom")
+    refreshed_payload = _read_payload(refreshed.baseline_path)
+    assert refreshed_payload["contract_fingerprint"] != old_fingerprint
+    assert (refreshed.contracts_dir / old_fingerprint / "baseline.json").is_file()
+    source = refreshed.inbox_path / "in-flight-old-contract.json"
+    source.write_text(
+        json.dumps(old_result, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    batch = process_template_import_inbox("custom", settle_seconds=0)
+
+    assert len(batch.successes) == 1
+    assert not batch.rejections
+    assert batch.successes[0].entry.name == "升级期间仍在生成的模板"
+
+
+def test_preserved_failure_can_be_revalidated_without_consuming_inbox(
+    isolated_authoring_library: Path,
+) -> None:
+    workspace = ensure_template_authoring_workspace("custom")
+    result = _result_from_baseline(
+        workspace.baseline_path,
+        name="重新校验成功模板",
+    )
+    failed_source = workspace.failed_dir / "preserved-result.json"
+    failed_source.parent.mkdir(parents=True, exist_ok=True)
+    failed_source.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    unrelated = workspace.inbox_path / "unrelated.json"
+    unrelated.write_text("{", encoding="utf-8")
+
+    batch = revalidate_template_authoring_failure("custom", failed_source)
+
+    assert len(batch.successes) == 1
+    assert not batch.rejections
+    assert failed_source.is_file()
+    assert unrelated.is_file()
+
+
+def test_failure_revalidation_rejects_paths_outside_managed_failure_dir(
+    isolated_authoring_library: Path,
+    tmp_path: Path,
+) -> None:
+    ensure_template_authoring_workspace("custom")
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+
+    batch = revalidate_template_authoring_failure("custom", outside)
+
+    assert not batch.successes
+    assert len(batch.rejections) == 1
+    assert batch.rejections[0].code == "revalidation_source_invalid"
 
 
 @pytest.mark.parametrize(

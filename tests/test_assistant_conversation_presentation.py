@@ -29,7 +29,7 @@ from src.assistant.ui.message_components import (
 from src.assistant.ui.turn_completion_mixin import (
     _provider_reference_is_openable,
 )
-from src.qt_api import QImage, Qt
+from src.qt_api import QImage, QSize, Qt
 from src.shared.ui.icons.catalog import is_icon_registered
 from src.ui.bridge import PanelBridge
 
@@ -259,12 +259,18 @@ def test_ai_card_explicit_alignment_overrides_generation_semantics():
     assert action.icon_name == "refresh-ccw"
 
 
-def test_execution_and_artifact_projection_suppress_legacy_explanatory_text():
+def test_structured_cards_suppress_legacy_explanatory_text():
+    disclosure = project_interaction(
+        interaction_type="disclosure",
+        title="确认本次发送的材料范围",
+        body="确认后，仅把下面列出的内容发送给当前模型。",
+        payload={"facts": [{"label": "发送内容", "value": "附件正文"}]},
+    )
     progress = project_interaction(
         interaction_type="progress",
-        title="正在生成文档",
-        body="旧版执行说明",
-        payload={"progress_kind": "execution"},
+        title="正在处理",
+        body="旧版进度说明",
+        payload={},
     )
     artifact = project_interaction(
         interaction_type="artifact",
@@ -284,9 +290,40 @@ def test_execution_and_artifact_projection_suppress_legacy_explanatory_text():
         },
     )
 
+    structured_question = project_interaction(
+        interaction_type="question",
+        title="确认文档任务",
+        body="请选择更符合需求的文档类型。",
+        payload={
+            "confirmation_request": {
+                "options": [{"id": "review", "label": "审阅文档"}]
+            }
+        },
+    )
+
+    assert disclosure.body == ""
     assert progress.body == ""
     assert artifact.body == ""
+    assert structured_question.body == ""
     assert provider_artifact.body == "这段产物说明有实际含义。"
+
+
+def test_reason_driven_cards_keep_non_redundant_body_copy():
+    recovery = project_interaction(
+        interaction_type="recovery",
+        title="模板未通过本地校验",
+        body="原因：标题规则冲突。",
+        payload={"actions": []},
+    )
+    preflight = project_interaction(
+        interaction_type="preflight",
+        title="执行前检查未通过",
+        body="• 当前模板不可用。",
+        payload={"facts": [{"label": "输出目录", "value": "C:/Outputs"}]},
+    )
+
+    assert recovery.body == "原因：标题规则冲突。"
+    assert preflight.body == "• 当前模板不可用。"
 
 
 def test_interaction_activity_comes_from_persisted_form_state():
@@ -1003,7 +1040,7 @@ def test_assistant_markdown_geometry_wraps_code_scales_images_and_extends_headin
         renderer.close()
 
 
-def test_artifact_card_renders_all_files_and_opens_selected_reference(qapp, tmp_path):
+def test_artifact_card_hides_summary_copy_and_opens_selected_reference(qapp, tmp_path):
     first = tmp_path / "学生卷.docx"
     second = tmp_path / "答案卷.docx"
     first.write_bytes(b"one")
@@ -1026,8 +1063,7 @@ def test_artifact_card_renders_all_files_and_opens_selected_reference(qapp, tmp_
     )
     try:
         qapp.processEvents()
-        assert not card._body.isHidden()
-        assert card._body.text() == "全部产物已通过检查。"
+        assert card._body.isHidden()
         assert len(card._file_cards) == 2
         assert all(item.height() == 92 for item in card._file_cards)
         card._file_cards[1]._open.click()
@@ -1218,6 +1254,55 @@ def test_question_card_requires_and_submits_structured_official_intake(qapp):
             "organization": "示例市教育局",
             "purpose": "开展秋季校园安全检查",
         }
+    finally:
+        card.close()
+
+
+@pytest.mark.parametrize(
+    "interaction_type",
+    (
+        "info",
+        "question",
+        "disclosure",
+        "permission",
+        "plan_candidate",
+        "plan",
+        "preflight",
+        "approval",
+        "progress",
+        "artifact",
+        "format_evidence",
+        "boundary",
+        "recovery",
+    ),
+)
+def test_all_interaction_cards_share_the_compact_heading_shell(
+    qapp,
+    interaction_type,
+):
+    card = AssistantInteractionCard(
+        interaction_type=interaction_type,
+        title="卡片状态摘要",
+        body="卡片正文",
+        payload={},
+    )
+    try:
+        card.resize(760, card.sizeHint().height())
+        card.show()
+        qapp.processEvents()
+
+        assert card._uses_compact_heading is True
+        assert card._type_icon.size() == QSize(30, 30)
+        assert card._eyebrow.parentWidget() is card
+        assert card._title.parentWidget() is card
+        assert abs(
+            card._eyebrow.geometry().center().y()
+            - card._title.geometry().center().y()
+        ) <= 1
+        assert card._title.alignment() == (Qt.AlignRight | Qt.AlignVCenter)
+        if card._body.isVisible():
+            assert card._body.y() > card._type_icon.y()
+        assert "border-left" not in card.styleSheet()
     finally:
         card.close()
 

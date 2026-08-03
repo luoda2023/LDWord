@@ -3,8 +3,13 @@ from docx.enum.section import WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from src.config.document_scope import DocumentScopePolicy
+from src.config.resolver import resolve_config
+from src.config.scene import SceneWorkspace
+from src.config.template import TemplateConfig
+from src.modules.base import BaseModule, ModuleMeta
 from src.modules.structure.heading_recognition import rebuild_document_index
 from src.pipeline.context import PipelineContext
+from src.pipeline.runner import Pipeline
 from src.services.document_structure_evidence import build_document_structure_evidence
 from src.shared.engine.document_scope_guard import (
     capture_document_scope_guard,
@@ -78,3 +83,49 @@ def test_guard_blocks_shared_style_changes_that_affect_cover(tmp_path):
         item.startswith("style_changed:")
         for item in validate_document_scope_guard(guard)
     )
+
+
+class _UnsafeRegionWriter(BaseModule):
+    meta = ModuleMeta(
+        name="unsafe_region_writer",
+        description="Unsafe region writer",
+        category="test",
+        execution_phase="fill",
+        scope_behavior="region_filtered",
+    )
+
+    def apply(self, doc, config, tracker, context) -> None:
+        doc.paragraphs[0].text = "mutated outside body"
+
+
+class _AuthorizedDocumentWriter(BaseModule):
+    meta = ModuleMeta(
+        name="authorized_document_writer",
+        description="Authorized document writer",
+        category="test",
+        execution_phase="format",
+        scope_behavior="document_level",
+    )
+
+    def apply(self, doc, config, tracker, context) -> None:
+        doc.paragraphs[0].text = "authorized document mutation"
+
+
+def test_document_level_module_cannot_mask_prior_region_violation(tmp_path):
+    source = tmp_path / "scope-order.docx"
+    _cover_document(source)
+    scene = SceneWorkspace(document_scope=DocumentScopePolicy(mode="body"))
+    scene.compliance_profile.object_preflight.enabled = False
+    config = resolve_config(TemplateConfig(), scene)
+    evidence = build_document_structure_evidence(source)
+
+    result = Pipeline(
+        [_UnsafeRegionWriter(), _AuthorizedDocumentWriter()],
+        config,
+        output_dir=str(tmp_path / "output"),
+        document_structure_evidence=evidence,
+    ).execute(str(source))
+
+    assert result.success is False
+    assert result.error.startswith("document_scope_violation:")
+    assert "paragraph_changed:cover@0" in result.error

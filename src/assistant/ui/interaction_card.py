@@ -93,14 +93,11 @@ class AssistantInteractionCard(QFrame):
             payload=self.payload,
         )
         self.interaction_type = self.presentation.interaction_type
-        self._uses_compact_heading = self.interaction_type in {
-            "artifact",
-            "approval",
-            "plan",
-            "preflight",
-            "progress",
-            "recovery",
-        } or self.presentation.compact_heading
+        # Every typed interaction shares one card shell.  Keeping this
+        # compatibility attribute avoids making older integrations care about
+        # the visual migration while preventing card kinds from drifting back
+        # to the former stacked-title/left-accent variant.
+        self._uses_compact_heading = True
         self.setObjectName("assistant_interaction_card")
         self.setProperty("tone", self.presentation.tone)
         self.setProperty("active", self.presentation.active)
@@ -125,31 +122,24 @@ class AssistantInteractionCard(QFrame):
             layout.setSpacing(8)
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(10 if self._uses_compact_heading else 7)
+        header.setSpacing(10)
         self._type_icon = QLabel(self)
         self._type_icon.setObjectName("assistant_card_type_icon")
         self._type_icon.setAlignment(Qt.AlignCenter)
-        icon_box_size = 30 if self._uses_compact_heading else 18
-        self._type_icon.setFixedSize(icon_box_size, icon_box_size)
+        self._type_icon.setFixedSize(30, 30)
         header.addWidget(self._type_icon)
         self._eyebrow = QLabel(self.presentation.eyebrow, self)
         self._eyebrow.setObjectName("assistant_card_eyebrow")
         self._title = QLabel(self.presentation.title, self)
         self._title.setObjectName("assistant_card_title")
         self._title.setWordWrap(True)
-        if self._uses_compact_heading:
-            self._eyebrow.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            self._title.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            header.addWidget(self._eyebrow)
-            header.addWidget(self._title, 1)
-            header.setAlignment(self._type_icon, Qt.AlignVCenter)
-        else:
-            header.addWidget(self._eyebrow)
-            header.addStretch(1)
+        self._eyebrow.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self._title.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        header.addWidget(self._eyebrow)
+        header.addWidget(self._title, 1)
+        header.setAlignment(self._type_icon, Qt.AlignVCenter)
         layout.addLayout(header)
 
-        if not self._uses_compact_heading:
-            layout.addWidget(self._title)
         self._body = QLabel(self.presentation.body, self)
         self._body.setObjectName("assistant_card_body")
         self._body.setWordWrap(True)
@@ -425,7 +415,7 @@ class AssistantInteractionCard(QFrame):
             ),
         )
         self._question_submit.setIconSize(QSize(16, 16))
-        if self.presentation.compact_heading:
+        if self._uses_compact_heading:
             self._question_submit.setMinimumWidth(96)
         apply_button_variant(self._question_submit, "primary")
         self._question_submit.setEnabled(False)
@@ -654,9 +644,6 @@ class AssistantInteractionCard(QFrame):
     def _apply_theme(self) -> None:
         theme = get_theme()
         accent, surface = self._tone_colors()
-        edge_rule = (
-            "" if self._uses_compact_heading else f"border-left: 3px solid {accent};"
-        )
         fact_surface = theme.bg_window if self.interaction_type == "plan" else "transparent"
         icon_name = {
             "question": "circle-help",
@@ -677,8 +664,7 @@ class AssistantInteractionCard(QFrame):
             QFrame#assistant_interaction_card {{
                 background: {theme.bg_card};
                 border: 1px solid {theme.border_light};
-                {edge_rule}
-                border-radius: {theme.radius_lg if self._uses_compact_heading else theme.radius_md}px;
+                border-radius: {theme.radius_lg}px;
             }}
             QWidget#assistant_artifact_stack,
             QWidget#assistant_question_choices,
@@ -697,21 +683,21 @@ class AssistantInteractionCard(QFrame):
                 border-radius: {theme.radius_sm}px;
             }}
             QLabel#assistant_card_type_icon {{
-                background: {surface if self._uses_compact_heading else "transparent"};
+                background: {surface};
                 border: none;
                 border-radius: {theme.radius_sm}px;
             }}
             QLabel#assistant_card_eyebrow {{
                 color: {accent};
                 background: transparent;
-                font-size: {theme.font_size_lg if self._uses_compact_heading else theme.font_size_sm}px;
+                font-size: {theme.font_size_lg}px;
                 font-weight: {theme.font_weight_emphasis};
             }}
             QLabel#assistant_card_title {{
                 color: {theme.text_primary};
                 background: transparent;
-                font-size: {theme.font_size_md if self._uses_compact_heading else theme.font_size_lg}px;
-                font-weight: {theme.font_weight_normal if self._uses_compact_heading else theme.font_weight_emphasis};
+                font-size: {theme.font_size_md}px;
+                font-weight: {theme.font_weight_normal};
             }}
             QLabel#assistant_card_body {{
                 color: {theme.text_secondary};

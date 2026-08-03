@@ -79,12 +79,12 @@ def test_workbench_issue_navigation_registry_maps_targets_to_surfaces():
         assert projection.target_key == "payload"
 
 
-def test_workbench_issue_navigation_registry_falls_back_to_content_fill():
+def test_workbench_issue_navigation_registry_falls_back_to_execution_surface():
     projection = workbench_issue_navigation_for_target("unknown_target", "x")
 
     assert projection.action_kind == "feature_card"
     assert projection.panel_id == ""
-    assert projection.feature_card_id == "content_fill"
+    assert projection.feature_card_id == "quick_execute"
 
 
 def test_material_repairs_route_to_canonical_assets_panel():
@@ -93,6 +93,14 @@ def test_material_repairs_route_to_canonical_assets_panel():
         assert projection.action_kind == "material_target"
         assert projection.panel_id == "assets"
         assert projection.feature_card_id == ""
+
+    candidate = workbench_issue_navigation_for_target(
+        "profile_question_figure_repair_candidate",
+        "payload",
+    )
+    assert candidate.action_kind == "material_profile_candidate"
+    assert candidate.panel_id == "assets"
+    assert candidate.feature_card_id == ""
 
 
 def test_coverage_boundary_issue_exposes_plugin_manual_gate_for_planned_family():
@@ -157,7 +165,7 @@ def test_workbench_issue_navigation_audit_reports_missing_surfaces():
         valid_panel_ids=("assets", "scene"),
         valid_scene_card_ids=("scn_rules",),
         valid_template_card_ids=("tpl_overview",),
-        valid_workbench_feature_card_ids=("content_fill",),
+        valid_workbench_feature_card_ids=("unrelated_feature",),
         scene_field_targets=(
             (
                 "scene_document_scope_field",

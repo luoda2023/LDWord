@@ -39,8 +39,19 @@ def test_ai_preferences_store_profile_and_secret_separately(qapp, tmp_path):
         assert saved[0].label == "公司模型"
         assert secrets.get(saved[0].profile_id) == "super-secret"
         assert "super-secret" not in (tmp_path / "providers.json").read_text(encoding="utf-8")
+        assert profiles.active_profile_id() == saved[0].profile_id
         assert changes == [True]
         assert "正文仍需" in panel._ai_status.text()
+
+        restarted = PreferencesPanel(
+            PanelBridge(),
+            provider_profiles=ProviderProfileStore(tmp_path / "providers.json"),
+            provider_secrets=secrets,
+        )
+        try:
+            assert restarted._ai_profile_combo.currentData() == saved[0].profile_id
+        finally:
+            restarted.close()
     finally:
         panel.close()
 
@@ -55,6 +66,7 @@ def test_ai_preferences_mock_profile_needs_no_key(qapp, tmp_path):
         panel._nav_rail.select_card("ai")
         assert panel._ai_profile_combo.currentData() == "mock-default"
         assert not panel._ai_key_input.isEnabled()
+        assert panel._ai_key_status.isHidden()
         panel._check_ai_profile()
         for _attempt in range(50):
             qapp.processEvents()
@@ -176,6 +188,7 @@ def test_saved_ai_profile_hot_syncs_into_assistant_home(qapp, tmp_path):
         assert combo.itemText(cloud_index).startswith("公司模型")
         assert "未测试" in combo.itemText(cloud_index)
         assert combo.model().item(cloud_index).isEnabled()
+        assert combo.currentData() == saved[0].profile_id
         assistant._creative_home.composer.select_provider(saved[0].profile_id)
         assistant._creative_home.composer.set_text("生成一份报告")
         assert assistant._creative_home.composer._send_btn.isEnabled()

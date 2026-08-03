@@ -9,6 +9,7 @@ import os
 from dataclasses import dataclass, field
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.application.materials import MaterialPreviewSnapshot
 from src.config.execution_target import ExecutionTarget, resolve_execution_target
@@ -20,6 +21,9 @@ from src.domain.materials import (
     MaterialRunSelection,
 )
 from src.qt_api import QObject, Signal
+
+if TYPE_CHECKING:
+    from src.ui.workspace_preferences import WorkspacePreferenceStore
 
 
 class TemplateLibraryEvents(QObject):
@@ -220,8 +224,14 @@ class PanelBridge(QObject):
     navigate_to_panel = Signal(int)                 # panel_index
     navigate_to_intent = Signal(object)             # NavigationIntent | dict
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        workspace_preference_store: "WorkspacePreferenceStore | None" = None,
+    ):
         super().__init__(parent)
+        self._workspace_preference_store = workspace_preference_store
         self.template_library_events = TemplateLibraryEvents(self)
         self._current_work_mode = default_work_mode()
         self._current_scene = None
@@ -260,6 +270,9 @@ class PanelBridge(QObject):
         self._pending_work_mode_transition: _BridgeStateSnapshot | None = None
         self._scene_publication_owner = object()
         self._active_scene_publication: ScenePublicationTransaction | None = None
+
+    def workspace_preference_store(self) -> "WorkspacePreferenceStore | None":
+        return self._workspace_preference_store
 
     def preferred_preferences_page(self) -> str:
         return self._preferred_preferences_page

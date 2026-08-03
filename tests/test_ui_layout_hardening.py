@@ -18,6 +18,7 @@ from src.shared.ui.form_action_row import FormActionButtonRow
 from src.shared.ui.icon_button import apply_icon_button_style
 from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.shared.ui.card import Card
 from src.shared.ui.file_drop_zone import FileDropZone
 from src.shared.ui.option_toggle_chip import OptionToggleChip
 from src.shared.ui.spacing_input import SpacingInput
@@ -308,7 +309,13 @@ def test_heading_panel_fixed_layout_shows_all_sections():
     assert panel._summary_card.isVisible()
     assert panel._scheme_section.isVisible()
     assert panel._level_editor_card.isVisible()
-    assert panel._nn_section is not None
+    assert isinstance(panel._nn_section, Card)
+    assert panel._nn_section.isVisible()
+    assert panel._nn_texts_edit.isVisible()
+    assert panel._nn_prefix_edit.isVisible()
+    assert panel._nn_style_mode_combo.isVisible()
+    assert not hasattr(panel, "_nn_scope_note")
+    assert not hasattr(panel._nn_section, "set_expanded")
 
     panel.close()
     app.processEvents()
@@ -507,8 +514,6 @@ def test_heading_panel_non_numbered_heading_style_source_can_be_customized():
         panel.on_template_changed(TemplateConfig())
         panel.resize(1280, 900)
         panel.show()
-        app.processEvents()
-        panel._nn_section.set_expanded(True)
         app.processEvents()
 
         custom_index = panel._nn_style_mode_combo.findData("custom")

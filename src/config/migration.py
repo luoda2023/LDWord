@@ -19,6 +19,7 @@ from src.config.formula_policy import (
     ThesisFormulaRules,
     is_thesis_formula_mode,
 )
+from src.config.feature_configs import normalize_page_number_format_value
 from src.config.heading_normalize import normalize_heading_numbering_payload
 from src.config.special_title_rules import parse_special_title_selector
 from src.config.style_semantics import (
@@ -1211,7 +1212,10 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
                     "phase_id": str(item.get("phase_id", "") or ""),
                     "selectors": normalize_page_scope_selectors(item.get("selectors", [])),
                     "visible": bool(item.get("visible", True)),
-                    "number_format": str(item.get("number_format", "decimal") or "decimal"),
+                    "number_format": normalize_page_number_format_value(
+                        item.get("number_format", "decimal"),
+                        default="decimal",
+                    ),
                     "start_mode": str(item.get("start_mode", "continue") or "continue"),
                     "start_value": max(1, int(item.get("start_value", 1) or 1)),
                 }
@@ -1223,9 +1227,9 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
                 "phase_id": "front",
                 "selectors": ["abstract_cn", "abstract_en", "toc"],
                 "visible": True,
-                "number_format": str(
-                    normalized.get("front_matter_page_number_format", "upperRoman")
-                    or "upperRoman"
+                "number_format": normalize_page_number_format_value(
+                    normalized.get("front_matter_page_number_format", "upperRoman"),
+                    default="upperRoman",
                 ),
                 "start_mode": "restart",
                 "start_value": max(
@@ -1244,8 +1248,9 @@ def _normalize_header_footer_payload(payload: Mapping[str, Any]) -> dict[str, An
                     "resume",
                 ],
                 "visible": True,
-                "number_format": str(
-                    normalized.get("body_page_number_format", "decimal") or "decimal"
+                "number_format": normalize_page_number_format_value(
+                    normalized.get("body_page_number_format", "decimal"),
+                    default="decimal",
                 ),
                 "start_mode": (
                     "restart"

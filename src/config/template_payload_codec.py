@@ -36,6 +36,20 @@ _LEGACY_SCENE_HINT_KEYS = {
     "template_ref",
 }
 
+# These are the collection-shaped authoring fields whose members are business
+# rules rather than positional schema.  Every path here has an explicit
+# semantic validator in ``template_authoring_semantics``.  Future list fields
+# remain structurally strict until they deliberately opt into such a policy.
+_REPLACEABLE_AUTHORING_LIST_PATHS = frozenset(
+    {
+        "heading_model.non_numbered_title_texts",
+        "heading_model.non_numbered_prefixes",
+        "header_footer.header.hidden_selectors",
+        "header_footer.footer.hidden_selectors",
+        "header_footer.page_number_plan.phases",
+    }
+)
+
 
 class TemplatePayloadCodecError(ValueError):
     """A payload cannot be represented losslessly as TemplateConfig."""
@@ -217,17 +231,20 @@ def _find_missing_structure_paths(
     elif isinstance(baseline, list):
         if not isinstance(result, list):
             return [prefix or "<root>"]
-        if len(result) < len(baseline):
-            missing.extend(
-                f"{prefix}[{index}]"
-                for index in range(len(result), len(baseline))
-            )
-        for index, baseline_value in enumerate(baseline[: len(result)]):
+        if prefix in _REPLACEABLE_AUTHORING_LIST_PATHS:
+            # These sets/rule tables may be replaced or regrouped; their
+            # coverage, uniqueness, and value domains are checked separately.
+            return missing
+        for index, baseline_value in enumerate(baseline):
+            path = f"{prefix}[{index}]"
+            if index >= len(result):
+                missing.append(path)
+                continue
             missing.extend(
                 _find_missing_structure_paths(
                     baseline_value,
                     result[index],
-                    prefix=f"{prefix}[{index}]",
+                    prefix=path,
                 )
             )
     return missing

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
+
+import pytest
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 from lxml import etree
-import pytest
 
 from src.assistant.domain.docx_format_evidence import (
     FORMAT_EVIDENCE_DISCLOSURE_FIELD,
@@ -15,7 +17,6 @@ from src.assistant.domain.docx_format_evidence import (
     extract_docx_format_evidence,
     is_format_requirements_request,
 )
-
 
 FORMAT_QUERY = "这个是标准的规划文件，帮我看看确定对应的格式要求"
 
@@ -110,7 +111,7 @@ def test_docx_format_evidence_extracts_geometry_styles_and_headers_without_path(
 
     evidence = extract_docx_format_evidence(path)
 
-    assert evidence["schema_version"] == "docx-format-evidence-v1"
+    assert evidence["schema_version"] == "docx-format-evidence-v2"
     assert evidence["source"]["name"] == path.name
     assert evidence["source"]["semantic_role"] == STANDARD_FORMAT_REFERENCE_ROLE
     assert str(tmp_path) not in str(evidence)
@@ -139,6 +140,35 @@ def test_docx_format_evidence_extracts_geometry_styles_and_headers_without_path(
     assert by_name["Heading 1"]["semantic_level"] == 1
     assert by_name["Heading 1"]["font"]["size_pt"] == 16.0
     assert by_name["Heading 1"]["font"]["bold"] is True
+
+
+def test_format_evidence_aggregates_direct_properties_without_body_text(
+    tmp_path,
+):
+    path = tmp_path / "direct-format.docx"
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.paragraph_format.space_after = Pt(9)
+    run = paragraph.add_run("绝不能进入格式克隆证据的正文文本")
+    run.font.size = Pt(13)
+    run.font.bold = True
+    run_properties = run._r.get_or_add_rPr()
+    run_properties.get_or_add_rFonts().set(qn("w:eastAsia"), "黑体")
+    highlight = OxmlElement("w:highlight")
+    highlight.set(qn("w:val"), "none")
+    run_properties.append(highlight)
+    document.save(path)
+
+    evidence = extract_docx_format_evidence(path)
+    direct = evidence["direct_formatting"]
+
+    assert direct["paragraph_profiles"][0]["properties"]["space_after_pt"] == 9
+    run_properties = direct["run_profiles"][0]["properties"]
+    assert run_properties["east_asia_font"] == "黑体"
+    assert run_properties["size_pt"] == 13
+    assert run_properties["bold"] is True
+    assert run_properties["highlight"] == "none"
+    assert "绝不能进入" not in json.dumps(evidence, ensure_ascii=False)
 
 
 def test_docx_format_evidence_counts_omml_and_equation_ole_objects(tmp_path):

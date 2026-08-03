@@ -223,6 +223,25 @@ def test_canonical_loader_rejects_partial_legacy_heading_payload(tmp_path):
         load_template(target)
 
 
+def test_template_persistence_rejects_duplicate_special_title_rules(tmp_path):
+    template = create_builtin_template("thesis_gbt")
+    duplicate = template.heading_model.non_numbered_title_texts[0]
+    template.heading_model.non_numbered_title_texts.append(duplicate)
+
+    with pytest.raises(ValueError, match="完整标题中存在重复规则"):
+        save_template(template, tmp_path / "invalid-save.json")
+
+    payload = asdict(template)
+    target = tmp_path / "invalid-load.json"
+    target.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigLoadError, match="完整标题中存在重复规则"):
+        load_template(target)
+
+
 def test_report_builtin_template_exposes_explicit_continuous_page_number_plan():
     template = create_builtin_template("report_default")
 

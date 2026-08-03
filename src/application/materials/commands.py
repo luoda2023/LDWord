@@ -465,6 +465,7 @@ class MaterialPackageService:
         watermark_text: str,
         show_single_image_name: bool | None = None,
         show_multi_image_name: bool | None = None,
+        page_break_after_images: bool = False,
         show_image_name: bool | None = None,
     ) -> MaterialCommandResult:
         def construct() -> MaterialPackage:
@@ -485,6 +486,7 @@ class MaterialPackageService:
                     if show_multi_image_name is None
                     else bool(show_multi_image_name)
                 ),
+                "page_break_after_images": bool(page_break_after_images),
             }
             return _package_with_extensions(package, extensions)
 

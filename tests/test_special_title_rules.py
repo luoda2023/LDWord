@@ -1,5 +1,7 @@
 import pytest
 
+from src.config.execution_config_integrity import execution_config_integrity_issue
+from src.config.resolved import ResolvedConfig
 from src.config.special_title_rules import (
     match_special_title,
     parse_special_title_selector,
@@ -80,13 +82,51 @@ def test_each_heading_model_item_becomes_one_scope_option():
     [
         (["摘要", "摘要"], [], "完整标题中存在重复规则"),
         ([], ["附录", "附录"], "标题前缀中存在重复规则"),
-        (["附录"], ["附录"], "不能同时作为完整标题和标题前缀"),
     ],
 )
-def test_duplicate_or_cross_category_rules_are_rejected(
+def test_duplicate_rules_within_one_category_are_rejected(
     exact,
     prefixes,
     message,
 ):
     with pytest.raises(ValueError, match=message):
         validate_special_title_values(exact, prefixes)
+
+
+def test_same_literal_can_split_exact_title_from_prefixed_variants():
+    exact, prefixes = validate_special_title_values(["附录"], ["附录"])
+
+    exact_match = match_special_title(
+        "附录",
+        exact_values=exact,
+        prefix_values=prefixes,
+    )
+    prefix_match = match_special_title(
+        "附录 A",
+        exact_values=exact,
+        prefix_values=prefixes,
+    )
+    options = special_title_selector_options(
+        HeadingModelConfig(
+            non_numbered_title_texts=exact,
+            non_numbered_prefixes=prefixes,
+        )
+    )
+
+    assert exact_match is not None and exact_match.kind == "exact"
+    assert prefix_match is not None and prefix_match.kind == "prefix"
+    assert [label for _selector, label in options] == [
+        "附录（完整标题）",
+        "附录（标题前缀）",
+    ]
+    assert len({selector for selector, _label in options}) == 2
+
+
+def test_execution_integrity_rejects_invalid_special_title_rules_early():
+    config = ResolvedConfig()
+    config.heading_model.non_numbered_title_texts = ["摘要", "摘要"]
+
+    issue = execution_config_integrity_issue(config)
+
+    assert issue.startswith("invalid_special_title_rules:")
+    assert "完整标题中存在重复规则" in issue

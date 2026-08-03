@@ -499,19 +499,21 @@ class PageSetupDetail(QWidget):
                 ],
             ],
         )
-        self._paper_form.add_field(
+        self._paper_by_section_row = self._paper_form.add_field(
             "分节纸张映射",
             self._paper_by_section_edit,
         )
+        self._paper_by_section_row.hide()
         self._paper_form.add_field(
             "方向",
             self._build_direction_selector(parent=self._paper_form),
         )
         self._paper_form.add_field("方向策略", self._orientation_mode_combo)
-        self._paper_form.add_field(
+        self._orientation_by_section_row = self._paper_form.add_field(
             "分节方向映射",
             self._orientation_by_section_edit,
         )
+        self._orientation_by_section_row.hide()
         self._paper_form.add_grid(
             [
                 [
@@ -846,13 +848,15 @@ class PageSetupDetail(QWidget):
         paper_mode = str(
             self._paper_mode_combo.currentData() or "preserve_source"
         )
-        self._paper_by_section_edit.setEnabled(paper_mode == "per_section")
+        show_paper_map = paper_mode == "per_section"
+        self._paper_by_section_row.setVisible(show_paper_map)
+        self._paper_by_section_edit.setEnabled(show_paper_map)
         orientation_mode = str(
             self._orientation_mode_combo.currentData() or "preserve_source"
         )
-        self._orientation_by_section_edit.setEnabled(
-            orientation_mode == "per_section"
-        )
+        show_orientation_map = orientation_mode == "per_section"
+        self._orientation_by_section_row.setVisible(show_orientation_map)
+        self._orientation_by_section_edit.setEnabled(show_orientation_map)
         margin_mode = str(
             self._margin_mode_combo.currentData() or "preserve_source"
         )

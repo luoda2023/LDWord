@@ -759,10 +759,7 @@ class AssistantDocumentWorkflowMixin:
                 role=ROLE_ASSISTANT,
                 interaction_type="disclosure",
                 title="确认用于内容生成的材料",
-                body=(
-                    "确认后，材料正文仅用于本次内容生成；本地路径、资料包结构化字段、"
-                    "Logo 和公章不会发送给模型。"
-                ),
+                body="",
                 payload={
                     "disclosure_id": disclosure_id,
                     "facts": [
@@ -835,7 +832,7 @@ class AssistantDocumentWorkflowMixin:
                     role=ROLE_ASSISTANT,
                     interaction_type="boundary",
                     title="已取消材料发送",
-                    body="未向模型发送材料正文；当前计划仍保留，可调整后重新发起。",
+                    body="",
                     payload={"actions": []},
                 ),
                 turn_status=TURN_COMPLETED,
@@ -1223,7 +1220,7 @@ class AssistantDocumentWorkflowMixin:
                 role=ROLE_ASSISTANT,
                 interaction_type="recovery",
                 title="已恢复上一版内容草稿",
-                body="本次失败的修订已撤销，后续检查和生成会继续使用恢复后的草稿。",
+                body="",
                 payload={
                     "actions": [
                         {"id": "open_content_draft", "label": "打开草稿"},
@@ -1662,7 +1659,7 @@ class AssistantDocumentWorkflowMixin:
                 interaction_type="recovery",
                 title="内容起草已取消" if cancelled else failure_title,
                 body=(
-                    "没有创建或覆盖正式输出文件。"
+                    ""
                     if cancelled
                     else failure_body
                 ),
@@ -2067,15 +2064,17 @@ class AssistantDocumentWorkflowMixin:
             self._active_session = self._provider_selection.synchronize_session(
                 self._active_session
             )
-        selected = (
-            self._active_session.provider_profile_id
-            if self._active_session is not None
-            else (
-                self._creative_home.composer.selected_provider_id()
-                or str(self._provider_combo.currentData() or "")
-                or "mock-default"
-            )
-        )
+        if self._active_session is not None:
+            selected = self._active_session.provider_profile_id
+        else:
+            try:
+                selected = self._provider_router.profiles.active_profile_id()
+            except (OSError, RuntimeError, TypeError, ValueError):
+                selected = (
+                    self._creative_home.composer.selected_provider_id()
+                    or str(self._provider_combo.currentData() or "")
+                    or "mock-default"
+                )
         projected_profiles: list[tuple[str, str, str, bool, str, str]] = []
         try:
             profiles = self._provider_router.profiles.list_profiles()
@@ -2104,11 +2103,20 @@ class AssistantDocumentWorkflowMixin:
         )
         self._provider_selection.select(selected)
 
+    def _remember_active_provider(self, profile_id: str) -> None:
+        if not profile_id:
+            return
+        try:
+            self._provider_router.profiles.set_active_profile_id(profile_id)
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+            return
+
     def _on_provider_selected(self, _index: int) -> None:
         profile_id = str(self._provider_combo.currentData() or "")
         if profile_id:
             self._creative_home.composer.select_provider(profile_id)
         if self._active_session is None:
+            self._remember_active_provider(profile_id)
             return
         profile_id, model_id = self._provider_selection.selected_identity()
         previous_profile_id = self._active_session.provider_profile_id
@@ -2118,6 +2126,7 @@ class AssistantDocumentWorkflowMixin:
                 model_id=model_id,
                 touch_activity=False,
             )
+            self._remember_active_provider(profile_id)
             return
         previous_domain = self._provider_data_domain(previous_profile_id)
         target_domain = self._provider_data_domain(profile_id)
@@ -2141,6 +2150,7 @@ class AssistantDocumentWorkflowMixin:
                 self._provider_selection.select(previous_profile_id)
                 return
             if decision == "new":
+                self._remember_active_provider(profile_id)
                 self.new_session()
                 return
             history_grant = {
@@ -2168,6 +2178,7 @@ class AssistantDocumentWorkflowMixin:
             provider_history_grant=history_grant,
             touch_activity=False,
         )
+        self._remember_active_provider(profile_id)
         if history_grant:
             self._active_session = self._coordinator.append_message(
                 self._active_session,
@@ -2175,11 +2186,7 @@ class AssistantDocumentWorkflowMixin:
                     role=ROLE_ASSISTANT,
                     interaction_type="disclosure",
                     title="已确认携带历史并切换模型服务",
-                    body=(
-                        f"已按你的确认，把当前会话的 "
-                        f"{history_grant['history_message_count']} 条可见消息"
-                        f"授权给 {profile_id}。附件仍需按每次请求单独确认。"
-                    ),
+                    body="",
                     payload={
                         "active": False,
                         "facts": [
@@ -2198,6 +2205,10 @@ class AssistantDocumentWorkflowMixin:
                                         "history_character_count"
                                     ]
                                 ),
+                            },
+                            {
+                                "label": "附件权限",
+                                "value": "仍需逐次确认",
                             },
                         ],
                         "actions": [],

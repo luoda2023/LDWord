@@ -23,6 +23,59 @@ _BODY_PHASE_SELECTORS = (
     "resume",
 )
 
+PAGE_NUMBER_FORMAT_VALUES = frozenset(
+    {
+        "decimal",
+        "upperRoman",
+        "lowerRoman",
+        "upperLetter",
+        "lowerLetter",
+        "ordinal",
+        "cardinalText",
+        "ordinalText",
+        "decimalZero",
+        "decimalFullWidth",
+    }
+)
+PAGE_NUMBER_START_MODE_VALUES = frozenset({"continue", "restart"})
+PAGE_NUMBER_VALIDATION_MODE_VALUES = frozenset({"strict", "warn"})
+PAGE_NUMBER_MISSING_DOC_TREE_POLICY_VALUES = frozenset(
+    {"warn_and_fallback", "fallback"}
+)
+_PAGE_NUMBER_FORMAT_ALIASES = {
+    "upper_roman": "upperRoman",
+    "roman_upper": "upperRoman",
+    "upperroman": "upperRoman",
+    "lower_roman": "lowerRoman",
+    "roman_lower": "lowerRoman",
+    "lowerroman": "lowerRoman",
+    "upper_letter": "upperLetter",
+    "upperletter": "upperLetter",
+    "lower_letter": "lowerLetter",
+    "lowerletter": "lowerLetter",
+    "cardinal_text": "cardinalText",
+    "cardinaltext": "cardinalText",
+    "ordinal_text": "ordinalText",
+    "ordinaltext": "ordinalText",
+    "decimal_zero": "decimalZero",
+    "decimalzero": "decimalZero",
+    "decimal_full_width": "decimalFullWidth",
+    "decimalfullwidth": "decimalFullWidth",
+}
+
+
+def normalize_page_number_format_value(
+    value: object,
+    *,
+    default: str = "",
+) -> str:
+    """Return a canonical Word page-number format, accepting stable aliases."""
+
+    raw = str(value or "").strip()
+    if raw in PAGE_NUMBER_FORMAT_VALUES:
+        return raw
+    return _PAGE_NUMBER_FORMAT_ALIASES.get(raw.casefold(), default)
+
 
 def _set_selector_membership(
     selectors: list[str],

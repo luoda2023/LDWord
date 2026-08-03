@@ -6,16 +6,27 @@ import shutil
 import tempfile
 import zipfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+
+from docx import Document
 
 from src.application.materials import (
     ExecutionMaterialRecord,
     ExecutionMaterialSnapshot,
 )
+from src.config.document_structure_contract import RegionDecision
 from src.config.resolved import ResolvedConfig
-from src.document_batch.material_resources import materialize_record_resources
+from src.document_batch.material_resources import (
+    materialize_record_resources,
+    planned_materialized_resource_count,
+)
+from src.services.document_structure_evidence import (
+    build_document_structure_evidence,
+    read_all_document_paragraph_anchors,
+)
 from src.services.docx_format_change import compare_docx_formatting
+from src.shared.engine.document_scope_runtime import resolve_paragraph_anchor
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,8 +89,10 @@ def prepare_formatting_input(
     return PreparedFormattingInput(
         path=materialized,
         work_dir=work_dir,
-        materialized_resource_count=sum(
-            len(resources) for resources in record.resources.values()
+        materialized_resource_count=planned_materialized_resource_count(
+            source_path,
+            record=record,
+            resource_domains=snapshot.resource_domains,
         ),
     )
 
@@ -136,9 +149,42 @@ __all__ = [
 ]
 
 
-def document_scope_pipeline_kwargs(context) -> dict[str, object]:
+def document_scope_pipeline_kwargs(
+    context,
+    materialized_path: str | Path | None = None,
+) -> dict[str, object]:
+    """Bind plan scope to the document after independent material expansion."""
+
     evidence, decisions = context
+    if evidence is not None and materialized_path is not None:
+        evidence = build_document_structure_evidence(materialized_path)
+        decisions = _rebase_scope_decisions(decisions, materialized_path)
     return {
         "document_structure_evidence": evidence,
         "document_scope_decisions": tuple(decisions or ()),
     }
+
+
+def _rebase_scope_decisions(decisions, path: str | Path) -> tuple[object, ...]:
+    anchors = read_all_document_paragraph_anchors(path)
+    if not anchors:
+        return tuple(decisions or ())
+    texts = tuple(str(paragraph.text or "").strip() for paragraph in Document(path).paragraphs)
+    rebased: list[object] = []
+    for decision in tuple(decisions or ()):
+        if not isinstance(decision, RegionDecision) or decision.action != "set_start":
+            rebased.append(decision)
+            continue
+        old_anchor = decision.start_anchor
+        if old_anchor is None:
+            rebased.append(decision)
+            continue
+        index = resolve_paragraph_anchor(old_anchor, texts)
+        if index is None and 0 <= old_anchor.source_index < len(anchors):
+            index = old_anchor.source_index
+        rebased.append(
+            replace(decision, start_anchor=anchors[index])
+            if index is not None
+            else decision
+        )
+    return tuple(rebased)

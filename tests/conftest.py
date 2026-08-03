@@ -62,6 +62,19 @@ def isolate_user_material_package_libraries(tmp_path_factory, monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def isolate_workspace_preferences(tmp_path, monkeypatch):
+    """Keep restart-preference tests away from the developer's real profile."""
+
+    from src.ui import workspace_preferences
+
+    monkeypatch.setattr(
+        workspace_preferences,
+        "workspace_preferences_path",
+        lambda: tmp_path / "workspace-preferences.json",
+    )
+
+
 def _new_valid_top_level_widgets(protected: tuple[object, ...]) -> list[object]:
     return [
         widget

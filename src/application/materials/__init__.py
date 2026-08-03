@@ -20,6 +20,8 @@ from .execution import (
     execution_material_snapshot_from_payload,
     execution_material_snapshot_to_payload,
     finalize_execution_material_snapshot,
+    image_policy_role_cardinality,
+    image_policy_role_label,
     project_execution_material_record_snapshot,
 )
 from .import_workflow import (
@@ -38,9 +40,11 @@ from .preview import (
 )
 
 __all__ = [
-    "ExecutionMaterialRecord",
+    "PACKAGE_CONTRACT_EXTENSIONS_KEY",
+    "RUNTIME_IMAGE_WATERMARK_KEY",
     "ExecutionMaterialFinalizeRequest",
     "ExecutionMaterialGroup",
+    "ExecutionMaterialRecord",
     "ExecutionMaterialSnapshot",
     "ExecutionResource",
     "ImportCandidate",
@@ -49,22 +53,22 @@ __all__ = [
     "MaterialImportDraft",
     "MaterialPackageService",
     "MaterialPreviewSnapshot",
-    "MaterialRuntimeFieldPreview",
     "MaterialRunBindRequest",
     "MaterialRunBindResult",
-    "PACKAGE_CONTRACT_EXTENSIONS_KEY",
-    "RUNTIME_IMAGE_WATERMARK_KEY",
+    "MaterialRuntimeFieldPreview",
     "bind_material_run",
     "bind_repository_material_run",
     "default_material_contract_id",
     "execution_material_snapshot_from_payload",
     "execution_material_snapshot_to_payload",
     "finalize_execution_material_snapshot",
-    "project_execution_material_record_snapshot",
     "get_material_contract",
     "get_package_material_contract",
+    "image_policy_role_cardinality",
+    "image_policy_role_label",
     "inspect_material_workbook",
     "inspect_material_workbook_headers",
     "material_contract_from_schema",
+    "project_execution_material_record_snapshot",
     "project_material_preview",
 ]

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import hashlib
+import zipfile
+from collections import Counter
 from pathlib import Path
 from xml.etree import ElementTree as ET
-import zipfile
-
 
 FORMAT_CHANGE_EVIDENCE_SCHEMA = "docx-format-change-v1"
 _WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -19,6 +18,7 @@ _VISIBLE_CONTROL_TOKENS = {
     f"{{{_WORD_NS}}}br": b"\n",
     f"{{{_WORD_NS}}}cr": b"\n",
 }
+_VISIBLE_OBJECT_LOCAL_NAMES = {"drawing", "pict", "object"}
 _PROPERTY_LOCAL_NAMES = {
     "pPr",
     "rPr",
@@ -77,12 +77,25 @@ def docx_format_fingerprint(path: str | Path) -> dict[str, object]:
             content.update(name.encode("utf-8"))
             content.update(b"\0")
             for element in root.iter():
+                local_name = _local_name(element.tag)
                 if element.tag in _TEXT_TAGS and element.text:
                     content.update(element.text.encode("utf-8"))
                 elif element.tag in _VISIBLE_CONTROL_TOKENS:
                     content.update(_VISIBLE_CONTROL_TOKENS[element.tag])
-                if _local_name(element.tag) in _PROPERTY_LOCAL_NAMES:
+                elif local_name in _VISIBLE_OBJECT_LOCAL_NAMES:
+                    content.update(b"\x1eobject:")
+                    content.update(_canonical_hash(element).encode("ascii"))
+                if local_name in _PROPERTY_LOCAL_NAMES:
                     element_hashes.append(_canonical_hash(element))
+            content.update(b"\0")
+        media_digests = sorted(
+            hashlib.sha256(archive.read(name)).hexdigest()
+            for name in names
+            if name.startswith("word/media/") and not name.endswith("/")
+        )
+        for digest in media_digests:
+            content.update(b"media:")
+            content.update(digest.encode("ascii"))
             content.update(b"\0")
         for name in sorted(_WHOLE_FORMAT_PARTS & names):
             root = ET.fromstring(archive.read(name))

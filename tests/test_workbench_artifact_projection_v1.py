@@ -8,6 +8,9 @@ from src.ui.adapters.workbench_execution_adapter import (
 from src.ui.adapters.workbench_product_issue_navigation import (
     workbench_issue_navigation_for_target,
 )
+from src.ui.panels.workbench.quick_execution_presenter import (
+    build_navigation_snapshot,
+)
 from src.ui.panels.workbench.quick_execution_result_presenter import (
     build_execution_result_presentation,
 )
@@ -72,6 +75,38 @@ def test_v1_quick_result_log_lists_delivery_artifacts():
     assert any("delivery/source_review.docx" in message for message in messages)
     assert any("delivery/source_review_changes.md" in message for message in messages)
     assert any("delivery/material_package.zip" in message for message in messages)
+
+
+def test_partial_success_uses_warning_presentation_consistently():
+    payload = _delivery_terminal_payload()
+    payload.update(
+        {
+            "status": "partial_success",
+            "summary": "文档已生成，但报告写入失败",
+            "artifact_failure_count": 1,
+            "error_text": "report write failed",
+        }
+    )
+    state = WorkbenchExecutionAdapter().build_result_state(
+        terminal_payload=payload
+    )
+
+    presentation = build_execution_result_presentation(state)
+    navigation = build_navigation_snapshot(
+        document_path="source.docx",
+        strategy_name="默认流程",
+        enabled_count=1,
+        execution_running=False,
+        last_result_status="partial_success",
+    )
+
+    assert presentation.success is True
+    assert presentation.status_text.startswith("部分完成")
+    assert presentation.status_tone == "warning"
+    assert presentation.expand_log is True
+    assert presentation.log_entries[0].level == "warning"
+    assert navigation["badge_text"] == "部分完成"
+    assert navigation["badge_variant"] == "warning"
 
 
 def test_v1_output_target_issue_preserves_repair_route():

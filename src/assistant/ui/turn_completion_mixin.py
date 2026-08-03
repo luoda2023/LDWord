@@ -57,6 +57,7 @@ class AssistantTurnCompletionMixin:
                 template_authoring = complete_template_authoring(
                     mode_id=worker.request.template_authoring_mode_id,
                     provider_text=result.visible_text,
+                    strategy=worker.request.template_authoring_strategy,
                 )
             except Exception as exc:
                 template_authoring = exc
@@ -200,9 +201,10 @@ class AssistantTurnCompletionMixin:
                     interaction_type="recovery",
                     title=("本次请求已取消" if cancelled else "模型响应未完成"),
                     body=(
-                        "未执行任何文档生产操作。"
-                        + (
-                            f"\n原因：{provider_error_text(error_message)}"
+                        ""
+                        if cancelled
+                        else (
+                            f"原因：{provider_error_text(error_message)}"
                             if error_message
                             else ""
                         )
@@ -242,10 +244,7 @@ class AssistantTurnCompletionMixin:
                     role=ROLE_ASSISTANT,
                     interaction_type="recovery",
                     title="模板未写入",
-                    body=(
-                        "模型已经返回结果，但本地模板校验或写入没有完成；"
-                        f"用户模板库未被更新。\n原因：{completion}"
-                    ),
+                    body=f"原因：{completion}",
                     payload={"actions": []},
                 ),
             )
@@ -256,21 +255,50 @@ class AssistantTurnCompletionMixin:
             reasons.extend(issue.message for issue in batch.warnings)
             if not reasons and batch.pending_count:
                 reasons.append("模板来源归档仍在等待，尚未形成可核验的成功记录")
+            retry_issue = next(
+                (
+                    issue
+                    for issue in batch.rejections
+                    if issue.source_path.suffix.casefold() == ".json"
+                    and issue.source_path.is_file()
+                ),
+                None,
+            )
+            payload: dict[str, object] = {"actions": []}
+            if retry_issue is not None:
+                payload.update(
+                    {
+                        "template_authoring_mode_id": completion.mode_id,
+                        "failed_result_path": str(retry_issue.source_path),
+                        "actions": [
+                            {
+                                "id": "revalidate_template_authoring_failure",
+                                "label": "重新校验已保留结果",
+                                "variant": "secondary",
+                            }
+                        ],
+                    }
+                )
             return (
                 AssistantMessage.interaction(
                     role=ROLE_ASSISTANT,
                     interaction_type="recovery",
                     title="模板未通过本地校验",
                     body=(
-                        "没有把未通过合同与字段边界检查的结果写入用户模板库。"
-                        + ("\n原因：" + "\n".join(reasons) if reasons else "")
+                        "原因：" + "\n".join(reasons)
+                        if reasons
+                        else ""
                     ),
-                    payload={"actions": []},
+                    payload=payload,
                 ),
             )
 
         success = batch.successes[0]
         entry = success.entry
+        strategy_label = {
+            "requirements": "文本规范生成",
+            "format_clone": "Word 格式克隆",
+        }.get(completion.strategy, "历史结果重新校验")
         notices = [issue.message for issue in batch.warnings]
         observation_labels = {
             "master": "母版边界",
@@ -297,13 +325,12 @@ class AssistantTurnCompletionMixin:
                 role=ROLE_ASSISTANT,
                 interaction_type="artifact",
                 title="新模板已创建并写入模板库",
-                body=(
-                    "模板已经通过本地合同、可写字段边界和无损读回校验。"
-                ),
+                body="",
                 payload={
                     "facts": [
                         {"label": "模板名称", "value": entry.name},
                         {"label": "工作模式", "value": completion.mode_id},
+                        {"label": "提取方式", "value": strategy_label},
                         {"label": "模板标识", "value": entry.config_id},
                     ],
                     "notices": notices[:8],
@@ -334,6 +361,7 @@ class AssistantTurnCompletionMixin:
             return {
                 "status": "completed",
                 "mode_id": completion.mode_id,
+                "strategy": completion.strategy,
                 "template_id": entry.config_id,
                 "template_name": entry.name,
                 "template_path": str(entry.path),
@@ -342,6 +370,7 @@ class AssistantTurnCompletionMixin:
         return {
             "status": "failed",
             "mode_id": completion.mode_id,
+            "strategy": completion.strategy,
             "issues": [
                 issue.message
                 for issue in (*batch.rejections, *batch.warnings)
@@ -446,12 +475,15 @@ class AssistantTurnCompletionMixin:
                         role=ROLE_ASSISTANT,
                         interaction_type="boundary",
                         title="本轮材料覆盖范围有限",
-                        body=(
-                            "下列材料未被完整读取。本轮回答只能作为已覆盖范围内的"
-                            "分析，不能视为全文或全部格式规则的最终结论。"
-                        ),
+                        body="",
                         payload={
-                            "facts": facts,
+                            "facts": [
+                                *facts,
+                                {
+                                    "label": "结论范围",
+                                    "value": "仅覆盖已读取内容",
+                                },
+                            ],
                             "actions": [],
                         },
                     )
@@ -463,10 +495,7 @@ class AssistantTurnCompletionMixin:
                     role=ROLE_ASSISTANT,
                     interaction_type="boundary",
                     title="本轮仅携带最近对话",
-                    body=(
-                        "较早历史因上下文预算未发送给模型；本轮回答不能被视为"
-                        "覆盖全部历史。需要完整上下文时，请新建任务并粘贴必要摘要。"
-                    ),
+                    body="",
                     payload={
                         "facts": [
                             {
@@ -487,6 +516,10 @@ class AssistantTurnCompletionMixin:
                                     "字符"
                                 ),
                             },
+                            {
+                                "label": "需要完整上下文",
+                                "value": "新建任务并粘贴必要摘要",
+                            },
                         ],
                         "actions": [],
                     },
@@ -506,7 +539,7 @@ class AssistantTurnCompletionMixin:
                 request.get("body")
                 or request.get("message")
                 or request.get("prompt")
-                or "请确认后继续。"
+                or ""
             )
             if is_permission:
                 body += (
@@ -542,7 +575,7 @@ class AssistantTurnCompletionMixin:
                     body=str(
                         action.get("description")
                         or action.get("body")
-                        or "这是模型提出的后续建议。"
+                        or ""
                     ),
                     payload={
                         "actions": (
@@ -570,7 +603,7 @@ class AssistantTurnCompletionMixin:
                     body=str(
                         artifact.get("description")
                         or artifact.get("summary")
-                        or "产物已记录到当前对话。"
+                        or ""
                     ),
                     reference=dict(artifact),
                     actions=(

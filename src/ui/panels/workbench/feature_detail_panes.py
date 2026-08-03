@@ -1,21 +1,13 @@
 from __future__ import annotations
 
-from src.application.materials import MaterialPreviewSnapshot
-from src.domain.materials import MaterialRunSelection
-from src.qt_api import QLabel, QLineEdit, QVBoxLayout, QWidget
+from src.qt_api import QLabel, QVBoxLayout, QWidget
 
 from src.shared.ui.card import Card
 from src.shared.ui.execution_progress_widget import ExecutionProgressWidget
-from src.shared.ui.file_drop_zone import FileDropZone
-from src.shared.ui.folder_picker import FolderPicker
-from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.module_status_list import ModuleStatusList
-from src.shared.ui.path_drop import PathAcceptancePolicy
 from src.shared.ui.search_input import SearchInput
-from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.template_form_layout import TemplateFormStack, template_form_row
-from src.shared.ui.text_area import TextArea
 from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.themed_slider import ThemedSlider
 from src.shared.ui.toggle_switch import ToggleSwitch
@@ -205,198 +197,6 @@ class CitationDetailPane(_FeatureDetailPaneBase):
         )
 
 
-class ContentDataDetailPane(_FeatureDetailPaneBase):
-    """资料包与填充能力域详情页。"""
-
-    def __init__(self, parent=None):
-        super().__init__(
-            "资料包与填充",
-            "从资料源选择模板，再决定映射强度与预览策略，后续可以分拆为更细的填充和插入能力。",
-            parent=parent,
-        )
-
-        template_card = self._build_card("场景与占位规则")
-        self._template_combo = StyledComboBox(template_card)
-        self._template_combo.addItems(
-            [
-                "默认填充流程",
-                "技术方案说明",
-                "汇报演示稿",
-                "合同交付件",
-            ]
-        )
-        self._template_combo.currentTextChanged.connect(lambda *_: self._refresh_summary())
-
-        self._placeholder_toggle = ToggleSwitch(template_card, checked=True)
-        self._placeholder_toggle.toggled_signal.connect(lambda *_: self._refresh_summary())
-        self._add_form_rows(
-            template_card,
-            [
-                template_form_row("填充模板", self._template_combo, parent=template_card),
-                template_form_row("保留未匹配占位符", self._placeholder_toggle, parent=template_card),
-            ],
-        )
-        self._layout.addWidget(template_card)
-
-        source_card = self._build_card("数据源")
-        self._source_picker = FileDropZone(
-            dialog_title="选择填充数据源",
-            policy=PathAcceptancePolicy(
-                suffixes=(".xlsx", ".csv", ".json"),
-                dialog_label="数据文件",
-            ),
-            parent=source_card,
-        )
-        self._source_picker.file_selected.connect(lambda *_: self._refresh_summary())
-        source_card.add_widget(self._source_picker)
-        self._source_hint = QLabel(
-            "支持 Excel / CSV / JSON，后续可继续接真实映射表。",
-            source_card,
-        )
-        self._source_hint.setWordWrap(True)
-        source_card.add_widget(self._source_hint)
-        self._layout.addWidget(source_card)
-        source_card.setVisible(False)
-
-        entity_card = self._build_card("当前资料")
-        self._profile_name_edit = QLineEdit(entity_card)
-        self._profile_name_edit.setPlaceholderText("未选择资料")
-        self._profile_name_edit.textChanged.connect(lambda *_: self._on_material_context_edited())
-
-        self._assets_picker = FolderPicker(placeholder="未选择图片目录", parent=entity_card)
-        self._assets_picker.folder_changed.connect(lambda *_: self._on_material_context_edited())
-
-        self._entity_fields_edit = TextArea(
-            placeholder="company_name=测试公司\nlegal_person=张三",
-            min_height=88,
-            max_height=140,
-            parent=entity_card,
-        )
-        self._entity_fields_edit.text_changed.connect(self._on_material_context_edited)
-        self._add_form_rows(
-            entity_card,
-            [
-                template_form_row("当前资料", self._profile_name_edit, parent=entity_card),
-                template_form_row("图片目录", self._assets_picker, parent=entity_card),
-                template_form_row("填资料", self._entity_fields_edit, parent=entity_card),
-            ],
-        )
-        self._layout.addWidget(entity_card)
-        self._profile_name_edit.setReadOnly(True)
-        self._assets_picker.setEnabled(False)
-        self._entity_fields_edit.setEnabled(False)
-        self._material_selection: MaterialRunSelection | None = None
-        self._material_preview: MaterialPreviewSnapshot | None = None
-
-        behavior_card = self._build_card("预览与映射强度")
-        self._confidence_slider = ThemedSlider(parent=behavior_card)
-        self._confidence_slider.setRange(50, 100)
-        self._confidence_slider.setValue(78)
-        self._confidence_slider.valueChanged.connect(self._update_confidence_label)
-        self._confidence_value = QLabel("78%", behavior_card)
-
-        self._preview_toggle = ToggleSwitch(behavior_card, checked=True)
-        self._preview_toggle.toggled_signal.connect(lambda *_: self._refresh_summary())
-        self._add_form_rows(
-            behavior_card,
-            [
-                template_form_row(
-                    "映射信心度",
-                    self._confidence_slider,
-                    suffix_widget=self._confidence_value,
-                    parent=behavior_card,
-                ),
-                template_form_row("自动预览", self._preview_toggle, parent=behavior_card),
-            ],
-        )
-        self._layout.addWidget(behavior_card)
-
-        self._refresh_summary()
-        self.finish_setup()
-
-    def _update_confidence_label(self, value: int) -> None:
-        self._confidence_value.setText(f"{value}%")
-        self._refresh_summary()
-
-    def set_material_selection(
-        self,
-        selection: MaterialRunSelection | None,
-        preview: MaterialPreviewSnapshot | None = None,
-    ) -> None:
-        self._material_selection = (
-            selection if isinstance(selection, MaterialRunSelection) else None
-        )
-        self._material_preview = (
-            preview if isinstance(preview, MaterialPreviewSnapshot) else None
-        )
-        self._profile_name_edit.setText(
-            self._material_preview.current_record_name
-            if self._material_preview is not None
-            else ""
-        )
-        self._entity_fields_edit.set_text("")
-        self._assets_picker.set_path("")
-        self._refresh_summary()
-
-    def _on_material_context_edited(self) -> None:
-        self._refresh_summary()
-
-    def _refresh_summary(self) -> None:
-        template_name = self._template_combo.currentText() or "未选择模板"
-        source_name = self._source_picker.file_path() or "未挂载数据源"
-        source_label = source_name.split("\\")[-1] if source_name else "未挂载数据源"
-        placeholder_text = "保留未匹配占位符" if self._placeholder_toggle.isChecked() else "直接落地替换"
-        preview_text = "开启自动预览" if self._preview_toggle.isChecked() else "仅保存结果"
-        preview = self._material_preview
-        entity_text = (
-            preview.current_record_name
-            if preview is not None and preview.current_record_name
-            else "未选择资料"
-        )
-        field_text = (
-            f"资料字段 {preview.field_count} 项"
-            if preview is not None
-            else "资料未绑定"
-        )
-        assets_text = (
-            f"资源 {preview.resource_count} 项"
-            if preview is not None
-            else "资源未绑定"
-        )
-        self.set_summary(
-            f"当前流程：{template_name} · 数据源 {source_label} · 当前资料 {entity_text} · {field_text} · {assets_text} · 信心度 {self._confidence_slider.value()}% · {placeholder_text} · {preview_text}"
-        )
-
-    def _apply_theme(self) -> None:
-        super()._apply_theme()
-        theme = get_theme()
-        self._source_hint.setStyleSheet(f"font-size: {theme.font_size_sm}px; color: {theme.text_hint};")
-        apply_size_class(self._profile_name_edit, "md")
-        self._profile_name_edit.setStyleSheet(build_text_input_stylesheet(theme))
-
-
-def _parse_entity_fields_text(text: str) -> dict[str, str]:
-    entity_data: dict[str, str] = {}
-    for raw_line in str(text or "").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line:
-            key, value = line.split("=", 1)
-        elif ":" in line:
-            key, value = line.split(":", 1)
-        else:
-            continue
-        key = key.strip()
-        if key:
-            entity_data[key] = value.strip()
-    return entity_data
-
-
-def _format_entity_fields_text(entity_data: dict[str, str]) -> str:
-    return "\n".join(f"{key}={value}" for key, value in entity_data.items())
-
-
 class ExecutionHistoryDetailPane(_FeatureDetailPaneBase):
     """执行历史详情页，供执行控制器写入实时状态。"""
 
@@ -450,13 +250,8 @@ class ExecutionHistoryDetailPane(_FeatureDetailPaneBase):
         )
 
 
-QuickFillDetailPane = ContentDataDetailPane
-
-
 __all__ = [
     "CitationDetailPane",
-    "ContentDataDetailPane",
     "ExecutionHistoryDetailPane",
-    "QuickFillDetailPane",
     "TableChartDetailPane",
 ]

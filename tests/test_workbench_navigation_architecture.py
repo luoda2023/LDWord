@@ -40,14 +40,17 @@ def test_navigation_controller_owns_snapshot_and_dynamic_card_logic():
 
 def test_workbench_panel_uses_shared_capability_feature_card_registry():
     module_source = (ROOT / "src/ui/panels/workbench/panel_v2.py").read_text(encoding="utf-8")
+    detail_source = (
+        ROOT / "src/ui/panels/workbench/feature_detail_panes.py"
+    ).read_text(encoding="utf-8")
 
     assert CAPABILITY_FEATURE_CARD_ORDER == (
         "table_chart",
         "citation",
-        "content_fill",
     )
     assert CAPABILITY_FEATURE_CARD_DEFINITIONS["table_chart"] == ("图表处理", "table")
-    assert CAPABILITY_FEATURE_CARD_DEFINITIONS["content_fill"] == ("资料包填充", "pen-tool")
+    assert "content_fill" not in CAPABILITY_FEATURE_CARD_DEFINITIONS
+    assert "content_fill" in UI_GROUP_MAP
     assert "cleanup" not in CAPABILITY_FEATURE_CARD_DEFINITIONS
     assert "cleanup" not in UI_GROUP_MAP
     assert "page_elements" not in CAPABILITY_FEATURE_CARD_DEFINITIONS
@@ -59,3 +62,7 @@ def test_workbench_panel_uses_shared_capability_feature_card_registry():
     )
     assert "CAPABILITY_FEATURE_CARD_ORDER" in module_source
     assert "CAPABILITY_FEATURE_CARD_DEFINITIONS" in module_source
+    assert "ContentDataDetailPane" not in module_source
+    assert '"content_fill"' not in module_source
+    assert "ContentDataDetailPane" not in detail_source
+    assert "默认填充流程" not in detail_source

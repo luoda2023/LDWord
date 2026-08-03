@@ -33,8 +33,8 @@ from src.config.official_material_form import (
 )
 from src.config.scene import SceneWorkspace
 from src.config.scene_presets import (
+    CAPABILITY_FEATURE_CARD_ORDER,
     LEGACY_FEATURE_GROUP_MAP,
-    UI_CAPABILITY_GROUPS,
     UI_GROUP_MAP,
     get_group_enabled,
     set_group_enabled,
@@ -76,6 +76,7 @@ from src.shared.ui.sizing import apply_size_class, resolved_control_height
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.theme import bind_theme, get_theme
 from src.ui.adapters.config_selector_models import (
+    SelectorOption,
     material_package_selector_options,
     plan_combo_label,
     plan_selector_descriptors,
@@ -129,7 +130,7 @@ def _refresh_material_package_selector(detail) -> None:
         return
     selection = getattr(detail, "_material_selection", None)
     snapshot = getattr(detail, "_material_preview_snapshot", None)
-    identity = (
+    resolved_identity = (
         selection.package_ref.package_id
         if isinstance(selection, MaterialRunSelection)
         else (
@@ -138,17 +139,58 @@ def _refresh_material_package_selector(detail) -> None:
             else ""
         )
     )
-    detail._material_package_identity = identity
+    if resolved_identity:
+        detail._material_package_identity = resolved_identity
+    identity = str(
+        getattr(detail, "_material_package_identity", "") or ""
+    ).strip()
+    options = list(
+        material_package_selector_options(
+            detail._work_mode_id,
+            include_source_prefix=False,
+        )
+    )
+    if getattr(detail, "_material_package_enabled", False) and identity:
+        matching_index = next(
+            (
+                index
+                for index, option in enumerate(options)
+                if option.value == identity
+            ),
+            -1,
+        )
+        if matching_index < 0:
+            options.append(
+                SelectorOption(
+                    value=identity,
+                    label="原资料包（不可用）",
+                    tooltip=(
+                        "已保存的资料包不存在或无法读取："
+                        f"{identity}。请选择其他资料包，或明确选择“不启用”。"
+                    ),
+                    source_type="unavailable",
+                    disabled=True,
+                )
+            )
+        elif options[matching_index].disabled:
+            unavailable = options[matching_index]
+            label = unavailable.label
+            if "不可用" not in label:
+                label = f"{label}（不可用）"
+            options[matching_index] = SelectorOption(
+                value=unavailable.value,
+                label=label,
+                tooltip=unavailable.tooltip or "该资料包当前无法读取。",
+                source_type="unavailable",
+                disabled=True,
+            )
     selected_identity = (
         identity
         if getattr(detail, "_material_package_enabled", False)
         else DISABLED_SELECTOR_VALUE
     )
     preview.set_package_options(
-        material_package_selector_options(
-            detail._work_mode_id,
-            include_source_prefix=False,
-        ),
+        options,
         selected_identity=selected_identity,
     )
 
@@ -164,6 +206,7 @@ def _apply_material_package_selection(detail, identity: str) -> None:
     detail._material_package_identity = package_identity
     detail._material_package_enabled = material_enabled
     detail.material_package_selected.emit(package_identity)
+    detail.preference_changed.emit()
 
 
 class QuickExecutionDetail(
@@ -185,6 +228,7 @@ class QuickExecutionDetail(
     scene_config_changed = Signal(object)
     official_document_type_changed = Signal(str)
     material_package_selected = Signal(str)
+    preference_changed = Signal()
 
     FEATURE_DEFINITIONS = FEATURE_DEFINITIONS
     FEATURE_ID_ALIASES = LEGACY_FEATURE_GROUP_MAP
@@ -206,7 +250,7 @@ class QuickExecutionDetail(
         self._current_template = None
         self._plan_enabled = True
         self._template_enabled = True
-        self._material_package_enabled = True
+        self._material_package_enabled = False
         initial_scene = default_scene_descriptor(mode_id=self._work_mode_id)
         if initial_scene is None and self._scene_descriptors:
             initial_scene = self._scene_descriptors[0]
@@ -911,6 +955,7 @@ class QuickExecutionDetail(
             self._refresh_floating_fields_card()
             self._refresh_exam_source_card()
             self._emit_summary_changed()
+            self.preference_changed.emit()
             return
 
         descriptor = self._descriptor_for_scene_id(scene_id)
@@ -938,6 +983,7 @@ class QuickExecutionDetail(
             self._apply_scene(self._current_scene)
             self._emit_summary_changed()
             self._emit_binding_changed()
+            self.preference_changed.emit()
 
     def _on_official_document_type_changed(self, _index: int) -> None:
         profile_id = str(self._document_type_combo.currentData() or "").strip()
@@ -949,6 +995,7 @@ class QuickExecutionDetail(
         self._refresh_exam_source_card()
         self._emit_summary_changed()
         self.official_document_type_changed.emit(profile_id)
+        self.preference_changed.emit()
 
     def _apply_scene(self, scene: SceneWorkspace) -> None:
         """Apply a scene and refresh the execution surface."""
@@ -1209,6 +1256,74 @@ class QuickExecutionDetail(
         self._current_template = template
         self._emit_summary_changed()
 
+    def restore_preference_state(
+        self,
+        *,
+        execution_template_id: str = "",
+        plan_enabled: bool = True,
+        template_enabled: bool = True,
+        material_enabled: bool = False,
+        material_package_id: str = "",
+        official_document_type_id: str = "notice",
+    ) -> None:
+        """Project durable selector choices without publishing user signals."""
+
+        self._binding_signal_blocked = True
+        self._scene_syncing = True
+        try:
+            self._plan_enabled = bool(plan_enabled)
+            self._template_enabled = bool(template_enabled)
+            self._material_package_enabled = bool(material_enabled)
+            self._material_package_identity = (
+                str(material_package_id or "").strip()
+                if self._material_package_enabled
+                else ""
+            )
+            self._apply_scene(self._current_scene)
+
+            target_template_id = str(execution_template_id or "").strip()
+            if (
+                target_template_id
+                and not self._template_id_is_from_other_work_mode(
+                    target_template_id
+                )
+                and target_template_id
+                in set(self._current_scene.compatible_template_ids or ())
+            ):
+                self._selected_template_id = target_template_id
+                template_ids = list(
+                    self._current_scene.compatible_template_ids or ()
+                )
+                if not template_ids and self._current_scene.template_id:
+                    template_ids.append(self._current_scene.template_id)
+                self._populate_template_combo_options(
+                    template_ids=template_ids,
+                    fallback_labels={
+                        template_id: self._template_label_for_scene(
+                            self._current_scene,
+                            template_id,
+                        )
+                        for template_id in template_ids
+                    },
+                    current_template_id=target_template_id,
+                )
+
+            profile_id = str(official_document_type_id or "").strip()
+            if get_official_document_profile(profile_id) is not None:
+                self._official_document_type_id = profile_id
+                index = self._document_type_combo.findData(profile_id)
+                if index >= 0:
+                    blocked = self._document_type_combo.blockSignals(True)
+                    self._document_type_combo.setCurrentIndex(index)
+                    self._document_type_combo.blockSignals(blocked)
+            _refresh_material_package_selector(self)
+            self._refresh_floating_fields_card()
+            self._refresh_exam_source_card()
+        finally:
+            self._binding_signal_blocked = False
+            self._scene_syncing = False
+        self._emit_summary_changed()
+
     def set_strategy_context(
         self,
         *,
@@ -1332,9 +1447,10 @@ class QuickExecutionDetail(
     def enabled_features(self) -> list[str]:
         scene = self.execution_scene()
         enabled: list[str] = []
-        for group in UI_CAPABILITY_GROUPS:
+        for feature_id in CAPABILITY_FEATURE_CARD_ORDER:
+            group = UI_GROUP_MAP[feature_id]
             if get_group_enabled(scene, group):
-                enabled.append(group.group_id)
+                enabled.append(feature_id)
         return enabled
 
     def current_scene_id(self) -> str:
@@ -1351,11 +1467,15 @@ class QuickExecutionDetail(
     ) -> SceneWorkspace:
         """Return a runtime projection honoring all three enablement switches."""
 
+        material_active = bool(
+            self._material_package_enabled
+            and isinstance(self._material_selection, MaterialRunSelection)
+        )
         return project_execution_scene(
             scene if isinstance(scene, SceneWorkspace) else self._current_scene,
             plan_enabled=self._plan_enabled,
             template_enabled=self._template_enabled,
-            material_enabled=self._material_package_enabled,
+            material_enabled=material_active,
         )
 
     def execution_template(self, template=None):
@@ -1370,7 +1490,7 @@ class QuickExecutionDetail(
     def execution_material_selection(self) -> MaterialRunSelection | None:
         """Return the exact committed selection used by the next run."""
 
-        if not self._plan_enabled or not self._material_package_enabled:
+        if not self._material_package_enabled:
             return None
         return self._material_selection
 
@@ -1382,6 +1502,11 @@ class QuickExecutionDetail(
 
     def material_package_enabled(self) -> bool:
         return self._material_package_enabled
+
+    def selected_material_package_id(self) -> str:
+        """Return the retained package choice even while it is unavailable."""
+
+        return str(self._material_package_identity or "").strip()
 
     def set_material_selection(
         self,
@@ -1450,6 +1575,11 @@ class QuickExecutionDetail(
     def current_template_id(self) -> str:
         if not self._template_enabled:
             return ""
+        return self._binding_template_id()
+
+    def selected_template_id(self) -> str:
+        """Return the retained template choice even while execution is disabled."""
+
         return self._binding_template_id()
 
     def current_strategy(self) -> str:
@@ -1565,6 +1695,7 @@ class QuickExecutionDetail(
         if template_id == DISABLED_SELECTOR_VALUE:
             self._template_enabled = False
             self._emit_summary_changed()
+            self.preference_changed.emit()
             return
         if template_id:
             self._template_enabled = True
@@ -1572,6 +1703,7 @@ class QuickExecutionDetail(
         self._emit_summary_changed()
         if not self._scene_syncing:
             self._emit_binding_changed()
+            self.preference_changed.emit()
 
     def _emit_binding_changed(self) -> None:
         if self._binding_signal_blocked:
@@ -1621,7 +1753,7 @@ class QuickExecutionDetail(
         if action is not None and action.available:
             self.material_repair_requested.emit(action.target_type, action.target_key)
             return
-        self.feature_config_requested.emit("content_fill")
+        self.material_repair_requested.emit("material_package", "")
 
     def _emit_summary_changed(self) -> None:
         if self._execution_running:

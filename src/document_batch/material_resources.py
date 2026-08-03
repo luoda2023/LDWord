@@ -11,11 +11,17 @@ from pathlib import Path
 from types import MappingProxyType
 
 from docx import Document
+from docx.enum.text import WD_BREAK
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 from PIL import Image
 
-from src.application.materials import ExecutionMaterialRecord, ExecutionResource
+from src.application.materials import (
+    ExecutionMaterialRecord,
+    ExecutionResource,
+    image_policy_role_cardinality,
+    image_policy_role_label,
+)
 from src.config.attachment_materials import (
     AttachmentBinding,
     AttachmentCardinality,
@@ -205,6 +211,26 @@ def materialize_record_resources(
     )
 
 
+def planned_materialized_resource_count(
+    source_docx: Path,
+    *,
+    record: ExecutionMaterialRecord,
+    resource_domains: Mapping[str, str],
+) -> int:
+    """Return how many bound resources this DOCX can actually consume."""
+
+    template_roles = inspect_template_resource_roles((source_docx,))
+    return sum(
+        len(resources)
+        for role, resources in record.resources.items()
+        if resources
+        and (
+            resource_domains.get(role) == "attachment"
+            or template_roles.get(role) == resource_domains.get(role)
+        )
+    )
+
+
 def plan_attachment_delivery_items(
     record: ExecutionMaterialRecord,
     *,
@@ -367,6 +393,9 @@ def _insert_images(
     show_multi_image_name = bool(
         image_policy.get("show_multi_image_name", legacy_show_image_name)
     )
+    page_break_after_images = bool(
+        image_policy.get("page_break_after_images", False)
+    )
     watermark = _resolved_watermark(image_policy, record.field_values)
     for role in roles:
         token = material_token(MaterialTokenNamespace.IMAGE, role)
@@ -392,9 +421,14 @@ def _insert_images(
                 paragraph_element.remove(child)
         available_width, available_height = _available_image_area(document)
         resources = record.resources.get(role, ())
-        if len(resources) == 1:
+        role_cardinality = image_policy_role_cardinality(
+            image_policy,
+            role,
+            resource_count=len(resources),
+        )
+        if role_cardinality == "single":
             show_image_name = show_single_image_name
-        elif len(resources) > 1:
+        elif resources:
             show_image_name = show_multi_image_name
         else:
             show_image_name = False
@@ -402,12 +436,11 @@ def _insert_images(
         # pictures already participate in normal text flow; inferring a
         # heading from the previous paragraph can instead attach an unrelated
         # (often empty) paragraph and expose Word/WPS pagination markers.
+        if show_image_name:
+            paragraph.add_run(
+                image_policy_role_label(image_policy, role)
+            ).add_break()
         for index, resource in enumerate(resources):
-            if show_image_name:
-                image_name = Path(
-                    resource.object_ref.original_name or resource.source_path
-                ).name
-                paragraph.add_run(image_name or f"{role}-{index + 1:04d}").add_break()
             prepared = prepare_material_image(
                 resource.source_path,
                 _file_ref(resource),
@@ -427,6 +460,8 @@ def _insert_images(
             run.add_picture(prepared.output_path, width=width)
             if index + 1 < len(resources):
                 run.add_break()
+            elif page_break_after_images:
+                run.add_break(WD_BREAK.PAGE)
     document.save(output_docx)
     Document(output_docx)
 
@@ -501,4 +536,5 @@ __all__ = [
     "inspect_template_resource_roles",
     "materialize_record_resources",
     "plan_attachment_delivery_items",
+    "planned_materialized_resource_count",
 ]

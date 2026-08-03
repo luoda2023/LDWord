@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Iterable
 
-from src.config.feature_configs import default_continuous_page_number_phases
+from src.config.feature_configs import (
+    PAGE_NUMBER_START_MODE_VALUES,
+    default_continuous_page_number_phases,
+    normalize_page_number_format_value,
+)
 from src.config.special_title_rules import (
     parse_special_title_selector,
     special_title_selector_label,
@@ -659,14 +663,11 @@ def _match_phase_id(
 
 
 def _normalize_number_format(value) -> str:
-    raw = str(value or "decimal")
-    if raw in {"decimal", "upperRoman", "lowerRoman"}:
-        return raw
-    return "decimal"
+    return normalize_page_number_format_value(value, default="decimal")
 
 
 def _normalize_start_mode(value) -> str:
     raw = str(value or "continue")
-    if raw in {"continue", "restart"}:
+    if raw in PAGE_NUMBER_START_MODE_VALUES:
         return raw
     return "continue"

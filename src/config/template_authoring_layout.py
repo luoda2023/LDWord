@@ -17,7 +17,9 @@ from src.config.template_authoring_contract import (
     AUTHORING_SCHEMA_VERSION,
     TemplateAuthoringBaselineEnvelope,
     TemplateAuthoringContract,
+    TemplateAuthoringContractError,
     canonical_json_sha256,
+    read_json_object,
 )
 from src.config.template_authoring_profile import (
     TemplateAuthoringProfile,
@@ -42,6 +44,9 @@ IMPORT_RECORDS_NAME = "records"
 PROCESSING_NAME = "processing"
 SUCCESS_NAME = "success"
 FAILED_NAME = "failed"
+CONTRACTS_NAME = "contracts"
+CONTRACT_BASELINE_FILENAME = "baseline.json"
+CONTRACT_PROMPT_FILENAME = "prompt.md"
 BASELINE_NAME_PLACEHOLDER = "请替换为来源文档对应的具体模板名称"
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -49,7 +54,7 @@ _PROMPT_RESOURCE_PATH = (
     _PROJECT_ROOT
     / "defaults"
     / "template_authoring"
-    / "ai_template_config_prompt_v3.zh-CN.md"
+    / "ai_template_config_prompt_v5.zh-CN.md"
 )
 
 
@@ -67,6 +72,7 @@ class TemplateAuthoringWorkspace:
     records_dir: Path
     success_dir: Path
     failed_dir: Path
+    contracts_dir: Path
 
 
 def template_authoring_workbench_path() -> Path:
@@ -114,6 +120,7 @@ def _workspace_descriptor_for_mode(
         records_dir=records_dir,
         success_dir=records_dir / SUCCESS_NAME,
         failed_dir=records_dir / FAILED_NAME,
+        contracts_dir=state_root / CONTRACTS_NAME,
     )
 
 
@@ -171,14 +178,17 @@ def _ensure_mode_workspace(
     for directory in (workspace.root, workspace.inbox_path):
         directory.mkdir(parents=True, exist_ok=True)
 
+    # Preserve the contract that was visible to an in-flight assistant before
+    # refreshing the workbench files.  This migration is intentionally done
+    # first so a prompt/profile rollout cannot strand a valid older result.
+    _archive_existing_contract_bundle(workspace)
+
     baseline_template_payload = asdict(baseline)
     prompt = _render_prompt(
         prompt_source,
         mode=mode,
         profile=profile,
     )
-    _write_text_if_changed(workspace.prompt_path, prompt)
-
     contract = TemplateAuthoringContract(
         mode_id=mode.mode_id,
         profile_id=profile.profile_id,
@@ -192,15 +202,77 @@ def _ensure_mode_workspace(
         contract=contract,
         template=baseline_template_payload,
     )
+    baseline_text = json.dumps(
+        baseline_envelope.to_payload(),
+        ensure_ascii=False,
+        indent=2,
+    )
+    _write_text_if_changed(workspace.prompt_path, prompt)
     _write_text_if_changed(
         workspace.baseline_path,
-        json.dumps(
-            baseline_envelope.to_payload(),
-            ensure_ascii=False,
-            indent=2,
-        ),
+        baseline_text,
+    )
+    _write_contract_bundle(
+        workspace,
+        contract=contract,
+        baseline_text=baseline_text,
+        prompt_text=prompt,
     )
     return workspace
+
+
+def _archive_existing_contract_bundle(
+    workspace: TemplateAuthoringWorkspace,
+) -> None:
+    """Best-effort migration of the previously published contract."""
+
+    if not workspace.baseline_path.is_file() or not workspace.prompt_path.is_file():
+        return
+    try:
+        baseline_text = workspace.baseline_path.read_text(encoding="utf-8")
+        prompt_text = workspace.prompt_path.read_text(encoding="utf-8")
+        baseline = TemplateAuthoringBaselineEnvelope.from_payload(
+            read_json_object(workspace.baseline_path)
+        )
+        contract = baseline.contract
+        if contract.mode_id != workspace.mode_id:
+            return
+        if canonical_json_sha256(baseline.template) != contract.baseline_sha256:
+            return
+        if hashlib.sha256(prompt_text.encode("utf-8")).hexdigest() != contract.prompt_sha256:
+            return
+        _write_contract_bundle(
+            workspace,
+            contract=contract,
+            baseline_text=baseline_text,
+            prompt_text=prompt_text,
+        )
+    except (OSError, UnicodeError, TemplateAuthoringContractError):
+        # A corrupt current projection is replaced below; it must never be
+        # promoted into trusted history.
+        return
+
+
+def _write_contract_bundle(
+    workspace: TemplateAuthoringWorkspace,
+    *,
+    contract: TemplateAuthoringContract,
+    baseline_text: str,
+    prompt_text: str,
+) -> Path:
+    """Persist one content-addressed baseline/prompt pair for later imports."""
+
+    bundle_dir = workspace.contracts_dir / contract.fingerprint
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    _write_text_if_changed(
+        bundle_dir / CONTRACT_BASELINE_FILENAME,
+        baseline_text,
+    )
+    _write_text_if_changed(
+        bundle_dir / CONTRACT_PROMPT_FILENAME,
+        prompt_text,
+    )
+    return bundle_dir
 
 
 def _render_prompt(
@@ -344,6 +416,9 @@ __all__ = [
     "AUTHORING_WORKSPACE_NAME",
     "BASELINE_FILENAME",
     "BASELINE_NAME_PLACEHOLDER",
+    "CONTRACTS_NAME",
+    "CONTRACT_BASELINE_FILENAME",
+    "CONTRACT_PROMPT_FILENAME",
     "FAILED_NAME",
     "IMPORT_RECORDS_NAME",
     "INBOX_NAME",

@@ -70,11 +70,11 @@ def test_enabling_feature_adds_dynamic_navigation_card():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        panel._quick_execution_detail.set_feature_enabled("content_fill", True)
+        panel._quick_execution_detail.set_feature_enabled("citation", True)
 
-        assert "content_fill" in panel._navigation_cards
-        panel._nav_rail.select_card("content_fill")
-        assert panel._current_detail is panel._content_fill_detail
+        assert "citation" in panel._navigation_cards
+        panel._nav_rail.select_card("citation")
+        assert panel._current_detail is panel._citation_detail
     finally:
         panel.close()
 
@@ -83,12 +83,12 @@ def test_disabling_feature_removes_dynamic_navigation_card():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        panel._quick_execution_detail.set_feature_enabled("content_fill", True)
-        assert "content_fill" in panel._navigation_cards
+        panel._quick_execution_detail.set_feature_enabled("citation", True)
+        assert "citation" in panel._navigation_cards
 
-        panel._quick_execution_detail.set_feature_enabled("content_fill", False)
+        panel._quick_execution_detail.set_feature_enabled("citation", False)
 
-        assert "content_fill" not in panel._navigation_cards
+        assert "citation" not in panel._navigation_cards
     finally:
         panel.close()
 
@@ -97,12 +97,27 @@ def test_summary_refresh_does_not_recreate_existing_dynamic_navigation_cards():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
-        panel._quick_execution_detail.set_feature_enabled("content_fill", True)
-        original_card = panel._navigation_cards["content_fill"]
+        panel._quick_execution_detail.set_feature_enabled("citation", True)
+        original_card = panel._navigation_cards["citation"]
 
         panel._quick_execution_detail.set_document_path("C:/docs/thesis.docx")
 
-        assert panel._navigation_cards["content_fill"] is original_card
+        assert panel._navigation_cards["citation"] is original_card
+    finally:
+        panel.close()
+
+
+def test_opening_retired_material_card_does_not_change_scene_or_navigation():
+    _app()
+    panel = WorkbenchPanel(PanelBridge())
+    try:
+        before = dict(panel._quick_execution_detail.current_scene().module_switches)
+
+        panel._open_feature_card("content_fill")
+
+        assert panel._quick_execution_detail.current_scene().module_switches == before
+        assert panel._nav_rail.selected_card_id() == "quick_execute"
+        assert "content_fill" not in panel._navigation_cards
     finally:
         panel.close()
 

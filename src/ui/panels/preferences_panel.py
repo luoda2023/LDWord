@@ -388,38 +388,6 @@ class PreferencesPanel(BasePanel):
         apply_text_role(self._ai_page_title, TextRole.PAGE_TITLE)
         layout.addWidget(self._ai_page_title)
 
-        self._ai_privacy_callout = QFrame(content)
-        self._ai_privacy_callout.setObjectName("preferences_ai_privacy_callout")
-        self._ai_privacy_callout.setAttribute(Qt.WA_StyledBackground, True)
-        privacy_layout = QHBoxLayout(self._ai_privacy_callout)
-        privacy_layout.setContentsMargins(12, 9, 12, 9)
-        privacy_layout.setSpacing(10)
-        self._ai_privacy_icon = QLabel(self._ai_privacy_callout)
-        self._ai_privacy_icon.setFixedSize(18, 18)
-        self._ai_privacy_icon.setAlignment(Qt.AlignCenter)
-        privacy_layout.addWidget(self._ai_privacy_icon, 0, Qt.AlignTop)
-        privacy_text = QVBoxLayout()
-        privacy_text.setContentsMargins(0, 0, 0, 0)
-        privacy_text.setSpacing(2)
-        self._ai_privacy_title = QLabel("隐私与数据", self._ai_privacy_callout)
-        apply_text_role(self._ai_privacy_title, TextRole.BODY)
-        self._ai_privacy_note = QLabel(
-            "密钥安全保存；文件不会自动上传，正文、图片和素材发送前会在 AI 助手中逐次确认。",
-            self._ai_privacy_callout,
-        )
-        self._ai_privacy_note.setWordWrap(True)
-        apply_text_role(self._ai_privacy_note, TextRole.CAPTION)
-        privacy_detail = (
-            "密钥优先从环境变量读取，手动保存时写入 Windows 凭据管理器。"
-            "选择文件不会自动上传；正文、图片和素材发送前会在 AI 助手中逐次确认。"
-        )
-        self._ai_privacy_callout.setToolTip(privacy_detail)
-        self._ai_privacy_callout.setAccessibleDescription(privacy_detail)
-        privacy_text.addWidget(self._ai_privacy_title)
-        privacy_text.addWidget(self._ai_privacy_note)
-        privacy_layout.addLayout(privacy_text, 1)
-        layout.addWidget(self._ai_privacy_callout)
-
         card = DesignSystemCard("模型配置", parent=content)
         card.set_header("模型配置", icon_name="sparkles")
         profile_selector = QWidget(card)
@@ -551,7 +519,12 @@ class PreferencesPanel(BasePanel):
             )
             label = profile.label if not suffix else f"{profile.label} · {suffix}"
             self._ai_profile_combo.addItem(label, profile.profile_id)
-        target = selected_profile_id or "mock-default"
+        target = selected_profile_id
+        if not target:
+            try:
+                target = self._provider_profiles.active_profile_id()
+            except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+                target = "mock-default"
         selected_index = -1
         for index in range(self._ai_profile_combo.count()):
             if str(self._ai_profile_combo.itemData(index) or "") == target:
@@ -579,6 +552,7 @@ class PreferencesPanel(BasePanel):
                 "新配置（尚未保存）" if profile_id == "__new__" else None
             )
             if profile_id == "__new__":
+                self._ai_key_status.show()
                 self._ai_url_input.setPlaceholderText("https://api.example.com/v1")
                 self._ai_key_input.setPlaceholderText("填写 API Key")
                 self._ai_label_input.setText("")
@@ -616,6 +590,7 @@ class PreferencesPanel(BasePanel):
                 ready = readiness.ready
                 readiness_message = readiness.message
                 if profile.requires_secret:
+                    self._ai_key_status.show()
                     self._ai_key_status.setText(
                         "API Key 已可用（环境变量或 Windows 凭据）"
                         if ready
@@ -623,9 +598,8 @@ class PreferencesPanel(BasePanel):
                     )
                 else:
                     self._ai_key_input.setPlaceholderText("不需要 API Key")
-                    self._ai_key_status.setText(
-                        "内置本地演示配置，不使用网络或 API Key。"
-                    )
+                    self._ai_key_status.clear()
+                    self._ai_key_status.hide()
                 self._set_ai_connection_state(
                     *self._ai_connection_state_for_profile(
                         profile,
@@ -765,6 +739,16 @@ class PreferencesPanel(BasePanel):
                     self._ai_profile_combo.blockSignals(blocked)
                 return
         self._load_ai_profile_form(index)
+        if target == "__new__":
+            return
+        try:
+            self._provider_profiles.set_active_profile_id(target)
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            self._ai_status.setText(
+                f"当前配置无法记住：{provider_error_text(exc)}"
+            )
+            return
+        self.bridge.assistant_provider_profiles_changed.emit()
 
     def _mark_ai_form_dirty(self, *_args) -> None:
         if self._loading_ai_form:
@@ -847,8 +831,8 @@ class PreferencesPanel(BasePanel):
             )
             if secret:
                 self._provider_secrets.set(profile_id, secret)
-            self._provider_profiles.upsert(profile)
-        except (OSError, RuntimeError, ValueError) as exc:
+            self._provider_profiles.upsert(profile, make_active=True)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
             rollback_ok = self._rollback_ai_profile_save(
                 profile_id,
                 previous_profile=previous_profile,
@@ -1092,25 +1076,6 @@ class PreferencesPanel(BasePanel):
         )
         self._ai_page_title.setStyleSheet(
             f"color: {theme.text_primary}; background: transparent;"
-        )
-        self._ai_privacy_callout.setStyleSheet(
-            f"""
-            QFrame#preferences_ai_privacy_callout {{
-                background: {theme.info_bg};
-                border: 1px solid {theme.border_light};
-                border-radius: {theme.radius_md}px;
-            }}
-            """
-        )
-        self._ai_privacy_icon.setPixmap(
-            get_icon("circle-help", 16, theme.info).pixmap(16, 16)
-        )
-        self._ai_privacy_title.setStyleSheet(
-            f"color: {theme.text_primary}; background: transparent; "
-            f"font-weight: {theme.font_weight_emphasis};"
-        )
-        self._ai_privacy_note.setStyleSheet(
-            f"color: {theme.text_secondary}; background: transparent;"
         )
         self._ai_key_status.setStyleSheet(
             f"color: {theme.text_secondary}; background: transparent;"

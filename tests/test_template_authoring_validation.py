@@ -59,6 +59,13 @@ def test_dataclass_default_that_serializes_as_integer_satisfies_float_field() ->
     validate_complete_template_payload(payload)
 
 
+def test_exact_and_prefix_special_title_rules_may_share_a_literal() -> None:
+    payload = _payload()
+    payload["heading_model"]["non_numbered_title_texts"].append("附录")
+
+    validate_complete_template_payload(payload)
+
+
 def test_type_hint_resolution_failure_is_not_silently_accepted(monkeypatch) -> None:
     payload = _payload()
     validation_module._resolved_type_hints.cache_clear()

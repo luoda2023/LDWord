@@ -14,6 +14,7 @@ import ctypes
 import ctypes.wintypes
 import logging
 import sys
+from pathlib import Path
 
 from src.app_meta import APP_DISPLAY_NAME_FULL
 from src.qt_api import (
@@ -45,6 +46,7 @@ from src.config.library import (
     load_scene_from_library,
     load_template_from_library,
 )
+from src.config.loader import load_template
 from src.config.work_mode import get_work_mode
 from src.ui.bridge import PanelBridge, navigation_intent_value
 from src.ui.panel_loading import PanelLoadState
@@ -53,6 +55,10 @@ from src.ui.panel_specs import PANEL_SPECS
 from src.ui.sidebar import Sidebar
 from src.ui.template_import_coordinator import TemplateImportCoordinator
 from src.ui.title_bar import TitleBar
+from src.ui.workspace_preferences import (
+    ModeWorkspacePreferences,
+    WorkspacePreferenceStore,
+)
 
 
 logger = logging.getLogger("alavette.gui.main_window")
@@ -182,6 +188,7 @@ class MainWindow(QMainWindow):
         parent=None,
         *,
         enable_background_services: bool = False,
+        workspace_preference_store: WorkspacePreferenceStore | None = None,
     ):
         super().__init__(parent)
         self._close_accepted = False
@@ -230,7 +237,15 @@ class MainWindow(QMainWindow):
         shell_layout.addWidget(self._container, 0, 0)
         self._shadow_surface.stackUnder(self._container)
 
-        self.bridge = PanelBridge(self)
+        self._workspace_preferences = (
+            workspace_preference_store or WorkspacePreferenceStore()
+        )
+        self._workspace_preference_state = self._workspace_preferences.load()
+        self.bridge = PanelBridge(
+            self,
+            workspace_preference_store=self._workspace_preferences,
+        )
+        self._restore_persisted_workspace()
         self._background_services_enabled = bool(enable_background_services)
         self._template_import_coordinator = TemplateImportCoordinator(parent=self)
         self._template_import_coordinator.batch_processed.connect(
@@ -293,6 +308,13 @@ class MainWindow(QMainWindow):
 
         self.sidebar.panel_selected.connect(self._show_panel)
         self.bridge.work_mode_changed.connect(self._on_work_mode_changed)
+        self.bridge.scene_changed.connect(self._persist_current_scene_preference)
+        self.bridge.template_changed.connect(
+            self._persist_current_template_preference
+        )
+        self.bridge.official_document_type_changed.connect(
+            self._persist_official_document_type_preference
+        )
         self.bridge.material_scope_suspended.connect(
             self._on_material_scope_suspended
         )
@@ -378,6 +400,167 @@ class MainWindow(QMainWindow):
         if self.panel_stack.currentIndex() == index:
             self.sidebar.select(index)
 
+    def _restore_persisted_workspace(self) -> None:
+        """Restore durable identities before the first panel is constructed."""
+
+        state = self._workspace_preference_state
+        mode = get_work_mode(state.active_mode_id)
+        if mode is None:
+            mode = self.bridge.current_work_mode()
+        self.bridge.set_current_work_mode(mode, emit_signal=False)
+        try:
+            self._activate_persisted_mode_state(mode, emit_signal=False)
+            self.bridge.commit_pending_work_mode_transition()
+        except Exception as exc:
+            logger.warning(
+                "Main window ignored persisted workspace restore failure for %s: %s",
+                getattr(mode, "mode_id", ""),
+                exc,
+                exc_info=exc,
+            )
+
+    def _activate_persisted_mode_state(self, mode, *, emit_signal: bool) -> None:
+        mode_id = str(getattr(mode, "mode_id", "") or "").strip()
+        preference = self._workspace_preferences.load().for_mode(mode_id)
+        scene_id = str(
+            getattr(preference, "scene_id", "")
+            or getattr(mode, "default_scene_id", "")
+            or ""
+        ).strip()
+        if not scene_id:
+            raise ValueError("work mode missing default_scene_id")
+
+        try:
+            scene_entry = get_scene_entry(scene_id, mode_id=mode_id)
+            scene = load_scene_from_library(scene_id, mode_id=mode_id)
+        except Exception:
+            fallback_scene_id = str(
+                getattr(mode, "default_scene_id", "") or ""
+            ).strip()
+            if not fallback_scene_id or fallback_scene_id == scene_id:
+                raise
+            scene_id = fallback_scene_id
+            scene_entry = get_scene_entry(scene_id, mode_id=mode_id)
+            scene = load_scene_from_library(scene_id, mode_id=mode_id)
+
+        template, template_id, template_path, template_source, template_source_type = (
+            self._resolve_persisted_template(mode_id, scene, preference)
+        )
+        self.bridge.set_current_scene(
+            scene,
+            config_id=scene_id,
+            path=str(scene_entry.path) if scene_entry is not None else "",
+            source="library" if scene_entry is not None else "builtin",
+            source_type=scene_entry.source_type if scene_entry is not None else "builtin",
+            emit_signal=emit_signal,
+        )
+        self.bridge.set_current_template(
+            template,
+            config_id=template_id,
+            path=template_path,
+            source=template_source,
+            source_type=template_source_type,
+            emit_signal=emit_signal,
+        )
+        document_type_id = str(
+            getattr(preference, "official_document_type_id", "") or "notice"
+        ).strip()
+        self.bridge.set_current_official_document_type_id(
+            document_type_id,
+            source="persisted",
+            emit_signal=emit_signal,
+        )
+        self.bridge.clear_scene_dirty(emit_signal=emit_signal)
+        if (
+            not hasattr(self, "panel_stack")
+            or self._loaded_panel_for_id("template") is None
+        ):
+            self.bridge.clear_template_dirty(emit_signal=emit_signal)
+
+    @staticmethod
+    def _empty_mode_preference() -> ModeWorkspacePreferences:
+        return ModeWorkspacePreferences()
+
+    def _resolve_persisted_template(self, mode_id: str, scene, preference):
+        selected = preference or self._empty_mode_preference()
+        template_id = str(
+            selected.template_id or getattr(scene, "template_id", "") or ""
+        ).strip()
+        if template_id:
+            entry = get_template_entry(template_id, mode_id=mode_id)
+            if entry is not None and entry.is_available:
+                return (
+                    load_template_from_library(template_id, mode_id=mode_id),
+                    template_id,
+                    str(entry.path),
+                    "library",
+                    entry.source_type,
+                )
+
+        external_path = Path(str(selected.template_path or "").strip())
+        if selected.template_source_type == "external" and external_path.is_file():
+            return (
+                load_template(external_path),
+                template_id or external_path.stem,
+                str(external_path),
+                selected.template_source or "file",
+                "external",
+            )
+
+        fallback_id = str(getattr(scene, "template_id", "") or "").strip()
+        if not fallback_id:
+            raise ValueError(f"plan missing template_id: {getattr(scene, 'scene_id', '')}")
+        fallback_entry = get_template_entry(fallback_id, mode_id=mode_id)
+        return (
+            load_template_from_library(fallback_id, mode_id=mode_id),
+            fallback_id,
+            str(fallback_entry.path) if fallback_entry is not None else "",
+            "library" if fallback_entry is not None else "builtin",
+            fallback_entry.source_type if fallback_entry is not None else "builtin",
+        )
+
+    def _persist_active_mode_preference(self, mode_id: str) -> None:
+        try:
+            self._workspace_preference_state = (
+                self._workspace_preferences.update_active_mode(mode_id)
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("Could not persist active work mode: %s", exc, exc_info=exc)
+
+    def _persist_current_scene_preference(self, _scene=None) -> None:
+        mode_id = self.bridge.current_work_mode_id()
+        try:
+            self._workspace_preference_state = self._workspace_preferences.update_mode(
+                mode_id,
+                scene_id=self.bridge.current_scene_id(),
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("Could not persist current plan: %s", exc, exc_info=exc)
+
+    def _persist_current_template_preference(self, _template=None) -> None:
+        mode_id = self.bridge.current_work_mode_id()
+        try:
+            self._workspace_preference_state = self._workspace_preferences.update_mode(
+                mode_id,
+                template_id=self.bridge.current_template_id(),
+                template_path=self.bridge.current_template_path(),
+                template_source=self.bridge.current_template_source(),
+                template_source_type=self.bridge.current_template_source_type(),
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("Could not persist current template: %s", exc, exc_info=exc)
+
+    def _persist_official_document_type_preference(self, document_type_id: str) -> None:
+        mode_id = self.bridge.current_work_mode_id()
+        try:
+            self._workspace_preference_state = self._workspace_preferences.update_mode(
+                mode_id,
+                official_document_type_id=str(document_type_id or "").strip()
+                or "notice",
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("Could not persist document type: %s", exc, exc_info=exc)
+
     def _request_work_mode_change(self, mode_id: str) -> bool:
         target_mode_id = str(mode_id or "").strip()
         if not target_mode_id or target_mode_id == self._active_work_mode_id:
@@ -441,6 +624,15 @@ class MainWindow(QMainWindow):
             return
         self._active_work_mode_id = mode_id
         self.bridge.commit_pending_work_mode_transition()
+        self._persist_active_mode_preference(mode_id)
+        workbench = self._loaded_panel_for_id("workbench")
+        restore_preferences = getattr(
+            workbench,
+            "restore_workspace_preferences",
+            None,
+        )
+        if callable(restore_preferences):
+            restore_preferences()
         if self._template_import_coordinator.is_running:
             self._template_import_coordinator.activate_mode(mode_id)
         self.startup_status_changed.emit(f"已切换到{getattr(mode, 'label', mode_id)}")
@@ -830,44 +1022,7 @@ class MainWindow(QMainWindow):
         self.bridge.commit_pending_work_mode_transition()
 
     def _load_work_mode_defaults(self, mode) -> None:
-        scene_id = str(getattr(mode, "default_scene_id", "") or "").strip()
-        if not scene_id:
-            raise ValueError("work mode missing default_scene_id")
-
-        mode_id = str(getattr(mode, "mode_id", "") or "").strip()
-        scene_entry = get_scene_entry(scene_id, mode_id=mode_id)
-        scene = load_scene_from_library(scene_id, mode_id=mode_id)
-        template_id = str(getattr(scene, "template_id", "") or "").strip()
-        if not template_id:
-            raise ValueError(f"plan missing template_id: {scene_id}")
-        template_entry = get_template_entry(template_id, mode_id=mode_id)
-        template = load_template_from_library(
-            template_id,
-            mode_id=mode_id,
-        )
-
-        self.bridge.set_current_scene(
-            scene,
-            config_id=scene_id,
-            path=str(scene_entry.path) if scene_entry is not None else "",
-            source="library" if scene_entry is not None else "builtin",
-            source_type=scene_entry.source_type if scene_entry is not None else "builtin",
-        )
-        self.bridge.set_current_template(
-            template,
-            config_id=template_id,
-            path=str(template_entry.path) if template_entry is not None else "",
-            source="library" if template_entry is not None else "builtin",
-            source_type=(
-                template_entry.source_type if template_entry is not None else "builtin"
-            ),
-        )
-        self.bridge.clear_scene_dirty()
-        # A loaded TemplatePanel owns the active draft status and updates it
-        # synchronously from template_changed.  Clearing here would erase the
-        # dirty marker of a cached draft when the user returns to a work mode.
-        if self._loaded_panel_for_id("template") is None:
-            self.bridge.clear_template_dirty()
+        self._activate_persisted_mode_state(mode, emit_signal=True)
 
     def _navigate_intent(self, intent) -> None:
         panel_index = self._panel_index_from_intent(intent)
@@ -1439,6 +1594,31 @@ class MainWindow(QMainWindow):
             self._resume_template_import_after_cancel(coordinator_was_running)
             event.ignore()
             return
+        workbench = next(
+            (
+                panel
+                for panel in panels
+                if callable(
+                    getattr(panel, "_persist_workspace_preferences", None)
+                )
+            ),
+            None,
+        )
+        persist_workbench = getattr(
+            workbench,
+            "_persist_workspace_preferences",
+            None,
+        )
+        if callable(persist_workbench):
+            persist_workbench()
+        self._persist_current_scene_preference()
+        self._persist_current_template_preference()
+        self._persist_official_document_type_preference(
+            self.bridge.current_official_document_type_id()
+        )
+        self._persist_active_mode_preference(
+            self.bridge.current_work_mode_id()
+        )
         self._close_accepted = True
         self._cancel_pending_lifecycle_callbacks()
         try:

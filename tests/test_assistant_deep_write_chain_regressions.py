@@ -785,7 +785,12 @@ def test_reference_analysis_plus_apply_keeps_sample_role_and_blocks_production(
             STANDARD_FORMAT_REFERENCE_ROLE
         )
         assert disclosed_ref["target_attachment_required"] is True
-        assert "目标文档尚未提供" in session.messages[-1].blocks[0].text
+        disclosure_facts = session.messages[-1].blocks[0].data["facts"]
+        assert any(
+            item["label"] == "本轮范围"
+            and "目标文档尚未提供" in item["value"]
+            for item in disclosure_facts
+        )
         assert gateway.requests == []
         decision = evaluate_request_policy(
             query,

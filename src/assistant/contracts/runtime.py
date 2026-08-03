@@ -56,6 +56,7 @@ class AssistantTurnRequest:
     history_disclosure_grant: Mapping[str, Any] = field(default_factory=dict)
     conversation_cursor: str = ""
     template_authoring_mode_id: str = ""
+    template_authoring_strategy: str = ""
 
     def __post_init__(self) -> None:
         for name in ("turn_id", "session_id", "provider_profile_id", "model_id"):
@@ -83,6 +84,12 @@ class AssistantTurnRequest:
             "template_authoring_mode_id",
             str(self.template_authoring_mode_id or "").strip(),
         )
+        strategy = str(self.template_authoring_strategy or "").strip()
+        if strategy not in {"", "requirements", "format_clone"}:
+            raise ValueError(
+                f"Unsupported template authoring strategy: {strategy!r}"
+            )
+        object.__setattr__(self, "template_authoring_strategy", strategy)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -102,6 +109,7 @@ class AssistantTurnRequest:
             ),
             "conversation_cursor": self.conversation_cursor,
             "template_authoring_mode_id": self.template_authoring_mode_id,
+            "template_authoring_strategy": self.template_authoring_strategy,
         }
 
 

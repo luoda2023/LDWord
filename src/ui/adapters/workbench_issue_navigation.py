@@ -498,16 +498,7 @@ def audit_workbench_issue_navigation_routes(
     missing = tuple(
         target for target in route_targets if target not in registered_targets
     )
-    fallback = tuple(
-        target
-        for target in route_targets
-        if (
-            workbench_issue_navigation_for_target(target).action_kind
-            == "feature_card"
-            and workbench_issue_navigation_for_target(target).feature_card_id
-            == "content_fill"
-        )
-    )
+    fallback = missing
     allowed_extra = set(WORKBENCH_NAVIGATION_ALLOWED_EXTRA_TARGET_TYPES)
     unexpected = tuple(
         sorted(registered_targets - set(route_targets) - allowed_extra)

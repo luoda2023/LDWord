@@ -5,36 +5,38 @@ from dataclasses import replace
 from pathlib import Path
 
 from docx import Document
+from PIL import Image
 
 from src.application.materials import (
     ExecutionMaterialRecord,
     ExecutionMaterialSnapshot,
     project_execution_material_record_snapshot,
 )
-from src.config.scene import SceneWorkspace
 from src.config.builtin_templates import create_builtin_template
+from src.config.execution_feature_state import project_execution_scene
+from src.config.scene import SceneWorkspace
 from src.config.template import TemplateConfig
 from src.domain.materials import MaterialPackageRef, MaterialRunSelection
+from src.modules.fill.entity_fill import EntityFillModule
+from src.services.document_structure_evidence import build_document_structure_evidence
 from src.services.docx_format_change import compare_docx_formatting
 from src.services.execution_run_log import append_execution_run
 from src.services.production_execution import (
     ProductionExecutionRequest,
     execute_production_request,
 )
-from src.services.document_structure_evidence import build_document_structure_evidence
 from src.services.production_runtime.formatting_runtime import (
     apply_required_format_change_policy,
 )
-from src.modules.fill.entity_fill import EntityFillModule
 from src.ui.panels.workbench.document_input_manifest import (
     discover_document_inputs,
 )
 from src.ui.panels.workbench.execution_session_controller import (
     ExecutionBuildResult,
     WorkbenchExecutionSessionController,
+    _batch_format_change_evidence,
     _FileProductionRunner,
     _ProductionRunner,
-    _batch_format_change_evidence,
 )
 
 
@@ -123,6 +125,47 @@ def test_material_selection_builds_the_formatting_runner(
     assert request.output_root == mapped_root
     assert request.output_suffix == "-formatted"
     assert request.document_structure_evidence is evidence
+
+
+def test_plan_off_material_selection_does_not_require_format_change(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "source.docx"
+    Document().save(source)
+    snapshot = _snapshot(_record(f"rec_{'c' * 32}", "Record"))
+    monkeypatch.setattr(
+        "src.ui.panels.workbench.execution_session_controller."
+        "bind_workbench_material",
+        lambda *_args, **_kwargs: (snapshot, ()),
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.workbench.execution_session_controller."
+        "build_threaded_runner",
+        lambda runner, **_kwargs: ExecutionBuildResult(worker=runner),
+    )
+    scene = project_execution_scene(
+        SceneWorkspace(mode_id="custom"),
+        plan_enabled=False,
+        template_enabled=True,
+        material_enabled=True,
+    )
+    controller = WorkbenchExecutionSessionController(
+        resolve_document_path=lambda: source,
+    )
+
+    build = controller.build_file_batch_worker(
+        document_paths=(str(source),),
+        template=TemplateConfig(name="Template"),
+        scene=scene,
+        selection=_selection(),
+        mode_id="custom",
+        template_id="template",
+        output_root=str(tmp_path / "outputs"),
+    )
+
+    assert isinstance(build.worker, _ProductionRunner)
+    assert build.worker._request.require_format_change is False
 
 
 def test_multiple_material_records_each_enter_production_formatting(
@@ -329,6 +372,25 @@ def test_content_evidence_ignores_run_segmentation(tmp_path):
     assert evidence["content_changed"] is False
 
 
+def test_content_evidence_detects_inserted_images(tmp_path):
+    source = tmp_path / "source.docx"
+    original = Document()
+    original.add_paragraph("{{@img:photo}}")
+    original.save(source)
+    image = tmp_path / "photo.png"
+    Image.new("RGB", (64, 32), "navy").save(image)
+    changed = tmp_path / "changed.docx"
+    modified = Document(source)
+    paragraph = modified.paragraphs[0]
+    paragraph.clear()
+    paragraph.add_run().add_picture(str(image))
+    modified.save(changed)
+
+    evidence = compare_docx_formatting(source, changed)
+
+    assert evidence["content_changed"] is True
+
+
 def test_required_format_change_downgrades_noop_success():
     payload = {"status": "success", "summary": "done"}
     evidence = {"status": "compared", "format_changed": False}
@@ -359,6 +421,112 @@ def test_batch_format_evidence_reports_any_unchanged_document():
 
     assert evidence["format_changed"] is False
     assert evidence["documents_unchanged"] == 1
+
+
+def test_file_batch_aggregates_partial_artifact_failures_and_warnings(
+    tmp_path,
+    monkeypatch,
+):
+    requests = tuple(
+        ProductionExecutionRequest(
+            input_path=tmp_path / f"source-{index}.docx",
+            output_root=tmp_path / "outputs",
+            mode_id="custom",
+            scene=SceneWorkspace(mode_id="custom"),
+            template=TemplateConfig(name="Template"),
+            plan_id="",
+        )
+        for index in (1, 2)
+    )
+    responses = iter(
+        (
+            {
+                "status": "partial_success",
+                "output_path": str(tmp_path / "outputs" / "one.docx"),
+                "artifact_failure_count": 2,
+                "artifact_failures": [
+                    {"kind": "report", "error": "disk full"}
+                ],
+                "warnings": ["report_incomplete"],
+                "error_text": "artifact publish incomplete",
+            },
+            {
+                "status": "success",
+                "output_path": str(tmp_path / "outputs" / "two.docx"),
+                "artifact_failure_count": 0,
+                "warnings": [],
+                "error_text": "",
+            },
+        )
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.workbench.execution_session_controller."
+        "execute_production_request",
+        lambda *_args, **_kwargs: next(responses),
+    )
+
+    result = _FileProductionRunner(requests).run(
+        lambda *_args: None,
+        lambda: False,
+    )
+
+    assert result["status"] == "partial_success"
+    assert result["summary"] == "完整完成 1/2 份文档；部分完成 1 份"
+    assert result["failed_count"] == 0
+    assert result["partial_success_count"] == 1
+    assert result["artifact_failure_count"] == 2
+    assert result["artifact_failures"][0]["source_path"].endswith(
+        "source-1.docx"
+    )
+    assert result["warnings"] == ["source-1.docx: report_incomplete"]
+    assert result["items"][0]["artifact_failure_count"] == 2
+
+
+def test_file_batch_does_not_count_cancelled_document_as_complete(
+    tmp_path,
+    monkeypatch,
+):
+    requests = tuple(
+        ProductionExecutionRequest(
+            input_path=tmp_path / f"source-{index}.docx",
+            output_root=tmp_path / "outputs",
+            mode_id="custom",
+            scene=SceneWorkspace(mode_id="custom"),
+            template=TemplateConfig(name="Template"),
+            plan_id="",
+        )
+        for index in (1, 2)
+    )
+    responses = iter(
+        (
+            {
+                "status": "cancelled",
+                "output_path": "",
+                "error_text": "execution_cancelled",
+            },
+            {
+                "status": "success",
+                "output_path": str(tmp_path / "outputs" / "two.docx"),
+                "error_text": "",
+            },
+        )
+    )
+    monkeypatch.setattr(
+        "src.ui.panels.workbench.execution_session_controller."
+        "execute_production_request",
+        lambda *_args, **_kwargs: next(responses),
+    )
+
+    result = _FileProductionRunner(requests).run(
+        lambda *_args: None,
+        lambda: False,
+    )
+
+    assert result["status"] == "partial_success"
+    assert result["summary"] == "完整完成 1/2 份文档；取消 1 份"
+    assert result["cancelled_count"] == 1
+    assert result["success_count"] == 1
+    assert "1 份文档已取消" in result["error_text"]
 
 
 def test_execution_receipt_persists_branch_and_format_evidence(tmp_path):

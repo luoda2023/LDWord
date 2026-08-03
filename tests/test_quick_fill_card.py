@@ -38,14 +38,18 @@ def test_quick_fill_card_uses_shared_summary_and_action_hooks():
     assert card._advanced_mapping_btn.objectName() == "wb_quick_card_action_secondary"
 
 
-def test_workbench_exposes_content_fill_via_dynamic_navigation_card():
+def test_workbench_keeps_material_fill_internal_without_duplicate_card():
     _app()
     panel = WorkbenchPanel(PanelBridge())
     try:
         panel._quick_execution_detail.set_feature_enabled("content_fill", True)
 
-        assert "content_fill" in panel._navigation_cards
-        panel._nav_rail.select_card("content_fill")
-        assert panel._current_detail is panel._content_fill_detail
+        assert panel._quick_execution_detail.current_scene().is_module_enabled(
+            "entity_fill"
+        )
+        assert "content_fill" not in panel._quick_execution_detail.enabled_features()
+        assert "content_fill" not in panel._navigation_cards
+        assert "content_fill" not in panel._detail_map
+        assert not hasattr(panel, "_content_fill_detail")
     finally:
         panel.close()

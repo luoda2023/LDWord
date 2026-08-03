@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from src.config.template import TemplateConfig
+from collections.abc import Mapping
+
+from src.config.special_title_rules import validate_special_title_model
 from src.config.strict_payload_validation import (
     StrictPayloadValidationError,
     validate_complete_dataclass_payload,
 )
+from src.config.template import TemplateConfig
 
 
 class TemplatePayloadValidationError(ValueError):
@@ -24,6 +27,14 @@ def validate_complete_template_payload(payload: object) -> None:
         )
     except StrictPayloadValidationError as exc:
         raise TemplatePayloadValidationError(str(exc)) from exc
+
+    if isinstance(payload, Mapping):
+        try:
+            validate_special_title_model(payload.get("heading_model"))
+        except ValueError as exc:
+            raise TemplatePayloadValidationError(
+                f"heading_model 特殊标题规则无效：{exc}"
+            ) from exc
 
 
 __all__ = [

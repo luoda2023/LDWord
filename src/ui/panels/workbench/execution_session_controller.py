@@ -13,11 +13,12 @@ from pathlib import Path
 from src.application.materials import (
     project_execution_material_record_snapshot,
 )
-from src.config.scene import SceneWorkspace
 from src.config.document_structure_contract import (
     DocumentStructureEvidence,
     RegionDecision,
 )
+from src.config.execution_feature_state import execution_plan_is_enabled
+from src.config.scene import SceneWorkspace
 from src.config.template import TemplateConfig
 from src.document_batch import (
     DocumentBatchRequest,
@@ -31,7 +32,10 @@ from src.services.production_execution import (
 
 from .diagnostics import log_best_effort_shutdown_failure
 from .material_state import bind_workbench_material
-from .output_path_policy import resolve_workbench_output_root
+from .output_path_policy import (
+    next_available_workbench_output_root,
+    resolve_workbench_output_root,
+)
 
 
 @dataclass(frozen=True)
@@ -95,6 +99,9 @@ class _FileProductionRunner:
     def run(self, progress_callback, cancel_check):
         items: list[dict[str, object]] = []
         output_paths: dict[str, str] = {}
+        report_paths: list[str] = []
+        warnings: list[str] = []
+        artifact_failures: list[dict[str, object]] = []
         total = len(self._requests)
         for index, request in enumerate(self._requests, start=1):
             if cancel_check():
@@ -132,46 +139,104 @@ class _FileProductionRunner:
             result = _attach_request_trace(result, request)
             status = str(result.get("status") or "failed")
             path = str(result.get("output_path") or "")
+            item_warnings = [
+                str(item)
+                for item in list(result.get("warnings") or ())
+                if str(item or "").strip()
+            ]
+            item_reports = [
+                str(item)
+                for item in list(result.get("report_paths") or ())
+                if str(item or "").strip()
+            ]
+            item_artifact_failures = [
+                dict(item)
+                for item in list(result.get("artifact_failures") or ())
+                if isinstance(item, Mapping)
+            ]
+            artifact_failure_count = max(
+                _nonnegative_int(result.get("artifact_failure_count")),
+                len(item_artifact_failures),
+            )
             items.append(
                 {
                     "status": status,
                     "source_path": str(request.input_path),
                     "output_path": path,
                     "error_text": str(result.get("error_text") or ""),
-                    "warnings": list(result.get("warnings") or ()),
+                    "failed_count": _nonnegative_int(
+                        result.get("failed_count")
+                    ),
+                    "artifact_failure_count": artifact_failure_count,
+                    "artifact_failures": item_artifact_failures,
+                    "warnings": item_warnings,
+                    "report_paths": item_reports,
                     "format_change_evidence": dict(
                         result.get("format_change_evidence") or {}
                     ),
                 }
             )
+            warnings.extend(
+                f"{request.input_path.name}: {warning}"
+                for warning in item_warnings
+            )
+            report_paths.extend(item_reports)
+            for failure in item_artifact_failures:
+                projected = dict(failure)
+                projected.setdefault("source_path", str(request.input_path))
+                artifact_failures.append(projected)
             if path:
                 output_paths[f"{index:04d}"] = path
+        succeeded = sum(item["status"] == "success" for item in items)
         failed = sum(item["status"] == "failed" for item in items)
         partial = sum(item["status"] == "partial_success" for item in items)
         cancelled = sum(item["status"] == "cancelled" for item in items)
-        status = (
-            "success"
-            if failed == 0 and partial == 0 and cancelled == 0
-            else (
-                "failed"
-                if failed + cancelled == total
-                else "partial_success"
-            )
-        )
+        if succeeded == total:
+            status = "success"
+        elif cancelled == total:
+            status = "cancelled"
+        elif succeeded + partial == 0:
+            status = "failed"
+        else:
+            status = "partial_success"
         progress_callback(total * 1000, total * 1000, "多文档执行完成")
         format_change_evidence = _batch_format_change_evidence(items)
+        summary_parts = [f"完整完成 {succeeded}/{total} 份文档"]
+        if partial:
+            summary_parts.append(f"部分完成 {partial} 份")
+        if failed:
+            summary_parts.append(f"失败 {failed} 份")
+        if cancelled:
+            summary_parts.append(f"取消 {cancelled} 份")
+        error_parts: list[str] = []
+        if failed:
+            error_parts.append(f"{failed} 份文档执行失败")
+        if partial:
+            error_parts.append(f"{partial} 份文档部分完成")
+        if cancelled:
+            error_parts.append(f"{cancelled} 份文档已取消")
+        artifact_failure_count = sum(
+            int(item["artifact_failure_count"]) for item in items
+        )
         return {
             "status": status,
-            "summary": f"完成 {total - failed}/{total} 份文档",
+            "summary": "；".join(summary_parts),
             "output_path": (
                 str(self._requests[0].output_root)
                 if self._requests
                 else ""
             ),
             "output_paths": output_paths,
+            "report_paths": report_paths,
             "items": items,
             "format_change_evidence": format_change_evidence,
             "failed_count": failed,
+            "partial_success_count": partial,
+            "cancelled_count": cancelled,
+            "success_count": succeeded,
+            "artifact_failure_count": artifact_failure_count,
+            "artifact_failures": artifact_failures,
+            "warnings": warnings,
             "execution_route": (
                 "production_with_material"
                 if any(
@@ -188,9 +253,7 @@ class _FileProductionRunner:
             "template_id": (
                 self._requests[0].template_id if self._requests else ""
             ),
-            "error_text": (
-                "部分文档执行失败" if failed else ""
-            ),
+            "error_text": "；".join(error_parts),
         }
 
 
@@ -605,6 +668,13 @@ def _cancelled(*, items: list[dict[str, object]] | None = None):
     }
 
 
+def _nonnegative_int(value: object) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 def _production_request(
     *,
     path: str,
@@ -640,7 +710,7 @@ def _production_request(
         session_overrides=dict(session_overrides or {}),
         output_suffix="-formatted",
         material_snapshot=material_snapshot,
-        require_format_change=True,
+        require_format_change=execution_plan_is_enabled(scene),
         document_structure_evidence=document_structure_evidence,
         document_scope_decisions=document_scope_decisions,
     )
@@ -670,6 +740,8 @@ def _production_output_roots(
             if raw_destination
             else base
         )
+        if not configured:
+            destination = next_available_workbench_output_root(destination)
         if configured and not _path_is_within(destination, base):
             return {}, f"workbench_output_path_outside_root:{destination}"
         if _path_is_within(source, destination):

@@ -294,7 +294,7 @@ def test_turn_extracts_structured_format_evidence_for_standard_reference(tmp_pat
     assert gateway.request is not None
     material_message = gateway.request.messages[-1]["content"]
     assert "<document_format_evidence>" in material_message
-    assert '"schema_version":"docx-format-evidence-v1"' in material_message
+    assert '"schema_version":"docx-format-evidence-v2"' in material_message
     assert '"semantic_role":"standard_format_reference"' in material_message
     assert '"schema_version":"docx-format-evidence-v1"' not in (
         gateway.request.system_prompt

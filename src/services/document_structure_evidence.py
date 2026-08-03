@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import asdict
 from hashlib import sha256
 from io import BytesIO
-import json
 from pathlib import Path
-import re
 from zipfile import BadZipFile, LargeZipFile
 
 from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
 from lxml.etree import XMLSyntaxError
 
-from src.shared.files.content_hash import file_content_revision
 from src.config.document_structure_contract import (
     DetectedRegion,
     DocumentStructureEvidence,
@@ -26,7 +25,7 @@ from src.config.document_structure_contract import (
 )
 from src.config.section_semantics import canonicalize_section_type
 from src.modules.structure.heading_recognition import analyze_document_tree
-
+from src.shared.files.content_hash import file_content_revision
 
 DETECTOR_REVISION = "logical-regions:v2"
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -188,6 +187,18 @@ def read_document_paragraph_anchors(
 ) -> tuple[ParagraphAnchor, ...]:
     """Return current non-empty paragraph choices for the review dialog."""
 
+    return tuple(
+        anchor
+        for anchor in read_all_document_paragraph_anchors(source_path)
+        if anchor.preview_text
+    )
+
+
+def read_all_document_paragraph_anchors(
+    source_path: str | Path,
+) -> tuple[ParagraphAnchor, ...]:
+    """Return stable anchors for every paragraph, including image-only blocks."""
+
     path = _canonical_path(source_path)
     if not path:
         return ()
@@ -196,11 +207,7 @@ def read_document_paragraph_anchors(
     except _DOCUMENT_ANALYSIS_ERRORS:
         return ()
     texts = tuple(str(paragraph.text or "").strip() for paragraph in doc.paragraphs)
-    return tuple(
-        anchor
-        for anchor in _paragraph_anchors(texts)
-        if anchor.preview_text
-    )
+    return _paragraph_anchors(texts)
 
 
 def _paragraph_anchors(paragraphs: tuple[str, ...]) -> tuple[ParagraphAnchor, ...]:
@@ -292,6 +299,7 @@ __all__ = [
     "build_document_structure_evidence_from_bytes",
     "document_structure_evidence_is_current",
     "pending_document_structure_review_roles",
+    "read_all_document_paragraph_anchors",
     "read_document_paragraph_anchors",
     "validate_region_decisions",
 ]

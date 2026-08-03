@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.config.scene_presets import (
+    CAPABILITY_FEATURE_CARD_DEFINITIONS,
     LEGACY_FEATURE_GROUP_MAP,
     UI_CAPABILITY_GROUPS,
 )
@@ -30,11 +31,6 @@ _FEATURE_SNAPSHOT_OVERRIDES: dict[str, dict[str, str]] = {
         "badge_text": "编号就绪",
         "badge_variant": "neutral",
     },
-    "content_fill": {
-        "subtitle": "资料源 / 5 个映射字段",
-        "badge_text": "资料就绪",
-        "badge_variant": "neutral",
-    },
 }
 
 _FEATURE_SNAPSHOT_MAP: dict[str, dict[str, str]] = {
@@ -47,6 +43,7 @@ _FEATURE_SNAPSHOT_MAP: dict[str, dict[str, str]] = {
         **_FEATURE_SNAPSHOT_OVERRIDES.get(group.group_id, {}),
     }
     for group in UI_CAPABILITY_GROUPS
+    if group.group_id in CAPABILITY_FEATURE_CARD_DEFINITIONS
 }
 
 
@@ -63,6 +60,7 @@ FEATURE_DEFINITIONS = tuple(
         badge_variant=_FEATURE_SNAPSHOT_MAP[group.group_id]["badge_variant"],
     )
     for group in UI_CAPABILITY_GROUPS
+    if group.group_id in CAPABILITY_FEATURE_CARD_DEFINITIONS
 )
 
 
@@ -87,9 +85,12 @@ def build_navigation_snapshot(
     if execution_running:
         badge_text = "执行中"
         badge_variant = "info"
-    elif last_result_status in {"success", "partial_success"}:
+    elif last_result_status == "success":
         badge_text = "最近完成"
         badge_variant = "success"
+    elif last_result_status == "partial_success":
+        badge_text = "部分完成"
+        badge_variant = "warning"
     elif last_result_status == "cancelled":
         badge_text = "已取消"
         badge_variant = "neutral"

@@ -6,6 +6,7 @@ from src.ui.panels.workbench.document_execution_state import (
 from src.ui.panels.workbench.output_location_card import OutputLocationCard
 from src.ui.panels.workbench.output_path_policy import (
     default_workbench_output_root,
+    next_available_workbench_output_root,
     resolve_workbench_output_root,
 )
 
@@ -37,6 +38,30 @@ def test_custom_output_root_is_kept_exact(tmp_path):
     )
 
     assert output == selected.resolve()
+
+
+def test_existing_default_output_root_uses_the_next_free_number(tmp_path):
+    source = tmp_path / "source.docx"
+    first = tmp_path / "source-输出"
+    second = tmp_path / "source-输出 (2)"
+    first.mkdir()
+    second.mkdir()
+
+    output = resolve_workbench_output_root("", (source,))
+
+    assert output == (tmp_path / "source-输出 (3)").resolve()
+
+
+def test_available_output_root_does_not_modify_an_existing_folder(tmp_path):
+    existing = tmp_path / "delivery"
+    marker = existing / "keep.txt"
+    existing.mkdir()
+    marker.write_text("previous result", encoding="utf-8")
+
+    output = next_available_workbench_output_root(existing)
+
+    assert output == (tmp_path / "delivery (2)").resolve()
+    assert marker.read_text(encoding="utf-8") == "previous result"
 
 
 def test_output_card_previews_the_actual_default_folder(qapp, tmp_path):

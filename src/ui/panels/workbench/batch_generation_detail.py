@@ -197,8 +197,10 @@ class BatchGenerationDetail(QWidget):
         count = len(self._selected_record_ids())
         if self._execution_running:
             badge_text, badge_variant = "执行中", "info"
-        elif self._last_result_status in {"success", "partial_success"}:
+        elif self._last_result_status == "success":
             badge_text, badge_variant = "已完成", "success"
+        elif self._last_result_status == "partial_success":
+            badge_text, badge_variant = "部分完成", "warning"
         elif self.can_start_execution():
             badge_text, badge_variant = "可执行", "success"
         else:

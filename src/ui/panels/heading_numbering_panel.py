@@ -1,7 +1,7 @@
 """
 heading_numbering_panel — 标题编号配置面板 (Unified Level Selection + Per-Level Override)
 
-Uses the same Card/FlowSection/template form row/ToggleSwitch design language
+Uses the same Card/InspectorForm/template form row/ToggleSwitch design language
 as PageSetupDetail and StyleDetail.
 
 Layout:
@@ -10,7 +10,7 @@ Layout:
   3. Level Editor — sidebar navigation + two always-visible detail cards
      a. Numbering Rules card (source + action + editors)
      b. Heading Format card (source + action + editors)
-  4. Non-numbered Section
+  4. Non-numbered Card
 """
 
 from __future__ import annotations
@@ -60,7 +60,6 @@ from src.qt_api import (
 )
 from src.shared.ui import (
     DashedSeparator,
-    FlowSection,
     SummaryGridItem,
     TemplateSummaryCard,
     apply_template_summary_action_button,
@@ -101,7 +100,6 @@ from src.ui.heading_numbering_logic import (
     build_detail_state,
     build_editor_enable_state,
     build_expert_toggle_text,
-    build_non_numbered_toggle_text,
     compose_display_template,
     format_csv_items,
     normalize_display_template_mode,
@@ -1202,47 +1200,35 @@ class HeadingNumberingPanel(BasePanel):
     # ━━ 4. Non-numbered Section ━━━━━━━━━━━━━━━━━
 
     def _build_non_numbered_section(self) -> None:
-        self._nn_section = FlowSection(build_non_numbered_toggle_text(False), expanded=False, parent=self)
-        self._nn_section.expanded_changed.connect(
-            lambda expanded: self._nn_section._toggle_button.setText(
-                build_non_numbered_toggle_text(expanded)
-            )
+        self._nn_section = Card(parent=self)
+        self._add_card_header(
+            self._nn_section,
+            "list-checks",
+            "特殊标题（不参与编号）",
         )
-        self._nn_scope_note = QLabel(
-            "完整标题按全文匹配，标题前缀按开头匹配。"
-            "每个逗号分隔项都是一条独立规则，并同步成为页眉、页脚文字和页码的独立范围选项。",
-            self,
-        )
-        self._nn_scope_note.setObjectName("hn_scope_note")
-        self._nn_scope_note.setWordWrap(True)
-        self._nn_section.add_widget(self._nn_scope_note)
+        self._nn_form = InspectorForm(parent=self._nn_section)
 
         self._nn_texts_edit = QLineEdit(self)
         apply_size_class(self._nn_texts_edit, "md")
         self._nn_texts_edit.setPlaceholderText("摘要, 目录, 参考文献, 缩略语表")
-        self._nn_section.add_widget(
-            self._form_row("完整标题", self._nn_texts_edit, parent=self._nn_section)
-        )
+        self._nn_texts_row = self._nn_form.add_field("完整标题", self._nn_texts_edit)
 
         self._nn_prefix_edit = QLineEdit(self)
         apply_size_class(self._nn_prefix_edit, "md")
         self._nn_prefix_edit.setPlaceholderText("附录, 附件")
-        self._nn_section.add_widget(
-            self._form_row("标题前缀", self._nn_prefix_edit, parent=self._nn_section)
-        )
+        self._nn_prefix_row = self._nn_form.add_field("标题前缀", self._nn_prefix_edit)
 
         self._nn_style_mode_combo = StyledComboBox(self)
         for value, label in NON_NUMBERED_STYLE_MODE_OPTIONS:
             self._nn_style_mode_combo.addItem(label, value)
         self._nn_style_mode_combo.currentIndexChanged.connect(self._on_nn_style_mode_changed)
-        self._nn_section.add_widget(
-            self._form_row("样式来源", self._nn_style_mode_combo, parent=self._nn_section)
+        self._nn_style_mode_row = self._nn_form.add_field(
+            "样式来源",
+            self._nn_style_mode_combo,
         )
+        self._nn_section.add_widget(self._nn_form)
 
-        self._nn_style_editor = QWidget(self)
-        nn_style_layout = QVBoxLayout(self._nn_style_editor)
-        nn_style_layout.setContentsMargins(0, 0, 0, 0)
-        nn_style_layout.setSpacing(8)
+        self._nn_style_editor = InspectorForm(parent=self._nn_section)
 
         self._nn_font_cn = FontCombo(lang="cn", parent=self)
         self._nn_font_cn.font_changed.connect(self._on_nn_style_edited)
@@ -1262,21 +1248,11 @@ class HeadingNumberingPanel(BasePanel):
         for value, label in ALIGNMENT_OPTIONS:
             self._nn_alignment.addItem(label, value)
         self._nn_alignment.currentIndexChanged.connect(self._on_nn_style_edited)
-        nn_style_layout.addWidget(
-            self._form_grid(
-                [
-                    [
-                        self._compact_form_row("中文字体", self._nn_font_cn, parent=self),
-                        self._compact_form_row("英文字体", self._nn_font_en, parent=self),
-                    ],
-                    [
-                        self._compact_form_row("字号", self._nn_size_combo, parent=self),
-                        self._compact_form_row("字形", nn_emphasis, parent=self),
-                    ],
-                    [self._compact_form_row("对齐方式", self._nn_alignment, parent=self)],
-                ]
-            )
-        )
+        self._nn_style_editor.add_field("中文字体", self._nn_font_cn)
+        self._nn_style_editor.add_field("英文字体", self._nn_font_en)
+        self._nn_style_editor.add_field("字号", self._nn_size_combo)
+        self._nn_style_editor.add_field("字形", nn_emphasis)
+        self._nn_style_editor.add_field("对齐方式", self._nn_alignment)
 
         self._nn_section.add_widget(self._nn_style_editor)
 

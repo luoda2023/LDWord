@@ -457,6 +457,7 @@ def test_image_policy_is_package_owned_and_survives_v1_save(
         watermark_text="内部资料",
         show_single_image_name=True,
         show_multi_image_name=False,
+        page_break_after_images=True,
     )
     assert updated.ok and updated.package is not None
     saved = service.save(
@@ -480,6 +481,7 @@ def test_image_policy_is_package_owned_and_survives_v1_save(
         "watermark_text": "内部资料",
         "show_single_image_name": True,
         "show_multi_image_name": False,
+        "page_break_after_images": True,
     }
 
 

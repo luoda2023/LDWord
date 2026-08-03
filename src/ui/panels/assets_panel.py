@@ -24,6 +24,7 @@ from src.application.materials import (
     inspect_material_workbook_headers,
     project_material_preview,
 )
+from src.config.attachment_materials import attachment_natural_path_key
 from src.config.material_package_library import (
     MaterialPackageLibraryEntry,
     create_material_package_in_library_with_receipt,
@@ -877,34 +878,42 @@ class AssetsPanel(BasePanel):
                     "image_rule_adaptive_check"
                 )
                 strategy_row.addWidget(self._image_rule_adaptive_check)
-                strategy_row.addStretch(1)
-                image_policy_layout.addLayout(strategy_row)
+                self._image_rule_page_break_after_check = QCheckBox(
+                    "图片后插入分页符",
+                    image_policy,
+                )
+                self._image_rule_page_break_after_check.setObjectName(
+                    "image_rule_page_break_after_check"
+                )
+                self._image_rule_page_break_after_check.setToolTip(
+                    "每个图片占位符完成全部图片插入后追加一个分页符"
+                )
+                strategy_row.addWidget(self._image_rule_page_break_after_check)
 
-                image_name_row = QHBoxLayout()
                 self._image_rule_single_name_check = QCheckBox(
-                    "单图前显示文件名",
+                    "单图前显示名称",
                     image_policy,
                 )
                 self._image_rule_single_name_check.setObjectName(
                     "image_rule_single_name_check"
                 )
                 self._image_rule_single_name_check.setToolTip(
-                    "图片角色只有一张图片时，在图片前显示原始文件名"
+                    "单图前显示资料项在“名称”列中配置的名称"
                 )
                 self._image_rule_multi_name_check = QCheckBox(
-                    "多图前显示文件名",
+                    "多图前显示名称",
                     image_policy,
                 )
                 self._image_rule_multi_name_check.setObjectName(
                     "image_rule_multi_name_check"
                 )
                 self._image_rule_multi_name_check.setToolTip(
-                    "图片角色包含多张图片时，在每张图片前显示原始文件名"
+                    "多图文件夹只在第一张图片前显示一次配置名称"
                 )
-                image_name_row.addWidget(self._image_rule_single_name_check)
-                image_name_row.addWidget(self._image_rule_multi_name_check)
-                image_name_row.addStretch(1)
-                image_policy_layout.addLayout(image_name_row)
+                strategy_row.addWidget(self._image_rule_single_name_check)
+                strategy_row.addWidget(self._image_rule_multi_name_check)
+                strategy_row.addStretch(1)
+                image_policy_layout.addLayout(strategy_row)
 
                 watermark_row = QHBoxLayout()
                 self._image_rule_watermark_check = QCheckBox(
@@ -944,6 +953,7 @@ class AssetsPanel(BasePanel):
                 rules_card.add_widget(image_policy)
                 for control in (
                     self._image_rule_adaptive_check,
+                    self._image_rule_page_break_after_check,
                     self._image_rule_single_name_check,
                     self._image_rule_multi_name_check,
                     self._image_rule_watermark_check,
@@ -1671,6 +1681,17 @@ class AssetsPanel(BasePanel):
             theme.master_detail_margin_bottom,
         )
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._dirty or self._updating or not hasattr(self, "_package_combo"):
+            return
+        has_persisted_choice, preferred = self._persisted_package_choice()
+        if not has_persisted_choice:
+            return
+        current = str(self._package_combo.currentData() or "").strip()
+        if preferred != current:
+            self._reload_library(preferred)
+
     def _on_work_mode_changed(self, _emitted_mode) -> None:
         # A failed mode activation can synchronously roll Bridge back while
         # Qt is still dispatching the original signal.  Always project the
@@ -1683,30 +1704,98 @@ class AssetsPanel(BasePanel):
         self._mode_label.setText(str(getattr(mode, "label", self._mode_id)))
         self._reload_library()
 
-    def _reload_library(self, preferred_id: str = "") -> None:
+    def _persisted_package_choice(self) -> tuple[bool, str]:
+        store = self.bridge.workspace_preference_store()
+        if store is None:
+            return False, ""
+        preference = store.load().for_mode(self._mode_id)
+        if preference is None:
+            return False, ""
+        package_id = str(preference.material_package_id or "").strip()
+        return True, package_id if preference.material_enabled else ""
+
+    def _persist_package_choice(self, package_id: str) -> None:
+        store = self.bridge.workspace_preference_store()
+        if store is None:
+            return
+        identity = str(package_id or "").strip()
+        try:
+            store.update_mode(
+                self._mode_id,
+                material_enabled=bool(identity),
+                material_package_id=identity,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Could not persist current material package: %s",
+                exc,
+                exc_info=exc,
+            )
+
+    def _reload_library(self, preferred_id: str | None = None) -> None:
         self._updating = True
+        selected_unavailable = False
         try:
             entries = list_material_package_entries(mode_id=self._mode_id)
             self._package_combo.clear()
             self._package_combo.addItem("不使用资料包", "")
             for entry in entries:
                 origin = "内置" if entry.source_type == "builtin" else "我的"
+                item_index = self._package_combo.count()
                 self._package_combo.addItem(
                     f"{entry.display_name}  ·  {origin}",
                     entry.package_id,
                 )
-            preferred = preferred_id
-            if not preferred:
+                if not entry.is_available:
+                    item = self._package_combo.model().item(item_index)
+                    if item is not None:
+                        item.setEnabled(False)
+                    self._package_combo.setItemData(
+                        item_index,
+                        entry.load_error or "该资料包当前无法读取。",
+                        Qt.ToolTipRole,
+                    )
+
+            if preferred_id is None:
+                has_persisted_choice, preferred = self._persisted_package_choice()
+            else:
+                has_persisted_choice = True
+                preferred = str(preferred_id or "").strip()
+            if not has_persisted_choice:
                 default = default_material_package_entry(
                     mode_id=self._mode_id,
                     entries=entries,
                 )
                 preferred = default.package_id if default is not None else ""
             index = self._package_combo.findData(preferred)
+            if preferred and index < 0:
+                index = self._package_combo.count()
+                self._package_combo.addItem(
+                    "原资料包（不可用）  ·  失效",
+                    preferred,
+                )
+                item = self._package_combo.model().item(index)
+                if item is not None:
+                    item.setEnabled(False)
+                self._package_combo.setItemData(
+                    index,
+                    (
+                        "已保存的资料包不存在或无法读取："
+                        f"{preferred}。请选择其他资料包，或明确选择“不使用资料包”。"
+                    ),
+                    Qt.ToolTipRole,
+                )
+                selected_unavailable = True
+            elif index >= 0:
+                entry = next(
+                    (item for item in entries if item.package_id == preferred),
+                    None,
+                )
+                selected_unavailable = bool(entry and not entry.is_available)
             self._package_combo.setCurrentIndex(max(0, index))
         finally:
             self._updating = False
-        self._load_selected_package()
+        self._load_selected_package(persist_selection=not selected_unavailable)
 
     def _on_package_changed(self, _index: int) -> None:
         if self._updating:
@@ -1726,17 +1815,22 @@ class AssetsPanel(BasePanel):
                 return
         self._load_selected_package()
 
-    def _load_selected_package(self) -> None:
+    def _clear_loaded_package(self) -> None:
+        self._entry = None
+        self._snapshot = None
+        self._package = None
+        self._dirty = False
+        self._selected_record_ids = ()
+        self._current_record_id = ""
+
+    def _load_selected_package(self, *, persist_selection: bool = True) -> None:
         package_id = str(self._package_combo.currentData() or "")
         if not package_id:
-            self._entry = None
-            self._snapshot = None
-            self._package = None
-            self._dirty = False
-            self._selected_record_ids = ()
-            self._current_record_id = ""
+            self._clear_loaded_package()
             self._refresh_editor()
             self._publish()
+            if persist_selection:
+                self._persist_package_choice("")
             return
         entry = next(
             (
@@ -1747,14 +1841,16 @@ class AssetsPanel(BasePanel):
             None,
         )
         if entry is None:
-            self._show_issues(
-                (
-                    MaterialIssue(
-                        code="material.package.not_found",
-                        message="资料包已不存在，请刷新后重试。",
-                    ),
-                )
+            self._clear_loaded_package()
+            self._refresh_editor()
+            issue = MaterialIssue(
+                code="material.package.not_found",
+                message="原资料包已不存在；已保留原选择，请重新选择或明确停用。",
             )
+            self._show_issues((issue,))
+            self.bridge.set_current_material_package_ref(None)
+            self.bridge.set_current_material_preview_snapshot(None)
+            self.bridge.set_current_material_run_selection(None)
             return
         try:
             snapshot = load_material_package_entry(entry)
@@ -1762,7 +1858,12 @@ class AssetsPanel(BasePanel):
             if contract.contract_id != snapshot.package.material_contract_id:
                 raise ValueError("material_contract_identity_mismatch")
         except Exception as exc:
+            self._clear_loaded_package()
+            self._refresh_editor()
             self._show_exception("material.package.load_failed", exc)
+            self.bridge.set_current_material_package_ref(None)
+            self.bridge.set_current_material_preview_snapshot(None)
+            self.bridge.set_current_material_run_selection(None)
             return
         self._entry = entry
         self._snapshot = snapshot
@@ -1785,6 +1886,8 @@ class AssetsPanel(BasePanel):
         )
         self._refresh_editor()
         self._publish()
+        if persist_selection:
+            self._persist_package_choice(package_id)
 
     def _refresh_editor(self) -> None:
         self._updating = True
@@ -2816,6 +2919,9 @@ class AssetsPanel(BasePanel):
             self._image_rule_adaptive_check.setChecked(
                 bool(policy.get("adaptive", True))
             )
+            self._image_rule_page_break_after_check.setChecked(
+                bool(policy.get("page_break_after_images", False))
+            )
             legacy_show_image_name = bool(policy.get("show_image_name", False))
             self._image_rule_single_name_check.setChecked(
                 bool(
@@ -2847,6 +2953,7 @@ class AssetsPanel(BasePanel):
         enabled = self._image_rule_watermark_check.isChecked()
         fixed = self._image_rule_watermark_fixed_radio.isChecked()
         self._image_rule_adaptive_check.setEnabled(writable)
+        self._image_rule_page_break_after_check.setEnabled(writable)
         self._image_rule_single_name_check.setEnabled(writable)
         self._image_rule_multi_name_check.setEnabled(writable)
         self._image_rule_watermark_check.setEnabled(writable)
@@ -2873,6 +2980,9 @@ class AssetsPanel(BasePanel):
                 watermark_text=self._image_rule_watermark_edit.text(),
                 show_single_image_name=(self._image_rule_single_name_check.isChecked()),
                 show_multi_image_name=(self._image_rule_multi_name_check.isChecked()),
+                page_break_after_images=(
+                    self._image_rule_page_break_after_check.isChecked()
+                ),
             )
         )
 
@@ -4832,7 +4942,9 @@ class AssetsPanel(BasePanel):
                             }
                         )
                     ),
-                    key=lambda item: item.relative_to(root).as_posix().casefold(),
+                    key=lambda item: attachment_natural_path_key(
+                        item.relative_to(root).as_posix()
+                    ),
                 )
             )
             paths = [str(item) for item in files[:2048]]
@@ -5207,7 +5319,7 @@ class AssetsPanel(BasePanel):
         except Exception as exc:
             self._show_exception("material.package.delete_failed", exc)
             return
-        self._reload_library()
+        self._reload_library("")
 
     def _restore_committed_draft(self) -> bool:
         if self._entry is None:

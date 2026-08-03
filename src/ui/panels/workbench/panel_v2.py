@@ -51,6 +51,7 @@ from src.ui.adapters.workbench_strategy_adapter import WorkbenchStrategyAdapter
 from src.ui.base_panel import BasePanel
 from src.ui.bridge import navigation_intent_value
 from src.ui.panel_specs import PANEL_SPECS
+from src.ui.workspace_preferences import ModeWorkspacePreferences
 from src.domain.materials import MaterialRunSelection
 
 from .document_execution_coordinator import (
@@ -74,7 +75,6 @@ from .execution_controller import WorkbenchExecutionController
 from .execution_controller import FileBatchWorkbenchController  # noqa: I001
 from .feature_detail_panes import (
     CitationDetailPane,
-    ContentDataDetailPane,
     TableChartDetailPane,
 )
 from .navigation_controller import WorkbenchNavigationController
@@ -910,6 +910,8 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
 
         self._bootstrap_strategy_context()
 
+        self.restore_workspace_preferences()
+
         self._refresh_strategy_summary()
 
         self._sync_dynamic_cards()
@@ -927,6 +929,18 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
         self._execution_adapter = WorkbenchExecutionAdapter()
 
         self._strategy_adapter = WorkbenchStrategyAdapter()
+
+        preference_store_getter = getattr(
+            self.bridge,
+            "workspace_preference_store",
+            None,
+        )
+        self._workspace_preference_store = (
+            preference_store_getter()
+            if callable(preference_store_getter)
+            else None
+        )
+        self._restoring_workspace_preferences = False
 
         self._current_template: TemplateConfig | None = None
 
@@ -1013,11 +1027,7 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
 
         self._citation_detail = CitationDetailPane(self)
 
-        self._content_fill_detail = ContentDataDetailPane(self)
-
         self._heading_numbering_detail = self._table_chart_detail
-
-        self._quick_fill_detail = self._content_fill_detail
 
         self._document_execution_detail = DocumentExecutionDetail(
             self._quick_execution_detail,
@@ -1031,9 +1041,7 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
             "quick_execute": self._document_execution_detail,
             "table_chart": self._table_chart_detail,
             "citation": self._citation_detail,
-            "content_fill": self._content_fill_detail,
             "heading_numbering": self._heading_numbering_detail,
-            "quick_fill": self._quick_fill_detail,
         }
         if self._suite_generation_detail is not None:
             detail_map[MATERIAL_SUITE_DELIVERY_CARD_ID] = (
@@ -1227,10 +1235,6 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
         material_selection = self.bridge.current_material_run_selection()
         material_preview = self.bridge.current_material_preview_snapshot()
         material_issues = self.bridge.current_material_issues()
-        self._content_fill_detail.set_material_selection(
-            material_selection,
-            material_preview,
-        )
         self._quick_execution_detail.set_material_selection(
             material_selection,
             preview_snapshot=material_preview,
@@ -1353,6 +1357,12 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
         self._quick_execution_detail.material_package_selected.connect(
             self._on_quick_material_package_selected
         )
+        self._quick_execution_detail.preference_changed.connect(
+            self._persist_workspace_preferences
+        )
+        self._document_execution_detail._output_card.output_changed.connect(
+            lambda _path: self._persist_workspace_preferences()
+        )
 
         self._nav_rail.select_card(self._nav_rail.selected_card_id() or "quick_execute")
 
@@ -1360,6 +1370,107 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
         if hasattr(self.bridge, "current_work_mode_id"):
             return str(self.bridge.current_work_mode_id() or "").strip()
         return "custom"
+
+    def restore_workspace_preferences(self) -> None:
+        store = getattr(self, "_workspace_preference_store", None)
+        if store is None:
+            return
+        preference = (
+            store.load().for_mode(self._current_work_mode_id())
+            or ModeWorkspacePreferences()
+        )
+
+        self._restoring_workspace_preferences = True
+        try:
+            self._quick_execution_detail.restore_preference_state(
+                execution_template_id=preference.execution_template_id,
+                plan_enabled=preference.plan_enabled,
+                template_enabled=preference.template_enabled,
+                material_enabled=preference.material_enabled,
+                material_package_id=preference.material_package_id,
+                official_document_type_id=(
+                    preference.official_document_type_id
+                ),
+            )
+
+            projection = (
+                choose_material_package(
+                    preference.material_package_id,
+                    work_mode_id=self._current_work_mode_id(),
+                )
+                if preference.material_enabled
+                and preference.material_package_id
+                else choose_material_package(
+                    "",
+                    work_mode_id=self._current_work_mode_id(),
+                )
+            )
+            self.bridge.set_current_material_run_selection(
+                projection.selection,
+                emit_signal=False,
+            )
+            self.bridge.set_current_material_preview_snapshot(
+                projection.preview,
+                emit_signal=False,
+            )
+            self.bridge.set_current_material_issues(
+                projection.issues,
+                emit_signal=False,
+            )
+            self._on_material_preview_snapshot_changed(projection.preview)
+
+            output_dir = (
+                preference.custom_output_dir
+                if preference.output_mode == "custom"
+                else ""
+            )
+            self._document_execution_detail._output_card.set_output_dir(
+                output_dir
+            )
+            self._refresh_strategy_summary()
+            self._refresh_fixed_cards()
+        finally:
+            self._restoring_workspace_preferences = False
+
+    def _persist_workspace_preferences(self) -> None:
+        store = getattr(self, "_workspace_preference_store", None)
+        if store is None or self._restoring_workspace_preferences:
+            return
+        selection = self.bridge.current_material_run_selection()
+        package_id = (
+            selection.package_ref.package_id
+            if isinstance(selection, MaterialRunSelection)
+            else self._quick_execution_detail.selected_material_package_id()
+        )
+        material_enabled = bool(
+            self._quick_execution_detail.material_package_enabled()
+            and package_id
+        )
+        output_dir = self._document_execution_detail.output_dir()
+        try:
+            store.update_mode(
+                self._current_work_mode_id(),
+                execution_template_id=(
+                    self._quick_execution_detail.selected_template_id()
+                ),
+                plan_enabled=self._quick_execution_detail.plan_enabled(),
+                template_enabled=(
+                    self._quick_execution_detail.template_enabled()
+                ),
+                material_enabled=material_enabled,
+                material_package_id=package_id if material_enabled else "",
+                official_document_type_id=(
+                    self._quick_execution_detail.official_document_type_id()
+                ),
+                output_mode="custom" if output_dir else "default",
+                custom_output_dir=output_dir,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Could not persist Workbench preferences: %s",
+                exc,
+                exc_info=exc,
+            )
 
     def _on_work_mode_changed(self, _emitted_mode) -> None:
         # Mode activation may be rolled back by an earlier signal listener.
@@ -1616,11 +1727,11 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
         self._navigation.sync_dynamic_cards()
 
     def _open_feature_card(self, feature_id: str) -> None:
-
-        if feature_id in self._detail_map and feature_id not in self._navigation_cards:
-            self._quick_execution_detail.set_feature_enabled(feature_id, True)
-            self._sync_dynamic_cards()
-        self._navigation.open_feature_card(feature_id)
+        target = str(feature_id or "").strip()
+        if target not in self._navigation_cards:
+            logger.warning("Ignoring unavailable Workbench card: %s", target)
+            target = "quick_execute"
+        self._navigation.open_feature_card(target)
 
     def _emit_panel_navigation(
         self,
@@ -1718,7 +1829,7 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
             if self._navigate_issue_projection(projection):
                 return
 
-        self._open_feature_card(projection.feature_card_id or "content_fill")
+        self._emit_panel_navigation("assets")
 
     def _open_issue_repair_target(self, target_type: str, target_key: str) -> None:
 
@@ -1783,7 +1894,7 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
             self._navigate_issue_projection(projection)
             return
 
-        self._open_feature_card(projection.feature_card_id or "content_fill")
+        self._open_feature_card(projection.feature_card_id or "quick_execute")
 
     def handle_navigation_intent(self, intent) -> None:
         card_id = str(navigation_intent_value(intent, "card_id", "") or "").strip()
@@ -1890,10 +2001,6 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
 
     def _on_material_preview_snapshot_changed(self, snapshot) -> None:
         self._quick_execution_detail.set_material_preview_snapshot(snapshot)
-        self._content_fill_detail.set_material_selection(
-            self.bridge.current_material_run_selection(),
-            snapshot,
-        )
         self._document_execution_detail.set_material_preview(snapshot)
         self._on_material_run_selection_changed(
             self.bridge.current_material_run_selection()
@@ -1911,12 +2018,15 @@ class WorkbenchPanel(WorkbenchExecutionLifecycleMixin, BasePanel):
     def _on_material_run_selection_changed(self, selection) -> None:
         preview = self.bridge.current_material_preview_snapshot()
         issues = self.bridge.current_material_issues()
+        material_enabled = None
+        if selection is None and not issues:
+            material_enabled = False
         self._quick_execution_detail.set_material_selection(
             selection,
             preview_snapshot=preview,
             issues=issues,
+            material_enabled=material_enabled,
         )
-        self._content_fill_detail.set_material_selection(selection, preview)
         self._document_execution_detail.set_material_selection(
             selection,
             preview=preview,

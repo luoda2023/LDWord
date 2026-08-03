@@ -50,9 +50,12 @@ from src.assistant.contracts.runtime import (
     AssistantTurnRequest,
 )
 from src.assistant.domain.docx_format_evidence import (
+    TEMPLATE_AUTHORING_FORMAT_CLONE,
+    TEMPLATE_AUTHORING_REQUIREMENTS,
     attachment_disclosure_fields,
     bind_attachment_semantic_roles,
     is_template_authoring_request,
+    resolve_template_authoring_strategy,
 )
 from src.assistant.domain.exam_authoring_contract import (
     exam_request_clarification,
@@ -71,6 +74,7 @@ from src.assistant.ui.workers import (
     AssistantTurnWorker,
 )
 from src.config.material_package_library import material_package_repository
+from src.config.work_mode import get_work_mode
 
 _ASSISTANT_ATTACHMENT_MEDIA_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -214,6 +218,9 @@ class AssistantTurnFlowMixin(
             normalized,
         )
         template_authoring_requested = is_template_authoring_request(normalized)
+        template_authoring_strategy = resolve_template_authoring_strategy(
+            normalized
+        )
         template_source_is_valid = bool(
             len(context_refs) == 1
             and Path(
@@ -228,6 +235,12 @@ class AssistantTurnFlowMixin(
         )
         if template_authoring_requested and not template_source_is_valid:
             self._close_template_authoring_without_single_source(
+                query=normalized,
+                context_refs=context_refs,
+            )
+            return True
+        if template_authoring_requested and not template_authoring_strategy:
+            self._close_template_authoring_without_strategy(
                 query=normalized,
                 context_refs=context_refs,
             )
@@ -353,6 +366,10 @@ class AssistantTurnFlowMixin(
             workspace_mode_id=workspace.mode_id,
             has_attachment=bool(context_refs),
         )
+        template_authoring_mode_id = ""
+        if template_authoring_requested:
+            routed_mode_id = str(policy.capability.mode_id or "").strip()
+            template_authoring_mode_id = routed_mode_id or workspace.mode_id
         local_policy_kinds = {
             POLICY_DOCUMENT_ACTION,
             POLICY_NEEDS_ROUTE_CLARIFICATION,
@@ -406,6 +423,8 @@ class AssistantTurnFlowMixin(
                 workspace=workspace,
                 material_snapshot=material_snapshot,
                 continuation_cursor=continuation_cursor,
+                template_authoring_mode_id=template_authoring_mode_id,
+                template_authoring_strategy=template_authoring_strategy,
             )
             return True
         return self._start_provider_turn(
@@ -416,6 +435,8 @@ class AssistantTurnFlowMixin(
             continuation_cursor=continuation_cursor,
             append_user=not retrying_continuation,
             disclosure_grant=None,
+            template_authoring_mode_id=template_authoring_mode_id,
+            template_authoring_strategy=template_authoring_strategy,
         )
 
     def _consume_submitted_context_refs(self) -> None:
@@ -533,8 +554,8 @@ class AssistantTurnFlowMixin(
             != ".docx"
         )
         body = (
-            "请先上传一份 DOCX 规范文档或标准样稿。应用会同时读取其中的"
-            "规范正文和格式结构证据，再生成并校验一个新的排版模板。"
+            "请先上传一份 DOCX 规范文档或标准样稿，并明确选择“按照文本要求"
+            "生成模板”或“克隆 Word 格式生成模板”。两种功能不会混合读取。"
             if not context_refs
             else (
                 "模板创作的来源必须是 DOCX，Markdown 或其他附件不能提供完整的"
@@ -571,6 +592,57 @@ class AssistantTurnFlowMixin(
         self._render_active_session()
         self._refresh_session_list(select_session_id=session.session_id)
 
+    def _close_template_authoring_without_strategy(
+        self,
+        *,
+        query: str,
+        context_refs: tuple[dict[str, object], ...],
+    ) -> None:
+        """Require an explicit evidence source; never silently blend both."""
+
+        session = self._active_session
+        if session is None:
+            return
+        session = self._coordinator.append_message(
+            session,
+            AssistantMessage.text(
+                role=ROLE_USER,
+                text=query,
+                source_refs=context_refs,
+            ),
+            turn_status=TURN_COMPLETED,
+            consume_draft=True,
+        )
+        session = self._coordinator.append_message(
+            session,
+            AssistantMessage.interaction(
+                role=ROLE_ASSISTANT,
+                interaction_type="boundary",
+                title="请选择一种模板提取方式",
+                body=(
+                    "两种功能相互独立，不能在同一次模板创作中混用：\n"
+                    "1. 按照文本要求生成模板：只读取附件正文中的明确规范条款；\n"
+                    "2. 克隆 Word 格式生成模板：只读取 DOCX 格式结构证据。\n"
+                    "请在请求中明确写出其中一种方式后重新发送。"
+                ),
+                payload={"actions": []},
+            ),
+            turn_status=TURN_COMPLETED,
+        )
+        self._active_session = self._coordinator.update_state(
+            session,
+            context_refs=context_refs,
+            pending_continuation={},
+            document_job={
+                **dict(session.document_job),
+                "status": "response_closed",
+                "reason": "template_authoring_strategy_required",
+            },
+            turn_status=TURN_COMPLETED,
+        )
+        self._render_active_session()
+        self._refresh_session_list(select_session_id=session.session_id)
+
     def _queue_provider_disclosure(
         self,
         *,
@@ -579,6 +651,8 @@ class AssistantTurnFlowMixin(
         workspace: WorkspaceSnapshot,
         material_snapshot: ExecutionMaterialSnapshot | None,
         continuation_cursor: str,
+        template_authoring_mode_id: str = "",
+        template_authoring_strategy: str = "",
     ) -> None:
         session = self._active_session
         if session is None:
@@ -608,6 +682,8 @@ class AssistantTurnFlowMixin(
             "continuation_cursor": continuation_cursor,
             "fields": list(fields),
             "material_snapshot": durable_material.to_dict(),
+            "template_authoring_mode_id": template_authoring_mode_id,
+            "template_authoring_strategy": template_authoring_strategy,
         }
         job = {
             **dict(session.document_job),
@@ -652,34 +728,51 @@ class AssistantTurnFlowMixin(
             else []
         )
         if template_authoring_requested:
+            target_mode = get_work_mode(template_authoring_mode_id)
+            target_mode_label = (
+                str(getattr(target_mode, "label", "") or "").strip()
+                or template_authoring_mode_id
+                or workspace.mode_label
+            )
             scope_facts.append(
                 {
                     "label": "写入目标",
-                    "value": f"{workspace.mode_label}用户模板库（新增模板）",
+                    "value": f"{target_mode_label}用户模板库（新增模板）",
                 }
             )
+            strategy_label = {
+                TEMPLATE_AUTHORING_REQUIREMENTS: "文本规范生成（只读正文要求）",
+                TEMPLATE_AUTHORING_FORMAT_CLONE: "Word 格式克隆（只读格式结构）",
+            }.get(template_authoring_strategy, "未选择")
+            scope_facts.append(
+                {
+                    "label": "提取方式",
+                    "value": strategy_label,
+                }
+            )
+            scope_facts.append(
+                {
+                    "label": "写入条件",
+                    "value": "通过本地合同、字段边界和无损读回校验",
+                }
+            )
+            if template_authoring_mode_id != workspace.mode_id:
+                scope_facts.append(
+                    {
+                        "label": "模式识别",
+                        "value": (
+                            f"当前界面为{workspace.mode_label}，"
+                            f"本次请求识别为{target_mode_label}"
+                        ),
+                    }
+                )
         session = self._coordinator.append_message(
             session,
             AssistantMessage.interaction(
                 role=ROLE_ASSISTANT,
                 interaction_type="disclosure",
                 title="确认本次发送的材料范围",
-                body=(
-                    "确认后，仅把下面列出的内容发送给当前模型；本地路径和未列出的"
-                    "生产资料不会发送。"
-                    + (
-                        "\n模型只负责生成模板配置；返回结果还会经过本地合同、字段边界"
-                        "和无损读回校验，通过后才会新增到当前模式的用户模板库。"
-                        if template_authoring_requested
-                        else ""
-                    )
-                    + (
-                        "\n目标文档尚未提供，本轮只分析标准样稿并列出格式要求；"
-                        "不会把样稿当作生产输入。"
-                        if target_attachment_required
-                        else ""
-                    )
-                ),
+                body="",
                 payload={
                     "disclosure_id": disclosure_id,
                     "facts": [
@@ -750,7 +843,7 @@ class AssistantTurnFlowMixin(
                     role=ROLE_ASSISTANT,
                     interaction_type="boundary",
                     title="已停止发送材料",
-                    body="未向模型发送附件内容，也未执行任何文档生产操作。",
+                    body="",
                     payload={"actions": []},
                 ),
                 turn_status=TURN_COMPLETED,
@@ -802,6 +895,12 @@ class AssistantTurnFlowMixin(
             ),
             append_user=False,
             disclosure_grant=grant,
+            template_authoring_mode_id=str(
+                continuation.get("template_authoring_mode_id") or ""
+            ),
+            template_authoring_strategy=str(
+                continuation.get("template_authoring_strategy") or ""
+            ),
         )
 
     def _start_provider_turn(
@@ -814,6 +913,8 @@ class AssistantTurnFlowMixin(
         continuation_cursor: str,
         append_user: bool,
         disclosure_grant: DisclosureGrant | None,
+        template_authoring_mode_id: str = "",
+        template_authoring_strategy: str = "",
     ) -> bool:
         session = self._active_session
         if session is None:
@@ -913,7 +1014,12 @@ class AssistantTurnFlowMixin(
             ),
             conversation_cursor=continuation_cursor,
             template_authoring_mode_id=(
-                workspace.mode_id
+                template_authoring_mode_id or workspace.mode_id
+                if is_template_authoring_request(query)
+                else ""
+            ),
+            template_authoring_strategy=(
+                template_authoring_strategy
                 if is_template_authoring_request(query)
                 else ""
             ),
@@ -1078,16 +1184,10 @@ class AssistantTurnFlowMixin(
         capability_status = policy.capability_status
         if capability_status == "gated":
             title = "该任务需要专业能力确认"
-            body = (
-                f"已识别为“{policy.route_label}”。当前核心文档助手不会自动执行该专业任务，"
-                "也不会把已添加文档的正文发送给模型。"
-            )
+            outcome = "未发送材料，也未生成产物"
         else:
             title = "该文档生产链尚未开放"
-            body = (
-                f"已识别为“{policy.route_label}”。当前可以保留需求，但不会降级为通用"
-                "文档任务，也不会生成不可验证的产物。"
-            )
+            outcome = "保留需求，不降级生成"
         job = {
             **dict(session.document_job),
             "status": "response_closed",
@@ -1110,7 +1210,7 @@ class AssistantTurnFlowMixin(
                 role=ROLE_ASSISTANT,
                 interaction_type="boundary",
                 title=title,
-                body=body,
+                body="",
                 payload={
                     "facts": [
                         {"label": "任务", "value": policy.route_label},
@@ -1122,6 +1222,7 @@ class AssistantTurnFlowMixin(
                                 else "尚未开放"
                             ),
                         },
+                        {"label": "处理结果", "value": outcome},
                     ],
                     "actions": [],
                 },

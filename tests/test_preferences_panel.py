@@ -45,6 +45,11 @@ def test_ai_preferences_use_shared_form_and_separate_new_action(qapp):
         assert panel._ai_url_input.accessibleName() == "API 地址"
         assert panel._ai_model_input.accessibleName() == "模型 ID"
         assert panel._ai_key_input.accessibleName() == "API Key"
+        visible_text = "\n".join(
+            label.text() for label in panel._ai_content.findChildren(QLabel)
+        )
+        assert "隐私与数据" not in visible_text
+        assert "内置本地演示配置" not in visible_text
 
         labels = {
             row.label_text

@@ -120,6 +120,22 @@ def test_execution_result_state_preserves_material_package_receipts():
     )
 
 
+def test_partial_success_without_failures_explains_warning_instead_of_zero_modules():
+    state = WorkbenchExecutionAdapter().build_result_state(
+        terminal_payload={
+            "status": "partial_success",
+            "failed_count": 0,
+            "artifact_failure_count": 0,
+            "warnings": [
+                "formatting_noop:未检测到排版变化，请检查处理方案或模板设置。"
+            ],
+        }
+    )
+
+    assert "0 个模块未成功" not in state.summary
+    assert "未检测到排版变化" in state.summary
+
+
 def test_execution_result_and_recent_state_preserve_complete_terminal_payload():
     adapter = WorkbenchExecutionAdapter()
     terminal_payload = {

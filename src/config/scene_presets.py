@@ -77,12 +77,21 @@ UI_CAPABILITY_GROUPS: tuple[UICapabilityGroup, ...] = (
 
 UI_GROUP_MAP: dict[str, UICapabilityGroup] = {g.group_id: g for g in UI_CAPABILITY_GROUPS}
 
-CAPABILITY_FEATURE_CARD_ORDER: tuple[str, ...] = tuple(group.group_id for group in UI_CAPABILITY_GROUPS)
+# Workbench cards are a product-navigation surface, not a mirror of every
+# runtime capability group.  Material filling is configured by the canonical
+# material-package panel and must never grow a second, partially functional
+# Workbench destination merely because its execution modules are active.
+_NON_WORKBENCH_CAPABILITY_GROUP_IDS = frozenset({"content_fill"})
+
+CAPABILITY_FEATURE_CARD_ORDER: tuple[str, ...] = tuple(
+    group.group_id
+    for group in UI_CAPABILITY_GROUPS
+    if group.group_id not in _NON_WORKBENCH_CAPABILITY_GROUP_IDS
+)
 
 CAPABILITY_FEATURE_CARD_DEFINITIONS: dict[str, tuple[str, str]] = {
     "table_chart": ("图表处理", "table"),
     "citation": ("引用处理", "book-open"),
-    "content_fill": ("资料包填充", "pen-tool"),
 }
 
 LEGACY_FEATURE_GROUP_MAP: dict[str, str] = {

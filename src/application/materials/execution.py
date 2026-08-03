@@ -21,6 +21,45 @@ from src.domain.materials import (
     MaterialRunSelection,
 )
 
+_IMAGE_ROLE_LABEL_PREFIX = "role_label:"
+_IMAGE_ROLE_CARDINALITY_PREFIX = "role_cardinality:"
+
+
+def image_policy_role_label(
+    image_policy: Mapping[str, object],
+    role: str,
+) -> str:
+    """Return the frozen editor-facing name for one image role."""
+
+    normalized_role = str(role or "").strip()
+    return str(
+        image_policy.get(
+            f"{_IMAGE_ROLE_LABEL_PREFIX}{normalized_role}",
+            normalized_role,
+        )
+        or normalized_role
+    ).strip()
+
+
+def image_policy_role_cardinality(
+    image_policy: Mapping[str, object],
+    role: str,
+    *,
+    resource_count: int,
+) -> str:
+    """Return the frozen single/multiple role kind with a legacy fallback."""
+
+    value = str(
+        image_policy.get(
+            f"{_IMAGE_ROLE_CARDINALITY_PREFIX}{str(role or '').strip()}",
+            "",
+        )
+        or ""
+    ).strip()
+    if value in {"single", "multiple"}:
+        return value
+    return "single" if resource_count == 1 else "multiple"
+
 
 @dataclass(frozen=True, slots=True)
 class ExecutionResource:
@@ -399,7 +438,11 @@ def bind_material_run(
                 }
             ),
             image_policy=MappingProxyType(
-                _package_image_policy(package, selection=selection)
+                _package_image_policy(
+                    package,
+                    selection=selection,
+                    contract=request.contract,
+                )
             ),
         )
     snapshot = replace(snapshot, snapshot_id=_snapshot_content_id(snapshot))
@@ -695,6 +738,7 @@ def _package_image_policy(
     package: MaterialPackage,
     *,
     selection: MaterialRunSelection,
+    contract: MaterialContract,
 ) -> dict[str, object]:
     defaults: dict[str, object] = {
         "adaptive": True,
@@ -703,6 +747,7 @@ def _package_image_policy(
         "watermark_text": "",
         "show_single_image_name": False,
         "show_multi_image_name": False,
+        "page_break_after_images": False,
     }
     extensions = package.metadata.get("material_contract_extensions", {})
     if not isinstance(extensions, Mapping):
@@ -723,8 +768,18 @@ def _package_image_policy(
             "show_multi_image_name": bool(
                 raw.get("show_multi_image_name", legacy_show_image_name)
             ),
+            "page_break_after_images": bool(
+                raw.get("page_break_after_images", False)
+            ),
         }
     )
+    for item in contract.resource_roles:
+        if item.domain != "image":
+            continue
+        defaults[f"{_IMAGE_ROLE_LABEL_PREFIX}{item.role}"] = item.label
+        defaults[f"{_IMAGE_ROLE_CARDINALITY_PREFIX}{item.role}"] = (
+            "single" if item.max_items == 1 else "multiple"
+        )
     if defaults["watermark_source"] == "free":
         defaults["runtime_watermark_text"] = (
             selection.runtime_image_watermark_text

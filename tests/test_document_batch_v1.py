@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 
 from docx import Document
@@ -234,6 +235,87 @@ def test_image_insertion_does_not_add_pagination_flags_to_neighboring_paragraphs
     assert len(rendered.inline_shapes) == 1
 
 
+def test_image_names_use_role_label_once_and_page_break_follows_group(
+    tmp_path,
+):
+    resources = []
+    expected_colors = [(128, 0, 128), (0, 128, 128), (0, 0, 128)]
+    for name, color in (
+        ("photo1.png", "purple"),
+        ("photo2.png", "teal"),
+        ("photo10.png", "navy"),
+    ):
+        path = tmp_path / name
+        Image.new("RGB", (32, 32), color).save(path)
+        payload = path.read_bytes()
+        resources.append(
+            ExecutionResource(
+                MaterialObjectRef(
+                    object_id="sha256:" + sha256(payload).hexdigest(),
+                    media_type="image/png",
+                    original_name=name,
+                    size=len(payload),
+                ),
+                str(path.resolve()),
+            )
+        )
+    record = ExecutionMaterialRecord(
+        record_id="record-gallery",
+        display_name="Gallery",
+        group_id="",
+        field_values={},
+        field_owners={},
+        resources={"gallery": tuple(resources)},
+        resource_owners={"gallery": ("record",)},
+    )
+    source = tmp_path / "source.docx"
+    document = Document()
+    document.add_paragraph("{{@img:gallery}}")
+    document.add_heading("Following title", level=1)
+    document.save(source)
+
+    output = tmp_path / "output.docx"
+    _insert_images(
+        source,
+        output,
+        record=record,
+        roles=("gallery",),
+        image_policy={
+            "adaptive": True,
+            "show_multi_image_name": True,
+            "page_break_after_images": True,
+            "role_label:gallery": "现场照片",
+            "role_cardinality:gallery": "multiple",
+        },
+        cache_dir=tmp_path / "image-cache",
+    )
+
+    rendered = Document(output)
+    image_paragraph = rendered.paragraphs[0]
+    assert image_paragraph.text.count("现场照片") == 1
+    assert all(name not in image_paragraph.text for name in (
+        "photo1.png",
+        "photo2.png",
+        "photo10.png",
+    ))
+    page_breaks = [
+        element
+        for element in image_paragraph._p.iter(qn("w:br"))
+        if element.get(qn("w:type")) == "page"
+    ]
+    assert len(page_breaks) == 1
+    blips = tuple(image_paragraph._p.iter(qn("a:blip")))
+    rendered_colors = [
+        Image.open(
+            BytesIO(
+                rendered.part.related_parts[blip.get(qn("r:embed"))].blob
+            )
+        ).convert("RGB").getpixel((0, 0))
+        for blip in blips
+    ]
+    assert rendered_colors == expected_colors
+
+
 def test_document_batch_consumes_all_five_v1_material_token_domains(tmp_path):
     content = tmp_path / "body.md"
     content.write_text("# Inserted body\n\nStructured content.", encoding="utf-8")
@@ -405,15 +487,16 @@ def test_document_batch_consumes_all_five_v1_material_token_domains(tmp_path):
     assert "Structured content." in text
     assert "Second folder item." in text
     assert "appendix.pdf" in text
-    assert "logo.png" in text
-    assert "cover.png" in text
+    assert text.splitlines().count("logo") == 1
+    assert "logo.png" not in text
+    assert "cover.png" not in text
     assert "avatar.png" not in text
     assert "{{@" not in text
     assert len(tuple(rendered.element.body.iter(qn("w:drawing")))) == 3
     image_paragraph_index, image_paragraph = next(
         (index, paragraph)
         for index, paragraph in enumerate(rendered.paragraphs)
-        if "logo.png" in paragraph.text
+        if paragraph.text.strip() == "logo"
     )
     assert rendered.paragraphs[image_paragraph_index - 1].text == "Logo images"
     assert (
@@ -428,15 +511,15 @@ def test_document_batch_consumes_all_five_v1_material_token_domains(tmp_path):
         for index, element in enumerate(image_elements)
         if element.tag == qn("w:drawing")
     )
-    name_positions = {
-        element.text: index
+    name_positions = [
+        index
         for index, element in enumerate(image_elements)
         if element.tag == qn("w:t")
-        and element.text in {"logo.png", "cover.png"}
-    }
-    assert name_positions["logo.png"] < drawing_positions[0]
-    assert drawing_positions[0] < name_positions["cover.png"]
-    assert name_positions["cover.png"] < drawing_positions[1]
+        and element.text == "logo"
+    ]
+    assert len(name_positions) == 1
+    assert name_positions[0] < drawing_positions[0]
+    assert drawing_positions[0] < drawing_positions[1]
     portrait_heading_index = next(
         index
         for index, paragraph in enumerate(rendered.paragraphs)
@@ -513,7 +596,11 @@ def test_document_batch_consumes_all_five_v1_material_token_domains(tmp_path):
     single_name_text = "\n".join(
         item.text for item in single_name_document.paragraphs
     )
-    assert "avatar.png" in single_name_text
+    assert any(
+        paragraph.text.strip() == "portrait"
+        for paragraph in single_name_document.paragraphs
+    )
+    assert "avatar.png" not in single_name_text
     assert "logo.png" not in single_name_text
     assert "cover.png" not in single_name_text
 

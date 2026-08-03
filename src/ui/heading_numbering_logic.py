@@ -266,13 +266,12 @@ def build_expert_toggle_text(is_expanded: bool) -> str:
     return "▴ 收起模板编辑" if is_expanded else "▾ 展开模板编辑"
 
 
-def build_non_numbered_toggle_text(is_expanded: bool) -> str:
-    prefix = "▾" if is_expanded else "▸"
-    return f"{prefix} 特殊标题（不参与编号）"
-
-
 def parse_csv_items(text: str) -> list[str]:
-    return [segment.strip() for segment in (text or "").split(",") if segment.strip()]
+    return [
+        segment.strip()
+        for segment in re.split(r"[,，]", text or "")
+        if segment.strip()
+    ]
 
 
 def format_csv_items(items: list[str]) -> str:

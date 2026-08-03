@@ -3,22 +3,25 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass, field, is_dataclass
 import hashlib
 import json
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from pathlib import Path
+
+from docx import Document
 
 from src.application.materials import (
     ExecutionMaterialFinalizeRequest,
     ExecutionMaterialSnapshot,
     finalize_execution_material_snapshot,
 )
-from src.config.execution_target import resolve_execution_target
 from src.config.document_structure_contract import (
     DocumentStructureEvidence,
     RegionDecision,
 )
+from src.config.execution_feature_state import execution_plan_is_enabled
+from src.config.execution_target import resolve_execution_target
 from src.config.resolver import resolve_config
 from src.config.scene import SceneWorkspace
 from src.config.scene_surface_registry import (
@@ -27,16 +30,19 @@ from src.config.scene_surface_registry import (
 )
 from src.config.template import TemplateConfig
 from src.config.work_mode import execution_work_mode_issue, resolve_work_mode_id
+from src.document_batch.material_resources import inspect_template_resource_roles
 from src.pipeline.runner import plan_pipeline_output_paths
-from src.services.execution_session.support import file_sha256
 from src.services.document_structure_evidence import (
     build_document_structure_evidence,
     document_structure_evidence_is_current,
 )
+from src.services.execution_session.support import file_sha256
 from src.services.production_runtime.execution_runtime import (
     WorkbenchProductionRunner,
 )
-
+from src.shared.engine.exact_material_placeholders import (
+    scan_document_exact_placeholders,
+)
 
 ProgressCallback = Callable[[int, int, str], None]
 CancelCheck = Callable[[], bool]
@@ -112,9 +118,18 @@ def execute_production_request(
         scene,
         requested_mode_id=request.mode_id,
     )
-    structure_evidence = request.document_structure_evidence
-    scope_decisions = tuple(request.document_scope_decisions or ())
-    if suffix == ".docx" and mode_id not in {"official", "exam"}:
+    plan_enabled = execution_plan_is_enabled(scene)
+    structure_evidence = (
+        request.document_structure_evidence if plan_enabled else None
+    )
+    scope_decisions = (
+        tuple(request.document_scope_decisions or ()) if plan_enabled else ()
+    )
+    if (
+        plan_enabled
+        and suffix == ".docx"
+        and mode_id not in {"official", "exam"}
+    ):
         if structure_evidence is None:
             structure_evidence = build_document_structure_evidence(input_path)
         elif not document_structure_evidence_is_current(structure_evidence, input_path):
@@ -126,10 +141,18 @@ def execute_production_request(
                 or "document_structure_evidence_not_ready",
             )
     snapshot = request.material_snapshot
+    execution_request = request
     if snapshot is not None:
         if not snapshot.execution_ready:
-            snapshot, issues = finalize_production_material_snapshot(
+            execution_request = _request_with_available_material_outputs(
                 request,
+                snapshot,
+                input_path=input_path,
+                output_root=output_root,
+                scene=scene,
+            )
+            snapshot, issues = finalize_production_material_snapshot(
+                execution_request,
                 snapshot,
                 input_path=input_path,
                 output_root=output_root,
@@ -156,16 +179,18 @@ def execute_production_request(
     output_root.mkdir(parents=True, exist_ok=True)
     runner = WorkbenchProductionRunner(
         doc_path=str(input_path),
-        template=copy.deepcopy(request.template),
+        template=copy.deepcopy(execution_request.template),
         scene=scene,
-        session_overrides=dict(request.session_overrides),
+        session_overrides=dict(execution_request.session_overrides),
         material_snapshot=snapshot,
         output_dir=output_root,
-        output_suffix=request.output_suffix,
-        document_type_id=request.document_type_id,
-        exam_scale_profile_id=request.exam_scale_profile_id,
-        exam_visual_quality_required=request.exam_visual_quality_required,
-        require_format_change=request.require_format_change,
+        output_suffix=execution_request.output_suffix,
+        document_type_id=execution_request.document_type_id,
+        exam_scale_profile_id=execution_request.exam_scale_profile_id,
+        exam_visual_quality_required=(
+            execution_request.exam_visual_quality_required
+        ),
+        require_format_change=execution_request.require_format_change,
         document_scope_context=(structure_evidence, scope_decisions),
     )
     try:
@@ -221,6 +246,12 @@ def finalize_production_material_snapshot(
     if not planned:
         return None, ("execution_output_plan_empty",)
 
+    supported_fields, supported_roles, material_issues = (
+        _production_material_template_contract(source, snapshot)
+    )
+    if material_issues:
+        return None, material_issues
+
     target = resolve_execution_target(
         mode_id=active_mode,
         scene=active_scene,
@@ -255,13 +286,158 @@ def finalize_production_material_snapshot(
             recipe_version=1,
             output_root=str(destination),
             output_paths=tuple(str(path) for path in planned.values()),
-            supported_field_keys=tuple(sorted(values)),
-            supported_resource_roles=tuple(sorted(snapshot.resource_domains)),
+            supported_field_keys=tuple(sorted(supported_fields)),
+            supported_resource_roles=tuple(sorted(supported_roles)),
         )
     )
     if not finalized.ok or finalized.snapshot is None:
         return None, tuple(item.code for item in finalized.issues)
     return finalized.snapshot, ()
+
+
+def _request_with_available_material_outputs(
+    request: ProductionExecutionRequest,
+    snapshot: ExecutionMaterialSnapshot,
+    *,
+    input_path: Path,
+    output_root: Path,
+    scene: SceneWorkspace,
+) -> ProductionExecutionRequest:
+    """Version material outputs instead of making a visible retry fail."""
+
+    base_suffix = str(request.output_suffix or "_formatted")
+    previous_paths: tuple[str, ...] | None = None
+    for version in range(1, 10_001):
+        output_suffix = (
+            base_suffix if version == 1 else f"{base_suffix} ({version})"
+        )
+        candidate = replace(request, output_suffix=output_suffix)
+        try:
+            paths = tuple(
+                sorted(
+                    _plan_material_output_paths(
+                        candidate,
+                        snapshot,
+                        input_path=input_path,
+                        output_root=output_root,
+                        scene=scene,
+                    ).values()
+                )
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return request
+        if paths and not any(Path(path).exists() for path in paths):
+            return candidate
+        if previous_paths is not None and paths == previous_paths:
+            # Delivery presets can own filenames independently of output_suffix.
+            return request
+        previous_paths = paths
+    return request
+
+
+def _plan_material_output_paths(
+    request: ProductionExecutionRequest,
+    snapshot: ExecutionMaterialSnapshot,
+    *,
+    input_path: Path,
+    output_root: Path,
+    scene: SceneWorkspace,
+) -> dict[str, str]:
+    record = snapshot.records[0]
+    config = resolve_config(
+        copy.deepcopy(request.template),
+        scene,
+        dict(request.session_overrides),
+        entity_data=dict(record.field_values),
+        field_scopes=dict(record.field_owners),
+        exact_material_placeholders=True,
+    )
+    return plan_pipeline_output_paths(
+        input_path,
+        config,
+        output_dir=output_root,
+        output_suffix=request.output_suffix,
+    )
+
+
+def _production_material_template_contract(
+    source: Path,
+    snapshot: ExecutionMaterialSnapshot,
+) -> tuple[set[str], set[str], tuple[str, ...]]:
+    """Validate bound values/resources against tokens in the real DOCX."""
+
+    record = snapshot.records[0]
+    if source.suffix.casefold() != ".docx":
+        supported_roles = {
+            role
+            for role, domain in snapshot.resource_domains.items()
+            if domain == "attachment"
+        }
+        present_roles = {
+            role for role, resources in record.resources.items() if resources
+        }
+        unsupported = sorted(present_roles - supported_roles)
+        issues = (
+            ("material.bind.template_resources_unsupported:" + ",".join(unsupported),)
+            if unsupported
+            else ()
+        )
+        return set(), supported_roles, issues
+
+    try:
+        document = Document(source)
+        template_fields = {
+            item.key for item in scan_document_exact_placeholders(document)
+        }
+        template_roles = dict(inspect_template_resource_roles((source,)))
+    except Exception as exc:  # noqa: BLE001 - corrupt input is a preflight failure
+        return set(), set(), (
+            f"material.bind.template_scan_failed:{type(exc).__name__}",
+        )
+
+    issues: list[str] = []
+    present_fields = set(record.field_values)
+    missing_fields = sorted(template_fields - present_fields)
+    if missing_fields:
+        issues.append(
+            "material.bind.template_fields_required_missing:"
+            + ",".join(missing_fields)
+        )
+
+    for role, domain in sorted(template_roles.items()):
+        declared_domain = snapshot.resource_domains.get(role)
+        if declared_domain is None:
+            issues.append(f"material.bind.template_resource_role_unknown:{role}")
+        elif declared_domain != domain:
+            issues.append(
+                "material.bind.template_resource_domain_mismatch:"
+                f"{role}:{declared_domain}:{domain}"
+            )
+        elif not record.resources.get(role, ()):
+            issues.append(
+                f"material.bind.template_resource_required_missing:{role}"
+            )
+
+    present_roles = {
+        role for role, resources in record.resources.items() if resources
+    }
+    attachment_roles = {
+        role
+        for role, domain in snapshot.resource_domains.items()
+        if domain == "attachment"
+    }
+    supported_roles = set(template_roles) | attachment_roles
+    unsupported_roles = sorted(present_roles - supported_roles)
+    if unsupported_roles:
+        issues.append(
+            "material.bind.template_resources_unsupported:"
+            + ",".join(unsupported_roles)
+        )
+    # A package can intentionally carry reusable fields that one document does
+    # not consume.  Missing document tokens are unsafe; surplus package fields
+    # are not.
+    supported_fields = template_fields | present_fields
+    return supported_fields, supported_roles, tuple(issues)
 
 
 def _production_template_revision(

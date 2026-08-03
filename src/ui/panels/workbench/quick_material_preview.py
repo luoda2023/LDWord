@@ -24,6 +24,7 @@ from src.shared.ui.card import Card
 from src.shared.ui.icons.catalog import get_icon
 from src.shared.ui.material_token_edit import MaterialTokenEdit
 from src.shared.ui.rounded_surface import RoundedSurfaceFrame
+from src.shared.ui.sizing import resolved_control_height
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.theme import bind_theme, get_theme, theme_rgba
 from src.ui.adapters.config_selector_models import SelectorOption
@@ -37,7 +38,6 @@ class _ReadOnlyPreviewField(RoundedSurfaceFrame):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setObjectName("wb_quick_material_readonly_field")
-        self.setMinimumHeight(38)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 0, 8, 0)
@@ -65,6 +65,9 @@ class _ReadOnlyPreviewField(RoundedSurfaceFrame):
 
     def apply_theme(self) -> None:
         theme = get_theme()
+        control_height = resolved_control_height(theme, "md")
+        self.setMinimumHeight(control_height)
+        self.setMaximumHeight(control_height)
         self.configure_surface(
             background=theme.bg_card,
             radius=theme.radius_sm,
@@ -186,6 +189,8 @@ class QuickMaterialPreview(Card):
             for option in self._package_options:
                 if option.source_type == "builtin":
                     badge_text, badge_kind = "内置", "builtin"
+                elif option.source_type == "unavailable":
+                    badge_text, badge_kind = "失效", "neutral"
                 else:
                     badge_text, badge_kind = "自定", "user"
                 item_index = self._package_field.add_badged_item(
@@ -276,7 +281,6 @@ class QuickMaterialPreview(Card):
         field = _MaterialPackageComboBox(container)
         field.setObjectName("wb_quick_material_package_selector")
         field.set_full_width_mode(True)
-        field.set_outer_height(38)
         field.currentIndexChanged.connect(self._on_package_selection_changed)
         layout.addWidget(field, 1)
         icon.setProperty("iconName", icon_name)

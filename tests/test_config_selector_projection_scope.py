@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from src.config.material_package_library import MaterialPackageLibraryEntry
 from src.ui.adapters import config_selector_models
 
 
@@ -47,3 +50,44 @@ def test_selector_projection_reads_are_not_cached_outside_scope(monkeypatch):
     config_selector_models.plan_selector_descriptors("custom")
 
     assert calls == ["custom", "custom"]
+
+
+def test_duplicate_material_package_names_are_disambiguated(monkeypatch):
+    entries = (
+        MaterialPackageLibraryEntry(
+            package_id="pkg_aaaaaaaaaaaaaaaaaaaaaaaaaa111111",
+            name="223",
+            path=Path("first/package.json"),
+            mode_id="custom",
+            source_type="user",
+        ),
+        MaterialPackageLibraryEntry(
+            package_id="pkg_bbbbbbbbbbbbbbbbbbbbbbbbbb222222",
+            name="223",
+            path=Path("second/package.json"),
+            mode_id="custom",
+            source_type="user",
+        ),
+        MaterialPackageLibraryEntry(
+            package_id="pkg_cccccccccccccccccccccccccc333333",
+            name="Unique",
+            path=Path("third/package.json"),
+            mode_id="custom",
+            source_type="user",
+        ),
+    )
+    monkeypatch.setattr(
+        config_selector_models,
+        "list_material_package_entries",
+        lambda *, mode_id: entries,
+    )
+
+    options = config_selector_models.material_package_selector_options(
+        "custom"
+    )
+
+    assert [option.label for option in options] == [
+        "223 · 111111",
+        "223 · 222222",
+        "Unique",
+    ]

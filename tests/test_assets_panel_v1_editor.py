@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PIL import Image
+
 from src.application.materials import (
     MaterialPackageService,
     default_material_contract_id,
@@ -29,6 +31,7 @@ from src.ui.panels.material_legacy_rows import (
     LegacyImageGroupTokenRow,
     LegacySingleImageTokenRow,
 )
+from src.ui.workspace_preferences import WorkspacePreferenceStore
 
 
 def _create_user_package(name: str) -> MaterialPackage:
@@ -113,6 +116,30 @@ def test_assets_panel_cancelled_package_switch_keeps_dirty_draft(qapp, monkeypat
     assert panel._package_combo.currentData() == first.package_id
     assert panel.has_pending_material_changes() is True
     assert panel._package.get_record(record_id).scope.fields[field.key] == "不能丢"
+
+
+def test_deleting_current_package_does_not_fall_back_to_default(
+    qapp,
+    tmp_path,
+    monkeypatch,
+):
+    package = _create_user_package("待删除资料包")
+    store = WorkspacePreferenceStore(tmp_path / "workspace-preferences.json")
+    panel = AssetsPanel(PanelBridge(workspace_preference_store=store))
+    panel._reload_library(package.package_id)
+    monkeypatch.setattr(
+        "src.ui.panels.assets_panel.confirm",
+        lambda *_args, **_kwargs: True,
+    )
+
+    panel._delete_package()
+
+    preference = store.load().for_mode("custom")
+    assert panel._package_combo.currentData() == ""
+    assert panel._package is None
+    assert preference is not None
+    assert preference.material_enabled is False
+    assert preference.material_package_id == ""
 
 
 def test_assets_panel_exposes_v1_material_domains(qapp):
@@ -219,17 +246,71 @@ def test_single_and_multi_image_name_switches_update_independently(qapp):
     package = _create_user_package("图片名称开关")
     panel = _panel_for(package)
 
+    policy_layout = panel._image_rule_adaptive_check.parentWidget().layout()
+    strategy_layout = policy_layout.itemAt(0).layout()
+    assert all(
+        strategy_layout.indexOf(control) >= 0
+        for control in (
+            panel._image_rule_adaptive_check,
+            panel._image_rule_page_break_after_check,
+            panel._image_rule_single_name_check,
+            panel._image_rule_multi_name_check,
+        )
+    )
     assert panel._image_rule_single_name_check.isChecked() is False
     assert panel._image_rule_multi_name_check.isChecked() is False
+    assert panel._image_rule_page_break_after_check.isChecked() is False
 
     panel._image_rule_multi_name_check.setChecked(True)
+    panel._image_rule_page_break_after_check.setChecked(True)
 
     policy = panel._package.metadata["material_contract_extensions"][
         "image_policy"
     ]
     assert policy["show_single_image_name"] is False
     assert policy["show_multi_image_name"] is True
+    assert policy["page_break_after_images"] is True
     assert panel.has_pending_material_changes() is True
+
+
+def test_image_folder_import_freezes_natural_number_order(qapp, tmp_path):
+    package = _create_user_package("图片自然排序")
+    panel = _panel_for(package)
+    role = "现场照片"
+    assert panel._apply_result(
+        panel._service().add_resource_role_definition(
+            panel._package,
+            role=role,
+            label="现场照片",
+            domain="image",
+            max_items=None,
+            source_kind="directory",
+            recursive=True,
+        )
+    )
+    folder = tmp_path / "images"
+    folder.mkdir()
+    for name, color in (
+        ("photo10.png", "navy"),
+        ("photo2.png", "teal"),
+        ("photo1.png", "purple"),
+    ):
+        Image.new("RGB", (32, 32), color).save(folder / name)
+
+    panel._bind_resource_paths(
+        "image",
+        role,
+        (str(folder),),
+        source_kind="directory",
+    )
+
+    owner_scope, owner_id = panel._selected_scope()
+    binding = panel._scope_object(owner_scope, owner_id).resources[role]
+    assert [item.original_name for item in binding.items] == [
+        "photo1.png",
+        "photo2.png",
+        "photo10.png",
+    ]
 
 
 def test_assets_panel_restores_legacy_token_row_views_on_v1(qapp):

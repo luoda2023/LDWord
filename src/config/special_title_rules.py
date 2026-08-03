@@ -7,7 +7,7 @@ merged into groups, or expanded with aliases.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -60,7 +60,13 @@ def validate_special_title_values(
     exact_values: Iterable[object] | None,
     prefix_values: Iterable[object] | None,
 ) -> tuple[list[str], list[str]]:
-    """Return normalized lists, rejecting the same literal in both categories."""
+    """Return normalized lists, rejecting duplicates within each category.
+
+    The same literal may intentionally exist in both categories.  Exact
+    matching wins for the bare title while the prefix rule covers variants;
+    for example, exact ``附录`` and prefix ``附录`` distinguish ``附录`` from
+    ``附录 A`` with stable kind-qualified selectors.
+    """
 
     exact = normalize_special_title_values(exact_values)
     prefixes = normalize_special_title_values(prefix_values)
@@ -70,10 +76,23 @@ def validate_special_title_values(
     duplicate_prefix = _first_duplicate(prefixes)
     if duplicate_prefix is not None:
         raise ValueError(f"标题前缀中存在重复规则“{duplicate_prefix}”")
-    conflict = next((value for value in exact if value in prefixes), None)
-    if conflict is not None:
-        raise ValueError(f"“{conflict}”不能同时作为完整标题和标题前缀")
     return exact, prefixes
+
+
+def validate_special_title_model(
+    heading_model: object | Mapping[str, object] | None,
+) -> tuple[list[str], list[str]]:
+    """Validate one object- or mapping-backed heading model consistently."""
+
+    if heading_model is None:
+        return [], []
+    if isinstance(heading_model, Mapping):
+        exact_values = heading_model.get("non_numbered_title_texts")
+        prefix_values = heading_model.get("non_numbered_prefixes")
+    else:
+        exact_values = getattr(heading_model, "non_numbered_title_texts", None)
+        prefix_values = getattr(heading_model, "non_numbered_prefixes", None)
+    return validate_special_title_values(exact_values, prefix_values)
 
 
 def _first_duplicate(values: Iterable[str]) -> str | None:
@@ -132,18 +151,19 @@ def special_title_selector_options(heading_model) -> tuple[tuple[str, str], ...]
 
     if heading_model is None:
         return ()
-    exact, prefixes = validate_special_title_values(
-        getattr(heading_model, "non_numbered_title_texts", None),
-        getattr(heading_model, "non_numbered_prefixes", None),
-    )
+    exact, prefixes = validate_special_title_model(heading_model)
+    shared_literals = set(exact) & set(prefixes)
     options = [
-        (special_title_selector(EXACT_RULE_KIND, value), value)
+        (
+            special_title_selector(EXACT_RULE_KIND, value),
+            f"{value}（完整标题）" if value in shared_literals else value,
+        )
         for value in exact
     ]
     options.extend(
         (
             special_title_selector(PREFIX_RULE_KIND, value),
-            value,
+            f"{value}（标题前缀）" if value in shared_literals else value,
         )
         for value in prefixes
     )
@@ -313,5 +333,6 @@ __all__ = [
     "special_title_selector_label",
     "special_title_selector_options",
     "strip_existing_heading_number",
+    "validate_special_title_model",
     "validate_special_title_values",
 ]

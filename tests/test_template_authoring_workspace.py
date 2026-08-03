@@ -65,6 +65,7 @@ def test_singular_ensure_exposes_only_three_user_facing_entries(
         workspace.records_dir,
         workspace.success_dir,
         workspace.failed_dir,
+        workspace.contracts_dir,
     ):
         assert internal_path.resolve().is_relative_to(workspace.state_root.resolve())
         assert not internal_path.resolve().is_relative_to(workspace.root.resolve())
@@ -76,6 +77,9 @@ def test_singular_ensure_exposes_only_three_user_facing_entries(
     assert baseline["kind"] == AUTHORING_BASELINE_KIND
     assert baseline["schema_version"] == AUTHORING_SCHEMA_VERSION
     assert baseline["mode_id"] == "thesis"
+    contract_bundle = workspace.contracts_dir / baseline["contract_fingerprint"]
+    assert (contract_bundle / "baseline.json").is_file()
+    assert (contract_bundle / "prompt.md").is_file()
 
 
 def test_workspace_ensure_is_idempotent_without_migration_copies(

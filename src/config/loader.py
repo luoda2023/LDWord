@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from src.config.atomic_io import atomic_write_text
 from src.config.dataclass_utils import dict_to_dataclass
 from src.config.execution_config_integrity import delivery_preset_identity_issue
+from src.config.special_title_rules import validate_special_title_model
 from src.config.strict_payload_validation import (
     StrictPayloadValidationError,
     validate_complete_dataclass_payload,
@@ -108,6 +109,10 @@ def save_scene(scene: "SceneWorkspace", path: str | Path) -> Path:
 
 def save_template(template: "TemplateConfig", path: str | Path) -> Path:
     """Save TemplateConfig to a YAML or JSON file."""
+    try:
+        validate_special_title_model(template.heading_model)
+    except ValueError as exc:
+        raise ValueError(f"Invalid template special-title config: {exc}") from exc
     target = Path(path)
     suffix = target.suffix.lower()
     data = asdict(template)
@@ -205,6 +210,13 @@ def _materialize_canonical_payload(
         materialized = dict_to_dataclass(dataclass_type, data)
     except (TypeError, ValueError) as exc:
         raise ConfigLoadError(f"Invalid canonical config payload: {path}") from exc
+
+    try:
+        validate_special_title_model(getattr(materialized, "heading_model", None))
+    except ValueError as exc:
+        raise ConfigLoadError(
+            f"Invalid canonical config payload: {path}: heading_model: {exc}"
+        ) from exc
 
     canonical = asdict(materialized)
     difference = _first_payload_difference(data, canonical)

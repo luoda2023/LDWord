@@ -8,7 +8,7 @@ from pathlib import Path
 from src.assistant.application.execution_lease import ExecutionLeaseManager
 from src.assistant.application.output_references import project_output_references
 from src.assistant.application.session_coordinator import AssistantSessionCoordinator
-from src.assistant.contracts.messages import AssistantMessage, ROLE_ASSISTANT
+from src.assistant.contracts.messages import ROLE_ASSISTANT, AssistantMessage
 from src.assistant.storage.execution_journal import ExecutionJournalStore
 
 
@@ -89,13 +89,19 @@ class AssistantSessionRecovery:
                                 else "recovery"
                             ),
                             title="已恢复上次文档任务结果",
-                            body=(
-                                ""
-                                if status in {"success", "partial_success"}
-                                else f"应用已从本地执行记录恢复任务终态：{status}。"
-                            ),
+                            body="",
                             payload={
                                 "execution_id": execution_id,
+                                "facts": (
+                                    []
+                                    if status in {"success", "partial_success"}
+                                    else [
+                                        {
+                                            "label": "恢复状态",
+                                            "value": status,
+                                        }
+                                    ]
+                                ),
                                 "actions": actions,
                                 "reference": {
                                     "type": "file",
@@ -126,10 +132,7 @@ class AssistantSessionRecovery:
                             role=ROLE_ASSISTANT,
                             interaction_type="recovery",
                             title="上次文档任务已中断",
-                            body=(
-                                "未发现完整的成功回执，因此不会把任务误报为成功，也不会自动覆盖输出。"
-                                "请重新执行本地检查后再确认生成。"
-                            ),
+                            body="",
                             payload={
                                 "execution_id": execution_id,
                                 "actions": [
@@ -154,7 +157,7 @@ class AssistantSessionRecovery:
                         role=ROLE_ASSISTANT,
                         interaction_type="recovery",
                         title="上次执行前检查已中断",
-                        body="没有执行文档生产。请重新检查当前题稿、方案、模板和输出目录。",
+                        body="",
                         payload={
                             "actions": [
                                 {"id": "retry_preflight", "label": "重新检查"}
@@ -178,7 +181,7 @@ class AssistantSessionRecovery:
                         role=ROLE_ASSISTANT,
                         interaction_type="recovery",
                         title="上次内容起草已中断",
-                        body="未完成的模型输出不会作为文档输入；可以从原计划重新生成草稿。",
+                        body="",
                         payload={
                             "actions": [
                                 {
@@ -209,7 +212,7 @@ class AssistantSessionRecovery:
                         role=ROLE_ASSISTANT,
                         interaction_type="recovery",
                         title="内容生成尚未开始",
-                        body="上次已完成材料授权，但内容生成尚未真正启动；原计划仍保留。",
+                        body="",
                         payload={
                             "actions": [
                                 {
@@ -244,7 +247,7 @@ class AssistantSessionRecovery:
                         role=ROLE_ASSISTANT,
                         interaction_type="recovery",
                         title="公文字段补充已中断",
-                        body="缺失字段的确认记录不完整，没有把未确认草稿送入正式生产。",
+                        body="",
                         payload={
                             "actions": [
                                 {
@@ -285,7 +288,7 @@ class AssistantSessionRecovery:
                         role=ROLE_ASSISTANT,
                         interaction_type="recovery",
                         title="上次 AI 回复已中断",
-                        body="未完成的流式回复不会继续拼接；可以重新发送上一条请求。",
+                        body="",
                         payload={
                             "actions": (
                                 [

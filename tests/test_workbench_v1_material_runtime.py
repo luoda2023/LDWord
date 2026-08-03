@@ -14,10 +14,28 @@ from src.domain.materials import (
     generate_package_id,
     generate_record_id,
 )
+from src.shared.ui.sizing import resolved_control_height
+from src.shared.ui.theme import get_theme
 from src.ui.panels.workbench.material_state import material_execution_gate
 from src.ui.panels.workbench.quick_execution_detail import QuickExecutionDetail
+from src.ui.panels.workbench.quick_material_preview import QuickMaterialPreview
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_quick_material_preview_uses_standard_selector_height(qapp) -> None:
+    preview = QuickMaterialPreview()
+    try:
+        preview.resize(960, 160)
+        preview.show()
+        qapp.processEvents()
+
+        expected_height = resolved_control_height(get_theme(), "md")
+        assert preview._package_field.height() == expected_height
+        assert preview._content_field.height() == expected_height
+    finally:
+        preview.close()
+        qapp.processEvents()
 
 
 def test_quick_execution_floating_inputs_update_the_run_selection(qapp) -> None:

@@ -14,9 +14,12 @@ from src.assistant.contracts.runtime import (
 )
 from src.assistant.domain.docx_format_evidence import (
     FORMAT_EVIDENCE_DISCLOSURE_FIELD,
+    TEMPLATE_AUTHORING_FORMAT_CLONE,
+    TEMPLATE_AUTHORING_REQUIREMENTS,
     attachment_disclosure_fields,
     bind_attachment_semantic_roles,
     is_template_authoring_request,
+    resolve_template_authoring_strategy,
 )
 from src.assistant.runtime.provider_contract import (
     PROVIDER_DONE,
@@ -37,8 +40,8 @@ from src.config.template_authoring_contract import AUTHORING_RESULT_KIND
 from src.qt_api import QDesktopServices
 from src.ui.bridge import PanelBridge
 
-
 _QUERY = "帮我按照要求制作论文的模板"
+_CLONE_QUERY = "帮我克隆这个 Word 格式并制作论文模板"
 
 
 class _TemplateAuthoringGateway:
@@ -82,22 +85,35 @@ def _wait_for_turn(qapp, panel: AssistantPanel) -> None:
     assert panel._turn_worker is None
 
 
-def test_template_authoring_intent_discloses_body_and_format_evidence() -> None:
+def test_template_authoring_intents_select_one_exclusive_evidence_source() -> None:
     refs = ({"path": "C:/sample.docx", "title": "sample.docx"},)
 
-    bound = bind_attachment_semantic_roles(refs, _QUERY)
+    requirements = bind_attachment_semantic_roles(refs, _QUERY)
+    clone = bind_attachment_semantic_roles(refs, _CLONE_QUERY)
 
     assert is_template_authoring_request(_QUERY) is True
-    assert bound[0]["template_authoring_source"] is True
-    assert attachment_disclosure_fields(bound) == (
-        "document_text",
+    assert resolve_template_authoring_strategy(_QUERY) == (
+        TEMPLATE_AUTHORING_REQUIREMENTS
+    )
+    assert resolve_template_authoring_strategy(_CLONE_QUERY) == (
+        TEMPLATE_AUTHORING_FORMAT_CLONE
+    )
+    assert requirements[0]["template_authoring_source"] is True
+    assert requirements[0]["template_authoring_strategy"] == "requirements"
+    assert attachment_disclosure_fields(requirements) == ("document_text",)
+    assert clone[0]["template_authoring_strategy"] == "format_clone"
+    assert attachment_disclosure_fields(clone) == (
         FORMAT_EVIDENCE_DISCLOSURE_FIELD,
     )
+    assert resolve_template_authoring_strategy("把这个做成模板") == ""
+    assert resolve_template_authoring_strategy(
+        "按照文本要求并克隆格式制作模板"
+    ) == ""
     assert is_template_authoring_request("按这个模板生成文档") is False
     assert is_template_authoring_request("不要生成模板，只分析格式") is False
 
 
-def test_template_authoring_source_bypasses_generic_attachment_compaction(
+def test_requirements_authoring_sends_full_text_and_no_format_evidence(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -128,9 +144,49 @@ def test_template_authoring_source_bypasses_generic_attachment_compaction(
     coverage = {item["kind"]: item for item in audit["attachment_coverage"]}
     assert coverage["document_text"]["mode"] == "full"
     assert coverage["document_text"]["omitted_characters"] == 0
-    assert coverage["document_format_evidence"]["mode"] == "full"
-    assert coverage["document_format_evidence"]["omitted_characters"] == 0
+    assert "document_format_evidence" not in coverage
+    assert audit["attachment_format_evidence_count"] == 0
     assert audit["attachment_format_evidence_truncated"] is False
+    assert audit["template_authoring_strategy"] == "requirements"
+
+
+def test_format_clone_authoring_sends_full_format_evidence_and_no_text(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import src.assistant.runtime.turn_runner as turn_runner_module
+
+    source = tmp_path / "格式样稿.docx"
+    document = Document()
+    document.add_paragraph("正文中写着：请使用红色字体；这不是克隆规则。")
+    document.sections[0].header.paragraphs[0].text = (
+        "页眉中写着：标题使用绿色；也不是克隆规则。"
+    )
+    document.sections[0].footer.paragraphs[0].text = (
+        "页脚中的自然语言同样不能发送。"
+    )
+    document.save(source)
+    refs = bind_attachment_semantic_roles(
+        ({"path": str(source), "title": source.name},),
+        _CLONE_QUERY,
+    )
+    monkeypatch.setattr(
+        turn_runner_module,
+        "_MAX_ATTACHMENT_FORMAT_EVIDENCE_CHARACTERS",
+        1,
+    )
+
+    prompt, audit = build_attachment_context(refs)
+
+    coverage = {item["kind"]: item for item in audit["attachment_coverage"]}
+    assert "document_text" not in coverage
+    assert coverage["document_format_evidence"]["mode"] == "full"
+    assert audit["attachment_text_character_count"] == 0
+    assert audit["attachment_format_evidence_count"] == 1
+    assert audit["template_authoring_strategy"] == "format_clone"
+    assert "请使用红色字体" not in prompt
+    assert "标题使用绿色" not in prompt
+    assert "页脚中的自然语言" not in prompt
 
 
 def test_uploaded_docx_template_authoring_writes_validated_user_template(
@@ -151,7 +207,7 @@ def test_uploaded_docx_template_authoring_writes_validated_user_template(
 
     gateway = _TemplateAuthoringGateway()
     bridge = PanelBridge()
-    bridge.set_current_work_mode("thesis")
+    bridge.set_current_work_mode("custom")
     panel = AssistantPanel(
         bridge,
         coordinator=AssistantSessionCoordinator(
@@ -164,8 +220,21 @@ def test_uploaded_docx_template_authoring_writes_validated_user_template(
         panel._on_composer_document_selected(str(source))
         assert panel._send_message(_QUERY) is True
         disclosure = panel._active_session.messages[-1].blocks[0].data
-        assert disclosure["facts"][1]["value"] == "附件正文、格式结构证据"
-        assert any(item["label"] == "写入目标" for item in disclosure["facts"])
+        assert disclosure["facts"][1]["value"] == "附件正文"
+        assert any(
+            item["label"] == "写入目标"
+            and item["value"] == "论文版用户模板库（新增模板）"
+            for item in disclosure["facts"]
+        )
+        assert any(
+            item["label"] == "模式识别" and "当前界面为通用版" in item["value"]
+            for item in disclosure["facts"]
+        )
+        assert any(
+            item["label"] == "提取方式"
+            and item["value"] == "文本规范生成（只读正文要求）"
+            for item in disclosure["facts"]
+        )
 
         panel._resolve_provider_disclosure(disclosure, approved=True)
         _wait_for_turn(qapp, panel)
@@ -184,6 +253,7 @@ def test_uploaded_docx_template_authoring_writes_validated_user_template(
         assert session.document_job["template_authoring"] == {
             "status": "completed",
             "mode_id": "thesis",
+            "strategy": "requirements",
             "template_id": entries[0].config_id,
             "template_name": "上传规范自动生成模板",
             "template_path": str(entries[0].path),
@@ -206,6 +276,16 @@ def test_uploaded_docx_template_authoring_writes_validated_user_template(
             "<template_authoring_instructions>"
         )
         assert "只生成模板创作结果 JSON" in provider_request.system_prompt
+        assert "唯一来源是附件正文中明确写出的规范条款" in (
+            provider_request.system_prompt
+        )
+        assert "<document_format_evidence>" not in "\n".join(
+            str(message["content"])
+            for message in provider_request.messages
+        )
+        assert gateway.requests[0].metadata["template_authoring_strategy"] == (
+            "requirements"
+        )
         assert "只读的“格式规范分析”" not in provider_request.system_prompt
         assert not any(
             block.data.get("title") == "文档处理计划"
@@ -213,6 +293,63 @@ def test_uploaded_docx_template_authoring_writes_validated_user_template(
             for block in message.blocks
         )
         assert session.document_job.get("content_generation_purpose") is None
+    finally:
+        panel.close()
+
+
+def test_uploaded_docx_format_clone_never_sends_body_requirements(
+    qapp,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config_root = tmp_path / "config_library"
+    monkeypatch.setattr(library, "TEMPLATE_LIBRARY_DIR", config_root / "templates")
+    monkeypatch.setattr(library, "SCENE_LIBRARY_DIR", config_root / "plans")
+    source = tmp_path / "格式样稿.docx"
+    forbidden_text = "正文声明所有标题使用粉红色，但克隆模式不得读取这句话。"
+    document = Document()
+    document.add_paragraph(forbidden_text)
+    document.save(source)
+
+    gateway = _TemplateAuthoringGateway()
+    panel = AssistantPanel(
+        PanelBridge(),
+        coordinator=AssistantSessionCoordinator(
+            AssistantSessionStore(tmp_path / "sessions")
+        ),
+        turn_runner=AssistantTurnRunner(gateway),
+        first_level=True,
+    )
+    try:
+        panel._on_composer_document_selected(str(source))
+        assert panel._send_message(_CLONE_QUERY) is True
+        disclosure = panel._active_session.messages[-1].blocks[0].data
+        assert disclosure["facts"][1]["value"] == "格式结构证据"
+        assert any(
+            item["label"] == "提取方式"
+            and item["value"] == "Word 格式克隆（只读格式结构）"
+            for item in disclosure["facts"]
+        )
+
+        panel._resolve_provider_disclosure(disclosure, approved=True)
+        _wait_for_turn(qapp, panel)
+
+        provider_request = gateway.requests[0]
+        sent_content = "\n".join(
+            str(message["content"])
+            for message in provider_request.messages
+        )
+        assert "唯一来源是 <document_format_evidence>" in (
+            provider_request.system_prompt
+        )
+        assert "不要把原始 Word 正文与结构化格式证据再次混合输入" in (
+            provider_request.system_prompt
+        )
+        assert "<document_format_evidence>" in sent_content
+        assert forbidden_text not in sent_content
+        assert provider_request.metadata["template_authoring_strategy"] == (
+            "format_clone"
+        )
     finally:
         panel.close()
 
@@ -278,6 +415,40 @@ def test_template_authoring_rejects_single_non_docx_source(
         boundary = session.messages[-1].blocks[0].data
         assert boundary["title"] == "请选择一份模板来源 DOCX"
         assert "来源必须是 DOCX" in session.messages[-1].blocks[0].text
+    finally:
+        panel.close()
+
+
+def test_template_authoring_requires_an_explicit_extraction_strategy(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "来源.docx"
+    Document().save(source)
+    gateway = _TemplateAuthoringGateway()
+    panel = AssistantPanel(
+        PanelBridge(),
+        coordinator=AssistantSessionCoordinator(
+            AssistantSessionStore(tmp_path / "sessions")
+        ),
+        turn_runner=AssistantTurnRunner(gateway),
+        first_level=True,
+    )
+    try:
+        panel._on_composer_document_selected(str(source))
+
+        assert panel._send_message("帮我把这个做成论文模板") is True
+        qapp.processEvents()
+
+        assert gateway.requests == []
+        session = panel._active_session
+        assert session is not None
+        assert session.document_job["reason"] == (
+            "template_authoring_strategy_required"
+        )
+        boundary = session.messages[-1].blocks[0].data
+        assert boundary["title"] == "请选择一种模板提取方式"
+        assert "两种功能相互独立" in session.messages[-1].blocks[0].text
     finally:
         panel.close()
 
