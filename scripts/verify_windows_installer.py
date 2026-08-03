@@ -45,6 +45,18 @@ def verify_installer(setup: Path, work_root: Path) -> dict[str, object]:
             f"Installed executable is missing: {executable}"
         )
     _verify_startup(executable, work_root / "runtime-data")
+    user_data_probe = (
+        work_root
+        / "runtime-data"
+        / "LocalAppData"
+        / "Alavette-Form"
+        / "upgrade-preserved.probe"
+    )
+    user_data_probe.parent.mkdir(parents=True, exist_ok=True)
+    user_data_probe.write_text(
+        "must survive update and default uninstall\n",
+        encoding="utf-8",
+    )
 
     stale_probe = install_root / "app" / "installer-stale-payload.probe"
     stale_probe.write_text("must be removed by the next upgrade\n", encoding="utf-8")
@@ -56,6 +68,10 @@ def verify_installer(setup: Path, work_root: Path) -> dict[str, object]:
     if not executable.is_file():
         raise InstallerVerificationError(
             "In-place reinstall removed the application executable"
+        )
+    if not user_data_probe.is_file():
+        raise InstallerVerificationError(
+            "In-place reinstall removed current-user application data"
         )
 
     uninstaller = install_root / "unins000.exe"
@@ -77,6 +93,10 @@ def verify_installer(setup: Path, work_root: Path) -> dict[str, object]:
         raise InstallerVerificationError(
             "Uninstall completed but the application payload still exists"
         )
+    if not user_data_probe.is_file():
+        raise InstallerVerificationError(
+            "Default silent uninstall unexpectedly removed current-user data"
+        )
 
     result = {
         "schema_version": 1,
@@ -86,6 +106,7 @@ def verify_installer(setup: Path, work_root: Path) -> dict[str, object]:
         "installed_application_startup": "passed",
         "in_place_reinstall": "passed",
         "stale_payload_cleanup": "passed",
+        "user_data_preservation": "passed",
         "uninstall": "passed",
     }
     (work_root / "INSTALLER_QA.json").write_text(

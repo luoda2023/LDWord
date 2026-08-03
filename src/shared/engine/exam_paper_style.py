@@ -25,6 +25,7 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 from lxml import etree
 
+from src.app_paths import master_library_data_root
 from src.config.content_materials import (
     HeadingBlock,
     ImageBlock,
@@ -54,7 +55,7 @@ from src.shared.engine.ooxml_ops import set_inline_shape_alt_text
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 EXAM_MASTER_ROOT = PROJECT_ROOT / "config_library" / "masters" / "exam"
 BUILTIN_EXAM_MASTER_DIR = EXAM_MASTER_ROOT / "builtin"
-USER_EXAM_MASTER_DIR = EXAM_MASTER_ROOT / "user"
+USER_EXAM_MASTER_DIR = master_library_data_root() / "exam" / "user"
 
 BUILTIN_EXAM_BLANK_STYLE_IDS = (
     "default_exam",

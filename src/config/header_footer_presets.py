@@ -13,6 +13,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TypedDict
 
+from src.app_paths import header_footer_preset_data_root
 from src.config.dataclass_utils import dict_to_dataclass
 from src.config.feature_configs import (
     HeaderFooterConfig,
@@ -33,8 +34,7 @@ class HeaderFooterPresetEntry(TypedDict):
     description: str
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-USER_PRESET_DIR = PROJECT_ROOT / "header_footer_presets"
+USER_PRESET_DIR = header_footer_preset_data_root()
 BUILTIN_SOURCE = "builtin"
 USER_SOURCE = "user"
 

@@ -30,6 +30,35 @@ def test_startup_ready_probe_is_written_only_when_requested(tmp_path):
     assert ready_file.read_text(encoding="utf-8") == "ready\n"
 
 
+def test_startup_ready_probe_is_published_only_after_main_window_is_shown():
+    source = (ROOT / "main.py").read_text(encoding="utf-8")
+    start_gui_source = source[source.index("def _start_gui"):source.index("def _run_cli")]
+    before_show_callback, show_callback_and_after = start_gui_source.split(
+        "    def _show_main_window() -> None:",
+        maxsplit=1,
+    )
+    show_callback = show_callback_and_after.split(
+        "    win.startup_status_changed.connect",
+        maxsplit=1,
+    )[0]
+
+    assert "_publish_startup_ready_probe()" not in before_show_callback
+    assert show_callback.index("win.show()") < show_callback.index(
+        "_publish_startup_ready_probe()"
+    )
+
+
+def test_uninstall_cleanup_command_is_dispatched_before_argument_parsing(monkeypatch):
+    monkeypatch.setattr(main, "_run_internal_maintenance_command", lambda argv: 73)
+    monkeypatch.setattr(
+        main,
+        "parse_args",
+        lambda _argv: pytest.fail("maintenance command should bypass public parsing"),
+    )
+
+    assert main.run_app(["--internal-uninstall-clean-user-data"]) == 73
+
+
 def test_run_cli_passes_explicit_document_type_to_production_entry(
     tmp_path,
     monkeypatch,

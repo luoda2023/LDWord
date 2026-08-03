@@ -12,6 +12,7 @@ from pathlib import Path
 
 from docx import Document
 
+from src.app_paths import master_library_data_root
 from src.config.scene import ExamPaperConfig, coerce_exam_paper_config
 from src.shared.engine.exam_paper_style import (
     BUILTIN_EXAM_BLANK_STYLE_IDS,
@@ -30,7 +31,7 @@ from src.config.master_placeholder_index import (
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MASTER_MANIFEST_ROOT = _PROJECT_ROOT / "config_library" / "masters"
-OFFICIAL_USER_MASTER_DIR = MASTER_MANIFEST_ROOT / "official" / "user"
+OFFICIAL_USER_MASTER_DIR = master_library_data_root() / "official" / "user"
 _OFFICIAL_BUILTIN_MASTER_IDS = (
     "official_gbt_standard",
     "official_gbt_upward",

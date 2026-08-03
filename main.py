@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 _STARTUP_READY_FILE_ENV = "ALAVETTE_STARTUP_READY_FILE"
+_UNINSTALL_CLEANUP_FLAG = "--internal-uninstall-clean-user-data"
 
 
 class _ConsoleSafeArgumentParser(argparse.ArgumentParser):
@@ -196,13 +197,13 @@ def _start_gui(font_engine: str | None = None) -> int:
     _tooltip_guard = install_global_tooltip(app)
 
     win = MainWindow(enable_background_services=True)
-    _publish_startup_ready_probe()
 
     def _show_main_window() -> None:
         splash.set_status("正在打开首页")
         win.show()
         app.processEvents()
         splash.finish_and_close()
+        _publish_startup_ready_probe()
 
     win.startup_status_changed.connect(splash.set_status)
     win.startup_ready.connect(_show_main_window)
@@ -244,6 +245,9 @@ def run_app(argv: list[str] | None = None) -> int:
     """Route startup to GUI or CLI based on the provided arguments."""
     configure_console_output()
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    maintenance_result = _run_internal_maintenance_command(raw_argv)
+    if maintenance_result is not None:
+        return maintenance_result
     internal_result = _run_internal_office_child(raw_argv)
     if internal_result is not None:
         return internal_result
@@ -251,6 +255,20 @@ def run_app(argv: list[str] | None = None) -> int:
     if args.gui or not args.input:
         return _start_gui(args.font_engine)
     return _run_cli(args)
+
+
+def _run_internal_maintenance_command(argv: list[str]) -> int | None:
+    """Run installer-owned maintenance without importing Qt application code."""
+
+    if argv != [_UNINSTALL_CLEANUP_FLAG]:
+        return None
+    from src.services.user_data_cleanup import clear_current_user_data
+
+    try:
+        result = clear_current_user_data()
+    except Exception:  # noqa: BLE001 - process boundary used by the uninstaller
+        return 1
+    return 0 if result.succeeded else 1
 
 
 def _run_internal_office_child(argv: list[str]) -> int | None:

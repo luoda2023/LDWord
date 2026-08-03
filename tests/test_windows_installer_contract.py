@@ -21,8 +21,9 @@ def test_hotfix_identity_is_stable_and_semver_is_visible() -> None:
 def test_installer_uses_one_v1_product_identity_and_per_user_location() -> None:
     source = INSTALLER.read_text(encoding="utf-8")
     assert "AppId={{5C548E6B-72CF-4A77-B8E4-7D2A94B777D4}" in source
-    assert "DefaultDirName={autopf}\\Alavette Form" in source
+    assert "DefaultDirName={localappdata}\\Programs\\Alavette Form" in source
     assert "PrivilegesRequired=lowest" in source
+    assert "PrivilegesRequiredOverridesAllowed" not in source
     assert "UsePreviousAppDir=yes" in source
     assert "UsePreviousTasks=yes" in source
 
@@ -48,8 +49,48 @@ def test_installer_creates_start_menu_and_offers_desktop_shortcut_by_default() -
 def test_installer_replaces_only_owned_payload_and_preserves_user_data() -> None:
     source = INSTALLER.read_text(encoding="utf-8")
     assert 'Type: filesandordirs; Name: "{app}\\app"' in source
-    assert "%LOCALAPPDATA%\\Alavette-Form" in source
     assert 'Name: "{localappdata}\\Alavette-Form"' not in source
+    assert 'Parameters: "--internal-uninstall-clean-user-data"' in source
+    assert "Check: ShouldDeleteUserData" in source
+    assert "MB_YESNO or MB_DEFBUTTON2" in source
+
+
+def test_installer_blocks_downgrades_before_replacing_the_payload() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+
+    assert "function PrepareToInstall" in source
+    assert "GetPackedVersion(" in source
+    assert "ComparePackedVersion(InstalledVersion, PackageVersion) > 0" in source
+    assert "CustomMessage('DowngradeBlocked')" in source
+
+
+def test_installer_migrates_legacy_user_catalogs_before_payload_replacement() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+
+    assert "function MigrateLegacyUserData: Boolean" in source
+    assert "LegacyRoot := ExpandConstant('{app}\\app')" in source
+    assert "LegacyRoot + '\\_internal'" in source
+    assert "{localappdata}\\Alavette-Form" in source
+    assert "\\header_footer_presets" in source
+    assert "\\heading_numbering_schemes" in source
+    assert "\\config_library\\masters\\official\\user" in source
+    assert "\\config_library\\masters\\exam\\user" in source
+    assert "if not MigrateLegacyUserData then" in source
+    assert "CustomMessage('LegacyMigrationFailed')" in source
+    prepare_to_install = source[source.index("function PrepareToInstall"):]
+    assert prepare_to_install.index(
+        "if not MigrateLegacyUserData then"
+    ) < prepare_to_install.index("function InitializeUninstall")
+
+
+def test_installer_localizes_custom_shortcut_and_launch_text() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+
+    assert 'Description: "{cm:CreateDesktopIcon}"' in source
+    assert 'GroupDescription: "{cm:AdditionalIcons}"' in source
+    assert 'Description: "{cm:LaunchProgram,{#AppName}}"' in source
+    assert "chinesesimplified.UninstallDataPrompt=" in source
+    assert "english.UninstallDataPrompt=" in source
 
 
 def test_installer_signs_setup_and_uninstaller_in_official_mode() -> None:

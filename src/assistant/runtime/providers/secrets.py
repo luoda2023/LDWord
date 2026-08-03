@@ -121,6 +121,31 @@ class WindowsCredentialSecretStore:
             raise
         return True
 
+    def delete_all(self) -> int:
+        """Delete every credential owned by this application's provider store."""
+
+        if not self.available:
+            return 0
+        import pywintypes
+        import win32cred
+
+        try:
+            credentials = win32cred.CredEnumerate(f"{self.service_prefix}/*", 0)
+        except pywintypes.error as exc:
+            if getattr(exc, "winerror", None) == 1168:
+                return 0
+            raise
+
+        removed = 0
+        target_prefix = f"{self.service_prefix}/"
+        for credential in credentials:
+            target = str(credential.get("TargetName") or "")
+            if not target.startswith(target_prefix):
+                continue
+            win32cred.CredDelete(target, win32cred.CRED_TYPE_GENERIC)
+            removed += 1
+        return removed
+
     def _target(self, profile_id: str) -> str:
         normalized = str(profile_id or "").strip()
         if not normalized or any(char in normalized for char in "\\/\x00"):

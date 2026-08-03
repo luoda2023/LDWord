@@ -14,6 +14,7 @@ from dataclasses import asdict, fields
 from pathlib import Path
 from typing import TypedDict
 
+from src.app_paths import heading_numbering_scheme_data_root
 from src.config.template import HeadingLevelBindingConfig
 
 
@@ -30,8 +31,7 @@ def _b(**kwargs) -> HeadingLevelBindingConfig:
     return HeadingLevelBindingConfig(enabled=True, **kwargs)
 
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-USER_SCHEME_DIR = _PROJECT_ROOT / "heading_numbering_schemes"
+USER_SCHEME_DIR = heading_numbering_scheme_data_root()
 SUPPORTED_LEVELS = 8
 BUILTIN_SOURCE = "builtin"
 USER_SOURCE = "user"
