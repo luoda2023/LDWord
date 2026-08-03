@@ -142,7 +142,7 @@ class AdaptivePairRow(QWidget):
         if stacked is None:
             stacked = self._layout.direction() == QBoxLayout.TopToBottom
         height = max(0, self._layout_size(stacked=stacked, minimum=False).height())
-        if height > 0 and self.minimumHeight() != height:
+        if self.minimumHeight() != height:
             self.setMinimumHeight(height)
 
     def _stack_breakpoint(self) -> int:
@@ -169,7 +169,7 @@ class AdaptivePairRow(QWidget):
     def _layout_size(self, *, stacked: bool, minimum: bool) -> QSize:
         widths, heights = self._visible_widget_extents(minimum=minimum)
         if not widths:
-            return super().sizeHint()
+            return QSize(0, 0)
         margins = self._layout.contentsMargins()
         spacing = (
             (self._stacked_spacing if stacked else self._inline_spacing)

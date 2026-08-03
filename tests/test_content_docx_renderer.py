@@ -105,6 +105,50 @@ def test_semantic_blocks_preserve_order_styles_inline_formatting_and_field_token
     assert "{{@text:company_name}}" in reopened.paragraphs[1].text
 
 
+def test_plain_text_mode_flattens_structure_and_drops_formatting_and_images():
+    document = Document()
+    document.add_paragraph(TOKEN)
+    fragment = DocumentFragment(
+        (
+            HeadingBlock(2, (_text("标题", bold=True),)),
+            ListBlock(
+                ordered=True,
+                start=2,
+                nesting=0,
+                items=(ListItem((_text("事项", italic=True),)),),
+            ),
+            TableBlock(
+                (
+                    TableRow(
+                        (
+                            TableCell((ParagraphBlock((_text("甲"),)),)),
+                            TableCell((ParagraphBlock((_text("乙"),)),)),
+                        )
+                    ),
+                )
+            ),
+            ImageBlock("sha256/image.png", alt_text="示意图"),
+        )
+    )
+
+    receipt = render_document_fragment(
+        document,
+        fragment,
+        _rule(format_mode="plain_text"),
+    )
+
+    assert [paragraph.text for paragraph in document.paragraphs] == [
+        "标题",
+        "2. 事项",
+        "甲\t乙",
+    ]
+    assert all(paragraph.style.style_id == "Normal" for paragraph in document.paragraphs)
+    assert not document.tables
+    assert not receipt.image_job_drafts
+    assert document.element.body.find(".//" + qn("w:b")) is None
+    assert document.element.body.find(".//" + qn("w:i")) is None
+
+
 def test_tab_strikethrough_and_vertical_alignment_survive_docx_round_trip():
     document = Document()
     document.add_paragraph(TOKEN)

@@ -7,8 +7,8 @@ from PIL import Image
 from src.application.materials import (
     MaterialPackageService,
     default_material_contract_id,
-    get_material_contract,
     get_package_material_contract,
+    project_material_preview,
 )
 from src.config import material_package_library
 from src.config.material_schema_registry import MaterialAssetRoleSpec
@@ -16,11 +16,21 @@ from src.domain.materials import (
     MaterialDerivationSpec,
     MaterialPackage,
     MaterialRecord,
+    MaterialScope,
     MaterialTimelineSpec,
     generate_package_id,
     generate_record_id,
 )
-from src.qt_api import QApplication, QDialog, QFileDialog, QInputDialog
+from src.qt_api import (
+    QApplication,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QInputDialog,
+    QLineEdit,
+    Qt,
+    QWidget,
+)
 from src.shared.ui.master_detail_shell import MasterDetailShell
 from src.shared.ui.persistence_actions import PersistenceActions
 from src.ui.bridge import PanelBridge
@@ -34,12 +44,35 @@ from src.ui.panels.material_legacy_rows import (
 from src.ui.workspace_preferences import WorkspacePreferenceStore
 
 
-def _create_user_package(name: str) -> MaterialPackage:
+def _create_user_package(
+    name: str,
+    *,
+    with_test_fields: bool = True,
+    shared_fields: dict[str, str] | None = None,
+) -> MaterialPackage:
+    metadata = {}
+    if with_test_fields:
+        metadata = {
+            "material_contract_extensions": {
+                "fields": [
+                    {
+                        "key": key,
+                        "label": key,
+                        "required": False,
+                        "allowed_scopes": ["shared", "group", "record", "run"],
+                    }
+                    for key in ("title", "body")
+                ],
+                "resource_roles": [],
+                "image_policy": {},
+            }
+        }
     package = MaterialPackage(
         package_id=generate_package_id(),
         display_name=name,
         work_mode_id="custom",
         material_contract_id=default_material_contract_id("custom"),
+        shared_scope=MaterialScope(fields=dict(shared_fields or {})),
         records=(
             MaterialRecord(
                 record_id=generate_record_id(),
@@ -47,6 +80,7 @@ def _create_user_package(name: str) -> MaterialPackage:
                 lifecycle="active",
             ),
         ),
+        metadata=metadata,
     )
     material_package_library.material_package_repository().create_user(package)
     return package
@@ -65,10 +99,7 @@ def test_assets_panel_preserves_scope_after_a_field_edit(qapp):
     panel = _panel_for(package)
     shared_index = panel._scope.findData(("shared", ""))
     panel._scope.setCurrentIndex(shared_index)
-    field = get_material_contract(
-        package.material_contract_id,
-        work_mode_id=package.work_mode_id,
-    ).fields[0]
+    field = get_package_material_contract(package).fields[0]
 
     result = panel._service().set_field(
         panel._package,
@@ -88,10 +119,7 @@ def test_assets_panel_cancelled_package_switch_keeps_dirty_draft(qapp, monkeypat
     first = _create_user_package("资料包 A")
     second = _create_user_package("资料包 B")
     panel = _panel_for(first)
-    field = get_material_contract(
-        first.material_contract_id,
-        work_mode_id=first.work_mode_id,
-    ).fields[0]
+    field = get_package_material_contract(first).fields[0]
     record_id = panel._current_record_id
     assert panel._apply_result(
         panel._service().set_field(
@@ -166,6 +194,7 @@ def test_assets_panel_exposes_v1_material_domains(qapp):
     assert panel._image_rules_card.parent() is panel._section_pages["images"]
     assert panel._image_card.parent() is panel._section_pages["images"]
     assert not panel._image_card.isAncestorOf(panel._image_rules_table)
+    assert panel._content_rules_card.parent() is panel._section_pages["content"]
     assert panel._content_card.parent() is panel._section_pages["content"]
     assert panel._attachment_card.parent() is panel._section_pages["attachments"]
     assert "可编辑" in panel._source_banner.text()
@@ -197,16 +226,19 @@ def test_overview_keeps_management_compact_and_restores_header_persistence(qapp)
         assert isinstance(actions, PersistenceActions)
         assert actions.restore_button.text() == "恢复"
         assert actions.save_button.text() == "保存"
+    image_actions = panel._persistence_actions["images"]
+    assert panel._image_rules_card.isAncestorOf(image_actions)
+    assert not panel._image_card.isAncestorOf(image_actions)
+    content_actions = panel._persistence_actions["content"]
+    assert panel._content_rules_card.isAncestorOf(content_actions)
+    assert not panel._content_card.isAncestorOf(content_actions)
 
 
 def test_section_restore_keeps_other_v1_draft_sections(qapp):
     package = _create_user_package("分区恢复")
     panel = _panel_for(package)
     record_id = panel._current_record_id
-    field = get_material_contract(
-        package.material_contract_id,
-        work_mode_id=package.work_mode_id,
-    ).fields[0]
+    field = get_package_material_contract(package).fields[0]
 
     assert panel._apply_result(
         panel._service().set_field(
@@ -273,9 +305,73 @@ def test_single_and_multi_image_name_switches_update_independently(qapp):
     assert panel.has_pending_material_changes() is True
 
 
+def test_file_rules_card_persists_plain_text_policy_and_restores_as_one_section(
+    qapp,
+):
+    package = _create_user_package("文件规则")
+    panel = _panel_for(package)
+
+    assert panel._content_rule_target_radio.isChecked()
+    assert not panel._content_rule_plain_radio.isChecked()
+    assert not panel._content_rule_source_radio.isEnabled()
+    assert panel._content_rule_source_radio.isHidden()
+    assert not hasattr(panel, "_content_rule_description")
+    policy_layout = panel._content_rule_target_radio.parentWidget().layout()
+    format_layout = policy_layout.itemAt(0).layout()
+    assert format_layout.indexOf(panel._content_rule_source_radio) == -1
+    behavior_layout = policy_layout.itemAt(1).layout()
+    assert behavior_layout.count() == 2
+    assert behavior_layout.itemAt(0).widget() is panel._content_rule_page_break_check
+    assert behavior_layout.itemAt(1).spacerItem() is not None
+    assert panel._content_rules_card.isAncestorOf(
+        panel._persistence_actions["content"]
+    )
+
+    panel._content_rule_plain_radio.setChecked(True)
+
+    policy = panel._package.metadata["material_contract_extensions"][
+        "content_policy"
+    ]
+    assert policy == {
+        "format_mode": "plain_text",
+        "page_break_policy": "drop",
+    }
+    assert panel._persistence_actions["content"].restore_button.isEnabled()
+
+    assert panel._restore_section_draft("content")
+    assert panel._content_rule_target_radio.isChecked()
+    assert not panel._persistence_actions["content"].restore_button.isEnabled()
+
+
+def test_image_watermark_font_defaults_to_simsun_and_updates_policy(qapp):
+    package = _create_user_package("图片水印字体")
+    panel = _panel_for(package)
+
+    policy_layout = panel._image_rule_adaptive_check.parentWidget().layout()
+    watermark_layout = policy_layout.itemAt(1).layout()
+    watermark_font_layout = policy_layout.itemAt(2).layout()
+    assert watermark_layout.indexOf(panel._image_rule_watermark_edit) >= 0
+    assert watermark_layout.indexOf(panel._image_rule_watermark_font_label) < 0
+    assert watermark_layout.indexOf(panel._image_rule_watermark_font) < 0
+    assert watermark_font_layout.indexOf(panel._image_rule_watermark_font_label) >= 0
+    assert watermark_font_layout.indexOf(panel._image_rule_watermark_font) >= 0
+    assert panel._image_rule_watermark_font.selected_font() == "宋体"
+    assert panel._image_rule_watermark_font.isEnabled() is False
+
+    panel._image_rule_watermark_check.setChecked(True)
+    panel._image_rule_watermark_font.set_font_name("黑体")
+
+    policy = panel._package.metadata["material_contract_extensions"][
+        "image_policy"
+    ]
+    assert panel._image_rule_watermark_font.isEnabled() is True
+    assert policy["watermark_font"] == "黑体"
+
+
 def test_image_folder_import_freezes_natural_number_order(qapp, tmp_path):
     package = _create_user_package("图片自然排序")
     panel = _panel_for(package)
+    initial_preview_height = panel._overview_preview_table.height()
     role = "现场照片"
     assert panel._apply_result(
         panel._service().add_resource_role_definition(
@@ -311,6 +407,43 @@ def test_image_folder_import_freezes_natural_number_order(qapp, tmp_path):
         "photo2.png",
         "photo10.png",
     ]
+    preview_rows = {
+        panel._overview_preview_table.item(row, 0).text(): row
+        for row in range(panel._overview_preview_table.rowCount())
+    }
+    image_row = preview_rows["{{@img:现场照片}}"]
+    image_preview = panel._overview_preview_table.item(image_row, 1)
+    assert image_preview.text() == (
+        "3 张图片 · photo1.png、photo2.png、photo10.png"
+    )
+    assert image_preview.toolTip().splitlines() == [
+        "photo1.png",
+        "photo2.png",
+        "photo10.png",
+    ]
+    assert panel._overview_preview_table.item(image_row, 2).text() == "已绑定"
+    assert panel._overview_preview_table.height() > initial_preview_height
+    assert (
+        panel._overview_preview_table.verticalScrollBarPolicy()
+        == Qt.ScrollBarAlwaysOff
+    )
+    assert (
+        panel._overview_preview_table.minimumHeight()
+        == panel._overview_preview_table.maximumHeight()
+    )
+
+
+def test_overview_generation_check_stays_detached_and_hidden(qapp):
+    package = _create_user_package("隐藏生成检查")
+    panel = _panel_for(package)
+
+    assert panel._section_layouts["generate"].indexOf(panel._preview_card) == -1
+    assert panel._preview_card.isHidden()
+
+    panel._refresh_scope_views()
+
+    assert panel._section_layouts["generate"].indexOf(panel._preview_card) == -1
+    assert panel._preview_card.isHidden()
 
 
 def test_assets_panel_restores_legacy_token_row_views_on_v1(qapp):
@@ -397,6 +530,90 @@ def test_assets_panel_restores_legacy_token_row_views_on_v1(qapp):
     assert panel._resource_column_guides[
         ("image", "folder")
     ]._action_count == 6
+
+
+def test_custom_field_editor_starts_empty_and_adds_inline_like_file_materials(
+    qapp,
+    monkeypatch,
+):
+    package = _create_user_package("空白字段资料", with_test_fields=False)
+    panel = _panel_for(package)
+
+    def unexpected_dialog(*_args, **_kwargs):
+        raise AssertionError("inline field add must not open an input dialog")
+
+    monkeypatch.setattr(QInputDialog, "getText", unexpected_dialog)
+    assert get_package_material_contract(panel._package).fields == ()
+    assert panel._legacy_field_rows == {}
+    assert not panel._add_material_field_button.isHidden()
+    assert panel._fixed_field_header.title_label.text() == "固定字段"
+    assert panel._floating_field_header.title_label.text() == "自由字段"
+    assert panel._add_material_field_button.text() == "＋ 新增固定字段"
+    assert (
+        panel._add_floating_material_field_button.text()
+        == "＋ 新增自由字段"
+    )
+    assert panel._profile_card.isAncestorOf(panel._add_material_field_button)
+
+    panel._request_add_field_definition()
+
+    assert tuple(panel._legacy_field_rows) == ("固定字段1",)
+    first = panel._legacy_field_rows["固定字段1"]
+    assert first.token_edit.isTokenEditable()
+    assert first.add_button.isEnabled()
+    assert not first.remove_button.isHidden()
+
+    first.add_requested.emit(first.key)
+
+    assert tuple(panel._legacy_field_rows) == ("固定字段1", "固定字段2")
+    assert panel.has_pending_material_changes()
+
+
+def test_free_field_group_is_runtime_owned_and_projected_to_workbench(qapp):
+    package = _create_user_package("自由字段资料", with_test_fields=False)
+    panel = _panel_for(package)
+
+    panel._request_add_field_definition("floating")
+
+    assert tuple(panel._legacy_field_rows) == ("自由字段1",)
+    row = panel._legacy_field_rows["自由字段1"]
+    assert panel._legacy_field_scopes["自由字段1"] == "floating"
+    assert row.value_edit.isReadOnly()
+    assert row.value_edit.placeholderText() == "在工作台填写"
+    assert row.token_edit.isTokenEditable()
+    definition = panel._package.metadata["material_contract_extensions"][
+        "fields"
+    ][0]
+    assert definition["value_source"] == "floating"
+    assert definition["allowed_scopes"] == ["run"]
+
+    preview = project_material_preview(
+        panel._package,
+        revision="draft",
+        source_type="user",
+        contract=get_package_material_contract(panel._package),
+        current_record_id=panel._current_record_id,
+    )
+    assert [item.key for item in preview.runtime_fields] == ["自由字段1"]
+
+
+def test_custom_field_editor_preserves_used_legacy_generic_fields(qapp):
+    package = _create_user_package(
+        "旧字段兼容",
+        with_test_fields=False,
+        shared_fields={"title": "旧资料仍保留"},
+    )
+    panel = _panel_for(package)
+
+    assert [
+        field.key for field in get_package_material_contract(panel._package).fields
+    ] == ["title"]
+    assert panel._legacy_field_rows["title"].value_edit.text() == "旧资料仍保留"
+
+    panel._clear_legacy_field_value("title")
+
+    assert get_package_material_contract(panel._package).fields == ()
+    assert panel._legacy_field_rows == {}
 
 
 def test_inline_image_add_does_not_open_input_dialogs(qapp, monkeypatch):
@@ -556,7 +773,7 @@ def test_derivation_add_uses_one_editor_instead_of_dialog_chain(
     assert output in panel._scope_object(owner_scope, owner_id).derivations
 
 
-def test_classic_field_page_hides_single_record_field_administration(qapp):
+def test_classic_field_page_hides_record_administration_but_keeps_field_add(qapp):
     package = _create_user_package("旧版字段页")
     panel = _panel_for(package)
 
@@ -566,16 +783,15 @@ def test_classic_field_page_hides_single_record_field_administration(qapp):
     assert panel._profile_name_row.parent() is panel._profile_form
     assert panel._profile_form.isHidden()
     assert panel._field_mapping_example.isHidden()
-    assert panel._field_toolbar.isHidden()
+    assert not panel._add_material_field_button.isHidden()
+    assert not panel._add_floating_material_field_button.isHidden()
+    assert panel._profile_card.isAncestorOf(panel._add_material_field_button)
 
 
 def test_classic_timeline_shows_record_plan_independent_of_hidden_v1_scope(qapp):
     package = _create_user_package("旧版时间计划")
     panel = _panel_for(package)
-    contract = get_material_contract(
-        package.material_contract_id,
-        work_mode_id=package.work_mode_id,
-    )
+    contract = get_package_material_contract(package)
     output = contract.fields[0].key
     anchor = contract.fields[-1].key
     record_id = panel._current_record_id
@@ -602,6 +818,9 @@ def test_classic_timeline_shows_record_plan_independent_of_hidden_v1_scope(qapp)
     assert len(panel._timeline_segment_rows) == 1
     assert panel._timeline_empty_label.isHidden()
     assert next(iter(panel._timeline_segment_rows)).endswith(f":{output}")
+    timeline_row = next(iter(panel._timeline_segment_rows.values()))
+    assert timeline_row.property("tokenRowHover") is False
+    assert timeline_row.findChild(QFrame, "timeline_segment_header") is not None
 
 
 def test_classic_timeline_add_edit_and_remove_compile_to_v1(qapp):
@@ -620,6 +839,8 @@ def test_classic_timeline_add_edit_and_remove_compile_to_v1(qapp):
     assert projection.end_field == "时间段1_结束"
     assert len(panel._timeline_segment_rows) == 1
     timeline_row = next(iter(panel._timeline_segment_rows.values()))
+    assert timeline_row.property("tokenRowHover") is False
+    assert timeline_row.findChild(QFrame, "timeline_segment_header") is not None
     assert len(
         [
             row
@@ -645,6 +866,13 @@ def test_classic_timeline_add_edit_and_remove_compile_to_v1(qapp):
     panel._resize_ratio_timeline_segment(projection, 4)
     projection = panel._visible_timeline_segments()[0]
     assert len(projection.nodes) == 4
+    timeline_row = next(iter(panel._timeline_segment_rows.values()))
+    position_values = [
+        node_row.findChild(QLineEdit, "timeline_node_position").text()
+        for node_row in timeline_row.findChildren(QFrame)
+        if node_row.objectName() == "timeline_node_row"
+    ]
+    assert position_values == ["0", "33.3", "66.7", "100"]
     panel._commit_ratio_timeline_position(
         projection,
         "时间节点1-2",
@@ -682,6 +910,77 @@ def test_classic_timeline_add_edit_and_remove_compile_to_v1(qapp):
     assert contract.get_field("时间段1_结束") is None
     assert contract.get_field("时间节点1-4") is None
     assert panel._scope_object(owner_scope, owner_id).timelines == {}
+
+
+def test_timeline_date_range_waits_for_both_inputs_before_committing(qapp):
+    package = _create_user_package("时间段支持分步填写")
+    panel = _panel_for(package)
+    panel._add_timeline()
+
+    timeline_row = next(iter(panel._timeline_segment_rows.values()))
+    start_edit = timeline_row.findChild(
+        QLineEdit,
+        "timeline_segment_start_date",
+    )
+    end_edit = timeline_row.findChild(
+        QLineEdit,
+        "timeline_segment_end_date",
+    )
+    assert start_edit is not None
+    assert end_edit is not None
+
+    start_edit.setText("2026-08-01")
+    start_edit.editingFinished.emit()
+
+    assert start_edit.text() == "2026-08-01"
+    assert end_edit.text() == ""
+    assert next(iter(panel._timeline_segment_rows.values())) is timeline_row
+
+    end_edit.setText("2026-08-10")
+    end_edit.editingFinished.emit()
+
+    owner_scope, owner_id = panel._selected_scope()
+    scope = panel._scope_object(owner_scope, owner_id)
+    assert scope.fields["时间段1_开始"] == "2026-08-01"
+    assert scope.fields["时间段1_结束"] == "2026-08-10"
+
+
+def test_timeline_refresh_is_atomic_and_preserves_expansion_state(
+    qapp,
+    monkeypatch,
+):
+    package = _create_user_package("时间段刷新不闪烁")
+    panel = _panel_for(package)
+    panel._add_timeline()
+    panel._on_section_selected("timeline")
+
+    timeline_row = next(iter(panel._timeline_segment_rows.values()))
+    body = timeline_row.findChild(QWidget, "timeline_segment_body")
+    assert body is not None
+    body.hide()
+
+    update_states: list[tuple[bool, bool]] = []
+    original_rebuild = panel._rebuild_calculations
+
+    def observe_atomic_rebuild(expanded_state):
+        update_states.append(
+            (
+                panel._timeline_segments_container.updatesEnabled(),
+                panel._detail_scroll.viewport().updatesEnabled(),
+            )
+        )
+        original_rebuild(expanded_state)
+
+    monkeypatch.setattr(panel, "_rebuild_calculations", observe_atomic_rebuild)
+    panel._refresh_calculations()
+
+    refreshed_row = next(iter(panel._timeline_segment_rows.values()))
+    refreshed_body = refreshed_row.findChild(QWidget, "timeline_segment_body")
+    assert update_states == [(False, False)]
+    assert refreshed_body is not None
+    assert refreshed_body.isHidden()
+    assert panel._timeline_segments_container.updatesEnabled()
+    assert panel._detail_scroll.viewport().updatesEnabled()
 
 
 def test_legacy_folder_row_imports_files_into_v1_object_store(
@@ -802,10 +1101,7 @@ def test_material_service_can_remove_derivation_and_timeline():
     repository = material_package_library.material_package_repository()
     service = MaterialPackageService(repository)
     record_id = package.records[0].record_id
-    contract = get_material_contract(
-        package.material_contract_id,
-        work_mode_id=package.work_mode_id,
-    )
+    contract = get_package_material_contract(package)
     output = contract.fields[0].key
     source = contract.fields[-1].key
     derived = service.set_derivation(

@@ -331,13 +331,13 @@ class ValidationModule(BaseModule):
                     )
                 )
             header_footer_enabled = _module_policy_enabled(config, "header_footer")
+            behavior = getattr(config.header_footer, "behavior", None)
             link_mode = str(
-                getattr(section_config, "header_footer_link_mode", "preserve_source")
-                or "preserve_source"
+                getattr(behavior, "link_to_previous", "preserve") or "preserve"
             )
             if (
                 not header_footer_enabled
-                and link_mode == "preserve_source"
+                and link_mode == "preserve"
                 and inventory.section_count == source.section_count
             ):
                 before_refs = tuple(item.header_footer_refs for item in source.boundaries)

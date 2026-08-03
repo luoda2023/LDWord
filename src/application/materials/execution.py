@@ -109,8 +109,9 @@ class ExecutionMaterialSnapshot:
     package_field_owners: Mapping[str, str]
     groups: tuple[ExecutionMaterialGroup, ...]
     records: tuple[ExecutionMaterialRecord, ...]
-    schema_version: int = 2
+    schema_version: int = 3
     resource_domains: Mapping[str, str] = field(default_factory=dict)
+    content_policy: Mapping[str, object] = field(default_factory=dict)
     image_policy: Mapping[str, object] = field(default_factory=dict)
     contract_version: int = 1
     template_id: str = ""
@@ -123,7 +124,7 @@ class ExecutionMaterialSnapshot:
     preflight_receipt: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.schema_version not in {1, 2}:
+        if self.schema_version not in {1, 2, 3}:
             raise ValueError("execution_material_snapshot_schema_unsupported")
         if (
             type(self.snapshot_id) is not str
@@ -155,6 +156,11 @@ class ExecutionMaterialSnapshot:
             for key, value in self.image_policy.items()
         ):
             raise TypeError("execution_material_image_policy_invalid")
+        if not isinstance(self.content_policy, Mapping) or any(
+            type(key) is not str or type(value) not in {bool, str}
+            for key, value in self.content_policy.items()
+        ):
+            raise TypeError("execution_material_content_policy_invalid")
         if type(self.output_paths) is not tuple or any(
             type(item) is not str for item in self.output_paths
         ):
@@ -173,6 +179,11 @@ class ExecutionMaterialSnapshot:
             self,
             "resource_domains",
             MappingProxyType(dict(self.resource_domains)),
+        )
+        object.__setattr__(
+            self,
+            "content_policy",
+            MappingProxyType(dict(self.content_policy)),
         )
         object.__setattr__(
             self,
@@ -437,6 +448,7 @@ def bind_material_run(
                     for item in request.contract.resource_roles
                 }
             ),
+            content_policy=MappingProxyType(_package_content_policy(package)),
             image_policy=MappingProxyType(
                 _package_image_policy(
                     package,
@@ -745,6 +757,7 @@ def _package_image_policy(
         "watermark_enabled": False,
         "watermark_source": "fixed",
         "watermark_text": "",
+        "watermark_font": "宋体",
         "show_single_image_name": False,
         "show_multi_image_name": False,
         "page_break_after_images": False,
@@ -762,6 +775,7 @@ def _package_image_policy(
             "watermark_enabled": bool(raw.get("watermark_enabled", False)),
             "watermark_source": str(raw.get("watermark_source", "fixed")),
             "watermark_text": str(raw.get("watermark_text", "")),
+            "watermark_font": str(raw.get("watermark_font", "宋体") or "宋体"),
             "show_single_image_name": bool(
                 raw.get("show_single_image_name", legacy_show_image_name)
             ),
@@ -784,6 +798,26 @@ def _package_image_policy(
         defaults["runtime_watermark_text"] = (
             selection.runtime_image_watermark_text
         )
+    return defaults
+
+
+def _package_content_policy(package: MaterialPackage) -> dict[str, object]:
+    defaults: dict[str, object] = {
+        "format_mode": "target_document",
+        "page_break_policy": "drop",
+    }
+    extensions = package.metadata.get("material_contract_extensions", {})
+    if not isinstance(extensions, Mapping):
+        return defaults
+    raw = extensions.get("content_policy", {})
+    if not isinstance(raw, Mapping):
+        return defaults
+    format_mode = str(raw.get("format_mode", "target_document"))
+    if format_mode in {"target_document", "plain_text"}:
+        defaults["format_mode"] = format_mode
+    page_break_policy = str(raw.get("page_break_policy", "drop"))
+    if page_break_policy in {"drop", "preserve_explicit"}:
+        defaults["page_break_policy"] = page_break_policy
     return defaults
 
 
@@ -881,13 +915,15 @@ def execution_material_snapshot_to_payload(
             record_payload["timeline_field_keys"] = list(
                 record.timeline_field_keys
             )
+    if snapshot.schema_version >= 3:
+        payload["content_policy"] = dict(snapshot.content_policy)
     return payload
 
 
 def execution_material_snapshot_from_payload(
     payload: Mapping[str, object],
 ) -> ExecutionMaterialSnapshot:
-    if not isinstance(payload, Mapping) or payload.get("schema_version") not in {1, 2}:
+    if not isinstance(payload, Mapping) or payload.get("schema_version") not in {1, 2, 3}:
         raise ValueError("execution_material_snapshot_schema_unsupported")
     schema_version = _payload_int(payload, "schema_version")
     expected_keys = {
@@ -917,6 +953,8 @@ def execution_material_snapshot_from_payload(
     }
     if schema_version >= 2:
         expected_keys.update({"resource_domains", "image_policy"})
+    if schema_version >= 3:
+        expected_keys.add("content_policy")
     if set(payload) != expected_keys:
         raise ValueError("execution_material_snapshot_payload_keys_invalid")
     package_ref_payload = _payload_mapping(payload.get("package_ref"))
@@ -1032,6 +1070,11 @@ def execution_material_snapshot_from_payload(
         resource_domains=MappingProxyType(
             _payload_text_mapping(payload.get("resource_domains"))
             if schema_version >= 2
+            else {}
+        ),
+        content_policy=MappingProxyType(
+            _payload_scalar_mapping(payload.get("content_policy"))
+            if schema_version >= 3
             else {}
         ),
         image_policy=MappingProxyType(

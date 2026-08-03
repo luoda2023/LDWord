@@ -51,7 +51,7 @@ _PAPER_OPTIONS: tuple[tuple[str, str], ...] = (
 )
 
 _SECTION_BREAK_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("", "不设置"),
+    ("", "保留已有分节类型"),
     ("nextPage", "下一页分节"),
     ("continuous", "连续分节"),
     ("oddPage", "下一奇数页分节"),
@@ -87,11 +87,6 @@ _CLEANUP_POLICY_OPTIONS: tuple[tuple[str, str], ...] = (
     ("remove_proven_redundant", "仅删除已证明冗余项"),
 )
 
-_HEADER_FOOTER_LINK_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("semantic_rebuild", "按语义重建链接"),
-    ("preserve_source", "保留源链接"),
-)
-
 _PAPER_DIMENSIONS_CM: dict[str, tuple[float, float]] = {
     "A4": (21.0, 29.7),
     "A3": (29.7, 42.0),
@@ -124,8 +119,6 @@ class _PageSetupSnapshot:
     section_break_type: str | None
     boundary_mode: str
     empty_break_policy: str
-    caption_table_break_policy: str
-    header_footer_link_mode: str
 
     @classmethod
     def from_template(cls, template: TemplateConfig) -> _PageSetupSnapshot:
@@ -149,8 +142,6 @@ class _PageSetupSnapshot:
             section_break_type=template.section.section_break_type,
             boundary_mode=template.section.boundary_mode,
             empty_break_policy=template.section.empty_break_policy,
-            caption_table_break_policy=template.section.caption_table_break_policy,
-            header_footer_link_mode=template.section.header_footer_link_mode,
         )
 
     @classmethod
@@ -178,8 +169,6 @@ class _PageSetupSnapshot:
         template.section.section_break_type = self.section_break_type or None
         template.section.boundary_mode = self.boundary_mode
         template.section.empty_break_policy = self.empty_break_policy
-        template.section.caption_table_break_policy = self.caption_table_break_policy
-        template.section.header_footer_link_mode = self.header_footer_link_mode
 
 
 def _set_combo_by_data(combo: StyledComboBox, target) -> None:
@@ -469,21 +458,10 @@ class PageSetupDetail(QWidget):
         self._boundary_mode_combo.currentIndexChanged.connect(self._on_form_edited)
 
         self._empty_break_policy_combo = StyledComboBox(self)
-        self._caption_table_break_policy_combo = StyledComboBox(self)
-        for combo in (
-            self._empty_break_policy_combo,
-            self._caption_table_break_policy_combo,
-        ):
-            self._configure_expanding_combo(combo)
-            for value, label in _CLEANUP_POLICY_OPTIONS:
-                combo.addItem(label, value)
-            combo.currentIndexChanged.connect(self._on_form_edited)
-
-        self._header_footer_link_mode_combo = StyledComboBox(self)
-        self._configure_expanding_combo(self._header_footer_link_mode_combo)
-        for value, label in _HEADER_FOOTER_LINK_OPTIONS:
-            self._header_footer_link_mode_combo.addItem(label, value)
-        self._header_footer_link_mode_combo.currentIndexChanged.connect(
+        self._configure_expanding_combo(self._empty_break_policy_combo)
+        for value, label in _CLEANUP_POLICY_OPTIONS:
+            self._empty_break_policy_combo.addItem(label, value)
+        self._empty_break_policy_combo.currentIndexChanged.connect(
             self._on_form_edited
         )
         self._paper_form = InspectorForm(parent=self._paper_card)
@@ -499,6 +477,13 @@ class PageSetupDetail(QWidget):
                 ],
             ],
         )
+        self._section_policy_hint = QLabel(
+            "新增语义分节默认从下一页开始，已有分页型分节保持原类型。",
+            self._paper_form,
+        )
+        self._section_policy_hint.setWordWrap(True)
+        self._desc_labels.append(self._section_policy_hint)
+        self._paper_form.add_widget(self._section_policy_hint)
         self._paper_by_section_row = self._paper_form.add_field(
             "分节纸张映射",
             self._paper_by_section_edit,
@@ -520,18 +505,6 @@ class PageSetupDetail(QWidget):
                     self._build_form_row(
                         "空分节清理",
                         self._empty_break_policy_combo,
-                        parent=self._paper_form,
-                    ),
-                    self._build_form_row(
-                        "题注-表格清理",
-                        self._caption_table_break_policy_combo,
-                        parent=self._paper_form,
-                    ),
-                ],
-                [
-                    self._build_form_row(
-                        "页眉页脚链接",
-                        self._header_footer_link_mode_combo,
                         parent=self._paper_form,
                     ),
                     self._paper_form.placeholder_cell(),
@@ -572,7 +545,11 @@ class PageSetupDetail(QWidget):
                 ],
             ]
         )
-        self._margin_form.add_field("分节边距映射", self._margin_by_section_edit)
+        self._margin_by_section_row = self._margin_form.add_field(
+            "分节边距映射",
+            self._margin_by_section_edit,
+        )
+        self._margin_by_section_row.hide()
         self._margin_card.add_widget(self._margin_form)
 
     def _build_header_footer_controls(self) -> None:
@@ -733,14 +710,6 @@ class PageSetupDetail(QWidget):
                 self._empty_break_policy_combo,
                 template.section.empty_break_policy,
             )
-            _set_combo_by_data(
-                self._caption_table_break_policy_combo,
-                template.section.caption_table_break_policy,
-            )
-            _set_combo_by_data(
-                self._header_footer_link_mode_combo,
-                template.section.header_footer_link_mode,
-            )
             self._paper_by_section_edit.setText(
                 _format_paper_overrides(
                     dict(template.page_setup.paper_size_by_section)
@@ -833,18 +802,12 @@ class PageSetupDetail(QWidget):
         template.section.empty_break_policy = str(
             self._empty_break_policy_combo.currentData() or "preserve"
         )
-        template.section.caption_table_break_policy = str(
-            self._caption_table_break_policy_combo.currentData() or "preserve"
-        )
-        template.section.header_footer_link_mode = str(
-            self._header_footer_link_mode_combo.currentData()
-            or "semantic_rebuild"
-        )
         self._refresh_policy_control_state()
 
     def _refresh_policy_control_state(self) -> None:
         boundary_mode = str(self._boundary_mode_combo.currentData() or "preserve_source")
         self._section_break_combo.setEnabled(boundary_mode == "normalize_all")
+        self._section_policy_hint.setVisible(boundary_mode == "semantic_rebuild")
         paper_mode = str(
             self._paper_mode_combo.currentData() or "preserve_source"
         )
@@ -860,7 +823,9 @@ class PageSetupDetail(QWidget):
         margin_mode = str(
             self._margin_mode_combo.currentData() or "preserve_source"
         )
-        self._margin_by_section_edit.setEnabled(margin_mode == "per_section")
+        show_margin_map = margin_mode == "per_section"
+        self._margin_by_section_row.setVisible(show_margin_map)
+        self._margin_by_section_edit.setEnabled(show_margin_map)
 
     def _on_restore_entry(self) -> None:
         if self._current_template is None or self._snapshot is None:
@@ -1069,8 +1034,6 @@ class PageSetupDetail(QWidget):
             "page_setup.margin_by_section": "margin_by_section",
             "section.boundary_mode": "boundary_mode",
             "section.empty_break_policy": "empty_break_policy",
-            "section.caption_table_break_policy": "caption_table_break_policy",
-            "section.header_footer_link_mode": "header_footer_link_mode",
             "section_break_type": "section_break_type",
             "section.section_break_type": "section_break_type",
             "page_setup.section_break_type": "section_break_type",
@@ -1131,10 +1094,6 @@ class PageSetupDetail(QWidget):
             return self._section_break_combo
         if field_name == "empty_break_policy":
             return self._empty_break_policy_combo
-        if field_name == "caption_table_break_policy":
-            return self._caption_table_break_policy_combo
-        if field_name == "header_footer_link_mode":
-            return self._header_footer_link_mode_combo
         return self._page_inputs.get(field_name)
 
 

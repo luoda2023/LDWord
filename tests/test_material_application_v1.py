@@ -294,8 +294,12 @@ def test_dynamic_file_role_reaches_exact_v1_execution_snapshot(
     assert resources[0].object_ref.object_id == object_ref.object_id
     assert resources[0].source_path.endswith(object_ref.object_id.split(":")[1])
     assert execution.snapshot.records[0].field_values["中间节点"] == "2026-08-06"
-    assert execution.snapshot.schema_version == 2
+    assert execution.snapshot.schema_version == 3
     assert execution.snapshot.resource_domains["文件1"] == "content"
+    assert execution.snapshot.content_policy == {
+        "format_mode": "target_document",
+        "page_break_policy": "drop",
+    }
     assert execution.snapshot.records[0].timeline_field_keys == (
         "中间节点",
         "项目开始",
@@ -455,6 +459,7 @@ def test_image_policy_is_package_owned_and_survives_v1_save(
         watermark_enabled=True,
         watermark_source="fixed",
         watermark_text="内部资料",
+        watermark_font="黑体",
         show_single_image_name=True,
         show_multi_image_name=False,
         page_break_after_images=True,
@@ -479,6 +484,7 @@ def test_image_policy_is_package_owned_and_survives_v1_save(
         "watermark_enabled": True,
         "watermark_source": "fixed",
         "watermark_text": "内部资料",
+        "watermark_font": "黑体",
         "show_single_image_name": True,
         "show_multi_image_name": False,
         "page_break_after_images": True,
@@ -736,6 +742,7 @@ def test_floating_timeline_and_watermark_values_flow_into_run_snapshot() -> None
     assert bound.ok and bound.snapshot is not None
     assert bound.snapshot.records[0].field_values["node"] == "2026-08-05"
     assert bound.snapshot.image_policy["runtime_watermark_text"] == "仅限内部"
+    assert bound.snapshot.image_policy["watermark_font"] == "宋体"
     assert bound.snapshot.image_policy["show_single_image_name"] is True
     assert bound.snapshot.image_policy["show_multi_image_name"] is False
 

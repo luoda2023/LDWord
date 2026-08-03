@@ -49,6 +49,7 @@ def test_content_insertion_rule_enforces_reserved_canonical_anchor() -> None:
         occurrence_policy="all",
         heading_policy="relative_to_anchor",
         page_break_policy="preserve_explicit",
+        format_mode="plain_text",
     )
     assert rule.anchor_token == content_anchor_token("technical_route")
     assert ContentInsertionRule.from_dict(rule.to_dict()) == rule

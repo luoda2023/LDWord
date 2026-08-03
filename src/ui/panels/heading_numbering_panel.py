@@ -1591,8 +1591,9 @@ class HeadingNumberingPanel(BasePanel):
         self._ref_style_cb.setEnabled(state.reference_core_style)
         self._title_sep_edit.setEnabled(state.title_separator)
         self._start_at_input.setEnabled(state.start_at)
-        self._restart_on_cb.setEnabled(state.restart_on)
-        self._restart_trigger_cb.setEnabled(state.restart_on)
+        restart_applicable = state.restart_on and self._selected_adv_level > 1
+        self._restart_on_cb.setEnabled(restart_applicable)
+        self._restart_trigger_cb.setEnabled(restart_applicable)
         self._use_raw_cb.setEnabled(state.use_raw_toggle)
         self._raw_template_edit.setEnabled(state.raw_template)
         self._sync_raw_template_validation()

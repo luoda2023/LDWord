@@ -65,12 +65,15 @@ def test_heading_level_header_and_numbering_settings_are_compact():
         assert panel._restart_trigger_grid.isHidden()
         assert panel._chain_sep_grid.isHidden()
         assert panel._ref_style_row.isVisible()
+        assert panel._restart_on_cb.currentText() == "一级编号不适用"
+        assert panel._restart_on_cb.isEnabled() is False
         assert panel._counter_grid._pair_rows[1].height() == panel._title_sep_row.height()
         assert panel._counter_grid._pair_rows[1].width() == panel._title_sep_row.width()
 
         panel._adv_list.setCurrentRow(1)
         app.processEvents()
         assert panel._chain_sep_grid.isVisible()
+        assert panel._restart_on_cb.isEnabled() is True
 
         specific_index = panel._restart_on_cb.findData("specific")
         assert specific_index >= 0

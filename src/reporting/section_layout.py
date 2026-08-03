@@ -6,6 +6,19 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 
 
+def _header_footer_link_mode(config) -> str:
+    header_footer = getattr(config, "header_footer", None)
+    behavior = getattr(header_footer, "behavior", None)
+    link_to_previous = str(
+        getattr(behavior, "link_to_previous", "preserve") or "preserve"
+    )
+    return {
+        "never": "semantic_rebuild",
+        "preserve": "preserve_source",
+        "always": "always_link",
+    }.get(link_to_previous, link_to_previous)
+
+
 def extract_section_layout_evidence(result) -> dict[str, Any] | None:
     context = getattr(result, "context", None)
     if context is None:
@@ -80,11 +93,10 @@ def extract_section_layout_evidence(result) -> dict[str, Any] | None:
             getattr(section_config, "empty_break_policy", "") or ""
         ),
         "caption_table_break_policy": str(
-            getattr(section_config, "caption_table_break_policy", "") or ""
+            getattr(getattr(config, "caption", None), "table_break_policy", "")
+            or ""
         ),
-        "header_footer_link_mode": str(
-            getattr(section_config, "header_footer_link_mode", "") or ""
-        ),
+        "header_footer_link_mode": _header_footer_link_mode(config),
         "required_semantic_starts": list(
             getattr(plan, "required_semantic_starts", ()) or ()
         ),

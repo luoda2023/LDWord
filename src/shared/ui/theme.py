@@ -1222,8 +1222,20 @@ if _HAS_QT:
 
         def eventFilter(self, watched, event) -> bool:
             owner = getattr(self, "_owner", None)
-            if owner is not None and watched is owner and event.type() in (QEvent.Show, QEvent.ShowToParent):
-                self.apply_if_dirty()
+            if owner is not None and watched is owner and event.type() in (
+                QEvent.Show,
+                QEvent.ShowToParent,
+                QEvent.Paint,
+            ):
+                # A nested child can receive ShowToParent while an ancestor is
+                # still completing its own show transition. isVisible() is
+                # false at that exact point, and no later event is guaranteed
+                # for the child. Refresh on the show transition itself so a
+                # page created under the previous theme cannot keep stale QSS
+                # or painter colours when it is opened for the first time.
+                # Paint is the final safety net for children whose only
+                # ShowToParent happened before an ancestor became visible.
+                self.apply_if_dirty(require_visible=False)
             return False
 
         def _on_theme_changed(self) -> None:
@@ -1236,8 +1248,8 @@ if _HAS_QT:
                 return
             self._dirty = True
 
-        def apply_if_dirty(self) -> None:
-            if self._dirty and self._is_visible():
+        def apply_if_dirty(self, *, require_visible: bool = True) -> None:
+            if self._dirty and (not require_visible or self._is_visible()):
                 self._dirty = False
                 self._do_apply()
 

@@ -20,7 +20,7 @@ from src.config.migration import (
     normalize_template_overrides,
     unflatten_dict,
 )
-from src.config.template import TemplateConfig
+from src.config.template import StyleConfig, TemplateConfig
 from src.config.feature_configs import (
     EquationNumberingConfig,
     FormulaStyleConfig,
@@ -94,12 +94,19 @@ def resolve_config(
 
     template_payload = asdict(template)
     template_flat = add_template_compat_aliases(flatten_dict("", template_payload))
+    scene_override_tree = unflatten_dict(scene_overrides)
+    session_override_tree = unflatten_dict(session_overrides)
+    _seed_reference_variant_base(
+        template_payload,
+        scene_override_tree,
+        session_override_tree,
+    )
 
     merged_payload = merge_dict_layers(
         template_payload,
         scene_feature_overrides,
-        unflatten_dict(scene_overrides),
-        unflatten_dict(session_overrides),
+        scene_override_tree,
+        session_override_tree,
     )
     merged_template = dict_to_dataclass(TemplateConfig, merged_payload)
     merged_flat = add_template_compat_aliases(
@@ -262,6 +269,28 @@ _SCENE_FEATURE_FIELDS = (
     "reference_style",
     "watermark",
 )
+
+
+def _seed_reference_variant_base(
+    template_payload: dict[str, Any],
+    *override_layers: Mapping[str, Any],
+) -> None:
+    """Let partial reference-style overrides inherit the effective body style."""
+
+    styles = template_payload.get("styles")
+    styles = dict(styles) if isinstance(styles, Mapping) else {}
+    if isinstance(styles.get("references_body"), Mapping):
+        return
+    requested = any(
+        isinstance(layer.get("styles"), Mapping)
+        and isinstance(layer["styles"].get("references_body"), Mapping)
+        for layer in override_layers
+    )
+    if not requested:
+        return
+    base = styles.get("body") or styles.get("normal") or asdict(StyleConfig())
+    styles["references_body"] = copy.deepcopy(dict(base))
+    template_payload["styles"] = styles
 
 
 def _extract_scene_feature_overrides(scene: SceneWorkspace) -> dict[str, Any]:

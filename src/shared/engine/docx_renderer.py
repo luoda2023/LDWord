@@ -21,6 +21,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 from src.config.content_materials import (
+    ContentFormatMode,
     ContentHeadingPolicy,
     ContentInsertionRule,
     ContentOccurrencePolicy,
@@ -164,8 +165,9 @@ class ContentDocxRenderer:
         fragment: DocumentFragment,
         rule: ContentInsertionRule,
     ) -> ContentRenderPreflight:
+        effective_fragment = _effective_fragment(fragment, rule)
         plan, diagnostics, anchor_count = _build_render_plan(
-            document, fragment, rule
+            document, effective_fragment, rule
         )
         del plan
         return ContentRenderPreflight(
@@ -181,8 +183,9 @@ class ContentDocxRenderer:
         fragment: DocumentFragment,
         rule: ContentInsertionRule,
     ) -> ContentRenderReceipt:
+        effective_fragment = _effective_fragment(fragment, rule)
         plan, diagnostics, _anchor_count = _build_render_plan(
-            document, fragment, rule
+            document, effective_fragment, rule
         )
         errors = [
             item
@@ -204,7 +207,7 @@ class ContentDocxRenderer:
                 occurrences=(),
                 diagnostics=tuple(diagnostics),
             )
-        return _commit_render_plan(document, fragment, rule, plan)
+        return _commit_render_plan(document, effective_fragment, rule, plan)
 
 
 def render_document_fragment(
@@ -215,6 +218,91 @@ def render_document_fragment(
     """Convenience API for the strict renderer."""
 
     return ContentDocxRenderer().render(document, fragment, rule)
+
+
+def _effective_fragment(
+    fragment: DocumentFragment,
+    rule: ContentInsertionRule,
+) -> DocumentFragment:
+    if not isinstance(fragment, DocumentFragment):
+        raise TypeError("fragment must be a DocumentFragment")
+    if not isinstance(rule, ContentInsertionRule):
+        raise TypeError("rule must be a ContentInsertionRule")
+    if rule.format_mode is not ContentFormatMode.PLAIN_TEXT:
+        return fragment
+    blocks = tuple(_plain_text_blocks(fragment))
+    if not blocks and fragment.blocks:
+        blocks = (ParagraphBlock(()),)
+    return DocumentFragment(blocks)
+
+
+def _plain_text_blocks(fragment: DocumentFragment):
+    """Flatten semantic blocks without leaking source or target formatting."""
+
+    for block in fragment.blocks:
+        if isinstance(block, (HeadingBlock, ParagraphBlock)):
+            yield ParagraphBlock(_plain_inlines(block.inlines))
+        elif isinstance(block, ListBlock):
+            for item_index, item in enumerate(block.items, start=block.start):
+                marker = f"{item_index}. " if block.ordered else "• "
+                yield ParagraphBlock(
+                    (InlineContent(text=marker), *_plain_inlines(item.inlines))
+                )
+        elif isinstance(block, TableBlock):
+            for row in block.rows:
+                inlines: list[InlineContent] = []
+                for cell_index, cell in enumerate(row.cells):
+                    if cell_index:
+                        inlines.append(InlineContent(kind=InlineKind.TAB))
+                    inlines.extend(_plain_cell_inlines(cell.blocks))
+                yield ParagraphBlock(tuple(inlines))
+        elif isinstance(block, PageBreakBlock):
+            # Plain text owns only visible characters and line boundaries.
+            continue
+        elif isinstance(block, ImageBlock):
+            continue
+
+
+def _plain_cell_inlines(blocks) -> tuple[InlineContent, ...]:
+    result: list[InlineContent] = []
+    for block in blocks:
+        block_inlines: tuple[InlineContent, ...]
+        if isinstance(block, ParagraphBlock):
+            block_inlines = _plain_inlines(block.inlines)
+        elif isinstance(block, ListBlock):
+            item_values: list[InlineContent] = []
+            for index, item in enumerate(block.items, start=block.start):
+                if item_values:
+                    item_values.append(InlineContent(text="; "))
+                marker = f"{index}. " if block.ordered else "• "
+                item_values.append(InlineContent(text=marker))
+                item_values.extend(_plain_inlines(item.inlines))
+            block_inlines = tuple(item_values)
+        else:
+            block_inlines = ()
+        if result and block_inlines:
+            result.append(InlineContent(kind=InlineKind.HARD_BREAK))
+        result.extend(block_inlines)
+    return tuple(result)
+
+
+def _plain_inlines(inlines) -> tuple[InlineContent, ...]:
+    result: list[InlineContent] = []
+    for inline in inlines:
+        if inline.kind is InlineKind.SOFT_BREAK:
+            result.append(InlineContent(text=" "))
+        elif inline.kind in {InlineKind.HARD_BREAK, InlineKind.TAB}:
+            result.append(InlineContent(kind=inline.kind))
+        elif inline.kind is InlineKind.FIELD_TOKEN:
+            result.append(
+                InlineContent(
+                    kind=InlineKind.FIELD_TOKEN,
+                    field_key=inline.field_key,
+                )
+            )
+        else:
+            result.append(InlineContent(text=inline.text))
+    return tuple(result)
 
 
 def _build_render_plan(document, fragment, rule):

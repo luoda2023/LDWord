@@ -36,5 +36,46 @@
       "origin": {}
     }
   ],
-  "metadata": {}
+  "metadata": {
+    "material_contract_extensions": {
+      "fields": [
+        {
+          "key": "title",
+          "label": "Document title",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        },
+        {
+          "key": "subtitle",
+          "label": "Subtitle",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        },
+        {
+          "key": "author",
+          "label": "Author",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        },
+        {
+          "key": "organization",
+          "label": "Organization",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        },
+        {
+          "key": "date",
+          "label": "Date",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        },
+        {
+          "key": "body",
+          "label": "Body",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        }
+      ]
+    }
+  }
 }

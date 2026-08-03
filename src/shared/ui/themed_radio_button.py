@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from src.qt_api import QAbstractButton, QPainter, QRectF, QSize, Qt
+from src.qt_api import QAbstractButton, QColor, QPainter, QRectF, QSize, Qt
 
 from src.shared.ui.selection_control_metrics import build_radio_metrics
 from src.shared.ui.selection_control_painter import draw_focus_ring, draw_radio_indicator
 from src.shared.ui.theme import bind_theme, get_theme
+
+
+def _radio_label_color(theme, *, enabled: bool, checked: bool) -> QColor:
+    if not enabled:
+        return QColor(theme.selection_label_disabled_color)
+    if checked:
+        return QColor(theme.selection_label_checked_color)
+    return QColor(theme.selection_label_color)
 
 
 class ThemedRadioButton(QAbstractButton):
@@ -81,6 +89,13 @@ class ThemedRadioButton(QAbstractButton):
 
         text_left = int(indicator.right() + metrics.label_gap)
         text_rect = self.rect().adjusted(text_left, 0, 0, 0)
+        painter.setPen(
+            _radio_label_color(
+                theme,
+                enabled=self.isEnabled(),
+                checked=self.isChecked(),
+            )
+        )
         painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, self.text())
 
     def enterEvent(self, event) -> None:

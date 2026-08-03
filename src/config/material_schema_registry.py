@@ -135,15 +135,12 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
         schema_id="generic_document_v1",
         label="Generic document materials",
         family="custom",
-        description="Common named fields and optional resources for general documents.",
-        fields=(
-            MaterialFieldSpec("title", "Document title", required=False),
-            MaterialFieldSpec("subtitle", "Subtitle", required=False),
-            MaterialFieldSpec("author", "Author", required=False),
-            MaterialFieldSpec("organization", "Organization", required=False),
-            MaterialFieldSpec("date", "Date", required=False),
-            MaterialFieldSpec("body", "Body", required=False),
-        ),
+        description="User-defined fields and optional resources for general documents.",
+        # General-document fields are package-owned declarations.  Keeping a
+        # fixed English starter inventory here made every new custom package
+        # expose six unrelated rows and prevented the field editor from
+        # behaving like the other freely authored material domains.
+        fields=(),
         asset_roles=(
             MaterialAssetRoleSpec("logo", "Logo", required=False),
             MaterialAssetRoleSpec(

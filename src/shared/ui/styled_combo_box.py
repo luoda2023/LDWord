@@ -47,8 +47,10 @@ CURRENT_BADGE_RIGHT_INSET = 8
 def _source_badge_colors(theme, badge_kind: str, *, enabled: bool) -> tuple[QColor, QColor]:
     if badge_kind == "off":
         return (
-            QColor("#000000" if enabled else theme.text_disabled),
-            QColor("#FFFFFF" if enabled else theme.bg_card),
+            QColor(theme.bg_tooltip if enabled else theme.bg_hover),
+            QColor(
+                theme.text_on_tooltip if enabled else theme.text_disabled
+            ),
         )
     if badge_kind == "user":
         fill = QColor(theme.primary)

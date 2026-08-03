@@ -92,11 +92,16 @@ def _set_selector_membership(
     selectors[:] = normalized
 
 
+DEFAULT_HEADER_FOOTER_FONT_CN = "宋体"
+DEFAULT_HEADER_FOOTER_FONT_EN = "Times New Roman"
+DEFAULT_HEADER_FOOTER_SIZE_PT = 10.5
+
+
 @dataclass
 class HeaderFooterTypographyConfig:
-    font_cn: str | None = None
-    font_en: str | None = None
-    size_pt: float | None = None
+    font_cn: str | None = DEFAULT_HEADER_FOOTER_FONT_CN
+    font_en: str | None = DEFAULT_HEADER_FOOTER_FONT_EN
+    size_pt: float | None = DEFAULT_HEADER_FOOTER_SIZE_PT
     bold: bool = False
     italic: bool = False
 
@@ -650,6 +655,7 @@ class CaptionConfig:
     numbering_mode: str = "chapter"     # "chapter" | "global"
     auto_insert: bool = True
     format_inserted: bool = False
+    table_break_policy: str = "preserve"  # preserve | remove_proven_redundant
 
 
 @dataclass
@@ -696,14 +702,11 @@ class EquationNumberingConfig:
 
 @dataclass
 class ReferenceStyleConfig:
-    """Reference-list typography."""
+    """Reference-list paragraph rules; typography lives in style variants."""
 
     hanging_indent_cm: float = 0.74
     space_after_pt: float = 0
     space_after_unit: str = "pt"
-    font_cn: str | None = None
-    font_en: str | None = None
-    size_pt: float | None = None
 
 
 @dataclass

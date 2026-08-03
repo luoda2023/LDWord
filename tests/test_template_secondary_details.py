@@ -9,6 +9,7 @@ from src.qt_api import QApplication, QBoxLayout, QLabel, QPoint, QPushButton, Qt
 from src.config.special_title_rules import special_title_selector
 from src.config.template import TemplateConfig
 from src.shared.ui.adaptive_pair_row import AdaptivePairRow
+from src.shared.ui.card import Card
 from src.shared.ui.dashed_separator import DashedSeparator
 from src.shared.ui.flow_layout import FlowLayout
 from src.shared.ui.form_row import FormRow
@@ -89,6 +90,9 @@ def test_table_and_elements_details_reuse_shared_controls():
     assert 'owner._add_card_header(self._normal_page_card, "panel-top", "页眉")' in header_footer_source
     assert 'owner._add_card_header(self._footer_card, "panel-bottom", "页脚文字")' in header_footer_source
     assert 'owner._add_card_header(self._page_number_card, "list-ordered", "页码")' in header_footer_source
+    assert '"workflow",\n            "跨分节处理",' in header_footer_source
+    assert "控制不同分节之间的页眉页脚继承关系。" not in header_footer_source
+    assert header_footer_source.find("self._build_section_exclusion_form()") < header_footer_source.find("self._build_section_link_form()")
     assert "PageNumberPlanSection(owner, container=self._page_number_card, embedded=True)" in header_footer_source
     assert 'FlowSection("编号分组", expanded=True' in page_plan_source
     assert 'FlowSection("高级规则编辑器"' not in page_plan_source
@@ -635,6 +639,12 @@ def test_header_footer_detail_writes_header_and_footer_typography_separately():
         app.processEvents()
 
         header_footer = detail._header_footer_detail
+        assert header_footer._font_cn_combo.selected_font() == "宋体"
+        assert header_footer._font_en_combo.selected_font() == "Times New Roman"
+        assert header_footer._size_combo.current_pt() == 10.5
+        assert header_footer._footer_font_cn_combo.selected_font() == "宋体"
+        assert header_footer._footer_font_en_combo.selected_font() == "Times New Roman"
+        assert header_footer._footer_size_combo.current_pt() == 10.5
         header_footer._font_cn_combo.set_font_name("黑体")
         header_footer._size_combo.set_pt(9)
         header_footer._bold_toggle.setChecked(True)
@@ -683,7 +693,7 @@ def test_header_footer_hidden_fixed_text_row_does_not_force_stacked_layout():
 
 def test_header_footer_hidden_footer_text_row_does_not_leave_blank_grid_row():
     app = _app()
-    detail = ElementsDetail()
+    detail = ElementsDetail(scope="header_footer")
 
     try:
         detail.set_template(TemplateConfig())
@@ -696,6 +706,23 @@ def test_header_footer_hidden_footer_text_row_does_not_leave_blank_grid_row():
         assert detail._header_footer_detail._footer_text_row.isHidden()
         assert detail._header_footer_detail._bottom_text_mode_row.isVisible()
         assert detail._header_footer_detail._footer_alignment_row.isVisible()
+        assert footer_grid._pair_rows[1].height() == 0
+        assert footer_grid._pair_rows[1].minimumHeight() == 0
+
+        section_link_card = detail._header_footer_detail._section_link_card
+        assert type(section_link_card) is Card
+        assert section_link_card.parentWidget() is detail._editor_column
+        assert detail._editor_layout.indexOf(section_link_card) == detail._editor_layout.count() - 2
+        assert detail._header_footer_detail._section_link_mode_row.label_text == "不同分节如何处理"
+        section_link_combo = detail._header_footer_detail._section_link_mode_combo
+        assert section_link_combo.itemText(section_link_combo.findData("never")) == "各节分别应用模板"
+        assert section_link_combo.itemText(section_link_combo.findData("preserve")) == "沿用原文的节间关系"
+        workflow_icons = [
+            label for icon_name, label in detail._header_icons if icon_name == "workflow"
+        ]
+        assert len(workflow_icons) == 1
+        assert workflow_icons[0] in section_link_card.findChildren(QLabel)
+        assert not workflow_icons[0].pixmap().isNull()
     finally:
         detail.close()
         app.processEvents()
@@ -721,14 +748,13 @@ def test_header_footer_shows_scheme_preview_and_collapses_structure_settings():
         assert header_footer._scheme_note.isHidden()
         assert header_footer._quick_preview_label.isVisible()
         preview = header_footer._quick_preview_label.text()
-        assert "页眉：跟随 1 级标题" in preview
-        assert "页脚文字：不显示" in preview
-        assert "页码：" in preview
-        assert "页眉隐藏：封面" in preview
-        assert "页脚文字隐藏：封面" in preview
-        assert "区域结果（只读）：" in preview
-        assert "封面：页眉无 · 页脚文字无 · 页码隐藏但计数" in preview
-        assert "目录：页眉有 · 页脚文字无 · 页码阿拉伯，从 1 起" in preview
+        preview_lines = preview.splitlines()
+        assert preview_lines[0] == "页眉：跟随 1 级标题（封面隐藏） · 页脚文字：不显示"
+        assert preview_lines[1].startswith("页码：")
+        assert len(preview_lines) == 2
+        assert "页眉隐藏：" not in preview
+        assert "页脚文字隐藏：" not in preview
+        assert "区域结果（只读）" not in preview
         assert header_footer._header_scope_row.isVisible()
         assert header_footer._footer_scope_row.isVisible()
         assert not hasattr(header_footer, "_exclusion_preset_row")
@@ -744,11 +770,11 @@ def test_header_footer_shows_scheme_preview_and_collapses_structure_settings():
         assert template.header_footer.footer.hidden_selectors == []
         assert template.header_footer.page_number_plan.phases[0].phase_id == "pre_numbering"
         preview = header_footer._quick_preview_label.text()
-        assert "页眉：跟随 1 级标题" in preview
-        assert "页脚文字：不显示" in preview
+        assert preview.splitlines()[0] == "页眉：跟随 1 级标题 · 页脚文字：不显示"
         assert "页码：" in preview
         assert "页眉隐藏：" not in preview
         assert "页脚文字隐藏：" not in preview
+        assert len(preview.splitlines()) == 2
 
         header_footer._scheme_combo.setCurrentIndex(header_footer._scheme_combo.findData("no_page_number"))
         app.processEvents()
@@ -762,8 +788,7 @@ def test_header_footer_shows_scheme_preview_and_collapses_structure_settings():
         assert header_footer._numbering_mode_combo.currentData() == "continuous"
         assert header_footer._page_advanced_section.isHidden()
         preview = header_footer._quick_preview_label.text()
-        assert "页眉：跟随 1 级标题" in preview
-        assert "页脚文字：不显示" in preview
+        assert preview == "页眉：跟随 1 级标题 · 页脚文字：不显示"
         assert "页码：" not in preview
 
         header_footer._header_scope_editor.set_selectors(["cover"])
@@ -887,8 +912,9 @@ def test_header_footer_independent_scope_selectors_write_config():
             appendix_selector,
         ]
         preview = header_footer._quick_preview_label.text()
-        assert "页眉隐藏：封面" in preview
-        assert "页脚文字隐藏：参考文献、附录" in preview
+        assert "页眉：跟随 1 级标题（封面隐藏）" in preview
+        assert "页眉隐藏：" not in preview
+        assert "页脚文字隐藏：" not in preview
     finally:
         detail.close()
         app.processEvents()
@@ -970,12 +996,13 @@ def test_template_caption_detail_uses_semantic_cards_and_result_language():
         assert not hasattr(detail, "_footer_note")
 
         assert [len(row) for row in detail._text_grid._rows] == [2, 2, 1, 1]
-        assert [len(row) for row in detail._rules_grid._rows] == [2, 2]
+        assert [len(row) for row in detail._rules_grid._rows] == [2, 2, 1]
         assert [len(row) for row in detail._style_grid._rows] == [2, 2, 2, 1, 2]
         assert detail._text_grid._rows[0] == (detail._figure_prefix_row, detail._table_prefix_row)
         assert detail._text_grid._rows[1] == (detail._separator_row, detail._placeholder_row)
         assert detail._rules_grid._rows[0] == (detail._numbering_mode_row, detail._numbering_format_row)
         assert detail._rules_grid._rows[1] == (detail._auto_insert_row, detail._numbering_type_row)
+        assert detail._rules_grid._rows[2] == (detail._table_break_policy_row,)
         assert detail._style_grid._rows[0] == (detail._font_cn_row, detail._size_row)
         assert detail._style_grid._rows[1] == (detail._font_en_row, detail._emphasis_row)
 
@@ -994,6 +1021,7 @@ def test_template_caption_detail_uses_semantic_cards_and_result_language():
             "显示格式",
             "缺失题注",
             "编号类型",
+            "题注-表格分节",
             "行距类型",
             "行距值",
         ):
@@ -1853,6 +1881,9 @@ def test_template_panel_header_footer_supports_page_variant_controls():
         detail._header_alignment_combo.setCurrentIndex(detail._header_alignment_combo.findData("right"))
         detail._different_first_page_toggle.click()
         detail._different_odd_even_toggle.click()
+        detail._section_link_mode_combo.setCurrentIndex(
+            detail._section_link_mode_combo.findData("preserve")
+        )
         detail._page_number_display_combo.setCurrentIndex(detail._page_number_display_combo.findData("total"))
         detail._first_header_mode_combo.setCurrentIndex(detail._first_header_mode_combo.findData("fixed"))
         detail._first_header_alignment_combo.setCurrentIndex(detail._first_header_alignment_combo.findData("left"))
@@ -1889,8 +1920,9 @@ def test_template_panel_header_footer_supports_page_variant_controls():
         header_footer = panel._current_template.header_footer
         assert header_footer.behavior.different_first_page is True
         assert header_footer.behavior.different_odd_even_pages is True
-        assert header_footer.behavior.link_to_previous == "never"
+        assert header_footer.behavior.link_to_previous == "preserve"
         assert header_footer.behavior.preserve_existing_content is False
+        assert "沿用原文的节间关系" in detail._summary_grid.detail_for("header")
         assert header_footer.header_alignment == "right"
         assert header_footer.page_number_template == "第 {page} 页 / 共 {pages} 页"
         assert header_footer.variants.first.header.mode == "fixed"

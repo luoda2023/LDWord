@@ -26,6 +26,7 @@ from src.config.template import TemplateConfig
 from src.qt_api import (
     QCheckBox,
     QLabel,
+    QSize,
     QSizePolicy,
     Qt,
     QVBoxLayout,
@@ -44,7 +45,6 @@ from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.styled_spin_box import StyledSpinBox
 from src.shared.ui.summary_grid import SummaryGridItem
 from src.shared.ui.template_form_layout import (
-    TemplateFormGrid,
     compact_form_column_gap,
     template_form_row,
 )
@@ -96,28 +96,160 @@ def _display_label(combo: StyledComboBox, fallback: str) -> str:
     return text or fallback
 
 
+class _AdaptiveSelectionGrid(QWidget):
+    """Compact left-aligned option grid with stable responsive column tiers."""
+
+    _PREFERRED_COLUMN_WIDTH = 220
+
+    def __init__(
+        self,
+        controls: list[QCheckBox],
+        *,
+        max_columns: int = 4,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._controls = tuple(controls)
+        self._max_columns = max(1, int(max_columns))
+        self._current_columns = 1
+        self._column_gap = compact_form_column_gap()
+        self._row_gap = get_theme().spacing_sm
+
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        for control in self._controls:
+            control.setParent(self)
+            control.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+
+        self._apply_theme()
+        bind_theme(self, self._apply_theme)
+
+    def columns(self) -> int:
+        return self._current_columns
+
+    def column_width(self) -> int:
+        return self._column_width()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        columns = min(self._max_columns, max(1, len(self._controls)))
+        return QSize(
+            self._width_for_columns(columns),
+            self._height_for_columns(columns),
+        )
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API contract
+        return QSize(
+            self._column_width(),
+            self._height_for_columns(self._current_columns),
+        )
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt API contract
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt API contract
+        return self._height_for_columns(self._columns_for_width(width))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._relayout(event.size().width())
+
+    def showEvent(self, event) -> None:
+        self._relayout(self.width())
+        super().showEvent(event)
+
+    def _available_column_tiers(self) -> tuple[int, ...]:
+        if self._max_columns >= 4:
+            return (4, 2, 1)
+        if self._max_columns == 3:
+            return (3, 2, 1)
+        if self._max_columns == 2:
+            return (2, 1)
+        return (1,)
+
+    def _columns_for_width(self, width: int) -> int:
+        item_count = max(1, len(self._controls))
+        for columns in self._available_column_tiers():
+            resolved = min(columns, item_count)
+            if int(width or 0) >= self._width_for_columns(resolved):
+                return resolved
+        return 1
+
+    def _column_width(self) -> int:
+        hinted_width = max(
+            (
+                max(control.minimumSizeHint().width(), control.sizeHint().width())
+                for control in self._controls
+            ),
+            default=0,
+        )
+        return max(self._PREFERRED_COLUMN_WIDTH, hinted_width)
+
+    def _row_height(self) -> int:
+        return max(
+            (
+                max(
+                    control.minimumHeight(),
+                    control.minimumSizeHint().height(),
+                    control.sizeHint().height(),
+                )
+                for control in self._controls
+            ),
+            default=0,
+        )
+
+    def _width_for_columns(self, columns: int) -> int:
+        resolved = max(1, int(columns))
+        return (
+            resolved * self._column_width()
+            + max(0, resolved - 1) * self._column_gap
+        )
+
+    def _height_for_columns(self, columns: int) -> int:
+        resolved = max(1, int(columns))
+        rows = (
+            (len(self._controls) + resolved - 1) // resolved
+            if self._controls
+            else 0
+        )
+        return rows * self._row_height() + max(0, rows - 1) * self._row_gap
+
+    def _relayout(self, width: int) -> None:
+        columns = self._columns_for_width(width)
+        self._current_columns = columns
+        column_width = self._column_width()
+        row_height = self._row_height()
+        control_width = min(column_width, max(0, int(width or 0)))
+        for index, control in enumerate(self._controls):
+            row = index // columns
+            column = index % columns
+            control.setGeometry(
+                column * (column_width + self._column_gap),
+                row * (row_height + self._row_gap),
+                control_width,
+                row_height,
+            )
+
+        height = self._height_for_columns(columns)
+        self.setMinimumHeight(height)
+        self.setMaximumHeight(height)
+        self.updateGeometry()
+
+    def _apply_theme(self) -> None:
+        theme = get_theme()
+        self._column_gap = int(theme.form_grid_compact_column_gap)
+        self._row_gap = int(theme.spacing_sm)
+        self._relayout(self.width())
+
+
 def _selection_grid(
     controls: list[QCheckBox],
     *,
     parent: QWidget,
-    columns: int = 2,
-) -> TemplateFormGrid:
-    """Lay selection options out on the same responsive grid as detail forms."""
-
-    resolved_columns = max(1, int(columns))
-    for control in controls:
-        control.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    rows = [
-        controls[index : index + resolved_columns]
-        for index in range(0, len(controls), resolved_columns)
-    ]
-    return TemplateFormGrid(
-        rows,
+    columns: int = 4,
+) -> _AdaptiveSelectionGrid:
+    return _AdaptiveSelectionGrid(
+        controls,
         parent=parent,
-        column_gap=compact_form_column_gap(),
-        column_stretches=tuple(1 for _ in range(resolved_columns)),
-        align_trailing_labels=False,
-        stack_slack=24,
+        max_columns=columns,
     )
 
 
@@ -365,10 +497,34 @@ class _SceneFormulaRulesCard(QWidget):
 
         self._workflow_card = Card(parent=self)
         self._workflow_card.set_header("处理步骤", icon_name="list-checks")
-        self._formula_workflow_wrap = _selection_grid(
-            list(self._formula_workflow_checks.values()),
-            parent=self._workflow_card,
+        self._formula_workflow_wrap = QWidget(self._workflow_card)
+        workflow_layout = QVBoxLayout(self._formula_workflow_wrap)
+        workflow_layout.setContentsMargins(0, 0, 0, 0)
+        workflow_layout.setSpacing(get_theme().spacing_sm)
+        self._formula_workflow_grid = _selection_grid(
+            [
+                self._formula_workflow_checks["formula_to_table"],
+                self._formula_workflow_checks["equation_numbering"],
+                self._formula_workflow_checks["formula_style"],
+            ],
+            parent=self._formula_workflow_wrap,
+            columns=3,
         )
+        workflow_layout.addWidget(self._formula_workflow_grid)
+        self._formula_to_table_options = QWidget(self._formula_workflow_wrap)
+        self._formula_to_table_options.setObjectName("scn_formula_to_table_options")
+        formula_to_table_options_layout = QVBoxLayout(self._formula_to_table_options)
+        formula_to_table_options_layout.setContentsMargins(
+            get_theme().checkbox_size + get_theme().spacing_md,
+            0,
+            0,
+            0,
+        )
+        formula_to_table_options_layout.setSpacing(0)
+        formula_to_table_options_layout.addWidget(
+            self._formula_workflow_checks["block_only"]
+        )
+        workflow_layout.addWidget(self._formula_to_table_options)
         self._workflow_card.add_widget(self._formula_workflow_wrap)
 
         self._formula_style_card = Card(parent=self)
@@ -877,6 +1033,13 @@ class _SceneFormulaRulesCard(QWidget):
     def apply_theme(self) -> None:
         theme = get_theme()
         self.layout().setSpacing(theme.template_detail_section_gap)
+        self._formula_workflow_wrap.layout().setSpacing(theme.spacing_sm)
+        self._formula_to_table_options.layout().setContentsMargins(
+            theme.checkbox_size + theme.spacing_md,
+            0,
+            0,
+            0,
+        )
         checkbox_style = build_checkbox_stylesheet(theme)
         for checkbox in (
             *self._formula_style_checks.values(),
@@ -946,14 +1109,15 @@ class _SceneChemTypographyDetail(QWidget):
 
         self._scope_card = Card(parent=self)
         self._scope_card.set_header("处理范围", icon_name="scan-text")
+        self._scope_card.add_header_action(self._chem_all_scope)
         self._chem_scope_wrap = QWidget(self._scope_card)
         scope_layout = QVBoxLayout(self._chem_scope_wrap)
         scope_layout.setContentsMargins(0, 0, 0, 0)
-        scope_layout.setSpacing(get_theme().spacing_sm)
-        scope_layout.addWidget(self._chem_all_scope)
+        scope_layout.setSpacing(0)
         self._chem_scope_grid = _selection_grid(
             list(self._chem_scope_checks.values()),
             parent=self._chem_scope_wrap,
+            columns=4,
         )
         scope_layout.addWidget(self._chem_scope_grid)
         self._scope_card.add_widget(self._chem_scope_wrap)

@@ -66,6 +66,7 @@ class MasterDetailShell:
         detail_object_name: str,
         detail_content_object_name: str,
         nav_background_role: str = "nav",
+        bind_to_theme: bool = True,
     ):
         self.host = host
         self.panel_name = panel_name
@@ -93,7 +94,8 @@ class MasterDetailShell:
         self.layout.addWidget(self.detail_scroll, 1)
 
         self.apply_theme(get_theme())
-        bind_theme(host, lambda: self.apply_theme(get_theme()))
+        if bind_to_theme:
+            bind_theme(host, lambda: self.apply_theme(get_theme()))
 
     def apply_theme(self, theme: AppTheme) -> None:
         self.nav_rail.setFixedWidth(theme.master_detail_nav_width)

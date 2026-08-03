@@ -489,17 +489,32 @@ def _header_summary_value(header_footer) -> str:
 
 
 def _header_summary_detail(header_footer) -> str:
+    behavior = getattr(header_footer, "behavior", None)
+    link_mode = str(
+        getattr(behavior, "link_to_previous", "never") or "never"
+    )
+    link_detail = {
+        "never": "各节分别应用模板",
+        "preserve": "沿用原文的节间关系",
+        "always": "始终沿用前一节",
+    }.get(link_mode, f"跨分节处理：{link_mode}")
     if not bool(getattr(getattr(header_footer, "header", None), "enabled", True)):
-        return "不输出页眉"
+        return f"不输出页眉 / {link_detail}"
     mode = str(header_footer.header_mode or "styleref")
     typography_detail = _typography_detail_text(getattr(header_footer.header, "typography", None))
     position = _header_position_label(header_footer)
     if mode == "none":
-        return "不输出页眉和横线"
+        return f"不输出页眉和横线 / {link_detail}"
     if mode == "fixed":
         text = str(header_footer.header_text or "").strip() or "未填写固定文字"
-        return f"{text} / {position} / {'顶部横线开启' if header_footer.header_border else '顶部横线关闭'} / {typography_detail}"
-    return f"{position} / {typography_detail}"
+        border_detail = (
+            "顶部横线开启" if header_footer.header_border else "顶部横线关闭"
+        )
+        return (
+            f"{text} / {position} / {border_detail} / "
+            f"{typography_detail} / {link_detail}"
+        )
+    return f"{position} / {typography_detail} / {link_detail}"
 
 
 def _footer_summary_value(header_footer) -> str:
@@ -733,13 +748,9 @@ def _page_tiles(cfg: TemplateConfig) -> tuple[TemplateSummaryTileSpec, ...]:
         ),
         TemplateSummaryTileSpec(
             key="header_footer",
-            label="页眉页脚",
+            label="页眉页脚距离",
             value=f"页眉/页脚 {page.header_distance_cm:g}/{page.footer_distance_cm:g} cm",
-            detail=(
-                "链接按语义重建"
-                if cfg.section.header_footer_link_mode == "semantic_rebuild"
-                else "保留源链接"
-            ),
+            detail="相对页面边界",
             icon_name="panel-top",
             preferred_span=4,
         ),
@@ -958,6 +969,11 @@ def _caption_tiles(cfg: TemplateConfig) -> tuple[TemplateSummaryTileSpec, ...]:
         "chapter:seq": "1:1",
         "seq": "1",
     }.get(caption.numbering_format, caption.numbering_format or "1.1")
+    table_break_detail = (
+        "仅删除已确认的题注-表格冗余分节"
+        if caption.table_break_policy == "remove_proven_redundant"
+        else "保留题注-表格原分节"
+    )
     return (
         TemplateSummaryTileSpec(
             key="caption_text",
@@ -974,7 +990,8 @@ def _caption_tiles(cfg: TemplateConfig) -> tuple[TemplateSummaryTileSpec, ...]:
             detail=(
                 f"{numbering_format}  "
                 f"{'缺失时自动补齐' if caption.auto_insert else '缺失时不补齐'}  "
-                f"{'Word 可更新编号' if caption.format_inserted else '固定文本编号'}"
+                f"{'Word 可更新编号' if caption.format_inserted else '固定文本编号'}  "
+                f"{table_break_detail}"
             ),
             icon_name="list-ordered",
             preferred_span=4,

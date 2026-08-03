@@ -46,6 +46,11 @@ class ContentPageBreakPolicy(_StringEnum):
     PRESERVE_EXPLICIT = "preserve_explicit"
 
 
+class ContentFormatMode(_StringEnum):
+    TARGET_DOCUMENT = "target_document"
+    PLAIN_TEXT = "plain_text"
+
+
 class InlineKind(_StringEnum):
     TEXT = "text"
     SOFT_BREAK = "soft_break"
@@ -160,6 +165,7 @@ class ContentInsertionRule:
     heading_policy: ContentHeadingPolicy = ContentHeadingPolicy.PRESERVE
     heading_level_offset: int = 0
     page_break_policy: ContentPageBreakPolicy = ContentPageBreakPolicy.DROP
+    format_mode: ContentFormatMode = ContentFormatMode.TARGET_DOCUMENT
 
     def __post_init__(self) -> None:
         _require_text(self.rule_id, "rule_id")
@@ -172,6 +178,7 @@ class ContentInsertionRule:
         _coerce_enum_field(self, "occurrence_policy", ContentOccurrencePolicy)
         _coerce_enum_field(self, "heading_policy", ContentHeadingPolicy)
         _coerce_enum_field(self, "page_break_policy", ContentPageBreakPolicy)
+        _coerce_enum_field(self, "format_mode", ContentFormatMode)
         if isinstance(self.heading_level_offset, bool) or not isinstance(
             self.heading_level_offset, int
         ):
@@ -187,6 +194,7 @@ class ContentInsertionRule:
             "heading_policy": self.heading_policy.value,
             "heading_level_offset": self.heading_level_offset,
             "page_break_policy": self.page_break_policy.value,
+            "format_mode": self.format_mode.value,
         }
 
     @classmethod
@@ -204,6 +212,10 @@ class ContentInsertionRule:
                 payload.get("heading_level_offset", 0), "heading_level_offset"
             ),
             page_break_policy=str(payload.get("page_break_policy", "drop") or "drop"),
+            format_mode=str(
+                payload.get("format_mode", "target_document")
+                or "target_document"
+            ),
         )
 
 
@@ -734,6 +746,7 @@ def _raise_type(message: str):
 __all__ = [
     "ContentBlock",
     "ContentBlockKind",
+    "ContentFormatMode",
     "ContentHeadingPolicy",
     "ContentInsertionRule",
     "ContentOccurrencePolicy",

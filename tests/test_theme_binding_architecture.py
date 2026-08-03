@@ -2,6 +2,7 @@ import inspect
 import sys
 from pathlib import Path
 
+# ruff: noqa: E402 - this architecture test imports after adding the repo root
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -16,7 +17,7 @@ from src.shared.ui.theme import (
     on_theme_changed,
     set_theme,
 )
-from src.qt_api import QWidget
+from src.qt_api import QVBoxLayout, QWidget
 
 
 def test_bind_theme_source_registers_auto_cleanup():
@@ -96,6 +97,34 @@ def test_bind_theme_defers_hidden_widget_refresh_until_show(qapp):
         assert calls == [target_theme.primary]
     finally:
         widget.close()
+        qapp.processEvents()
+        set_theme(original)
+        flush_theme_changes()
+
+
+def test_bind_theme_refreshes_nested_child_during_parent_show(qapp):
+    original = get_theme()
+    target_theme = OCEAN if original == DARK else DARK
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    child = QWidget(host)
+    layout.addWidget(child)
+    calls: list[str] = []
+
+    try:
+        bind_theme(child, lambda: calls.append(get_theme().bg_card))
+
+        set_theme(target_theme)
+        flush_theme_changes()
+
+        assert calls == []
+
+        host.show()
+        qapp.processEvents()
+
+        assert calls == [target_theme.bg_card]
+    finally:
+        host.close()
         qapp.processEvents()
         set_theme(original)
         flush_theme_changes()

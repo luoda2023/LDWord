@@ -7,31 +7,28 @@ The heavier matrix, fixture, and release evidence remains in
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from src.config.default_delivery_identity import project_default_delivery_identity
 from src.config.scene import ExamPaperConfig, SceneWorkspace, coerce_exam_paper_config
+from src.config.scene_surface_registry import (
+    scene_uses_exam_paper_surface,
+    scene_uses_official_document_surface,
+)
 from src.config.template import TemplateConfig
 from src.shared.engine.exam_paper_style import (
     exam_blank_style_label,
     resolve_exam_blank_style,
 )
-from src.config.scene_surface_registry import (
-    scene_uses_exam_paper_surface,
-    scene_uses_official_document_surface,
-)
 from src.ui.panels.scene_product_summary_projection import (
-    build_input_profile_summary_items,
     build_product_scene_overview_summary_items,
-    material_schema_display_name,
     scene_document_scope_display_name,
 )
 from src.ui.panels.style_source_projection import (
     StyleSourceProjection,
     build_style_source_projection,
 )
-from src.ui.panels.workbench.execution_flow_projection import standard_execution_flow_steps
 
 
 @dataclass(frozen=True)
@@ -41,14 +38,6 @@ class SceneOverviewTaskSpec:
     numbering_label: str
     suitable_for: str
     boundary_note: str
-
-
-@dataclass(frozen=True)
-class SceneRunStepSpec:
-    key: str
-    title: str
-    detail: str
-    icon_name: str = "circle"
 
 
 @dataclass(frozen=True)
@@ -83,7 +72,6 @@ class SceneEvidenceLinkSpec:
 @dataclass(frozen=True)
 class SceneOverviewSpec:
     task: SceneOverviewTaskSpec
-    run_steps: tuple[SceneRunStepSpec, ...]
     style_source: StyleSourceProjection
     key_settings: tuple[SceneOverviewRowSpec, ...]
     risk_notices: tuple[SceneRiskNoticeSpec, ...]
@@ -143,8 +131,6 @@ def build_scene_overview_spec(
     template_preview_action: str = "",
 ) -> SceneOverviewSpec:
     summary = _summary_item_map(scene)
-    input_item = summary.get("input_profile")
-    risk_item = summary.get("object_preflight")
     output_item = summary.get("delivery")
     style_source = build_style_source_projection(
         scene,
@@ -155,13 +141,6 @@ def build_scene_overview_spec(
 
     return SceneOverviewSpec(
         task=build_scene_task_summary(scene, template_label=template_label, summary=summary),
-        run_steps=build_scene_run_preview_steps(
-            scene,
-            template_label=template_label,
-            input_summary=_item_value(input_item, "Word 文档"),
-            risk_summary=_risk_setting_summary(risk_item),
-            output_summary=_item_value(output_item, "最终 Word"),
-        ),
         style_source=style_source,
         key_settings=build_scene_key_setting_rows(
             scene,
@@ -169,7 +148,6 @@ def build_scene_overview_spec(
             template_label=template_label,
             template_preview_action=template_preview_action,
             style_source=style_source,
-            input_summary=_input_setting_summary(scene, input_item),
             output_summary=_output_setting_summary(output_item),
         ),
         risk_notices=build_scene_risk_notices(scene, summary=summary),
@@ -202,54 +180,6 @@ def build_scene_task_summary(
     )
 
 
-def build_scene_run_preview_steps(
-    scene: SceneWorkspace,
-    *,
-    template_label: str = "",
-    input_summary: str = "Word 文档",
-    risk_summary: str = "检查高风险 Word 对象",
-    output_summary: str = "最终 Word",
-) -> tuple[SceneRunStepSpec, ...]:
-    if _is_exam_scene(scene):
-        return _build_exam_run_preview_steps()
-    template = _clean_first_screen_text(
-        str(template_label or "").strip() or _template_label_from_scene(scene)
-    )
-    flow = {step.key: step for step in standard_execution_flow_steps()}
-    return (
-        SceneRunStepSpec(
-            key=flow["read"].key,
-            title=flow["read"].title,
-            detail=f"读取 {input_summary}",
-            icon_name=flow["read"].icon_name,
-        ),
-        SceneRunStepSpec(
-            key=flow["preflight"].key,
-            title=flow["preflight"].title,
-            detail=_shorten_sentence(risk_summary),
-            icon_name=flow["preflight"].icon_name,
-        ),
-        SceneRunStepSpec(
-            key=flow["format"].key,
-            title=flow["format"].title,
-            detail=f"按“{template}”统一主要样式",
-            icon_name=flow["format"].icon_name,
-        ),
-        SceneRunStepSpec(
-            key=flow["report"].key,
-            title=flow["report"].title,
-            detail="记录提醒和处理结果",
-            icon_name=flow["report"].icon_name,
-        ),
-        SceneRunStepSpec(
-            key=flow["deliver"].key,
-            title=flow["deliver"].title,
-            detail=f"生成{output_summary}",
-            icon_name=flow["deliver"].icon_name,
-        ),
-    )
-
-
 def build_scene_key_setting_rows(
     scene: SceneWorkspace,
     *,
@@ -257,7 +187,6 @@ def build_scene_key_setting_rows(
     template_label: str = "",
     template_preview_action: str = "",
     style_source: StyleSourceProjection | None = None,
-    input_summary: str = "Word 文档",
     output_summary: str = "最终 Word",
 ) -> tuple[SceneOverviewRowSpec, ...]:
     if style_source is None:
@@ -271,20 +200,42 @@ def build_scene_key_setting_rows(
         return _build_exam_key_setting_rows(scene)
     rows: list[SceneOverviewRowSpec] = [
         SceneOverviewRowSpec(
-            key="materials",
-            label="资料包",
-            summary=_material_package_summary(scene),
-            target_card_id="assets",
-            icon_name="package",
-            status=_material_package_status(scene),
-            action_label="设置",
-        ),
-        SceneOverviewRowSpec(
             key="scope",
             label="处理范围",
             summary=_scope_setting_summary(scene),
             target_card_id="scn_rules",
             icon_name="scan-text",
+            action_label="设置",
+        ),
+        SceneOverviewRowSpec(
+            key="numbering",
+            label="编号策略",
+            summary=(
+                "重建编号"
+                if bool(getattr(scene, "strict_mode", False))
+                else "保留原编号"
+            ),
+            target_card_id="scn_rules",
+            icon_name="list-ordered",
+            status="当前设置",
+            action_label="设置",
+        ),
+        SceneOverviewRowSpec(
+            key="input_cleanup",
+            label="输入清理",
+            summary=_input_cleanup_setting_summary(scene),
+            target_card_id="scn_rules",
+            icon_name="sliders-horizontal",
+            status="方案规则",
+            action_label="设置",
+        ),
+        SceneOverviewRowSpec(
+            key="watermark",
+            label="文档水印",
+            summary=_watermark_setting_summary(scene),
+            target_card_id="scn_rules",
+            icon_name="shield-check",
+            status="已启用" if bool(scene.watermark.enabled) else "未启用",
             action_label="设置",
         ),
     ]
@@ -300,21 +251,49 @@ def build_scene_key_setting_rows(
                 action_label="设置",
             )
         )
-    if _should_show_delivery_row(scene):
-        rows.append(
-            SceneOverviewRowSpec(
-                key="delivery",
-                label="交付结果",
-                summary=_delivery_setting_summary(scene, output_summary),
-                target_card_id="scn_output",
-                icon_name="file-output",
-                status="特殊交付",
-                action_label="设置",
-            )
+    rows.append(
+        SceneOverviewRowSpec(
+            key="delivery",
+            label="生成结果",
+            summary=_delivery_setting_summary(scene, output_summary),
+            target_card_id="scn_output",
+            icon_name="folder-output",
+            status="交付内容",
+            action_label="设置",
         )
+    )
     if scene_uses_official_document_surface(scene):
         rows = [row for row in rows if row.key != "scope"]
     return tuple(rows)
+
+
+def _input_cleanup_setting_summary(scene: SceneWorkspace) -> str:
+    policy = str(scene.input_source_profile.markdown_policy or "disabled").strip()
+    policy_labels = {
+        "disabled": "Markdown 不处理",
+        "cleanup_only": "Markdown 自动清理残留",
+        "preview_and_cleanup": "Markdown 预览后清理",
+    }
+    parts: list[str] = []
+    accepted_formats = {
+        str(value or "").strip().casefold()
+        for value in list(scene.input_source_profile.accepted_formats or ())
+    }
+    if accepted_formats.intersection({"md", "markdown"}) or policy != "disabled":
+        parts.append(policy_labels.get(policy, f"Markdown：{policy}"))
+    parts.append(
+        "空白规范化已开启"
+        if bool(scene.module_switches.get("whitespace_normalize", False))
+        else "空白规范化未开启"
+    )
+    return "；".join(parts)
+
+
+def _watermark_setting_summary(scene: SceneWorkspace) -> str:
+    if not bool(scene.watermark.enabled):
+        return "未启用文字水印"
+    text = str(scene.watermark.text or "").strip()
+    return f"已启用：{text}" if text else "已启用，尚未填写水印文本"
 
 
 def _scene_uses_reference_format(scene: SceneWorkspace) -> bool:
@@ -375,41 +354,6 @@ def _build_exam_key_setting_rows(scene: SceneWorkspace) -> tuple[SceneOverviewRo
             icon_name="settings",
             status="执行时填写",
             action_label="查看",
-        ),
-    )
-
-
-def _build_exam_run_preview_steps() -> tuple[SceneRunStepSpec, ...]:
-    return (
-        SceneRunStepSpec(
-            key="exam_import",
-            title="导入试卷内容",
-            detail="在工作台粘贴或选择 Markdown、Word",
-            icon_name="file-text",
-        ),
-        SceneRunStepSpec(
-            key="exam_fields",
-            title="填写考试信息",
-            detail="标题、科目、时间、满分由本次任务填写",
-            icon_name="settings",
-        ),
-        SceneRunStepSpec(
-            key="exam_structure",
-            title="检查题目结构",
-            detail="确认大题、小题、选项和分值",
-            icon_name="list",
-        ),
-        SceneRunStepSpec(
-            key="exam_style",
-            title="套入试卷样式",
-            detail="使用试卷卷面装配页面",
-            icon_name="file-text",
-        ),
-        SceneRunStepSpec(
-            key="exam_deliver",
-            title="生成 Word 试卷",
-            detail="按工作台本次设置输出 Word 文件",
-            icon_name="book-open",
         ),
     )
 
@@ -553,8 +497,6 @@ def first_screen_texts(spec: SceneOverviewSpec) -> tuple[str, ...]:
         spec.task.suitable_for,
         spec.task.boundary_note,
     ]
-    for step in spec.run_steps:
-        texts.extend((step.title, step.detail))
     for row in spec.key_settings:
         texts.extend((row.label, row.summary, row.status))
     return tuple(texts)
@@ -574,48 +516,6 @@ def _summary_item_map(scene: SceneWorkspace) -> dict[str, object]:
 
 def _is_exam_scene(scene: SceneWorkspace) -> bool:
     return scene_uses_exam_paper_surface(scene)
-
-
-def _input_setting_summary(scene: SceneWorkspace, input_item: object | None) -> str:
-    parts = [_item_value(input_item, "Word 文档")]
-    input_items = {item.key: item for item in build_input_profile_summary_items(scene)}
-    materials = input_items.get("materials")
-    if materials is not None:
-        parts.append("资料包" + _item_value(materials, "可选"))
-    return "，".join(part for part in parts if part)
-
-
-def _material_package_summary(scene: SceneWorkspace) -> str:
-    profile = scene.input_source_profile
-    schema_names = _material_schema_names(scene)
-    has_material_rules = bool(
-        schema_names
-        or getattr(profile, "required_material_fields", ())
-        or getattr(profile, "required_image_roles", ())
-    )
-    if not bool(getattr(profile, "require_material_package", False)) and not has_material_rules:
-        return "未开启资料包，只处理当前文档"
-    if schema_names:
-        return "已开启：" + "、".join(schema_names[:3])
-    return "已开启资料包，尚未选择资料包"
-
-
-def _material_package_status(scene: SceneWorkspace) -> str:
-    profile = scene.input_source_profile
-    if not bool(getattr(profile, "require_material_package", False)) and not _material_schema_names(scene):
-        return "未开启"
-    if _material_schema_names(scene):
-        return "已开启"
-    return "待选择"
-
-
-def _risk_setting_summary(risk_item: object | None) -> str:
-    value = _item_value(risk_item, "发现风险先提醒")
-    detail = _item_detail(risk_item, "")
-    text = f"{value}；{detail}"
-    if any(word in text for word in ("跳过", "阻断", "停止", "严格保护")):
-        return "发现风险会先提醒，高风险内容不会自动改"
-    return "发现风险会先提醒"
 
 
 def _output_setting_summary(output_item: object | None) -> str:
@@ -638,26 +538,6 @@ def _manual_setting_summary(item: object | None) -> str:
         _item_detail(item, _item_value(item, "有事项需确认"))
     )
     return f"请确认：{_shorten_sentence(detail, max_chars=54)}"
-
-
-def _should_show_delivery_row(scene: SceneWorkspace) -> bool:
-    presets = list(getattr(scene, "delivery_presets", ()) or ())
-    identity = project_default_delivery_identity(scene)
-    if not identity.is_ok:
-        return True
-    if len(presets) > 1:
-        return True
-    default = identity.preset
-    artifacts = getattr(default, "artifacts", None)
-    if bool(getattr(default, "include_structured_intermediate", False)):
-        return True
-    if getattr(default, "content_visibility_rules", None):
-        return True
-    if bool(getattr(artifacts, "material_manifest", False)):
-        return True
-    if bool(getattr(artifacts, "material_package", False)):
-        return True
-    return bool(artifacts is not None and not bool(getattr(artifacts, "final_docx", True)))
 
 
 def _delivery_setting_summary(scene: SceneWorkspace, fallback: str) -> str:
@@ -715,22 +595,6 @@ def _template_label_from_scene(scene: SceneWorkspace) -> str:
     return (
         str(scene.template_id or "").strip()
         or "当前模板"
-    )
-
-
-def _material_schema_names(scene: SceneWorkspace) -> tuple[str, ...]:
-    profile = scene.input_source_profile
-    schema_ids = [
-        str(value or "").strip()
-        for value in (
-            getattr(profile, "material_schema_id", ""),
-            *list(getattr(profile, "material_schema_ids", ()) or ()),
-        )
-        if str(value or "").strip()
-    ]
-    return tuple(
-        material_schema_display_name(schema_id)
-        for schema_id in dict.fromkeys(schema_ids)
     )
 
 
@@ -937,12 +801,10 @@ __all__ = [
     "SceneOverviewSpec",
     "SceneOverviewTaskSpec",
     "SceneRiskNoticeSpec",
-    "SceneRunStepSpec",
     "build_scene_evidence_links",
     "build_scene_key_setting_rows",
     "build_scene_overview_spec",
     "build_scene_risk_notices",
-    "build_scene_run_preview_steps",
     "build_scene_task_summary",
     "first_screen_forbidden_terms",
     "first_screen_texts",

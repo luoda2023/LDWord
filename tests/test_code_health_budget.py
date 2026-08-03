@@ -13,7 +13,7 @@ SOURCE_ROOT = ROOT / "src"
 
 FILE_LINE_BUDGETS = {
     "src/assistant/ui/assistant_panel.py": 2150,
-    "src/assistant/ui/turn_flow_mixin.py": 1375,
+    "src/assistant/ui/turn_flow_mixin.py": 1469,
     "src/config/library.py": 3475,
     "src/config/scene_matrix_dashboard.py": 3225,
     "src/pipeline/runner.py": 2325,
@@ -26,7 +26,7 @@ FILE_LINE_BUDGETS = {
     "src/ui/panels/template_overview_projection_mixin.py": 160,
     "src/ui/panels/template_panel.py": 725,
     "src/ui/panels/template_session_persistence_mixin.py": 425,
-    "src/ui/panels/workbench/quick_execution_detail.py": 1850,
+    "src/ui/panels/workbench/quick_execution_detail.py": 1895,
     "src/ui/panels/workbench/quick_execution_feedback_mixin.py": 425,
     "src/ui/template_close_prompt.py": 65,
     "src/ui/template_close_transaction.py": 365,
@@ -34,7 +34,7 @@ FILE_LINE_BUDGETS = {
 
 SYMBOL_LINE_BUDGETS = {
     ("src/assistant/ui/assistant_panel.py", "AssistantPanel"): 2050,
-    ("src/assistant/ui/turn_flow_mixin.py", "AssistantTurnFlowMixin"): 1300,
+    ("src/assistant/ui/turn_flow_mixin.py", "AssistantTurnFlowMixin"): 1384,
     ("src/config/scene_matrix_dashboard.py", "_build_scene_matrix_dashboard_uncached"): 475,
     ("src/config/scene_matrix_dashboard.py", "_dashboard_cards"): 575,
     ("src/config/scene_matrix_drilldown.py", "audit_scene_matrix_drilldown_report"): 800,

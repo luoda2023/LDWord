@@ -20,6 +20,7 @@ from src.config.feature_configs import (
     default_continuous_page_number_phases,
 )
 from src.config.migration import (
+    apply_default_header_footer_typography,
     normalize_header_footer_payload,
     normalize_page_scope_selectors,
 )
@@ -251,6 +252,7 @@ def _load_user_presets() -> dict[str, HeaderFooterPresetEntry]:
                         )
         else:
             config_payload = normalize_header_footer_payload(config_payload)
+        apply_default_header_footer_typography(config_payload)
 
         used_labels.add(normalized_label)
         presets[preset_id] = {

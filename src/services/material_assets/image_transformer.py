@@ -7,16 +7,17 @@ runtime fields while transforming pixels, and never overwrites the source.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from hashlib import sha256
-from io import BytesIO
 import json
 import os
-from pathlib import Path
 import re
 import sys
 import threading
 import warnings
+from dataclasses import dataclass
+from functools import lru_cache
+from hashlib import sha256
+from io import BytesIO
+from pathlib import Path
 from typing import Mapping
 
 from PIL import (
@@ -26,7 +27,11 @@ from PIL import (
     ImageFont,
     ImageOps,
     UnidentifiedImageError,
+)
+from PIL import (
     __version__ as PILLOW_VERSION,
+)
+from PIL import (
     features as pillow_features,
 )
 
@@ -36,6 +41,11 @@ from src.config.image_materials import (
     ImageWatermarkTextSource,
     ResolvedImageWatermark,
 )
+from src.shared.engine.font_resolver import (
+    CN_ALIASES,
+    EN_ALIASES,
+    canonicalize_font_name,
+)
 from src.shared.engine.material_token_contract import (
     MaterialTokenKind,
     parse_material_token,
@@ -43,9 +53,10 @@ from src.shared.engine.material_token_contract import (
 from src.shared.engine.material_token_router import MATERIAL_TOKEN_PATTERN
 from src.shared.engine.prepared_image import (
     IMAGE_TRANSFORM_CONTRACT,
+)
+from src.shared.engine.prepared_image import (
     PreparedImage as _PreparedImage,
 )
-
 
 IMAGE_TRANSFORM_ENGINE_VERSION = "material-image-transform-v1"
 IMAGE_ORIENTATION_COLOR_CONTRACT = "exif-transpose-srgb-v1"
@@ -107,6 +118,7 @@ def resolve_image_watermark(
     runtime_text: str = "",
     font_path: str | Path | None = None,
     font_identity: str = "",
+    font_family: str = "",
 ) -> ResolvedImageWatermark:
     """Resolve a configuration template exactly once at the Freeze boundary."""
 
@@ -205,6 +217,7 @@ def resolve_image_watermark(
     font_resolution = resolve_watermark_font(
         resolved_text,
         candidate_paths=() if font_path is None else (font_path,),
+        font_family=font_family,
     )
     resolved_font_path = Path(font_resolution.path)
     font_bytes = resolved_font_path.read_bytes()
@@ -236,6 +249,7 @@ def resolve_watermark_font(
     text: str,
     *,
     candidate_paths: tuple[str | Path, ...] = (),
+    font_family: str = "",
 ) -> WatermarkFontResolution:
     """Resolve a readable font file with glyph coverage for CJK watermark text."""
 
@@ -244,6 +258,7 @@ def resolve_watermark_font(
             "empty_watermark_text", "Watermark text is required to resolve a font."
         )
     candidates = [Path(item) for item in candidate_paths]
+    candidates.extend(_font_family_candidates(font_family))
     candidates.extend(_default_watermark_font_candidates())
     seen: set[str] = set()
     for candidate in candidates:
@@ -496,6 +511,165 @@ def _validated_font_path(font_path: str | Path | None) -> Path:
             "watermark_font_missing", f"Watermark font file is unavailable: {path}", path=str(path)
         )
     return path
+
+
+@lru_cache(maxsize=64)
+def _font_family_candidates(font_family: str) -> tuple[Path, ...]:
+    """Return installed font files matching an editable UI family name."""
+
+    family_names = _font_family_names(font_family)
+    if not family_names:
+        return ()
+
+    candidates: list[Path] = []
+    if sys.platform == "win32":
+        candidates.extend(_windows_registered_font_candidates(family_names))
+
+    target_keys = tuple(_normalize_family_name(name) for name in family_names)
+    for directory in _watermark_font_directories():
+        if not directory.is_dir():
+            continue
+        try:
+            files = tuple(directory.iterdir())
+        except OSError:
+            continue
+        ranked: list[tuple[int, str, Path]] = []
+        for path in files:
+            if path.suffix.casefold() not in {".ttf", ".otf", ".ttc"}:
+                continue
+            stem_key = _normalize_family_name(path.stem)
+            score = next(
+                (
+                    index
+                    for index, target_key in enumerate(target_keys)
+                    if stem_key == target_key
+                ),
+                None,
+            )
+            if score is not None:
+                ranked.append((score, path.name.casefold(), path))
+        candidates.extend(path for _score, _name, path in sorted(ranked))
+    return tuple(dict.fromkeys(candidates))
+
+
+def _font_family_names(font_family: str) -> tuple[str, ...]:
+    requested = str(font_family or "").strip()
+    if not requested:
+        return ()
+    canonical = canonicalize_font_name(requested)
+    names: list[str] = [requested, canonical]
+    names.extend(CN_ALIASES.get(canonical, ()))
+    names.extend(EN_ALIASES.get(canonical, ()))
+    names.extend(
+        {
+            "华文中宋": ("STZhongsong", "stzhongs"),
+            "华文楷体": ("STKaiti", "stkaiti"),
+        }.get(canonical, ())
+    )
+    return tuple(dict.fromkeys(name for name in names if name))
+
+
+def _windows_registered_font_candidates(
+    family_names: tuple[str, ...],
+) -> tuple[Path, ...]:
+    try:
+        import winreg
+    except ImportError:
+        return ()
+
+    target_keys = tuple(_normalize_family_name(name) for name in family_names)
+    locations = (
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts",
+        ),
+        (
+            winreg.HKEY_CURRENT_USER,
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts",
+        ),
+    )
+    ranked: list[tuple[int, int, str, Path]] = []
+    for location_index, (hive, key_path) in enumerate(locations):
+        try:
+            with winreg.OpenKey(hive, key_path) as key:
+                index = 0
+                while True:
+                    try:
+                        display_name, raw_path, _kind = winreg.EnumValue(key, index)
+                    except OSError:
+                        break
+                    index += 1
+                    path = _registered_font_path(raw_path)
+                    if path is None:
+                        continue
+                    display = re.sub(
+                        r"\s*\((?:TrueType|OpenType)\)\s*$",
+                        "",
+                        str(display_name or ""),
+                        flags=re.IGNORECASE,
+                    )
+                    display_keys = tuple(
+                        _normalize_family_name(part)
+                        for part in display.split("&")
+                        if part.strip()
+                    )
+                    score = next(
+                        (
+                            target_index
+                            for target_index, target_key in enumerate(target_keys)
+                            if target_key in display_keys
+                        ),
+                        None,
+                    )
+                    if score is not None:
+                        ranked.append(
+                            (score, location_index, path.name.casefold(), path)
+                        )
+        except OSError:
+            continue
+    return tuple(path for _score, _location, _name, path in sorted(ranked))
+
+
+def _registered_font_path(raw_path: object) -> Path | None:
+    value = str(raw_path or "").strip()
+    if not value:
+        return None
+    path = Path(os.path.expandvars(value))
+    if path.is_absolute() and path.is_file():
+        return path
+    for directory in _watermark_font_directories():
+        candidate = directory / value
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _watermark_font_directories() -> tuple[Path, ...]:
+    if sys.platform == "win32":
+        return (
+            Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts",
+            Path.home() / "AppData" / "Local" / "Microsoft" / "Windows" / "Fonts",
+        )
+    if sys.platform == "darwin":
+        return (
+            Path("/System/Library/Fonts"),
+            Path("/Library/Fonts"),
+            Path.home() / "Library" / "Fonts",
+        )
+    return (
+        Path("/usr/share/fonts/opentype/noto"),
+        Path("/usr/share/fonts/truetype/wqy"),
+        Path("/usr/share/fonts/truetype/dejavu"),
+        Path.home() / ".local" / "share" / "fonts",
+    )
+
+
+def _normalize_family_name(value: str) -> str:
+    return "".join(
+        char
+        for char in str(value or "").strip().casefold()
+        if char.isalnum()
+    )
 
 
 def _default_watermark_font_candidates() -> tuple[Path, ...]:

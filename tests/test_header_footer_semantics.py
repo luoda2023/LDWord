@@ -22,6 +22,7 @@ from src.modules.structure.heading_recognition import DocSection, DocTree
 from src.pipeline.context import PipelineContext
 from src.pipeline.tracker import ChangeTracker
 from src.shared.engine.field_builder import iter_field_instructions
+from src.shared.engine.font_resolver import resolve_font
 from src.shared.engine.ooxml_ops import qn
 
 
@@ -178,6 +179,30 @@ def test_header_footer_header_and_footer_typography_are_independent():
     assert footer_run.font.italic is True
 
 
+def test_default_header_footer_typography_is_written_to_document():
+    doc = Document()
+    config = ResolvedConfig()
+    config.header_footer.header_mode = "fixed"
+    config.header_footer.header_text = "默认页眉"
+    config.header_footer.footer.content_mode = "fixed"
+    config.header_footer.footer_text = "Default Footer"
+    config.header_footer.page_number_enabled = False
+
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), PipelineContext())
+
+    runs = (
+        doc.sections[0].header.paragraphs[0].runs[0],
+        doc.sections[0].footer.paragraphs[0].runs[0],
+    )
+    for run in runs:
+        fonts = run._element.get_or_add_rPr().get_or_add_rFonts()
+        assert run.font.name == resolve_font("Times New Roman", lang="en")
+        assert fonts.get(qn("w:eastAsia")) == resolve_font("宋体", lang="cn")
+        assert run.font.size.pt == 10.5
+        assert run.font.bold is False
+        assert run.font.italic is False
+
+
 def test_header_footer_config_exposes_word_variant_model():
     cfg = HeaderFooterConfig()
 
@@ -195,6 +220,56 @@ def test_header_footer_config_exposes_word_variant_model():
     assert cfg.header.border_style.width_pt == 0.5
     assert cfg.page_number_template == "{page}"
     assert cfg.header.typography is not cfg.footer.typography
+    assert cfg.header.typography.font_cn == "宋体"
+    assert cfg.header.typography.font_en == "Times New Roman"
+    assert cfg.header.typography.size_pt == 10.5
+    assert cfg.footer.typography.font_cn == "宋体"
+    assert cfg.footer.typography.font_en == "Times New Roman"
+    assert cfg.footer.typography.size_pt == 10.5
+
+
+def test_header_footer_preserve_strategy_keeps_source_section_links():
+    doc = Document()
+    doc.add_paragraph("第一节")
+    doc.add_section()
+    doc.add_paragraph("第二节")
+    assert doc.sections[1].header.is_linked_to_previous is True
+    assert doc.sections[1].footer.is_linked_to_previous is True
+
+    config = ResolvedConfig()
+    config.header_footer.behavior.link_to_previous = "preserve"
+    config.header_footer.header_mode = "fixed"
+    config.header_footer.header_text = "共享页眉"
+
+    HeaderFooterModule().apply(doc, config, ChangeTracker(), PipelineContext())
+
+    assert doc.sections[1].header.is_linked_to_previous is True
+    assert doc.sections[1].footer.is_linked_to_previous is True
+    assert doc.sections[1].header.paragraphs[0].text == "共享页眉"
+
+
+def test_template_normalization_moves_feature_policies_out_of_section():
+    payload = normalize_template_payload(
+        {
+            "section": {
+                "boundary_mode": "preserve_source",
+                "section_break_type": None,
+                "empty_break_policy": "preserve",
+                "caption_table_break_policy": "remove_proven_redundant",
+                "header_footer_link_mode": "preserve_source",
+            },
+            "caption": {},
+            "header_footer": {"behavior": {"link_to_previous": "never"}},
+        }
+    )
+
+    assert set(payload["section"]) == {
+        "boundary_mode",
+        "section_break_type",
+        "empty_break_policy",
+    }
+    assert payload["caption"]["table_break_policy"] == "remove_proven_redundant"
+    assert payload["header_footer"]["behavior"]["link_to_previous"] == "preserve"
 
 
 def test_header_footer_template_normalization_preserves_word_variant_model():

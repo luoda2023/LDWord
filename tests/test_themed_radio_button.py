@@ -1,12 +1,13 @@
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.qt_api import QApplication
-from src.shared.ui.themed_radio_button import ThemedRadioButton
+from src.shared.ui.themed_radio_button import ThemedRadioButton, _radio_label_color
 
 
 def _non_transparent_bounds(image):
@@ -18,6 +19,19 @@ def _non_transparent_bounds(image):
                 xs.append(x)
                 ys.append(y)
     return min(xs), min(ys), max(xs), max(ys)
+
+
+def test_themed_radio_label_color_uses_semantic_theme_tokens():
+    theme = SimpleNamespace(
+        selection_label_color="#123456",
+        selection_label_checked_color="#234567",
+        selection_label_disabled_color="#345678",
+    )
+
+    assert _radio_label_color(theme, enabled=True, checked=False).name() == "#123456"
+    assert _radio_label_color(theme, enabled=True, checked=True).name() == "#234567"
+    assert _radio_label_color(theme, enabled=False, checked=False).name() == "#345678"
+    assert _radio_label_color(theme, enabled=False, checked=True).name() == "#345678"
 
 
 def test_themed_radio_indicator_rect_is_square():

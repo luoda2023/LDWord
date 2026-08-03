@@ -78,6 +78,19 @@ class HeaderFooterModule(BaseModule):
         context: PipelineContext,
     ) -> list[Issue]:
         issues: list[Issue] = []
+        behavior = getattr(config.header_footer, "behavior", None)
+        link_mode = str(
+            getattr(behavior, "link_to_previous", "never") or "never"
+        ).strip().lower()
+        if link_mode not in {"never", "always", "preserve"}:
+            issues.append(
+                Issue(
+                    level="error",
+                    module_name=self.meta.name,
+                    message=f"不支持的页眉页脚节间继承策略：{link_mode}",
+                    location="header_footer.behavior.link_to_previous",
+                )
+            )
         protected_boundaries = _protected_section_boundaries(doc)
         if protected_boundaries:
             issues.append(
@@ -149,7 +162,7 @@ class HeaderFooterModule(BaseModule):
                 )
             else:
                 if not plan.header_visible or header_mode == "none":
-                    _clear_header(section)
+                    _clear_header(section, hf_cfg)
                     count += 1
                 elif header_mode == "fixed":
                     _set_fixed_header(section, hf_cfg)
@@ -289,7 +302,7 @@ def _render_header_footer_variant(section, hf_cfg, variant_name: str, plan, conf
     header_content = _resolve_variant_content(hf_cfg, variant_name, "header")
     footer_content = _resolve_variant_content(hf_cfg, variant_name, "footer")
     if not header_enabled or not plan.header_visible:
-        if _clear_part(header_part):
+        if _clear_part(header_part, hf_cfg):
             count += 1
         _set_part_header_border(header_part, False, hf_cfg)
     elif _render_header_content(header_part, header_content, hf_cfg, plan, config):
@@ -377,10 +390,10 @@ def _render_footer_content(
         plan,
     )
     if not text_visible and not page_number_visible:
-        _clear_part(part)
+        _clear_part(part, hf_cfg)
         return True
 
-    _clear_part(part)
+    _clear_part(part, hf_cfg)
     para = part.paragraphs[0] if part.paragraphs else part.add_paragraph()
     text_alignment = _normalize_footer_alignment(getattr(content, "alignment", "center"))
     page_alignment = _page_number_alignment_for_variant(hf_cfg, variant_name)
@@ -601,7 +614,7 @@ def _render_content_part(
     if _global_preserve_existing_content(hf_cfg) and _part_has_content(part):
         return False
     if mode == "none":
-        _clear_part(part)
+        _clear_part(part, hf_cfg)
         return True
     if part_name == "footer" and not page_number_visible:
         if footer_text_visible and str(getattr(content, "fixed_text", "") or ""):
@@ -609,20 +622,22 @@ def _render_content_part(
                 part,
                 str(getattr(content, "fixed_text", "") or ""),
                 content,
+                hf_cfg,
             )
-        _clear_part(part)
+        _clear_part(part, hf_cfg)
         return True
     if mode == "fixed":
         text = str(getattr(content, "fixed_text", "") or "") if footer_text_visible else ""
-        return _write_text_part(part, text, content)
+        return _write_text_part(part, text, content, hf_cfg)
     if mode == "styleref":
-        return _write_styleref_part(part, content, plan, config)
+        return _write_styleref_part(part, content, plan, config, hf_cfg)
     if mode in {"page_number", "page_number_with_text"}:
         return _write_template_part(
             part,
             _page_number_template_for_content(content, mode),
             content,
             plan,
+            hf_cfg,
             include_text=footer_text_visible,
         )
     if mode == "template":
@@ -632,10 +647,11 @@ def _render_content_part(
             template,
             content,
             plan,
+            hf_cfg,
             include_text=footer_text_visible,
         )
 
-    _clear_part(part)
+    _clear_part(part, hf_cfg)
     return True
 
 
@@ -664,8 +680,8 @@ def _part_has_content(part) -> bool:
     return False
 
 
-def _write_text_part(part, text: str, content) -> bool:
-    _clear_part(part)
+def _write_text_part(part, text: str, content, hf_cfg) -> bool:
+    _clear_part(part, hf_cfg)
     para = part.paragraphs[0] if part.paragraphs else part.add_paragraph()
     _set_paragraph_alignment(para, getattr(content, "alignment", "center"))
     if text:
@@ -673,8 +689,8 @@ def _write_text_part(part, text: str, content) -> bool:
     return True
 
 
-def _write_styleref_part(part, content, plan, config) -> bool:
-    _clear_part(part)
+def _write_styleref_part(part, content, plan, config, hf_cfg) -> bool:
+    _clear_part(part, hf_cfg)
     para = part.paragraphs[0] if part.paragraphs else part.add_paragraph()
     _set_paragraph_alignment(para, getattr(content, "alignment", "center"))
     style_ref = str(getattr(content, "styleref_style", "") or "").strip()
@@ -708,10 +724,11 @@ def _write_template_part(
     template: str,
     content,
     plan,
+    hf_cfg,
     *,
     include_text: bool = True,
 ) -> bool:
-    _clear_part(part)
+    _clear_part(part, hf_cfg)
     para = part.paragraphs[0] if part.paragraphs else part.add_paragraph()
     _set_paragraph_alignment(para, getattr(content, "alignment", "center"))
     _add_template_to_paragraph(
@@ -785,7 +802,8 @@ def _page_field_instruction(num_format: str) -> str:
 
 def _set_styleref_header(section, hf_cfg, *, style_ref: str | None = None, include_number: bool = True) -> None:
     header = section.header
-    header.is_linked_to_previous = False
+    if not _prepare_part_for_write(header, hf_cfg):
+        return
 
     for para in header.paragraphs:
         for run in list(para.runs):
@@ -829,7 +847,8 @@ def _add_styleref_to_paragraph(
 
 def _set_fixed_header(section, hf_cfg) -> None:
     header = section.header
-    header.is_linked_to_previous = False
+    if not _prepare_part_for_write(header, hf_cfg):
+        return
 
     for para in header.paragraphs:
         for run in list(para.runs):
@@ -842,24 +861,14 @@ def _set_fixed_header(section, hf_cfg) -> None:
         para.add_run(text)
 
 
-def _clear_header(section) -> None:
+def _clear_header(section, hf_cfg=None) -> None:
     header = section.header
-    header.is_linked_to_previous = False
-
-    if not header.paragraphs:
-        header.add_paragraph()
-    for para in header.paragraphs:
-        _clear_paragraph_runs(para)
+    _clear_part(header, hf_cfg)
 
 
-def _clear_footer(section) -> None:
+def _clear_footer(section, hf_cfg=None) -> None:
     footer = section.footer
-    footer.is_linked_to_previous = False
-
-    if not footer.paragraphs:
-        footer.add_paragraph()
-    for para in footer.paragraphs:
-        _clear_paragraph_runs(para)
+    _clear_part(footer, hf_cfg)
 
 
 def _set_header_border(section, enable: bool, hf_cfg=None) -> None:
@@ -897,7 +906,8 @@ def _set_page_number(
     include_footer_text: bool = True,
 ) -> None:
     footer = section.footer
-    footer.is_linked_to_previous = False
+    if not _prepare_part_for_write(footer, hf_cfg):
+        return
 
     for para in footer.paragraphs:
         _clear_paragraph_runs(para)
@@ -928,7 +938,8 @@ def _set_page_number(
 
 def _set_fixed_footer(section, hf_cfg) -> None:
     footer = section.footer
-    footer.is_linked_to_previous = False
+    if not _prepare_part_for_write(footer, hf_cfg):
+        return
 
     for para in footer.paragraphs:
         _clear_paragraph_runs(para)
@@ -982,9 +993,10 @@ def _set_page_number_format(section, fmt: str = "decimal", *, start: int | None 
         pg_num_type.attrib.pop(qn("w:start"), None)
 
 
-def _clear_page_number_fields(section) -> bool:
+def _clear_page_number_fields(section, hf_cfg=None) -> bool:
     footer = section.footer
-    footer.is_linked_to_previous = False
+    if not _prepare_part_for_write(footer, hf_cfg):
+        return False
 
     changed = False
     for para in footer.paragraphs:
@@ -1045,8 +1057,8 @@ def _clear_paragraph_runs(para) -> None:
             para._element.remove(child)
 
 
-def _clear_part(part) -> bool:
-    if not _prepare_part_for_clear(part):
+def _clear_part(part, hf_cfg=None) -> bool:
+    if not _prepare_part_for_clear(part, hf_cfg):
         return False
     if not part.paragraphs:
         part.add_paragraph()
@@ -1055,9 +1067,8 @@ def _clear_part(part) -> bool:
     return True
 
 
-def _prepare_part_for_clear(part) -> bool:
-    part.is_linked_to_previous = False
-    return True
+def _prepare_part_for_clear(part, hf_cfg=None) -> bool:
+    return _prepare_part_for_write(part, hf_cfg)
 
 
 def _set_paragraph_alignment(para, alignment: str | None) -> None:

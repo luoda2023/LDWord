@@ -3,14 +3,15 @@ from __future__ import annotations
 from hashlib import sha256
 from pathlib import Path
 
-from PIL import Image, ImageChops
 import pytest
+from PIL import Image, ImageChops
 
 from src.config.content_materials import FileAssetRef
 from src.config.image_materials import (
     ImageWatermarkPolicy,
     ImageWatermarkTextSource,
 )
+from src.services.material_assets import image_transformer as image_transformer_module
 from src.services.material_assets.image_transformer import (
     ImageTransformError,
     ImageTransformLimits,
@@ -68,6 +69,32 @@ def test_resolve_watermark_freezes_fields_font_and_hashes(font_path: Path):
     assert resolved.resolved_font_sha256 == _sha(font_path)
     assert resolved.resolved_font_identity == "fixture-font"
     assert "{{" not in resolved.resolved_text
+
+
+def test_resolve_watermark_honors_requested_font_family(
+    font_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    requested: list[str] = []
+
+    def candidates(font_family: str) -> tuple[Path, ...]:
+        requested.append(font_family)
+        return (font_path,)
+
+    monkeypatch.setattr(
+        image_transformer_module,
+        "_font_family_candidates",
+        candidates,
+    )
+
+    resolved = resolve_image_watermark(
+        ImageWatermarkPolicy(enabled=True, text_template="内部资料"),
+        {},
+        font_family="宋体",
+    )
+
+    assert requested == ["宋体"]
+    assert resolved.resolved_font_sha256 == _sha(font_path)
 
 
 @pytest.mark.parametrize(

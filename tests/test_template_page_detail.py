@@ -47,8 +47,14 @@ def test_page_setup_detail_syncs_widget_values_from_template():
         assert detail._page_inputs["gutter_cm"].value() == 0.8
         assert detail._page_inputs["header_distance_cm"].value() == 1.6
         assert detail._section_break_combo.currentData() == "nextPage"
+        assert detail._section_break_combo.itemText(0) == "保留已有分节类型"
+        assert detail._section_policy_hint.isHidden() is False
+        assert detail._section_policy_hint.text() == (
+            "新增语义分节默认从下一页开始，已有分页型分节保持原类型。"
+        )
         assert detail._paper_by_section_row.isHidden() is True
         assert detail._orientation_by_section_row.isHidden() is True
+        assert detail._margin_by_section_row.isHidden() is True
         assert isinstance(detail._summary_grid, SummaryGrid)
         assert detail._summary_grid._tile_style == "module"
         assert len(detail._summary_grid.items()) == 3
@@ -70,10 +76,10 @@ def test_page_setup_detail_syncs_widget_values_from_template():
             == "左右 3.2/3.2 cm / 装订 0.8 cm / 模板边距"
         )
         assert "装订线 0.8 cm" in summary_items["margin_gutter"].tooltip
-        assert summary_items["header_footer"].label == "页眉页脚"
+        assert summary_items["header_footer"].label == "页眉页脚距离"
         assert summary_items["header_footer"].column_span == 4
         assert detail._summary_grid.value_for("header_footer") == "页眉/页脚 1.6/3 cm"
-        assert detail._summary_grid.detail_for("header_footer") == "链接按语义重建"
+        assert detail._summary_grid.detail_for("header_footer") == "相对页面边界"
         assert summary_items["margin_gutter"].detail_emphasis is True
         assert summary_items["header_footer"].detail_emphasis is True
     finally:
@@ -109,8 +115,6 @@ def test_page_setup_detail_round_trips_all_section_layout_policies():
     template.section.boundary_mode = "normalize_all"
     template.section.section_break_type = "oddPage"
     template.section.empty_break_policy = "remove_proven_redundant"
-    template.section.caption_table_break_policy = "remove_proven_redundant"
-    template.section.header_footer_link_mode = "preserve_source"
 
     try:
         detail.set_template(template)
@@ -126,19 +130,15 @@ def test_page_setup_detail_round_trips_all_section_layout_policies():
             "body=portrait, appendix=landscape"
         )
         assert detail._margin_mode_combo.currentData() == "per_section"
+        assert detail._margin_by_section_row.isHidden() is False
         assert detail._margin_by_section_edit.isEnabled() is True
         assert detail._margin_by_section_edit.text() == (
             "appendix=2,2.1,2.2,2.3,0.4,0.8,0.9"
         )
         assert detail._section_break_combo.currentData() == "oddPage"
+        assert detail._section_policy_hint.isHidden() is True
         assert detail._empty_break_policy_combo.currentData() == (
             "remove_proven_redundant"
-        )
-        assert detail._caption_table_break_policy_combo.currentData() == (
-            "remove_proven_redundant"
-        )
-        assert detail._header_footer_link_mode_combo.currentData() == (
-            "preserve_source"
         )
 
         detail._paper_by_section_edit.setText("body=B5, 2=A3")
@@ -147,9 +147,6 @@ def test_page_setup_detail_round_trips_all_section_layout_policies():
         )
         detail._margin_by_section_edit.setText(
             "2=1,1.1,1.2,1.3,0.2,0.6,0.7"
-        )
-        detail._header_footer_link_mode_combo.setCurrentIndex(
-            detail._header_footer_link_mode_combo.findData("semantic_rebuild")
         )
         detail._section_break_combo.setCurrentIndex(
             detail._section_break_combo.findData("evenPage")
@@ -173,7 +170,6 @@ def test_page_setup_detail_round_trips_all_section_layout_policies():
             header_distance_cm=0.6,
             footer_distance_cm=0.7,
         )
-        assert template.section.header_footer_link_mode == "semantic_rebuild"
         assert template.section.section_break_type == "evenPage"
         assert detail.focus_navigation_field(
             "template.page_setup.orientation_by_section"
@@ -183,9 +179,6 @@ def test_page_setup_detail_round_trips_all_section_layout_policies():
         )
         assert detail.focus_navigation_field(
             "template.page_setup.margin_by_section"
-        )
-        assert detail.focus_navigation_field(
-            "template.section.header_footer_link_mode"
         )
     finally:
         detail.close()
@@ -219,6 +212,7 @@ def test_page_setup_detail_blocks_save_for_invalid_or_empty_per_section_map():
             detail._margin_mode_combo.findData("per_section")
         )
         app.processEvents()
+        assert detail._margin_by_section_row.isHidden() is False
         assert "至少填写一个" in detail._validation_alert.message()
         assert detail._save_btn.isEnabled() is False
 
@@ -249,6 +243,12 @@ def test_page_setup_detail_blocks_save_for_invalid_or_empty_per_section_map():
             "appendix": "landscape"
         }
         assert detail._save_btn.isEnabled() is True
+
+        detail._margin_mode_combo.setCurrentIndex(
+            detail._margin_mode_combo.findData("force_template")
+        )
+        app.processEvents()
+        assert detail._margin_by_section_row.isHidden() is True
     finally:
         detail.close()
         app.processEvents()

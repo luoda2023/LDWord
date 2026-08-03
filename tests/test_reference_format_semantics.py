@@ -45,12 +45,11 @@ def test_reference_format_uses_reference_variant_style_with_rule_overrides():
     config.reference_style.hanging_indent_cm = 0.74
     config.reference_style.space_after_pt = 2
     config.reference_style.space_after_unit = "lines"
-    config.reference_style.font_en = "Calibri"
 
     style = _resolve_reference_entry_style(config)
 
     assert style.font_cn == "黑体"
-    assert style.font_en == "Calibri"
+    assert style.font_en == "Arial"
     assert style.size_pt == 11
     assert style.alignment == "left"
     assert style.line_spacing_type == "exact"

@@ -47,6 +47,7 @@ class LegacyFieldTokenRow(QFrame):
     value_committed = Signal(str, str)
     token_renamed = Signal(str, str)
     clear_requested = Signal(str)
+    add_requested = Signal(str)
     remove_requested = Signal(str)
 
     def __init__(
@@ -57,6 +58,9 @@ class LegacyFieldTokenRow(QFrame):
         value: str,
         custom: bool,
         writable: bool,
+        value_writable: bool | None = None,
+        definition_writable: bool | None = None,
+        value_placeholder: str = "填写字段内容",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -80,10 +84,15 @@ class LegacyFieldTokenRow(QFrame):
         self.index_label.setObjectName("asset_row_index")
         self.index_label.setAlignment(Qt.AlignCenter)
 
+        can_edit_value = writable if value_writable is None else value_writable
+        can_edit_definition = (
+            writable if definition_writable is None else definition_writable
+        )
+
         self.token_edit = MaterialTokenEdit(
             f"{{{{@text:{key}}}}}",
             self,
-            editable=custom and writable,
+            editable=custom and can_edit_definition,
             namespace=MaterialTokenNamespace.TEXT,
         )
         self.token_edit.setObjectName("material_v1_field_token")
@@ -92,8 +101,8 @@ class LegacyFieldTokenRow(QFrame):
 
         self.value_edit = QLineEdit(str(value), self)
         self.value_edit.setObjectName("material_v1_field_value")
-        self.value_edit.setPlaceholderText("填写字段内容")
-        self.value_edit.setReadOnly(not writable)
+        self.value_edit.setPlaceholderText(value_placeholder)
+        self.value_edit.setReadOnly(not can_edit_value)
         self.value_edit.editingFinished.connect(self._commit_value)
 
         self.actions = CompactRowActions(self)
@@ -104,6 +113,13 @@ class LegacyFieldTokenRow(QFrame):
             variant="ghost-danger",
             callback=lambda *_: self.clear_requested.emit(self._key),
         )
+        self.add_button = self.actions.add_action(
+            "add",
+            icon_name="plus",
+            tooltip="在当前项后新增字段",
+            variant="outlined-primary",
+            callback=lambda *_: self.add_requested.emit(self._key),
+        )
         self.remove_button = self.actions.add_action(
             "remove",
             icon_name="trash-2",
@@ -111,9 +127,10 @@ class LegacyFieldTokenRow(QFrame):
             variant="outlined-danger",
             callback=lambda *_: self.remove_requested.emit(self._key),
         )
-        self.clear_button.setEnabled(writable and bool(str(value).strip()))
+        self.clear_button.setEnabled(can_edit_value and bool(str(value).strip()))
+        self.add_button.setEnabled(can_edit_definition)
         self.remove_button.setVisible(custom)
-        self.remove_button.setEnabled(custom and writable)
+        self.remove_button.setEnabled(custom and can_edit_definition)
         self.actions.sync_visibility()
 
         layout.addWidget(self.index_label, 0, Qt.AlignVCenter)

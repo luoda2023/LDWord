@@ -80,6 +80,7 @@ def prepare_formatting_input(
             materialized,
             record=record,
             resource_domains=snapshot.resource_domains,
+            content_policy=snapshot.content_policy,
             image_policy=snapshot.image_policy,
             work_dir=work_dir,
         )

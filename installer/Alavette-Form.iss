@@ -27,7 +27,9 @@ AppPublisher={#AppPublisher}
 VersionInfoVersion={#AppVersion}
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
-DefaultDirName={localappdata}\Programs\Alavette Form
+; {autopf} resolves to LocalAppData\Programs for the default per-user mode,
+; and to Program Files only when the user explicitly selects admin mode.
+DefaultDirName={autopf}\Alavette Form
 DefaultGroupName=Alavette Form
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
@@ -41,6 +43,7 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 UsePreviousAppDir=yes
+UsePreviousTasks=yes
 DisableProgramGroupPage=yes
 CloseApplications=yes
 CloseApplicationsFilter={#AppExeName}
@@ -72,7 +75,9 @@ Name: "{group}\Alavette Form"; Filename: "{app}\app\{#AppExeName}"; WorkingDir: 
 Name: "{autodesktop}\Alavette Form"; Filename: "{app}\app\{#AppExeName}"; WorkingDir: "{app}\app"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加快捷方式："; Flags: unchecked
+; Checked for a fresh install; checkedonce avoids restoring a shortcut that a
+; user deliberately removed before an in-place upgrade.
+Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加快捷方式："; Flags: checkedonce
 
 [Run]
 Filename: "{app}\app\{#AppExeName}"; Description: "启动 Alavette Form"; WorkingDir: "{app}\app"; Flags: nowait postinstall skipifsilent

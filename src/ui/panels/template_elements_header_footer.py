@@ -130,6 +130,11 @@ PAGE_NUMBER_VARIANT_DISPLAY_OPTIONS: tuple[tuple[str, str], ...] = (
     *PAGE_NUMBER_DISPLAY_OPTIONS,
 )
 
+SECTION_LINK_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("never", "各节分别应用模板"),
+    ("preserve", "沿用原文的节间关系"),
+)
+
 CUSTOM_SECTION_EXCLUSION_OPTIONS: tuple[tuple[str, str], ...] = (
     ("cover", "封面"),
     ("body", "其余正文"),
@@ -185,6 +190,7 @@ class HeaderFooterDetailSection:
         self._page_plan = PageNumberPlanSection(owner, container=self._page_number_card, embedded=True)
 
         self._build_section_exclusion_form()
+        self._build_section_link_form()
 
         self._page_plan.export_compat_attributes(self)
         self.section = self._normal_page_card
@@ -265,6 +271,10 @@ class HeaderFooterDetailSection:
             "_page_variants_card",
             "_page_variants_form",
             "_page_variant_switch_grid",
+            "_section_link_card",
+            "_section_link_form",
+            "_section_link_mode_combo",
+            "_section_link_mode_row",
             "_header_enabled_toggle",
             "_header_enabled_row",
             "_footer_enabled_toggle",
@@ -1011,6 +1021,27 @@ class HeaderFooterDetailSection:
         self._page_variants_card.add_widget(self._page_variants_form)
         self._owner._editor_layout.addWidget(self._page_variants_card)
 
+    def _build_section_link_form(self) -> None:
+        self._section_link_card = Card(parent=self._owner._editor_column)
+        self._owner._add_card_header(
+            self._section_link_card,
+            "workflow",
+            "跨分节处理",
+        )
+        self._section_link_form = InspectorForm(parent=self._section_link_card)
+        self._section_link_mode_combo = self._options_combo(SECTION_LINK_OPTIONS)
+        self._section_link_mode_combo.currentIndexChanged.connect(
+            self._owner._on_structure_edited
+        )
+        self._section_link_mode_row = self._form_row(
+            "不同分节如何处理",
+            self._section_link_mode_combo,
+            parent=self._section_link_form,
+        )
+        self._section_link_form.add_widget(self._section_link_mode_row)
+        self._section_link_card.add_widget(self._section_link_form)
+        self._owner._editor_layout.addWidget(self._section_link_card)
+
     def _options_combo(self, options: tuple[tuple[str, str], ...]) -> StyledComboBox:
         combo = StyledComboBox(self._owner)
         for value, label in options:
@@ -1437,6 +1468,10 @@ class HeaderFooterDetailSection:
         behavior = getattr(header_footer, "behavior", None)
         self._different_first_page_toggle.setChecked(bool(getattr(behavior, "different_first_page", False)))
         self._different_odd_even_toggle.setChecked(bool(getattr(behavior, "different_odd_even_pages", False)))
+        self._set_combo_by_data(
+            self._section_link_mode_combo,
+            getattr(behavior, "link_to_previous", "never"),
+        )
         self._set_page_number_display_from_template(getattr(header_footer, "page_number_template", "{page}") or "{page}")
         page_number_plan = getattr(header_footer, "page_number_plan", None)
         self._set_page_number_variant_controls(
@@ -1528,7 +1563,9 @@ class HeaderFooterDetailSection:
         if behavior is not None:
             behavior.different_first_page = self._different_first_page_toggle.isChecked()
             behavior.different_odd_even_pages = self._different_odd_even_toggle.isChecked()
-            behavior.link_to_previous = "never"
+            behavior.link_to_previous = str(
+                self._section_link_mode_combo.currentData() or "never"
+            )
             behavior.preserve_existing_content = False
         header_footer.page_number_template = self._selected_page_number_template()
         header_footer.page_number_enabled = self._page_number_enabled_toggle.isChecked()
@@ -1830,7 +1867,26 @@ class HeaderFooterDetailSection:
         footer_mode = self._combined_footer_content_mode()
         bottom_text = "固定文字" if footer_mode in {"fixed", "page_number_with_text"} else "不显示"
 
-        lines = [f"页眉：{header_text}", f"页脚文字：{bottom_text}"]
+        header_hidden = [
+            SECTION_EXCLUSION_LABELS.get(
+                selector,
+                special_title_selector_label(selector),
+            )
+            for selector in self._header_scope_editor.selectors()
+        ]
+        footer_hidden = [
+            SECTION_EXCLUSION_LABELS.get(
+                selector,
+                special_title_selector_label(selector),
+            )
+            for selector in self._footer_scope_editor.selectors()
+        ]
+        if header_text != "不显示" and header_hidden:
+            header_text += f"（{'、'.join(header_hidden)}隐藏）"
+        if bottom_text != "不显示" and footer_hidden:
+            bottom_text += f"（{'、'.join(footer_hidden)}隐藏）"
+
+        lines = [f"页眉：{header_text} · 页脚文字：{bottom_text}"]
         page_summary = self._preview_page_summary_text()
         if page_summary:
             lines.append(f"页码：{page_summary}")
@@ -1852,24 +1908,6 @@ class HeaderFooterDetailSection:
                     self._even_page_number_display_combo,
                 )
             )
-        header_hidden = [
-            SECTION_EXCLUSION_LABELS.get(
-                selector,
-                special_title_selector_label(selector),
-            )
-            for selector in self._header_scope_editor.selectors()
-        ]
-        footer_hidden = [
-            SECTION_EXCLUSION_LABELS.get(
-                selector,
-                special_title_selector_label(selector),
-            )
-            for selector in self._footer_scope_editor.selectors()
-        ]
-        if header_hidden:
-            lines.append(f"页眉隐藏：{'、'.join(header_hidden)}")
-        if footer_hidden:
-            lines.append(f"页脚文字隐藏：{'、'.join(footer_hidden)}")
         word_parts: list[str] = []
         if self._different_first_page_toggle.isChecked():
             word_parts.append("每个分节的首页不同")
@@ -1880,7 +1918,6 @@ class HeaderFooterDetailSection:
             word_parts.append("自定义页码格式" if self._page_number_display_is_custom() else "页码格式")
         if word_parts:
             lines.append(f"Word：{'、'.join(word_parts)}")
-        lines.extend(self._preview_region_result_lines())
         self._quick_preview_label.setText("\n".join(lines))
 
     def _page_number_variant_preview_text(
@@ -1900,101 +1937,6 @@ class HeaderFooterDetailSection:
         if display != "inherit":
             parts.append(dict(PAGE_NUMBER_DISPLAY_OPTIONS).get(display, "自定义"))
         return " / ".join(parts)
-
-    def _preview_region_result_lines(self) -> list[str]:
-        rows = (
-            ("cover", "封面"),
-            ("abstract_cn", "摘要"),
-            ("toc", "目录"),
-            ("body", "正文"),
-            ("references", "参考文献"),
-        )
-        header_hidden = self._header_scope_editor.selectors()
-        footer_hidden = self._footer_scope_editor.selectors()
-        header_outputs = (
-            self._header_enabled_toggle.isChecked()
-            and str(self._header_mode_combo.currentData() or "styleref") != "none"
-        )
-        footer_text_outputs = (
-            self._footer_enabled_toggle.isChecked()
-            and self._footer_mode_has_fixed_text()
-        )
-        phases = self.phase_rows_to_configs()
-
-        lines = ["区域结果（只读）："]
-        for role, label in rows:
-            header_result = (
-                "有"
-                if header_outputs
-                and not self._preview_selector_matches_role(role, header_hidden)
-                else "无"
-            )
-            footer_result = (
-                "有"
-                if footer_text_outputs
-                and not self._preview_selector_matches_role(role, footer_hidden)
-                else "无"
-            )
-            page_result = self._preview_page_result_for_role(role, phases)
-            lines.append(
-                f"{label}：页眉{header_result} · 页脚文字{footer_result} · 页码{page_result}"
-            )
-        return lines
-
-    def _preview_page_result_for_role(self, role: str, phases: list) -> str:
-        if not self._footer_mode_has_page_number():
-            return "关闭"
-        phase = next(
-            (
-                candidate
-                for candidate in phases
-                if self._preview_selector_matches_role(
-                    role,
-                    list(getattr(candidate, "selectors", []) or []),
-                )
-            ),
-            None,
-        )
-        if phase is None:
-            return "未配置"
-        if not bool(getattr(phase, "visible", True)):
-            return "隐藏但计数"
-        suffix = (
-            "续号"
-            if str(getattr(phase, "start_mode", "restart") or "restart") == "continue"
-            else f"从 {max(1, int(getattr(phase, 'start_value', 1) or 1))} 起"
-        )
-        return f"{self._preview_number_format_short(phase)}，{suffix}"
-
-    def _preview_selector_matches_role(self, role: str, selectors: list[str]) -> bool:
-        groups = {
-            "pre_numbering": {"cover"},
-            "abstracts": {"abstract_cn", "abstract_en"},
-            "front_matter": {"abstract_cn", "abstract_en", "toc"},
-            "back_matter": {
-                "references",
-                "errata",
-                "appendix",
-                "acknowledgment",
-                "resume",
-            },
-            "all_numbered_content": {
-                "abstract_cn",
-                "abstract_en",
-                "toc",
-                "body",
-                "references",
-                "errata",
-                "appendix",
-                "acknowledgment",
-                "resume",
-            },
-        }
-        for selector in selectors:
-            normalized = str(selector or "").strip()
-            if normalized == role or role in groups.get(normalized, set()):
-                return True
-        return False
 
     def _preview_page_summary_text(self) -> str:
         if not self._footer_mode_has_page_number():

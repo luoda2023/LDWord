@@ -142,6 +142,7 @@ class DocumentBatchPlan:
                     stage,
                     record=record,
                     resource_domains=self.execution_snapshot.resource_domains,
+                    content_policy=self.execution_snapshot.content_policy,
                     image_policy=self.execution_snapshot.image_policy,
                     work_dir=work_dir,
                 )

@@ -156,6 +156,8 @@ def normalize_restart_on(value: str | None) -> str:
 
 
 def build_restart_options(level: int) -> list[tuple[str, str]]:
+    if int(level) <= 1:
+        return [("一级编号不适用", "parent")]
     options = [("上级变化时重新开始", "parent"), ("全文连续编号", "document")]
     for parent_level in range(1, max(1, int(level))):
         options.append((f"级别 {parent_level} 变化时重新开始", f"heading{parent_level}"))
@@ -163,6 +165,8 @@ def build_restart_options(level: int) -> list[tuple[str, str]]:
 
 
 def build_restart_mode_options(level: int) -> list[tuple[str, str]]:
+    if int(level) <= 1:
+        return [("一级编号不适用", "parent")]
     options = [("上级变化时重新开始", "parent"), ("全文连续编号", "document")]
     if int(level) > 1:
         options.append(("指定级别变化时重新开始", "specific"))

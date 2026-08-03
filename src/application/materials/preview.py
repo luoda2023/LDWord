@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 from src.domain.materials import MaterialContract, MaterialPackage, MaterialResolver
 
+from .contracts import package_material_field_value_source
+
 RUNTIME_IMAGE_WATERMARK_KEY = "__image_watermark_text__"
 
 
@@ -124,6 +126,12 @@ def _runtime_field_previews(
                     timeline_keys.append(key)
 
     candidates = list(timeline_keys)
+    for item in contract.fields:
+        if (
+            package_material_field_value_source(package, item.key) == "floating"
+            and item.key not in candidates
+        ):
+            candidates.append(item.key)
     for item in contract.fields:
         if (
             item.required

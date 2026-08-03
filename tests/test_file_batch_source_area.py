@@ -1,4 +1,12 @@
-from src.shared.ui.theme import get_theme, theme_rgba
+from src.qt_api import QVBoxLayout, QWidget
+from src.shared.ui.theme import (
+    LIGHT,
+    WARM_LIGHT,
+    flush_theme_changes,
+    get_theme,
+    set_theme,
+    theme_rgba,
+)
 from src.ui.panels.workbench.file_batch_execution_detail import (
     FileBatchSourceArea,
 )
@@ -69,3 +77,28 @@ def test_clearing_source_restores_idle_surface(qapp, tmp_path):
     assert area._clear_button.isHidden()
     assert not area._files_button.isHidden()
     assert not area._folder_button.isHidden()
+
+
+def test_nested_source_area_refreshes_warm_surface_on_first_show(qapp):
+    original = get_theme()
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    try:
+        set_theme(LIGHT)
+        flush_theme_changes()
+        area = FileBatchSourceArea(host)
+        layout.addWidget(area)
+
+        set_theme(WARM_LIGHT)
+        flush_theme_changes()
+        assert area._background.name() == LIGHT.bg_card.lower()
+
+        host.show()
+        qapp.processEvents()
+
+        assert area._background.name() == WARM_LIGHT.bg_card.lower()
+    finally:
+        host.close()
+        qapp.processEvents()
+        set_theme(original)
+        flush_theme_changes()

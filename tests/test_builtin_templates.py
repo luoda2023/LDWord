@@ -28,6 +28,21 @@ def test_every_declared_builtin_template_id_resolves_to_a_template_config():
         assert template.description is not None
 
 
+def test_every_builtin_template_has_explicit_header_footer_typography():
+    for mode_id, template_id, _path in list_builtin_template_resources():
+        template = create_builtin_template(template_id, mode_id=mode_id)
+
+        for typography in (
+            template.header_footer.header.typography,
+            template.header_footer.footer.typography,
+        ):
+            assert typography.font_cn == "宋体", template_id
+            assert typography.font_en == "Times New Roman", template_id
+            assert typography.size_pt == 10.5, template_id
+            assert typography.bold is False, template_id
+            assert typography.italic is False, template_id
+
+
 def test_every_builtin_template_has_explicit_enabled_bindings_for_visible_levels():
     for template_id in list_builtin_template_ids():
         template = create_builtin_template(template_id)
@@ -172,8 +187,14 @@ def test_every_builtin_json_owns_complete_output_channel_contract():
             "boundary_mode",
             "section_break_type",
             "empty_break_policy",
-            "caption_table_break_policy",
-            "header_footer_link_mode",
+        }
+        assert payload["caption"]["table_break_policy"] in {
+            "preserve",
+            "remove_proven_redundant",
+        }
+        assert header_footer["behavior"]["link_to_previous"] in {
+            "never",
+            "preserve",
         }
         assert set(payload["page_setup"]) >= {
             "paper_size_mode",

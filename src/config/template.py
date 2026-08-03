@@ -184,8 +184,6 @@ class SectionConfig:
     boundary_mode: str = "semantic_rebuild"  # preserve_source | semantic_rebuild | normalize_all
     section_break_type: str | None = None   # "nextPage" | "continuous" | None(不修改)
     empty_break_policy: str = "preserve"    # preserve | remove_proven_redundant
-    caption_table_break_policy: str = "preserve"
-    header_footer_link_mode: str = "semantic_rebuild"  # preserve_source | semantic_rebuild
 
 
 # ── 模板外观配置的向后兼容 re-export ─────────────────

@@ -1,22 +1,27 @@
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.config.scene import ExamBlankStyleConfig, ExamPaperConfig, SceneWorkspace
 from src.config.scene_family_application import apply_planned_scene_family_defaults
+from src.qt_api import QPushButton
 from src.shared.ui.icons.catalog import get_icon_names
+from src.ui.panels.scene_navigation_projection import overview_navigation_snapshot
+from src.ui.panels.scene_output_detail import _OutputDetail
 from src.ui.panels.scene_overview_projection import (
+    build_scene_overview_spec,
     first_screen_forbidden_terms,
     first_screen_texts,
-    build_scene_overview_spec,
 )
-from src.ui.panels.scene_navigation_projection import overview_navigation_snapshot
+from src.ui.panels.scene_panel import (
+    _SceneOverviewDetail,
+    _SceneRulesDetail,
+    _ScopeDetail,
+)
 from src.ui.panels.scene_summary_projection import build_scene_overview_summary_items
 from src.ui.panels.style_source_projection import build_style_source_projection
-from src.ui.panels.workbench.execution_flow_projection import standard_execution_flow_steps
 
 
 def test_style_source_projection_is_template_only():
@@ -51,28 +56,34 @@ def test_scene_overview_projection_shapes_user_first_screen():
     assert spec.task.numbering_label in {"重建编号", "保留原编号"}
     assert "Word 文档" in spec.task.suitable_for
     assert "Markdown" in spec.task.suitable_for
-    assert [step.title for step in spec.run_steps] == [
-        step.title for step in standard_execution_flow_steps()
-    ]
-    assert len(spec.key_settings) == 2
+    assert len(spec.key_settings) == 5
     assert [row.label for row in spec.key_settings] == [
-        "资料包",
         "处理范围",
+        "编号策略",
+        "输入清理",
+        "文档水印",
+        "生成结果",
     ]
     scope_row = next(row for row in spec.key_settings if row.key == "scope")
-    materials_row = next(row for row in spec.key_settings if row.key == "materials")
+    numbering_row = next(row for row in spec.key_settings if row.key == "numbering")
+    cleanup_row = next(row for row in spec.key_settings if row.key == "input_cleanup")
+    watermark_row = next(row for row in spec.key_settings if row.key == "watermark")
     assert spec.style_source == style_source_projection
-    assert materials_row.summary == "未开启资料包，只处理当前文档"
     assert scope_row.summary == "全部内容"
+    assert numbering_row.summary == "重建编号"
+    assert cleanup_row.summary == "Markdown 自动清理残留；空白规范化未开启"
+    assert watermark_row.summary == "未启用文字水印"
     assert "/" not in scope_row.summary
     assert "文档区域" not in scope_row.summary
-    assert {row.target_card_id for row in spec.key_settings} >= {
-        "assets",
+    assert {row.target_card_id for row in spec.key_settings} == {
         "scn_rules",
+        "scn_output",
     }
-    assert "scn_output" not in {row.target_card_id for row in spec.key_settings}
     assert len(spec.risk_notices) <= 3
     visible_text = "\n".join(first_screen_texts(spec))
+    assert "资料包" not in [row.label for row in spec.key_settings]
+    assert "读取文件" not in visible_text
+    assert "检查风险" not in visible_text
     assert "custom_basic" not in visible_text
     assert "quick_formatting" not in visible_text
     assert "9/9" not in visible_text
@@ -85,6 +96,56 @@ def test_scene_overview_projection_shapes_user_first_screen():
     )
     assert spec.risk_notices
     assert not first_screen_forbidden_terms(spec)
+
+
+def test_scene_overview_shows_numbering_as_read_only_final_preview(qapp):
+    scene = SceneWorkspace(scene_id="custom", category="custom", template_id="default")
+    scene.input_source_profile.accepted_formats = ["docx", "markdown"]
+    overview = _SceneOverviewDetail([])
+
+    overview.set_scene(scene)
+    overview.show()
+    qapp.processEvents()
+
+    assert not hasattr(overview, "_rebuild_radio")
+    assert not hasattr(overview, "_preserve_radio")
+    assert not hasattr(overview, "_run_preview_card")
+    assert overview.findChild(QPushButton, "scn_go_execute_btn") is None
+    assert "materials" not in overview._setting_rows
+    assert {
+        key for key, row in overview._setting_rows.items() if row.isVisible()
+    } == {"scope", "numbering", "input_cleanup", "watermark", "delivery"}
+    assert overview._setting_rows["numbering"].summary_text() == "重建编号"
+
+    scene.strict_mode = False
+    overview.set_scene(scene)
+    assert overview._setting_rows["numbering"].summary_text() == "保留原编号"
+
+
+def test_numbering_editor_is_independent_card_below_scope(qapp):
+    scene = SceneWorkspace(scene_id="custom", category="custom", template_id="default")
+    scope = _ScopeDetail()
+    output = _OutputDetail()
+    rules = _SceneRulesDetail(scope, output)
+    edits: list[bool] = []
+    output.scene_edited.connect(lambda: edits.append(True))
+
+    rules.set_scene(scene)
+    rules.show()
+    qapp.processEvents()
+
+    layout = rules.layout()
+    assert layout.indexOf(scope) < layout.indexOf(rules._numbering_rules)
+    assert layout.indexOf(rules._numbering_rules) < layout.indexOf(
+        rules._input_cleanup_rules
+    )
+    assert rules._numbering_rules.layout().indexOf(
+        rules._numbering_rules._card
+    ) == 0
+
+    rules._numbering_rules._preserve_radio.setChecked(True)
+    assert scene.strict_mode is False
+    assert edits
 
 
 def test_scene_overview_save_badge_reports_autosave_lifecycle():
@@ -111,7 +172,6 @@ def test_scene_overview_icons_are_registered_and_semantically_aligned():
     summary_items = build_scene_overview_summary_items(scene)
 
     rule_icons = {row.key: row.icon_name for row in spec.key_settings}
-    step_icons = {step.key: step.icon_name for step in spec.run_steps}
     summary_icons = {
         item.key: item.icon_name
         for item in summary_items
@@ -119,15 +179,11 @@ def test_scene_overview_icons_are_registered_and_semantically_aligned():
     }
 
     assert rule_icons == {
-        "materials": "package",
         "scope": "scan-text",
-    }
-    assert step_icons == {
-        "read": "file-input",
-        "preflight": "shield-alert",
-        "format": "layout-template",
-        "report": "file-text",
-        "deliver": "file-output",
+        "numbering": "list-ordered",
+        "input_cleanup": "sliders-horizontal",
+        "watermark": "shield-check",
+        "delivery": "folder-output",
     }
     assert summary_icons == {
         "input_profile": "file-input",
@@ -138,7 +194,6 @@ def test_scene_overview_icons_are_registered_and_semantically_aligned():
     registered_icons = set(get_icon_names())
     referenced_icons = {
         *rule_icons.values(),
-        *step_icons.values(),
         *summary_icons.values(),
     }
     assert referenced_icons <= registered_icons
@@ -172,8 +227,8 @@ def test_scene_overview_projection_uses_exam_assembly_rows_for_exam_scene():
     assert "题目装配" not in visible_text
     assert "答案处理" not in visible_text
     assert "紧凑试卷" not in visible_text
-    assert "导入试卷内容" in visible_text
-    assert "生成 Word 试卷" in visible_text
+    assert "导入试卷内容" not in visible_text
+    assert "生成 Word 试卷" not in visible_text
     assert not first_screen_forbidden_terms(spec)
 
 
@@ -273,14 +328,15 @@ def test_scene_overview_projection_cleans_raw_first_screen_terms():
     assert "docx" not in visible_text.lower()
     assert "xlsx" not in visible_text.lower()
     assert "_" not in visible_text
-    assert "资料包" in visible_text
+    assert "资料包" not in [row.label for row in spec.key_settings]
+    assert "输入清理" in visible_text
     assert "输出版本" not in visible_text
     assert "Word 文档、Excel 表格" in visible_text
     assert spec.style_source.status_label == "模板"
     assert spec.style_source.summary == "模板：最终资料规则"
     assert "宏 会停止执行" not in visible_text
     assert all(row.key != "risk_confirmation" for row in spec.key_settings)
-    assert all(row.key != "delivery" for row in spec.key_settings)
+    assert any(row.key == "delivery" for row in spec.key_settings)
     assert not first_screen_forbidden_terms(spec)
 
 
@@ -297,11 +353,10 @@ def test_scene_overview_projection_keeps_evidence_out_of_first_screen():
     visible_text = "\n".join(first_screen_texts(spec))
 
     assert "合同交付" in spec.task.title
-    assert "读取文件" in visible_text
+    assert "读取文件" not in visible_text
     assert "核对字段" in visible_text or "合同交付" in visible_text
-    materials_row = next(row for row in spec.key_settings if row.key == "materials")
     delivery_row = next(row for row in spec.key_settings if row.key == "delivery")
-    assert materials_row.summary == "已开启：合同方字段资料、签章资料"
+    assert all(row.key != "materials" for row in spec.key_settings)
     assert "会生成" in delivery_row.summary
     assert "不判断法律" not in visible_text
     assert not first_screen_forbidden_terms(spec)

@@ -60,6 +60,11 @@ NUMBERING_TYPE_OPTIONS: tuple[tuple[bool, str], ...] = (
     (True, "Word 可更新编号"),
 )
 
+TABLE_BREAK_POLICY_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("preserve", "保留原文分节"),
+    ("remove_proven_redundant", "仅删除已确认冗余分节"),
+)
+
 CAPTION_SEPARATOR_OPTIONS: tuple[tuple[str, str, str | None], ...] = (
     ("fullwidth_space", "全角空格（□）", "\u3000"),
     ("halfwidth_space", "半角空格（·）", " "),
@@ -355,10 +360,26 @@ class CaptionDetail(QWidget):
         self._numbering_type_combo.currentIndexChanged.connect(self._on_form_edited)
         self._numbering_type_row = self._form_row("编号类型", self._numbering_type_combo, parent=self._rules_form)
 
+        self._table_break_policy_combo = StyledComboBox(self)
+        for value, label in TABLE_BREAK_POLICY_OPTIONS:
+            self._table_break_policy_combo.addItem(label, value)
+        self._table_break_policy_combo.setToolTip(
+            "控制是否删除题注与紧随其后的表格之间、且已确认不承载版式差异的分节。"
+        )
+        self._table_break_policy_combo.currentIndexChanged.connect(
+            self._on_form_edited
+        )
+        self._table_break_policy_row = self._form_row(
+            "题注-表格分节",
+            self._table_break_policy_combo,
+            parent=self._rules_form,
+        )
+
         self._rules_grid = self._rules_form.add_grid(
             [
                 [self._numbering_mode_row, self._numbering_format_row],
                 [self._auto_insert_row, self._numbering_type_row],
+                [self._table_break_policy_row],
             ]
         )
         self._rules_card.add_widget(self._rules_form)
@@ -478,6 +499,10 @@ class CaptionDetail(QWidget):
             self._set_combo_by_data(self._numbering_format_combo, caption.numbering_format)
             self._set_combo_by_data(self._auto_insert_combo, bool(caption.auto_insert))
             self._set_combo_by_data(self._numbering_type_combo, bool(caption.format_inserted))
+            self._set_combo_by_data(
+                self._table_break_policy_combo,
+                caption.table_break_policy,
+            )
             self._font_cn_combo.set_font_name(style.font_cn or "")
             self._font_en_combo.set_font_name(style.font_en or "")
             self._size_combo.set_pt(style.size_pt or 12.0)
@@ -593,6 +618,9 @@ class CaptionDetail(QWidget):
         caption.numbering_format = str(self._numbering_format_combo.currentData() or "chapter.seq")
         caption.auto_insert = bool(self._auto_insert_combo.currentData())
         caption.format_inserted = bool(self._numbering_type_combo.currentData())
+        caption.table_break_policy = str(
+            self._table_break_policy_combo.currentData() or "preserve"
+        )
 
         if "caption" not in self._current_template.styles:
             self._current_template.styles["caption"] = deepcopy(

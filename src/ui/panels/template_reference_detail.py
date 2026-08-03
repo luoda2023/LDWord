@@ -350,18 +350,11 @@ class ReferenceDetail(QWidget):
     def _is_independent(self) -> bool:
         if self._current_template is None:
             return False
-        ref = self._current_template.reference_style
-        has_legacy_typography = any((ref.font_cn, ref.font_en, ref.size_pt))
-        return bool(
-            is_variant_overridden(self._current_template, _VARIANT_KEY)
-            or has_legacy_typography
-        )
+        return is_variant_overridden(self._current_template, _VARIANT_KEY)
 
     def _editable_style(self) -> StyleConfig | None:
         if self._current_template is None:
             return None
-        if not is_variant_overridden(self._current_template, _VARIANT_KEY):
-            self._promote_legacy_reference_typography(self._current_template)
         if not is_variant_overridden(self._current_template, _VARIANT_KEY):
             return enable_variant_override(self._current_template, _VARIANT_KEY)
         return self._current_template.styles.get(_VARIANT_KEY)
@@ -369,34 +362,7 @@ class ReferenceDetail(QWidget):
     def _style_for_display(self) -> StyleConfig | None:
         if self._current_template is None:
             return None
-        style = deepcopy(get_effective_style(self._current_template, _VARIANT_KEY))
-        ref = self._current_template.reference_style
-        if ref.font_cn:
-            style.font_cn = ref.font_cn
-        if ref.font_en:
-            style.font_en = ref.font_en
-        if ref.size_pt:
-            style.size_pt = ref.size_pt
-            style.size_display = display_font_size_with_name(ref.size_pt)
-        return style
-
-    def _promote_legacy_reference_typography(self, template: TemplateConfig) -> None:
-        ref = template.reference_style
-        if not any((ref.font_cn, ref.font_en, ref.size_pt)):
-            return
-
-        style = enable_variant_override(template, _VARIANT_KEY)
-        if ref.font_cn:
-            style.font_cn = ref.font_cn
-        if ref.font_en:
-            style.font_en = ref.font_en
-        if ref.size_pt:
-            style.size_pt = ref.size_pt
-            style.size_display = display_font_size_with_name(ref.size_pt)
-
-        ref.font_cn = None
-        ref.font_en = None
-        ref.size_pt = None
+        return deepcopy(get_effective_style(self._current_template, _VARIANT_KEY))
 
     # ──────────────────────────────────────────────────────
     # Mode switching

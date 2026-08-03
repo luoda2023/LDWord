@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 
-from src.qt_api import QApplication, QLineEdit, Qt, QWidget
+from src.qt_api import QApplication, QLineEdit, QObject, Qt, QWidget
 from src.shared.ui.path_drop import (
     PathAcceptancePolicy,
     PathDropController,
@@ -91,6 +91,8 @@ def test_path_drop_controller_handles_present_and_future_surface_children(
     controller.paths_dropped.connect(received.append)
     controller.proposal_rejected.connect(rejected.append)
     controller.install_on_surface(host)
+    helper = QObject(host)
+    assert helper not in controller._targets
     mime = _mime_for(source)
 
     drag = QDragEnterEvent(

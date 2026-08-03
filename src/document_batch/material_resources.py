@@ -42,6 +42,7 @@ from src.config.image_materials import (
 from src.services.material_assets.image_transformer import (
     prepare_material_image,
     resolve_image_watermark,
+    resolve_watermark_font,
 )
 from src.services.material_content.artifact_repository import (
     ContentArtifactRepository,
@@ -113,6 +114,7 @@ def materialize_record_resources(
     resource_domains: Mapping[str, str],
     image_policy: Mapping[str, object],
     work_dir: Path,
+    content_policy: Mapping[str, object] | None = None,
 ) -> tuple[AttachmentDeliveryItem, ...]:
     """Consume all resource tokens on an already field-filled staging DOCX."""
 
@@ -170,6 +172,18 @@ def materialize_record_resources(
                         rule_id=f"content:{content_id}",
                         content_id=content_id,
                         anchor_token=content_anchor_token(content_id),
+                        page_break_policy=str(
+                            (content_policy or {}).get(
+                                "page_break_policy",
+                                "drop",
+                            )
+                        ),
+                        format_mode=str(
+                            (content_policy or {}).get(
+                                "format_mode",
+                                "target_document",
+                            )
+                        ),
                     )
                 )
         attachment_bindings = tuple(
@@ -397,6 +411,14 @@ def _insert_images(
         image_policy.get("page_break_after_images", False)
     )
     watermark = _resolved_watermark(image_policy, record.field_values)
+    watermark_font_path = (
+        resolve_watermark_font(
+            watermark.resolved_text,
+            font_family=str(image_policy.get("watermark_font", "宋体") or "宋体"),
+        ).path
+        if watermark.enabled
+        else None
+    )
     for role in roles:
         token = material_token(MaterialTokenNamespace.IMAGE, role)
         matches = [
@@ -446,6 +468,7 @@ def _insert_images(
                 _file_ref(resource),
                 watermark,
                 cache_dir=cache_dir,
+                font_path=watermark_font_path,
             )
             run = paragraph.add_run()
             width = (
@@ -497,6 +520,7 @@ def _resolved_watermark(
         policy,
         field_values,
         runtime_text=str(image_policy.get("runtime_watermark_text", "")),
+        font_family=str(image_policy.get("watermark_font", "宋体") or "宋体"),
     )
 
 

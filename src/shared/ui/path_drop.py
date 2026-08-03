@@ -256,8 +256,14 @@ class PathDropController(QObject):
         if target is None or target is self or target in self._targets:
             return
         set_accept_drops = getattr(target, "setAcceptDrops", None)
-        if callable(set_accept_drops):
-            set_accept_drops(True)
+        # Layouts, theme subscriptions, and other QObject helpers can appear
+        # below a composite drop surface. They never receive drag/drop input;
+        # installing this controller on them can also interfere with event
+        # filters those helpers install while handling ChildAdded. Limit the
+        # drop tree to actual QWidget-like targets.
+        if not callable(set_accept_drops):
+            return
+        set_accept_drops(True)
         target.installEventFilter(self)
         self._targets.append(target)
 

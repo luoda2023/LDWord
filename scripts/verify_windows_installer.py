@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -43,6 +44,7 @@ def verify_installer(setup: Path, work_root: Path) -> dict[str, object]:
         raise InstallerVerificationError(
             f"Installed executable is missing: {executable}"
         )
+    _verify_startup(executable, work_root / "runtime-data")
 
     stale_probe = install_root / "app" / "installer-stale-payload.probe"
     stale_probe.write_text("must be removed by the next upgrade\n", encoding="utf-8")
@@ -81,6 +83,7 @@ def verify_installer(setup: Path, work_root: Path) -> dict[str, object]:
         "setup": str(setup),
         "install_root": str(install_root),
         "initial_install": "passed",
+        "installed_application_startup": "passed",
         "in_place_reinstall": "passed",
         "stale_payload_cleanup": "passed",
         "uninstall": "passed",
@@ -100,6 +103,42 @@ def _run(command: tuple[str, ...]) -> None:
             f"Installer command failed ({completed.returncode}): "
             + subprocess.list2cmdline(command)
         )
+
+
+def _verify_startup(executable: Path, data_root: Path) -> None:
+    data_root.mkdir(parents=True)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "QT_QPA_PLATFORM": "offscreen",
+            "APPDATA": str(data_root / "AppData"),
+            "LOCALAPPDATA": str(data_root / "LocalAppData"),
+        }
+    )
+    Path(environment["APPDATA"]).mkdir(parents=True)
+    Path(environment["LOCALAPPDATA"]).mkdir(parents=True)
+    process = subprocess.Popen(
+        (str(executable),),
+        cwd=executable.parent,
+        env=environment,
+    )
+    try:
+        try:
+            return_code = process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            return
+        raise InstallerVerificationError(
+            "Installed application exited during startup smoke test "
+            f"with code {return_code}"
+        )
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
 
 
 def main(argv: list[str] | None = None) -> int:

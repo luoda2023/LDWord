@@ -1,9 +1,10 @@
 from src.config.resolver import resolve_config
 from src.config.scene import SceneWorkspace
 from src.config.template import TemplateConfig
-from src.qt_api import QApplication, Qt
+from src.qt_api import QApplication, QCheckBox, Qt
 from src.ui.bridge import PanelBridge
 from src.ui.panels.scene_formula_detail import (
+    _AdaptiveSelectionGrid,
     _SceneChemTypographyDetail,
     _SceneFormulaRulesCard,
 )
@@ -283,7 +284,7 @@ def test_formula_policy_card_is_not_shown_for_non_thesis_mode():
         chem_detail.close()
 
 
-def test_formula_detail_uses_shared_two_column_alignment_rules():
+def test_formula_detail_keeps_form_alignment_and_hierarchical_workflow():
     app = _app()
     detail = _SceneFormulaRulesCard()
     try:
@@ -343,17 +344,35 @@ def test_formula_detail_uses_shared_two_column_alignment_rules():
             == 1
         )
         assert x(detail._formula_size) > x(detail._formula_font)
-        assert x(detail._formula_workflow_checks["formula_to_table"]) == x(
-            detail._formula_workflow_checks["formula_style"]
-        )
-        assert x(detail._formula_workflow_checks["equation_numbering"]) == x(
-            detail._formula_workflow_checks["block_only"]
+        top_level = [
+            detail._formula_workflow_checks["formula_to_table"],
+            detail._formula_workflow_checks["equation_numbering"],
+            detail._formula_workflow_checks["formula_style"],
+        ]
+        top_level_x = [x(control) for control in top_level]
+        top_level_y = [
+            control.mapTo(detail, control.rect().topLeft()).y()
+            for control in top_level
+        ]
+        block_only = detail._formula_workflow_checks["block_only"]
+        block_only_y = block_only.mapTo(detail, block_only.rect().topLeft()).y()
+
+        assert detail._formula_workflow_grid.columns() == 3
+        assert top_level_x == sorted(top_level_x)
+        assert len(set(top_level_x)) == 3
+        assert len(set(top_level_y)) == 1
+        assert block_only_y > top_level_y[0]
+        assert x(block_only) > top_level_x[0]
+        assert block_only.parentWidget() is detail._formula_to_table_options
+        assert all(
+            control.width() <= detail._formula_workflow_grid.column_width()
+            for control in top_level
         )
     finally:
         detail.close()
 
 
-def test_chem_scope_options_use_a_stable_two_column_grid():
+def test_chem_scope_options_use_a_compact_four_column_grid():
     app = _app()
     detail = _SceneChemTypographyDetail()
     try:
@@ -368,23 +387,68 @@ def test_chem_scope_options_use_a_stable_two_column_grid():
         def x(widget):
             return widget.mapTo(detail, widget.rect().topLeft()).x()
 
-        left_column = {
-            x(detail._chem_all_scope),
-            x(detail._chem_scope_checks["body"]),
-            x(detail._chem_scope_checks["abstract_cn"]),
-            x(detail._chem_scope_checks["tables"]),
-            x(detail._chem_scope_checks["references"]),
-        }
-        right_column = {
-            x(detail._chem_scope_checks["headings"]),
-            x(detail._chem_scope_checks["abstract_en"]),
-            x(detail._chem_scope_checks["captions"]),
-        }
-        assert len(left_column) == 1
-        assert len(right_column) == 1
-        assert next(iter(right_column)) > next(iter(left_column))
+        def y(widget):
+            return widget.mapTo(detail, widget.rect().topLeft()).y()
+
+        first_row = [
+            detail._chem_scope_checks["body"],
+            detail._chem_scope_checks["headings"],
+            detail._chem_scope_checks["abstract_cn"],
+            detail._chem_scope_checks["abstract_en"],
+        ]
+        second_row = [
+            detail._chem_scope_checks["tables"],
+            detail._chem_scope_checks["captions"],
+            detail._chem_scope_checks["references"],
+        ]
+
+        assert detail._chem_scope_grid.columns() == 4
+        assert [x(control) for control in first_row] == sorted(
+            x(control) for control in first_row
+        )
+        assert len({y(control) for control in first_row}) == 1
+        assert len({y(control) for control in second_row}) == 1
+        assert y(second_row[0]) > y(first_row[0])
+        assert [x(control) for control in second_row] == [
+            x(control) for control in first_row[:3]
+        ]
+        assert y(detail._chem_all_scope) < y(first_row[0])
+        assert detail._chem_all_scope.parentWidget() is detail._scope_card._header_widget
+        assert all(
+            control.width() <= detail._chem_scope_grid.column_width()
+            for control in (*first_row, *second_row)
+        )
     finally:
         detail.close()
+
+
+def test_adaptive_selection_grid_reflows_4_2_1_and_keeps_disabled_odd_tail_compact():
+    app = _app()
+    controls = [QCheckBox(label) for label in "ABCDEFG"]
+    grid = _AdaptiveSelectionGrid(controls, max_columns=4)
+    try:
+        grid.show()
+        for width, expected_columns, expected_rows in (
+            (940, 4, 2),
+            (700, 2, 4),
+            (420, 1, 7),
+        ):
+            grid.resize(width, 400)
+            app.processEvents()
+            assert grid.columns() == expected_columns
+            assert len({control.y() for control in controls}) == expected_rows
+            assert all(control.width() <= grid.column_width() for control in controls)
+
+        grid.resize(940, 400)
+        grid.setEnabled(False)
+        app.processEvents()
+
+        assert grid.columns() == 4
+        assert controls[-1].x() == controls[2].x()
+        assert controls[-1].y() > controls[2].y()
+        assert all(control.isEnabled() is False for control in controls)
+    finally:
+        grid.close()
 
 
 def test_chem_all_scope_is_a_tri_state_aggregate_and_can_clear_every_scope():

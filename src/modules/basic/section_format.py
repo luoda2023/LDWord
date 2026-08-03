@@ -52,7 +52,10 @@ class SectionFormatModule(BaseModule):
                 message=message,
                 location=location,
             )
-            for location, message in validate_section_policy(config.section)
+            for location, message in validate_section_policy(
+                config.section,
+                getattr(config, "caption", None),
+            )
         ]
 
         inventory = collect_section_inventory(doc)
@@ -105,14 +108,7 @@ class SectionFormatModule(BaseModule):
             context.section_inventory = inventory
             context.section_execution_plan = plan
 
-        receipt = execute_section_execution_plan(
-            doc,
-            plan,
-            header_footer_link_mode=str(
-                getattr(config.section, "header_footer_link_mode", "preserve_source")
-                or "preserve_source"
-            ),
-        )
+        receipt = execute_section_execution_plan(doc, plan)
         context.section_execution_receipt = receipt
         if receipt.blocked_operations:
             self._record_blocked_operations(receipt, tracker)
@@ -175,7 +171,6 @@ def _ensure_section_break_before_paragraph(
         doc,
         para_index,
         break_type,
-        header_footer_link_mode="semantic_rebuild",
     )
 
 

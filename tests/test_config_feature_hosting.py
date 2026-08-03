@@ -1,4 +1,5 @@
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -9,9 +10,10 @@ sys.path.insert(0, str(ROOT))
 
 import src.config.dataclass_utils as dataclass_utils
 from src.config.dataclass_utils import dict_to_dataclass
+from src.config.migration import upgrade_scene_formula_policy_ownership
 from src.config.resolver import resolve_config
 from src.config.scene import SceneWorkspace
-from src.config.template import TemplateConfig
+from src.config.template import StyleConfig, TemplateConfig
 
 
 def test_template_config_hosts_feature_specific_configs():
@@ -27,6 +29,9 @@ def test_template_config_hosts_feature_specific_configs():
     assert not hasattr(template.toc, "enabled")
     assert template.header_footer.page_number_enabled is True
     assert template.reference_style.hanging_indent_cm == 0.74
+    assert not hasattr(template.reference_style, "font_cn")
+    assert not hasattr(template.reference_style, "font_en")
+    assert not hasattr(template.reference_style, "size_pt")
     for removed_formula_root in (
         "formula_table",
         "formula_style",
@@ -48,6 +53,31 @@ def test_template_config_ignores_legacy_table_row_height_field():
 
     assert template.table.layout_mode == "full"
     assert not hasattr(template.table, "row_height_pt")
+
+
+def test_legacy_scene_reference_typography_becomes_inherited_style_override():
+    template = TemplateConfig()
+    template.styles["body"] = StyleConfig(alignment="right", bold=True)
+    payload = asdict(SceneWorkspace(mode_id="custom"))
+    payload["reference_style"].update(
+        {"font_cn": "黑体", "font_en": "Calibri", "size_pt": 11}
+    )
+
+    upgraded = upgrade_scene_formula_policy_ownership(payload)
+    scene = dict_to_dataclass(SceneWorkspace, upgraded)
+    resolved = resolve_config(template, scene)
+
+    assert set(upgraded["reference_style"]) == {
+        "hanging_indent_cm",
+        "space_after_pt",
+        "space_after_unit",
+    }
+    assert not hasattr(scene.reference_style, "font_cn")
+    assert resolved.styles["references_body"].font_cn == "黑体"
+    assert resolved.styles["references_body"].font_en == "Calibri"
+    assert resolved.styles["references_body"].size_pt == 11
+    assert resolved.styles["references_body"].alignment == "right"
+    assert resolved.styles["references_body"].bold is True
 
 
 def test_dataclass_materialization_fails_closed_when_type_hints_break(monkeypatch):

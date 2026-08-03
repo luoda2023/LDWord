@@ -1,5 +1,6 @@
 import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,37 @@ def test_user_header_footer_preset_rejects_duplicate_display_names(tmp_path, mon
     presets.save_user_preset("我的页眉页脚", HeaderFooterConfig())
     with pytest.raises(ValueError, match="名称已存在"):
         presets.save_user_preset("我的页眉页脚", HeaderFooterConfig())
+
+
+def test_current_user_preset_fills_historical_blank_typography(tmp_path, monkeypatch):
+    import src.config.header_footer_presets as presets
+    from src.config.feature_configs import HeaderFooterConfig
+
+    monkeypatch.setattr(presets, "USER_PRESET_DIR", tmp_path)
+    payload = {
+        "preset_id": "user.blank_typography",
+        "name": "旧空白字体方案",
+        "header_footer": asdict(HeaderFooterConfig()),
+    }
+    for channel_name in ("header", "footer"):
+        typography = payload["header_footer"][channel_name]["typography"]
+        typography["font_cn"] = None
+        typography["font_en"] = None
+        typography["size_pt"] = None
+    (tmp_path / "user.blank_typography.json").write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    loaded = presets.get_preset_config("user.blank_typography")
+
+    assert loaded is not None
+    assert loaded.header.typography.font_cn == "宋体"
+    assert loaded.header.typography.font_en == "Times New Roman"
+    assert loaded.header.typography.size_pt == 10.5
+    assert loaded.footer.typography.font_cn == "宋体"
+    assert loaded.footer.typography.font_en == "Times New Roman"
+    assert loaded.footer.typography.size_pt == 10.5
 
 
 def test_legacy_user_preset_migrates_footer_page_modes_to_variant_strategy(

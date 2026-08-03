@@ -416,6 +416,10 @@ def test_document_batch_consumes_all_five_v1_material_token_domains(tmp_path):
         records=(record,),
         metadata={
             "material_contract_extensions": {
+                "content_policy": {
+                    "format_mode": "plain_text",
+                    "page_break_policy": "drop",
+                },
                 "image_policy": {
                     "adaptive": True,
                     "watermark_enabled": True,
@@ -457,6 +461,10 @@ def test_document_batch_consumes_all_five_v1_material_token_domains(tmp_path):
         "portrait": "image",
         "appendix": "attachment",
     }
+    assert dict(bound.snapshot.content_policy) == {
+        "format_mode": "plain_text",
+        "page_break_policy": "drop",
+    }
 
     source = tmp_path / "template.docx"
     document = Document()
@@ -486,6 +494,12 @@ def test_document_batch_consumes_all_five_v1_material_token_domains(tmp_path):
     assert "Inserted body" in text
     assert "Structured content." in text
     assert "Second folder item." in text
+    inserted_heading = next(
+        paragraph
+        for paragraph in rendered.paragraphs
+        if paragraph.text == "Inserted body"
+    )
+    assert inserted_heading.style.style_id == "Normal"
     assert "appendix.pdf" in text
     assert text.splitlines().count("logo") == 1
     assert "logo.png" not in text

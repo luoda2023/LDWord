@@ -7,6 +7,7 @@ from .contracts import (
     get_material_contract,
     get_package_material_contract,
     material_contract_from_schema,
+    package_material_field_value_source,
 )
 from .execution import (
     ExecutionMaterialFinalizeRequest,
@@ -69,6 +70,7 @@ __all__ = [
     "inspect_material_workbook",
     "inspect_material_workbook_headers",
     "material_contract_from_schema",
+    "package_material_field_value_source",
     "project_execution_material_record_snapshot",
     "project_material_preview",
 ]

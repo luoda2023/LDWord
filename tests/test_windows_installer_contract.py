@@ -18,9 +18,28 @@ def test_hotfix_identity_is_stable_and_semver_is_visible() -> None:
 def test_installer_uses_one_v1_product_identity_and_per_user_location() -> None:
     source = INSTALLER.read_text(encoding="utf-8")
     assert "AppId={{5C548E6B-72CF-4A77-B8E4-7D2A94B777D4}" in source
-    assert "DefaultDirName={localappdata}\\Programs\\Alavette Form" in source
+    assert "DefaultDirName={autopf}\\Alavette Form" in source
     assert "PrivilegesRequired=lowest" in source
     assert "UsePreviousAppDir=yes" in source
+    assert "UsePreviousTasks=yes" in source
+
+
+def test_installer_creates_start_menu_and_offers_desktop_shortcut_by_default() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+
+    assert (
+        'Name: "{group}\\Alavette Form"; '
+        'Filename: "{app}\\app\\{#AppExeName}"'
+    ) in source
+    assert (
+        'Name: "{autodesktop}\\Alavette Form"; '
+        'Filename: "{app}\\app\\{#AppExeName}"'
+    ) in source
+    task_line = next(
+        line for line in source.splitlines() if line.startswith('Name: "desktopicon"')
+    )
+    assert "Flags: checkedonce" in task_line
+    assert "unchecked" not in task_line
 
 
 def test_installer_replaces_only_owned_payload_and_preserves_user_data() -> None:

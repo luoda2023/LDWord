@@ -82,7 +82,7 @@ def test_inserted_semantic_boundary_never_aliases_the_existing_header_part():
     doc.sections[0].header.paragraphs[0].text = "body source header"
     config = ResolvedConfig()
     config.section.boundary_mode = "semantic_rebuild"
-    config.section.header_footer_link_mode = "preserve_source"
+    config.header_footer.behavior.link_to_previous = "preserve"
     context = _cover_body_context()
 
     SectionFormatModule().apply(doc, config, ChangeTracker(), context)
@@ -483,8 +483,18 @@ def test_user_library_compatibility_is_bounded_to_known_v02_policy_fields(tmp_pa
         "margin_by_section",
     ):
         del payload["page_setup"][key]
-    payload["section"] = {"section_break_type": "nextPage"}
+    del payload["caption"]["table_break_policy"]
+    payload["section"] = {
+        "section_break_type": "nextPage",
+        "caption_table_break_policy": "remove_proven_redundant",
+        "header_footer_link_mode": "preserve_source",
+    }
     payload["header_footer"]["behavior"]["link_to_previous"] = "never"
+    for channel_name in ("header", "footer"):
+        typography = payload["header_footer"][channel_name]["typography"]
+        typography["font_cn"] = None
+        typography["font_en"] = None
+        typography["size_pt"] = None
     del payload["header_footer"]["page_number_plan"]["first"]
     del payload["header_footer"]["page_number_plan"]["even"]
     target = tmp_path / "legacy.json"
@@ -501,7 +511,14 @@ def test_user_library_compatibility_is_bounded_to_known_v02_policy_fields(tmp_pa
     assert compatible.page_setup.paper_size_by_section == {}
     assert compatible.page_setup.margin_by_section == {}
     assert compatible.section.boundary_mode == "normalize_all"
-    assert compatible.section.header_footer_link_mode == "semantic_rebuild"
+    assert compatible.caption.table_break_policy == "remove_proven_redundant"
+    assert compatible.header_footer.behavior.link_to_previous == "preserve"
+    assert compatible.header_footer.header.typography.font_cn == "宋体"
+    assert compatible.header_footer.header.typography.font_en == "Times New Roman"
+    assert compatible.header_footer.header.typography.size_pt == 10.5
+    assert compatible.header_footer.footer.typography.font_cn == "宋体"
+    assert compatible.header_footer.footer.typography.font_en == "Times New Roman"
+    assert compatible.header_footer.footer.typography.size_pt == 10.5
     assert routed == compatible
 
 
@@ -514,3 +531,4 @@ def test_custom_quick_formatting_preserves_source_page_geometry():
     assert template.page_setup.paper_size_by_section == {}
     assert template.page_setup.margin_by_section == {}
     assert template.section.boundary_mode == "preserve_source"
+    assert template.header_footer.behavior.link_to_previous == "preserve"

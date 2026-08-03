@@ -205,7 +205,7 @@ class _ThemeSwatchCard(RoundedSurfaceFrame):
             p.setPen(Qt.NoPen)
             p.drawEllipse(ck_rect)
             pen2 = p.pen()
-            p.setPen(QColor("#FFFFFF"))
+            p.setPen(QColor(t.text_on_primary))
             pen2 = p.pen()
             pen2.setWidth(2)
             p.setPen(pen2)
@@ -264,12 +264,13 @@ class _CustomThemeCard(_ThemeSwatchCard):
             btn_rect = QRectF(btn_x, btn_y, btn_size, btn_size)
 
             # 圆形红色背景
-            p.setBrush(QColor("#E04040"))
+            t = get_theme()
+            p.setBrush(QColor(t.error))
             p.setPen(Qt.NoPen)
             p.drawEllipse(btn_rect)
 
             # 白色 ×
-            p.setPen(QColor("#FFFFFF"))
+            p.setPen(QColor(t.text_on_primary))
             pen = p.pen()
             pen.setWidth(2)
             p.setPen(pen)

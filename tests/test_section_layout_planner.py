@@ -74,6 +74,26 @@ def test_explicit_cleanup_removes_only_a_proven_empty_redundant_section():
     assert receipt.removed_count == 1
 
 
+def test_caption_owned_policy_removes_only_a_proven_caption_table_break():
+    doc = Document()
+    caption = doc.add_paragraph("表 1  测试数据")
+    caption.style = doc.styles["Caption"]
+    doc.add_section(WD_SECTION.NEW_PAGE)
+    doc.add_table(rows=1, cols=1)
+
+    config = ResolvedConfig()
+    config.section.boundary_mode = "preserve_source"
+    config.caption.table_break_policy = "remove_proven_redundant"
+    context = PipelineContext()
+
+    SectionFormatModule().apply(doc, config, ChangeTracker(), context)
+
+    receipt = context.section_execution_receipt
+    assert receipt.source_section_count == 2
+    assert receipt.final_section_count == 1
+    assert receipt.removed_count == 1
+
+
 def test_cleanup_preserves_empty_boundary_that_contains_a_field():
     doc = Document()
     doc.add_paragraph("content")

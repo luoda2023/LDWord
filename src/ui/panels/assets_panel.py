@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 from src.application.materials import (
@@ -22,6 +22,7 @@ from src.application.materials import (
     get_package_material_contract,
     inspect_material_workbook,
     inspect_material_workbook_headers,
+    package_material_field_value_source,
     project_material_preview,
 )
 from src.config.attachment_materials import attachment_natural_path_key
@@ -80,9 +81,13 @@ from src.qt_api import (
     QWidget,
 )
 from src.shared.engine.material_timeline import parse_timeline_date
-from src.shared.engine.material_token_contract import MaterialTokenNamespace
+from src.shared.engine.material_token_contract import (
+    MaterialTokenNamespace,
+    material_token,
+)
 from src.shared.ui import (
     DialogAction,
+    FontCombo,
     ImagePreviewDialog,
     PreviewItem,
     StyledComboBox,
@@ -450,12 +455,14 @@ class AssetsPanel(BasePanel):
         self._current_record_id = ""
         self._dirty = False
         self._updating = False
+        self._syncing_content_policy = False
         self._syncing_image_policy = False
         self._creating_resource_role = False
         self._prepared: _PreparedChange | None = None
         self._resource_tables: dict[str, QTableWidget] = {}
         self._resource_action_buttons: dict[str, tuple[QPushButton, ...]] = {}
         self._legacy_field_rows: dict[str, LegacyFieldTokenRow] = {}
+        self._legacy_field_scopes: dict[str, str] = {}
         self._legacy_resource_rows: dict[
             str,
             dict[str, LegacyContentTokenRow | LegacyAssetTokenRow],
@@ -492,6 +499,11 @@ class AssetsPanel(BasePanel):
             nav_object_name="assets_section_rail",
             detail_object_name="assets_detail_scroll",
             detail_content_object_name="assets_detail_content",
+            # AssetsPanel owns a larger descendant stylesheet in _apply_theme.
+            # A second host binding from MasterDetailShell would run after the
+            # panel's deferred show refresh and replace that stylesheet with
+            # the shell-only rule, exposing native white table backgrounds.
+            bind_to_theme=False,
         )
         self._outer_layout = self._shell.layout
         self._section_nav = self._shell.nav_rail
@@ -637,7 +649,7 @@ class AssetsPanel(BasePanel):
 
         overview_card = Card(parent=overview_page)
         self._generate_card = overview_card
-        overview_card.set_header("资料 Token", icon_name="type")
+        overview_card.set_header("资料 Token", icon_name="braces")
         self._overview_summary = QLabel("", overview_card)
         self._overview_summary.setObjectName("material_overview_summary")
         self._overview_summary.setWordWrap(True)
@@ -649,6 +661,16 @@ class AssetsPanel(BasePanel):
         )
         self._configure_readonly_table(self._overview_preview_table)
         self._overview_preview_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self._overview_preview_table.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOff
+        )
+        self._overview_preview_table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOff
+        )
+        self._overview_preview_table.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed,
+        )
         self._overview_preview_table.horizontalHeader().setSectionResizeMode(
             0,
             QHeaderView.ResizeToContents,
@@ -668,7 +690,10 @@ class AssetsPanel(BasePanel):
         self._preview_card = check_card
         check_card.set_header("生成检查", icon_name="eye")
         check_card.add_widget(self._build_check_tab(check_card))
-        overview_layout.addWidget(check_card)
+        # Keep the legacy projection alive for compatibility, but generation
+        # validation belongs to the execution flow and must not reappear in the
+        # material overview after a parent/page refresh.
+        check_card.hide()
         overview_layout.addStretch(1)
 
         fields_page = self._section_pages["fields"]
@@ -787,42 +812,100 @@ class AssetsPanel(BasePanel):
         field_card.add_widget(self._field_mapping_example)
         self._field_mapping_example.hide()
 
-        field_toolbar = QWidget(field_card)
-        self._field_toolbar = field_toolbar
-        field_toolbar_layout = QHBoxLayout(field_toolbar)
-        field_toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        field_toolbar_layout.setSpacing(8)
-        self._template_fields_title = QLabel("资料字段", field_toolbar)
-        self._add_material_field_button = QPushButton("添加字段", field_toolbar)
+        self._field_groups_panel = QWidget(field_card)
+        field_groups_layout = QVBoxLayout(self._field_groups_panel)
+        field_groups_layout.setContentsMargins(0, 0, 0, 0)
+        field_groups_layout.setSpacing(14)
+
+        fixed_header = TokenSectionHeader(
+            "固定字段",
+            hint="长期复用",
+            add_text="＋ 新增固定字段",
+            parent=self._field_groups_panel,
+        )
+        self._fixed_field_header = fixed_header
+        self._fixed_field_count = fixed_header.count_label
+        self._add_material_field_button = fixed_header.add_button
         self._add_material_field_button.setObjectName("material_v1_add_field_button")
         self._add_material_field_button.clicked.connect(
-            self._request_add_field_definition
+            lambda _checked=False: self._request_add_field_definition("fixed")
         )
-        apply_button_variant(self._add_material_field_button, "secondary")
-        field_toolbar_layout.addWidget(self._template_fields_title, 1)
-        field_toolbar_layout.addWidget(self._add_material_field_button, 0)
-        field_card.add_widget(field_toolbar)
-        # Custom field-definition management is outside the first release.
-        # Existing definitions remain readable and editable below.
-        field_toolbar.hide()
+        field_groups_layout.addWidget(fixed_header)
 
+        self._fixed_fields_body = QWidget(self._field_groups_panel)
+        fixed_fields_layout = QVBoxLayout(self._fixed_fields_body)
+        fixed_fields_layout.setContentsMargins(0, 0, 0, 0)
+        fixed_fields_layout.setSpacing(0)
         self._field_column_guide = TokenColumnGuide(
-            action_count=2,
-            parent=field_card,
+            action_count=3,
+            parent=self._fixed_fields_body,
         )
+        self._field_column_guide.setProperty("fieldScope", "fixed")
         self._field_column_guide.metrics_changed.connect(
-            self._apply_legacy_field_metrics
+            lambda metrics: self._apply_legacy_field_metrics(metrics, "fixed")
         )
-        field_card.add_widget(self._field_column_guide)
-
-        self._legacy_fields_container = QWidget(field_card)
+        fixed_fields_layout.addWidget(self._field_column_guide)
+        self._legacy_fields_container = QWidget(self._fixed_fields_body)
         self._legacy_fields_layout = QVBoxLayout(self._legacy_fields_container)
         self._legacy_fields_layout.setContentsMargins(0, 0, 0, 0)
         self._legacy_fields_layout.setSpacing(0)
-        field_card.add_widget(self._legacy_fields_container)
-        self._empty_fields_label = QLabel("暂无字段", field_card)
-        self._empty_fields_label.setObjectName("material_hint")
-        field_card.add_widget(self._empty_fields_label)
+        fixed_fields_layout.addWidget(self._legacy_fields_container)
+        self._empty_fixed_fields_label = QLabel(
+            "暂无固定字段，点击上方新增。",
+            self._fixed_fields_body,
+        )
+        self._empty_fixed_fields_label.setObjectName("material_hint")
+        fixed_fields_layout.addWidget(self._empty_fixed_fields_label)
+        field_groups_layout.addWidget(self._fixed_fields_body)
+
+        floating_header = TokenSectionHeader(
+            "自由字段",
+            hint="每次填写",
+            add_text="＋ 新增自由字段",
+            parent=self._field_groups_panel,
+        )
+        self._floating_field_header = floating_header
+        self._floating_field_count = floating_header.count_label
+        self._add_floating_material_field_button = floating_header.add_button
+        self._add_floating_material_field_button.setObjectName(
+            "material_v1_add_floating_field_button"
+        )
+        self._add_floating_material_field_button.clicked.connect(
+            lambda _checked=False: self._request_add_field_definition("floating")
+        )
+        field_groups_layout.addWidget(floating_header)
+
+        self._floating_fields_body = QWidget(self._field_groups_panel)
+        floating_fields_layout = QVBoxLayout(self._floating_fields_body)
+        floating_fields_layout.setContentsMargins(0, 0, 0, 0)
+        floating_fields_layout.setSpacing(0)
+        self._floating_field_column_guide = TokenColumnGuide(
+            action_count=3,
+            parent=self._floating_fields_body,
+        )
+        self._floating_field_column_guide.setProperty("fieldScope", "floating")
+        self._floating_field_column_guide.metrics_changed.connect(
+            lambda metrics: self._apply_legacy_field_metrics(metrics, "floating")
+        )
+        floating_fields_layout.addWidget(self._floating_field_column_guide)
+        self._floating_fields_container = QWidget(self._floating_fields_body)
+        self._floating_fields_layout = QVBoxLayout(self._floating_fields_container)
+        self._floating_fields_layout.setContentsMargins(0, 0, 0, 0)
+        self._floating_fields_layout.setSpacing(0)
+        floating_fields_layout.addWidget(self._floating_fields_container)
+        self._empty_floating_fields_label = QLabel(
+            "暂无自由字段，点击上方新增；生成时在工作台填写。",
+            self._floating_fields_body,
+        )
+        self._empty_floating_fields_label.setObjectName("material_hint")
+        floating_fields_layout.addWidget(self._empty_floating_fields_label)
+        field_groups_layout.addWidget(self._floating_fields_body)
+
+        # Compatibility projection retained for integrations that only query
+        # whether the field editor is globally empty.
+        self._empty_fields_label = QLabel("", field_card)
+        self._empty_fields_label.hide()
+        field_card.add_widget(self._field_groups_panel)
 
         # Retain the V1 table as a non-visual compatibility projection for
         # selection-based commands and existing integrations.
@@ -860,6 +943,61 @@ class AssetsPanel(BasePanel):
             ("attachments", "attachment", "附件资料", "gallery-vertical-end"),
         ):
             page = self._section_pages[section_id]
+            if section_id == "content":
+                rules_card = Card(parent=page)
+                self._content_rules_card = rules_card
+                rules_card.set_header("文件规则", icon_name="sliders-horizontal")
+                content_policy = QWidget(rules_card)
+                content_policy.setObjectName("content_global_rules")
+                content_policy_layout = QVBoxLayout(content_policy)
+                content_policy_layout.setContentsMargins(0, 0, 0, 0)
+                content_policy_layout.setSpacing(12)
+
+                format_row = QHBoxLayout()
+                format_row.addWidget(QLabel("内容插入格式", content_policy))
+                self._content_rule_target_radio = ThemedRadioButton(
+                    "使用目标文档格式",
+                    content_policy,
+                )
+                self._content_rule_source_radio = ThemedRadioButton(
+                    "保留来源格式（仅 DOCX，暂不支持）",
+                    content_policy,
+                )
+                self._content_rule_plain_radio = ThemedRadioButton(
+                    "仅保留文本",
+                    content_policy,
+                )
+                self._content_rule_format_group = QButtonGroup(content_policy)
+                for radio in (
+                    self._content_rule_target_radio,
+                    self._content_rule_plain_radio,
+                ):
+                    self._content_rule_format_group.addButton(radio)
+                    format_row.addWidget(radio)
+                # Keep the future source-format projection isolated from the
+                # live UI until DOCX style/numbering migration is implemented.
+                self._content_rule_source_radio.setEnabled(False)
+                self._content_rule_source_radio.hide()
+                format_row.addStretch(1)
+                content_policy_layout.addLayout(format_row)
+
+                behavior_row = QHBoxLayout()
+                self._content_rule_page_break_check = QCheckBox(
+                    "保留源文件中的显式分页符",
+                    content_policy,
+                )
+                behavior_row.addWidget(self._content_rule_page_break_check)
+                behavior_row.addStretch(1)
+                content_policy_layout.addLayout(behavior_row)
+                rules_card.add_widget(content_policy)
+
+                for control in (
+                    self._content_rule_target_radio,
+                    self._content_rule_plain_radio,
+                    self._content_rule_page_break_check,
+                ):
+                    control.toggled.connect(self._commit_content_policy)
+                self._section_layouts[section_id].addWidget(rules_card)
             if section_id == "images":
                 rules_card = Card(parent=page)
                 self._image_rules_card = rules_card
@@ -945,11 +1083,34 @@ class AssetsPanel(BasePanel):
                 self._image_rule_watermark_edit.setPlaceholderText(
                     "水印文字或 {{字段}}"
                 )
+                self._image_rule_watermark_font_label = QLabel(
+                    "水印字体",
+                    image_policy,
+                )
+                self._image_rule_watermark_font_label.setObjectName(
+                    "image_rule_watermark_font_label"
+                )
+                self._image_rule_watermark_font = FontCombo(
+                    lang="cn",
+                    parent=image_policy,
+                )
+                self._image_rule_watermark_font.setObjectName(
+                    "image_rule_watermark_font"
+                )
+                self._image_rule_watermark_font.set_font_name("宋体")
                 watermark_row.addWidget(self._image_rule_watermark_check)
                 watermark_row.addWidget(self._image_rule_watermark_fixed_radio)
                 watermark_row.addWidget(self._image_rule_watermark_free_radio)
                 watermark_row.addWidget(self._image_rule_watermark_edit, 1)
                 image_policy_layout.addLayout(watermark_row)
+
+                watermark_font_row = QHBoxLayout()
+                watermark_font_row.addWidget(
+                    self._image_rule_watermark_font_label
+                )
+                watermark_font_row.addWidget(self._image_rule_watermark_font)
+                watermark_font_row.addStretch(1)
+                image_policy_layout.addLayout(watermark_font_row)
                 rules_card.add_widget(image_policy)
                 for control in (
                     self._image_rule_adaptive_check,
@@ -962,6 +1123,9 @@ class AssetsPanel(BasePanel):
                 ):
                     control.toggled.connect(self._commit_image_policy)
                 self._image_rule_watermark_edit.editingFinished.connect(
+                    self._commit_image_policy
+                )
+                self._image_rule_watermark_font.font_changed.connect(
                     self._commit_image_policy
                 )
 
@@ -1030,9 +1194,9 @@ class AssetsPanel(BasePanel):
 
         cards = {
             "fields": self._profile_card,
-            "content": self._content_card,
+            "content": self._content_rules_card,
             "timeline": self._timeline_card,
-            "images": self._image_card,
+            "images": self._image_rules_card,
             "attachments": self._attachment_card,
         }
         self._persistence_actions: dict[str, PersistenceActions] = {}
@@ -1277,6 +1441,13 @@ class AssetsPanel(BasePanel):
                 current_extensions["image_policy"] = dict(
                     saved_extensions.get("image_policy", {}) or {}
                 )
+            elif section_id == "content":
+                if "content_policy" in saved_extensions:
+                    current_extensions["content_policy"] = dict(
+                        saved_extensions.get("content_policy", {}) or {}
+                    )
+                else:
+                    current_extensions.pop("content_policy", None)
         if section_id == "fields" or domain:
             if (
                 any(bool(value) for value in current_extensions.values())
@@ -1605,6 +1776,16 @@ class AssetsPanel(BasePanel):
                 border-radius: {theme.radius_sm}px;
                 padding: 10px;
             }}
+            QFrame#timeline_segment_header {{
+                background: transparent;
+                border: 1px solid transparent;
+                border-left: 3px solid transparent;
+                border-radius: {theme.radius_sm}px;
+            }}
+            QFrame#timeline_segment_header:hover {{
+                background: {theme.bg_hover};
+                border-left-color: {theme.primary};
+            }}
             QLabel#material_overview_summary,
             QLabel#material_check_summary {{
                 background: transparent;
@@ -1902,6 +2083,7 @@ class AssetsPanel(BasePanel):
             self._rename_package_button.setEnabled(writable)
             self._open_package_folder_button.setEnabled(enabled)
             self._add_material_field_button.setEnabled(writable)
+            self._add_floating_material_field_button.setEnabled(writable)
             self._add_content_material_button.setEnabled(writable)
             self._timeline_add_segment_button.setEnabled(writable)
             for header in self._resource_section_headers.values():
@@ -2012,7 +2194,11 @@ class AssetsPanel(BasePanel):
             self._clear_legacy_field_rows()
             self._fields.setRowCount(0)
             if package is None:
-                self._empty_fields_label.setVisible(True)
+                self._fixed_field_count.setText("0 项")
+                self._floating_field_count.setText("0 项")
+                self._empty_fixed_fields_label.setVisible(True)
+                self._empty_floating_fields_label.setVisible(True)
+                self._empty_fields_label.setVisible(False)
                 return
             contract = get_package_material_contract(package)
             managed_timeline_fields = self._timeline_managed_field_keys(package)
@@ -2064,13 +2250,19 @@ class AssetsPanel(BasePanel):
             self._updating = was_updating
 
     def _clear_legacy_field_rows(self) -> None:
-        for row in self._legacy_field_rows.values():
-            self._legacy_fields_layout.removeWidget(row)
+        for key, row in self._legacy_field_rows.items():
+            layout = (
+                self._floating_fields_layout
+                if self._legacy_field_scopes.get(key) == "floating"
+                else self._legacy_fields_layout
+            )
+            layout.removeWidget(row)
             # Do not detach a live QWidget: on Windows that promotes it to a
             # native top-level ``pythonw`` window until deferred deletion.
             row.hide()
             row.deleteLater()
         self._legacy_field_rows.clear()
+        self._legacy_field_scopes.clear()
 
     @staticmethod
     def _timeline_managed_field_keys(
@@ -2102,32 +2294,89 @@ class AssetsPanel(BasePanel):
         writable: bool,
     ) -> None:
         custom_keys = self._custom_field_keys()
-        allowed = {field.key: owner_scope in field.allowed_scopes for field in fields}
-        for index, field in enumerate(fields, start=1):
-            row = LegacyFieldTokenRow(
-                index=index,
-                key=field.key,
-                value=str(scope.fields.get(field.key, "")),
-                custom=field.key in custom_keys,
-                writable=writable and allowed[field.key],
-                parent=self._legacy_fields_container,
+        grouped = {
+            "fixed": [
+                field
+                for field in fields
+                if package_material_field_value_source(self._package, field.key)
+                != "floating"
+            ],
+            "floating": [
+                field
+                for field in fields
+                if package_material_field_value_source(self._package, field.key)
+                == "floating"
+            ],
+        }
+        for field_scope, scoped_fields in grouped.items():
+            container = (
+                self._floating_fields_container
+                if field_scope == "floating"
+                else self._legacy_fields_container
             )
-            row.value_committed.connect(self._commit_legacy_field_value)
-            row.token_renamed.connect(self._rename_legacy_field_definition)
-            row.clear_requested.connect(self._clear_legacy_field_value)
-            row.remove_requested.connect(self._remove_legacy_field_definition)
-            self._legacy_fields_layout.addWidget(row)
-            self._legacy_field_rows[field.key] = row
-            apply_token_row_style(
-                row,
-                object_name="material_v1_field_token_row",
-                is_last=index == len(fields),
+            layout = (
+                self._floating_fields_layout
+                if field_scope == "floating"
+                else self._legacy_fields_layout
             )
-        self._empty_fields_label.setVisible(not fields)
-        self._apply_legacy_field_metrics(self._field_column_guide.metrics())
+            for index, field in enumerate(scoped_fields, start=1):
+                value = (
+                    ""
+                    if field_scope == "floating"
+                    else str(scope.fields.get(field.key, ""))
+                )
+                row = LegacyFieldTokenRow(
+                    index=index,
+                    key=field.key,
+                    value=value,
+                    custom=field.key in custom_keys,
+                    writable=writable,
+                    value_writable=(
+                        writable
+                        and field_scope == "fixed"
+                        and owner_scope in field.allowed_scopes
+                    ),
+                    definition_writable=writable and field.key in custom_keys,
+                    value_placeholder=(
+                        "在工作台填写"
+                        if field_scope == "floating"
+                        else "填写字段内容"
+                    ),
+                    parent=container,
+                )
+                row.value_committed.connect(self._commit_legacy_field_value)
+                row.token_renamed.connect(self._rename_legacy_field_definition)
+                row.clear_requested.connect(self._clear_legacy_field_value)
+                row.add_requested.connect(self._add_field_series)
+                row.remove_requested.connect(self._remove_legacy_field_definition)
+                layout.addWidget(row)
+                self._legacy_field_rows[field.key] = row
+                self._legacy_field_scopes[field.key] = field_scope
+                apply_token_row_style(
+                    row,
+                    object_name="material_v1_field_token_row",
+                    is_last=index == len(scoped_fields),
+                )
+        fixed_count = len(grouped["fixed"])
+        floating_count = len(grouped["floating"])
+        self._fixed_field_count.setText(f"{fixed_count} 项")
+        self._floating_field_count.setText(f"{floating_count} 项")
+        self._empty_fixed_fields_label.setVisible(not fixed_count)
+        self._empty_floating_fields_label.setVisible(not floating_count)
+        self._empty_fields_label.setVisible(False)
+        self._apply_legacy_field_metrics(
+            self._field_column_guide.metrics(),
+            "fixed",
+        )
+        self._apply_legacy_field_metrics(
+            self._floating_field_column_guide.metrics(),
+            "floating",
+        )
 
-    def _apply_legacy_field_metrics(self, metrics) -> None:
-        for row in self._legacy_field_rows.values():
+    def _apply_legacy_field_metrics(self, metrics, scope: str = "") -> None:
+        for key, row in self._legacy_field_rows.items():
+            if scope and self._legacy_field_scopes.get(key) != scope:
+                continue
             row.apply_metrics(metrics)
 
     def _custom_field_keys(self) -> set[str]:
@@ -2138,25 +2387,35 @@ class AssetsPanel(BasePanel):
             if hasattr(item, "get") and str(item.get("key", "")).strip()
         }
 
-    def _request_add_field_definition(self) -> None:
+    def _request_add_field_definition(self, value_source: str = "fixed") -> None:
         if not self._is_user_package():
             return
-        key = input_text(
-            "新增字段",
-            "字段名称（将生成 {{@text:字段名称}}）",
-            parent=self,
+        normalized_source = (
+            "floating" if value_source == "floating" else "fixed"
         )
-        if key is None:
-            return
-        key = self._normalize_token_identifier(key)
-        if not key:
-            return
+        key = self._next_field_definition_name(normalized_source)
         result = self._service().add_field_definition(
             self._package,
             key=key,
             label=key,
+            value_source=normalized_source,
         )
         self._apply_result(result)
+
+    def _add_field_series(self, key: str) -> None:
+        self._request_add_field_definition(
+            self._legacy_field_scopes.get(key, "fixed")
+        )
+
+    def _next_field_definition_name(self, value_source: str = "fixed") -> str:
+        existing = {
+            field.key for field in get_package_material_contract(self._package).fields
+        }
+        prefix = "自由字段" if value_source == "floating" else "固定字段"
+        index = 1
+        while f"{prefix}{index}" in existing:
+            index += 1
+        return f"{prefix}{index}"
 
     def _commit_legacy_field_value(self, key: str, value: str) -> None:
         if self._updating or not self._is_user_package():
@@ -2229,12 +2488,13 @@ class AssetsPanel(BasePanel):
         for table in self._resource_tables.values():
             table.setRowCount(0)
         self._image_rules_table.setRowCount(0)
+        self._refresh_content_policy_controls()
+        self._refresh_image_policy_controls()
         if package is None:
             self._refresh_resource_empty_states()
             return
         contract = get_package_material_contract(package)
         self._refresh_image_rules(contract)
-        self._refresh_image_policy_controls()
         owner_scope, owner_id = self._selected_scope()
         scope = self._scope_object(owner_scope, owner_id)
         current_record = package.get_record(self._current_record_id)
@@ -2948,6 +3208,9 @@ class AssetsPanel(BasePanel):
             self._image_rule_watermark_edit.setText(
                 str(policy.get("watermark_text", ""))
             )
+            self._image_rule_watermark_font.set_font_name(
+                str(policy.get("watermark_font", "宋体") or "宋体")
+            )
         finally:
             self._syncing_image_policy = False
         enabled = self._image_rule_watermark_check.isChecked()
@@ -2960,8 +3223,61 @@ class AssetsPanel(BasePanel):
         self._image_rule_watermark_fixed_radio.setEnabled(writable and enabled)
         self._image_rule_watermark_free_radio.setEnabled(writable and enabled)
         self._image_rule_watermark_edit.setEnabled(writable and enabled and fixed)
+        self._image_rule_watermark_font_label.setEnabled(writable and enabled)
+        self._image_rule_watermark_font.setEnabled(writable and enabled)
         self._image_rule_watermark_edit.setPlaceholderText(
             "水印文字或 {{字段}}" if fixed else "在工作台填写"
+        )
+
+    def _refresh_content_policy_controls(self) -> None:
+        extensions = self._package_contract_extensions()
+        policy = dict(extensions.get("content_policy", {}) or {})
+        writable = self._is_user_package()
+        mode = str(policy.get("format_mode", "target_document"))
+        self._syncing_content_policy = True
+        try:
+            self._content_rule_plain_radio.setChecked(mode == "plain_text")
+            self._content_rule_target_radio.setChecked(mode != "plain_text")
+            self._content_rule_page_break_check.setChecked(
+                str(policy.get("page_break_policy", "drop"))
+                == "preserve_explicit"
+            )
+        finally:
+            self._syncing_content_policy = False
+        self._content_rule_target_radio.setEnabled(writable)
+        self._content_rule_plain_radio.setEnabled(writable)
+        # Source formatting is deliberately unavailable until the DOCX style,
+        # numbering and relationship migration path exists end to end.
+        self._content_rule_source_radio.setEnabled(False)
+        self._content_rule_source_radio.hide()
+        self._content_rule_page_break_check.setEnabled(
+            writable and mode != "plain_text"
+        )
+
+    def _commit_content_policy(self, *_args) -> None:
+        if (
+            self._updating
+            or self._syncing_content_policy
+            or not self._is_user_package()
+        ):
+            return
+        self._apply_result(
+            self._service().set_content_policy(
+                self._package,
+                format_mode=(
+                    "plain_text"
+                    if self._content_rule_plain_radio.isChecked()
+                    else "target_document"
+                ),
+                page_break_policy=(
+                    "preserve_explicit"
+                    if (
+                        not self._content_rule_plain_radio.isChecked()
+                        and self._content_rule_page_break_check.isChecked()
+                    )
+                    else "drop"
+                ),
+            )
         )
 
     def _commit_image_policy(self, *_args) -> None:
@@ -2978,6 +3294,9 @@ class AssetsPanel(BasePanel):
                     else "fixed"
                 ),
                 watermark_text=self._image_rule_watermark_edit.text(),
+                watermark_font=(
+                    self._image_rule_watermark_font.selected_font() or "宋体"
+                ),
                 show_single_image_name=(self._image_rule_single_name_check.isChecked()),
                 show_multi_image_name=(self._image_rule_multi_name_check.isChecked()),
                 page_break_after_images=(
@@ -2987,6 +3306,47 @@ class AssetsPanel(BasePanel):
         )
 
     def _refresh_calculations(self) -> None:
+        expanded_state = {
+            segment_key: not body.isHidden()
+            for segment_key, row in self._timeline_segment_rows.items()
+            if (body := row.findChild(QWidget, "timeline_segment_body")) is not None
+        }
+        segments_updates_enabled = self._timeline_segments_container.updatesEnabled()
+        timeline_is_active = self._active_section_id == "timeline"
+        viewport = self._detail_scroll.viewport() if timeline_is_active else None
+        viewport_updates_enabled = (
+            viewport.updatesEnabled() if viewport is not None else False
+        )
+        scroll_bar = (
+            self._detail_scroll.verticalScrollBar() if timeline_is_active else None
+        )
+        scroll_value = scroll_bar.value() if scroll_bar is not None else 0
+
+        self._timeline_segments_container.setUpdatesEnabled(False)
+        if viewport is not None:
+            viewport.setUpdatesEnabled(False)
+        try:
+            self._rebuild_calculations(expanded_state)
+            if timeline_is_active:
+                timeline_page = self._section_pages["timeline"]
+                self._detail_geometry.sync_now(timeline_page)
+                if scroll_bar is not None:
+                    scroll_bar.setValue(scroll_value)
+        finally:
+            self._timeline_segments_container.setUpdatesEnabled(
+                segments_updates_enabled
+            )
+            if segments_updates_enabled:
+                self._timeline_segments_container.update()
+            if viewport is not None:
+                viewport.setUpdatesEnabled(viewport_updates_enabled)
+                if viewport_updates_enabled:
+                    viewport.update()
+
+    def _rebuild_calculations(
+        self,
+        expanded_state: dict[str, bool],
+    ) -> None:
         self._clear_timeline_segment_rows()
         self._derivations.setRowCount(0)
         self._timelines.setRowCount(0)
@@ -3049,14 +3409,16 @@ class AssetsPanel(BasePanel):
                     owner_id=segment_projection.owner_id,
                 )
             )
+            segment_key = (
+                f"{segment_projection.owner_scope}:"
+                f"{segment_projection.owner_id}:"
+                f"{segment_projection.segment_id}"
+            )
+            body = segment.findChild(QWidget, "timeline_segment_body")
+            if body is not None:
+                body.setVisible(expanded_state.get(segment_key, True))
             self._timeline_segments_layout.addWidget(segment)
-            self._timeline_segment_rows[
-                (
-                    f"{segment_projection.owner_scope}:"
-                    f"{segment_projection.owner_id}:"
-                    f"{segment_projection.segment_id}"
-                )
-            ] = segment
+            self._timeline_segment_rows[segment_key] = segment
         self._timeline_empty_label.setVisible(not visible_segments)
 
     def _visible_timeline_specs(
@@ -3203,9 +3565,10 @@ class AssetsPanel(BasePanel):
         outer.setContentsMargins(0, 12, 0, 16)
         outer.setSpacing(14)
 
-        header = QWidget(row)
+        header = QFrame(row)
+        header.setObjectName("timeline_segment_header")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setContentsMargins(8, 3, 4, 3)
         header_layout.setSpacing(8)
         title = QLabel(f"第 {index} 段时间", header)
         title.setObjectName("timeline_segment_title")
@@ -3255,6 +3618,8 @@ class AssetsPanel(BasePanel):
 
         start_edit = QLineEdit(start_value, body)
         end_edit = QLineEdit(end_value, body)
+        start_edit.setObjectName("timeline_segment_start_date")
+        end_edit.setObjectName("timeline_segment_end_date")
         node_count = StyledSpinBox(body)
         node_count.setDecimals(0)
         node_count.setSingleStep(1)
@@ -3360,7 +3725,7 @@ class AssetsPanel(BasePanel):
             start=1,
         ):
             ratio = Decimal(specification.parameters["ratio"])
-            percent = self._decimal_text(ratio * Decimal(100))
+            percent = self._timeline_percent_text(ratio)
             node_row = self._build_timeline_node_row(
                 parent=nodes_body,
                 index=node_index,
@@ -3436,6 +3801,7 @@ class AssetsPanel(BasePanel):
             row,
             object_name="timeline_segment_row",
             is_last=True,
+            hover_highlight=False,
         )
         return row
 
@@ -3456,9 +3822,10 @@ class AssetsPanel(BasePanel):
         outer.setContentsMargins(0, 12, 0, 16)
         outer.setSpacing(14)
 
-        header = QWidget(row)
+        header = QFrame(row)
+        header.setObjectName("timeline_segment_header")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setContentsMargins(8, 3, 4, 3)
         header_layout.setSpacing(8)
         title = QLabel(f"第 {index} 段时间", header)
         title.setObjectName("timeline_segment_title")
@@ -3647,6 +4014,7 @@ class AssetsPanel(BasePanel):
             row,
             object_name="timeline_segment_row",
             is_last=True,
+            hover_highlight=False,
         )
         return row
 
@@ -3685,6 +4053,7 @@ class AssetsPanel(BasePanel):
         )
         token_edit.setCompleted(True)
         position_edit = QLineEdit(position, row)
+        position_edit.setObjectName("timeline_node_position")
         position_edit.setReadOnly(not position_editable)
         if position_committed is not None:
             position_edit.editingFinished.connect(
@@ -3811,6 +4180,14 @@ class AssetsPanel(BasePanel):
     def _decimal_text(value: Decimal) -> str:
         text = format(value.normalize(), "f")
         return text.rstrip("0").rstrip(".") if "." in text else text
+
+    @staticmethod
+    def _timeline_percent_text(ratio: Decimal) -> str:
+        percent = (ratio * Decimal(100)).quantize(
+            Decimal("0.1"),
+            rounding=ROUND_HALF_UP,
+        )
+        return AssetsPanel._decimal_text(percent)
 
     @staticmethod
     def _ratio_timeline_parameters(
@@ -3947,6 +4324,12 @@ class AssetsPanel(BasePanel):
             return
         start_value = str(start_text or "").strip()
         end_value = str(end_text or "").strip()
+        # The two editors commit on focus loss. Moving from the first editor
+        # to the second must not validate an incomplete pair or rebuild the
+        # form, otherwise the first value is discarded before the user can
+        # finish entering the range.
+        if not start_value or not end_value:
+            return
         try:
             start_date = parse_timeline_date(start_value)
             end_date = parse_timeline_date(end_value)
@@ -4433,6 +4816,10 @@ class AssetsPanel(BasePanel):
         )
 
     def _refresh_check(self) -> None:
+        # This compatibility projection is intentionally never user-visible.
+        # Reassert the invariant here because this method runs on every scope
+        # and package refresh.
+        self._preview_card.setVisible(False)
         self._issues.setRowCount(0)
         package = self._package
         record = (
@@ -4480,7 +4867,7 @@ class AssetsPanel(BasePanel):
             self._source_banner.setText("尚未选择资料包")
             self._package_combo.setToolTip("选择资料包")
             self._overview_summary.clear()
-            self._overview_preview_table.setMinimumHeight(82)
+            self._fit_overview_preview_table()
             return
         contract = get_package_material_contract(package)
         source_text = (
@@ -4511,9 +4898,13 @@ class AssetsPanel(BasePanel):
             if resolution is not None and resolution.record is not None
             else {}
         )
-        preview_fields = contract.fields[:8]
-        self._overview_preview_table.setRowCount(len(preview_fields))
-        for row, field in enumerate(preview_fields):
+        resources = (
+            resolution.record.resources
+            if resolution is not None and resolution.record is not None
+            else {}
+        )
+        preview_rows: list[tuple[str, str, str, str, str]] = []
+        for field in contract.fields:
             value = values.get(field.key, "")
             is_filled = bool(str(value).strip())
             status = (
@@ -4521,23 +4912,85 @@ class AssetsPanel(BasePanel):
                 if is_filled
                 else ("必填未填写" if field.required else "未填写")
             )
-            token_item = QTableWidgetItem(f"{{{{@text:{field.key}}}}}")
-            token_item.setData(Qt.UserRole, field.key)
-            self._overview_preview_table.setItem(row, 0, token_item)
-            self._overview_preview_table.setItem(
-                row,
-                1,
-                QTableWidgetItem(str(value) if is_filled else "—"),
+            preview_rows.append(
+                (
+                    material_token(MaterialTokenNamespace.TEXT, field.key),
+                    str(value) if is_filled else "—",
+                    status,
+                    field.key,
+                    str(value) if is_filled else "",
+                )
             )
+        resource_namespaces = {
+            "content": MaterialTokenNamespace.FILE,
+            "image": MaterialTokenNamespace.IMAGE,
+            "attachment": MaterialTokenNamespace.ATTACHMENT,
+        }
+        for role_contract in contract.resource_roles:
+            items = tuple(resources.get(role_contract.role, ()))
+            names = tuple(item.original_name for item in items)
+            required = bool(role_contract.required or role_contract.min_items)
+            preview_rows.append(
+                (
+                    material_token(
+                        resource_namespaces[role_contract.domain],
+                        role_contract.role,
+                    ),
+                    self._resource_overview_text(role_contract.domain, names),
+                    (
+                        "已绑定"
+                        if names
+                        else ("必填未绑定" if required else "未绑定")
+                    ),
+                    role_contract.role,
+                    "\n".join(names),
+                )
+            )
+
+        self._overview_preview_table.setRowCount(len(preview_rows))
+        for row, (token, content, status, identity, tooltip) in enumerate(
+            preview_rows
+        ):
+            token_item = QTableWidgetItem(token)
+            token_item.setData(Qt.UserRole, identity)
+            self._overview_preview_table.setItem(row, 0, token_item)
+            content_item = QTableWidgetItem(content)
+            if tooltip:
+                content_item.setToolTip(tooltip)
+            self._overview_preview_table.setItem(row, 1, content_item)
             self._overview_preview_table.setItem(
                 row,
                 2,
                 QTableWidgetItem(status),
             )
             self._overview_preview_table.setRowHeight(row, 38)
-        self._overview_preview_table.setMinimumHeight(
-            44 + max(1, len(preview_fields)) * 38
-        )
+        self._fit_overview_preview_table()
+
+    @staticmethod
+    def _resource_overview_text(domain: str, names: tuple[str, ...]) -> str:
+        if not names:
+            return "—"
+        if len(names) == 1:
+            return names[0]
+        unit = {
+            "image": "张图片",
+            "content": "个文件",
+            "attachment": "个附件",
+        }.get(domain, "个资源")
+        visible_names = "、".join(names[:3])
+        suffix = " …" if len(names) > 3 else ""
+        return f"{len(names)} {unit} · {visible_names}{suffix}"
+
+    def _fit_overview_preview_table(self) -> None:
+        table = self._overview_preview_table
+        header = table.horizontalHeader()
+        header_height = max(header.height(), header.sizeHint().height())
+        body_height = sum(table.rowHeight(row) for row in range(table.rowCount()))
+        if not body_height:
+            body_height = 38
+        height = header_height + body_height + table.frameWidth() * 2
+        table.setFixedHeight(height)
+        table.updateGeometry()
 
     def _resolved_record(self, record_id: str):
         from src.domain.materials import MaterialResolver
@@ -4562,6 +5015,7 @@ class AssetsPanel(BasePanel):
             return {
                 "fields": (),
                 "resource_roles": (),
+                "content_policy": {},
                 "image_policy": {},
             }
         raw = self._package.metadata.get(PACKAGE_CONTRACT_EXTENSIONS_KEY, {})

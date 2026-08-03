@@ -229,6 +229,7 @@ def test_execution_snapshot_schema_v1_remains_readable() -> None:
     payload = snapshot.to_payload()
     payload["schema_version"] = 1
     payload.pop("resource_domains")
+    payload.pop("content_policy")
     payload.pop("image_policy")
     for record in payload["records"]:
         record.pop("timeline_field_keys")

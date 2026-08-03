@@ -34,7 +34,6 @@ if TYPE_CHECKING:
 _BREAK_TYPES = frozenset({"nextPage", "continuous", "evenPage", "oddPage"})
 _BOUNDARY_MODES = frozenset({"preserve_source", "semantic_rebuild", "normalize_all"})
 _CLEANUP_POLICIES = frozenset({"preserve", "remove_proven_redundant"})
-_LINK_MODES = frozenset({"preserve_source", "semantic_rebuild"})
 _CAPTION_PATTERN = re.compile(r"^(?:图|表|figure|table)\s*[-—－:：]?[\d一二三四五六七八九十]+", re.IGNORECASE)
 _PROTECTED_TAGS = frozenset(
     {
@@ -273,7 +272,7 @@ def build_section_execution_plan(
 
     cleanup_policy = str(getattr(section_config, "empty_break_policy", "preserve") or "preserve")
     caption_policy = str(
-        getattr(section_config, "caption_table_break_policy", "preserve") or "preserve"
+        getattr(config.caption, "table_break_policy", "preserve") or "preserve"
     )
     cleanup_candidates: set[int] = set()
     if cleanup_policy == "remove_proven_redundant":
@@ -399,8 +398,6 @@ def build_section_execution_plan(
 def execute_section_execution_plan(
     doc: Document,
     plan: SectionExecutionPlan,
-    *,
-    header_footer_link_mode: str = "preserve_source",
 ) -> SectionExecutionReceipt:
     """Execute a non-stale plan and verify its declared topology effects."""
 
@@ -437,14 +434,12 @@ def execute_section_execution_plan(
                 doc,
                 operation.paragraph_index,
                 operation.target_break_type,
-                header_footer_link_mode=header_footer_link_mode,
             )
         elif operation.action == "insert_carrier_break":
             carrier_boundary = _insert_break_carrier_before_paragraph(
                 doc,
                 operation.paragraph_index,
                 operation.target_break_type,
-                header_footer_link_mode=header_footer_link_mode,
             )
             changed = carrier_boundary is not None
             if carrier_boundary is not None:
@@ -516,7 +511,10 @@ def effective_boundary_mode(section_config: Any) -> str:
     return mode
 
 
-def validate_section_policy(section_config: Any) -> list[tuple[str, str]]:
+def validate_section_policy(
+    section_config: Any,
+    caption_config: Any | None = None,
+) -> list[tuple[str, str]]:
     issues: list[tuple[str, str]] = []
     mode = str(
         getattr(section_config, "boundary_mode", "semantic_rebuild")
@@ -529,21 +527,25 @@ def validate_section_policy(section_config: Any) -> list[tuple[str, str]]:
         issues.append(
             ("section.section_break_type", f"unsupported section_break_type: {break_type}")
         )
-    for field_name in ("empty_break_policy", "caption_table_break_policy"):
-        value = str(getattr(section_config, field_name, "preserve") or "preserve")
-        if value not in _CLEANUP_POLICIES:
-            issues.append((f"section.{field_name}", f"unsupported {field_name}: {value}"))
-    link_mode = str(
-        getattr(section_config, "header_footer_link_mode", "preserve_source")
-        or "preserve_source"
-    )
-    if link_mode not in _LINK_MODES:
+    value = str(getattr(section_config, "empty_break_policy", "preserve") or "preserve")
+    if value not in _CLEANUP_POLICIES:
         issues.append(
             (
-                "section.header_footer_link_mode",
-                f"unsupported header_footer_link_mode: {link_mode}",
+                "section.empty_break_policy",
+                f"unsupported empty_break_policy: {value}",
             )
         )
+    if caption_config is not None:
+        caption_value = str(
+            getattr(caption_config, "table_break_policy", "preserve") or "preserve"
+        )
+        if caption_value not in _CLEANUP_POLICIES:
+            issues.append(
+                (
+                    "caption.table_break_policy",
+                    f"unsupported table_break_policy: {caption_value}",
+                )
+            )
     return issues
 
 
@@ -551,8 +553,6 @@ def ensure_section_break_before_paragraph(
     doc: Document,
     paragraph_index: int,
     break_type: str = "nextPage",
-    *,
-    header_footer_link_mode: str = "semantic_rebuild",
 ) -> bool:
     """Compatibility-safe imperative helper backed by the local-section clone."""
 
@@ -568,7 +568,6 @@ def ensure_section_break_before_paragraph(
                     doc,
                     paragraph_index,
                     break_type,
-                    header_footer_link_mode=header_footer_link_mode,
                 )
                 is not None
             )
@@ -577,7 +576,6 @@ def ensure_section_break_before_paragraph(
         doc,
         paragraph_index - 1,
         break_type,
-        header_footer_link_mode=header_footer_link_mode,
     )
 
 
@@ -687,8 +685,6 @@ def _insert_break_after_paragraph(
     doc: Document,
     paragraph_index: int,
     break_type: str,
-    *,
-    header_footer_link_mode: str,
 ) -> bool:
     if paragraph_index < 0 or paragraph_index >= len(doc.paragraphs):
         return False
@@ -704,7 +700,6 @@ def _insert_break_after_paragraph(
         # one section to corrupt the other.  Preserve existing source refs on
         # existing boundaries; a new boundary begins by inheritance and the
         # header/footer planner may then create independent parts as required.
-        del header_footer_link_mode
         _strip_explicit_header_footer_references(sect_pr)
         ppr.append(sect_pr)
     old_type = _break_type(sect_pr)
@@ -718,8 +713,6 @@ def _insert_break_carrier_before_paragraph(
     doc: Document,
     target_paragraph_index: int,
     break_type: str,
-    *,
-    header_footer_link_mode: str,
 ):
     """Insert a minimal section-bearing paragraph after intervening tables.
 
@@ -729,7 +722,6 @@ def _insert_break_carrier_before_paragraph(
     that legal anchor without moving the table into the new section.
     """
 
-    del header_footer_link_mode
     if target_paragraph_index <= 0 or target_paragraph_index >= len(doc.paragraphs):
         return None
     target = doc.paragraphs[target_paragraph_index]._element

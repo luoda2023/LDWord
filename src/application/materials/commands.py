@@ -271,17 +271,28 @@ class MaterialPackageService:
         key: str,
         label: str,
         required: bool = False,
+        value_source: str = "fixed",
     ) -> MaterialCommandResult:
         def construct() -> MaterialPackage:
             if get_package_material_contract(package).get_field(key) is not None:
                 raise ValueError(f"material_field_definition_duplicate:{key}")
+            normalized_source = str(value_source or "fixed").strip()
+            if normalized_source not in {"fixed", "floating"}:
+                raise ValueError(
+                    f"material_field_value_source_invalid:{normalized_source}"
+                )
             extensions = _package_extensions(package)
             extensions["fields"].append(
                 {
                     "key": key,
                     "label": label,
                     "required": required,
-                    "allowed_scopes": ["shared", "group", "record", "run"],
+                    "allowed_scopes": (
+                        ["run"]
+                        if normalized_source == "floating"
+                        else ["shared", "group", "record", "run"]
+                    ),
+                    "value_source": normalized_source,
                 }
             )
             return _package_with_extensions(package, extensions)
@@ -463,6 +474,7 @@ class MaterialPackageService:
         watermark_enabled: bool,
         watermark_source: str,
         watermark_text: str,
+        watermark_font: str = "宋体",
         show_single_image_name: bool | None = None,
         show_multi_image_name: bool | None = None,
         page_break_after_images: bool = False,
@@ -476,6 +488,7 @@ class MaterialPackageService:
                 "watermark_enabled": bool(watermark_enabled),
                 "watermark_source": str(watermark_source),
                 "watermark_text": str(watermark_text),
+                "watermark_font": str(watermark_font or "宋体").strip() or "宋体",
                 "show_single_image_name": (
                     legacy_show_image_name
                     if show_single_image_name is None
@@ -487,6 +500,36 @@ class MaterialPackageService:
                     else bool(show_multi_image_name)
                 ),
                 "page_break_after_images": bool(page_break_after_images),
+            }
+            return _package_with_extensions(package, extensions)
+
+        return self._construct(construct)
+
+    def set_content_policy(
+        self,
+        package: MaterialPackage,
+        *,
+        format_mode: str,
+        page_break_policy: str = "drop",
+    ) -> MaterialCommandResult:
+        """Persist package-wide file-content insertion behavior."""
+
+        def construct() -> MaterialPackage:
+            normalized_mode = str(format_mode or "target_document").strip()
+            if normalized_mode not in {"target_document", "plain_text"}:
+                raise ValueError(
+                    f"material_content_format_mode_invalid:{normalized_mode}"
+                )
+            normalized_breaks = str(page_break_policy or "drop").strip()
+            if normalized_breaks not in {"drop", "preserve_explicit"}:
+                raise ValueError(
+                    "material_content_page_break_policy_invalid:"
+                    f"{normalized_breaks}"
+                )
+            extensions = _package_extensions(package)
+            extensions["content_policy"] = {
+                "format_mode": normalized_mode,
+                "page_break_policy": normalized_breaks,
             }
             return _package_with_extensions(package, extensions)
 
@@ -868,7 +911,7 @@ def _copy_scope(scope: MaterialScope, **changes) -> MaterialScope:
 def _package_extensions(package: MaterialPackage) -> dict[str, object]:
     raw = package.metadata.get(PACKAGE_CONTRACT_EXTENSIONS_KEY, {})
     source = dict(raw or {})
-    return {
+    extensions = {
         "fields": [
             dict(item)
             for item in source.get("fields", ())
@@ -881,6 +924,11 @@ def _package_extensions(package: MaterialPackage) -> dict[str, object]:
         ],
         "image_policy": dict(source.get("image_policy", {}) or {}),
     }
+    if "content_policy" in source:
+        extensions["content_policy"] = dict(
+            source.get("content_policy", {}) or {}
+        )
+    return extensions
 
 
 def _package_with_extensions(

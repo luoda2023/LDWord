@@ -95,7 +95,7 @@ class ReferenceFormatModule(BaseModule):
 
 
 def _resolve_reference_entry_style(config: ResolvedConfig) -> StyleConfig:
-    """Combine effective reference paragraph style with reference-rule overrides."""
+    """Combine the effective reference style with scene-owned paragraph rules."""
     base_style = deepcopy(
         config.styles.get("references_body")
         or config.styles.get("body")
@@ -103,13 +103,6 @@ def _resolve_reference_entry_style(config: ResolvedConfig) -> StyleConfig:
         or StyleConfig()
     )
     ref_cfg = config.reference_style
-
-    if ref_cfg.font_cn:
-        base_style.font_cn = ref_cfg.font_cn
-    if ref_cfg.font_en:
-        base_style.font_en = ref_cfg.font_en
-    if ref_cfg.size_pt:
-        base_style.size_pt = ref_cfg.size_pt
 
     base_style.space_before_pt = 0.0
     base_style.space_before_unit = "pt"

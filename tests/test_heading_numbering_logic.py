@@ -103,8 +103,7 @@ def test_heading_numbering_logic_module_exposes_pure_template_chain_and_state_he
     assert state.restart_mode == "parent"
     assert state.restart_trigger_level is None
     assert build_restart_mode_options(1) == [
-        ("上级变化时重新开始", "parent"),
-        ("全文连续编号", "document"),
+        ("一级编号不适用", "parent"),
     ]
     assert build_restart_mode_options(3) == [
         ("上级变化时重新开始", "parent"),

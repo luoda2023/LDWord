@@ -123,7 +123,6 @@ from src.ui.panels.scene_navigation_projection import (
 from src.ui.panels.scene_output_detail import _OutputDetail
 from src.ui.panels.scene_overview_projection import (
     SceneOverviewRowSpec,
-    SceneRunStepSpec,
     build_scene_overview_spec,
 )
 from src.ui.panels.scene_scope_sections import DocumentScopeSection
@@ -472,65 +471,6 @@ class _SceneOverviewSettingRow(QWidget):
         )
 
 
-class _SceneOverviewRunStepRow(QWidget):
-    """Compact one-step row for the scene overview run preview."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._icon_name = "circle"
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 3, 0, 3)
-        layout.setSpacing(8)
-
-        self._icon = QLabel(self)
-        self._icon.setFixedSize(18, 18)
-        layout.addWidget(self._icon, 0, Qt.AlignTop)
-
-        text_wrap = QWidget(self)
-        text_lay = QVBoxLayout(text_wrap)
-        text_lay.setContentsMargins(0, 0, 0, 0)
-        text_lay.setSpacing(1)
-
-        self._title = QLabel("", text_wrap)
-        self._detail = QLabel("", text_wrap)
-        self._detail.setWordWrap(True)
-        text_lay.addWidget(self._title)
-        text_lay.addWidget(self._detail)
-        layout.addWidget(text_wrap, 1)
-
-        self._apply_theme()
-        bind_theme(self, self._apply_theme)
-
-    def set_step(self, step: SceneRunStepSpec) -> None:
-        self._icon_name = step.icon_name
-        self._title.setText(step.title)
-        self._detail.setText(step.detail)
-        self._apply_theme()
-
-    def step_text(self) -> str:
-        return f"{self._title.text()} {self._detail.text()}".strip()
-
-    def _apply_theme(self) -> None:
-        t = get_theme()
-        self._title.setStyleSheet(
-            f"font-size: {t.font_size_sm}px; font-weight: {t.font_weight_emphasis}; "
-            f"color: {t.text_primary};"
-        )
-        self._detail.setStyleSheet(
-            f"font-size: {t.font_size_sm}px; color: {t.text_secondary};"
-        )
-        try:
-            from src.shared.ui.icons.catalog import get_icon
-
-            self._icon.setPixmap(
-                get_icon(self._icon_name, size=16, color=t.text_hint).pixmap(16, 16)
-            )
-            self._icon.setText("")
-        except Exception:
-            self._icon.setText("•")
-
-
 # ── 方案概览 ────────────────────────────────────────
 
 
@@ -540,7 +480,6 @@ class _SceneOverviewDetail(QWidget):
     scene_changed = Signal(int)
     scene_edited = Signal()
     navigate_requested = Signal(str)
-    execute_requested = Signal()
     new_scene_requested = Signal()
     duplicate_scene_requested = Signal()
     rename_scene_requested = Signal()
@@ -553,7 +492,6 @@ class _SceneOverviewDetail(QWidget):
     ):
         super().__init__(parent)
         self._current_scene: SceneWorkspace | None = None
-        self._is_syncing = False
         self._work_mode_id = str(work_mode_id or "").strip() or "custom"
         self._scene_descriptors = list(scene_descriptors)
         self._template_preview_action = ""
@@ -667,62 +605,20 @@ class _SceneOverviewDetail(QWidget):
 
         layout.addWidget(task_card)
 
-        self._run_preview_card = Card(parent=self)
-        self._run_preview_card.add_widget(
-            self._make_scene_overview_header("play-circle", "执行预览")
-        )
-        strategy_row = QWidget(self._run_preview_card)
-        s_lay = QHBoxLayout(strategy_row)
-        s_lay.setContentsMargins(0, 0, 0, 0)
-        s_lay.setSpacing(8)
-        self._strategy_group = QButtonGroup(self)
-        self._strategy_group.setExclusive(True)
-        self._rebuild_radio = ThemedRadioButton("重建编号", strategy_row)
-        self._preserve_radio = ThemedRadioButton("保留原编号", strategy_row)
-        self._strategy_group.addButton(self._rebuild_radio, 0)
-        self._strategy_group.addButton(self._preserve_radio, 1)
-        self._rebuild_radio.setChecked(True)
-        self._rebuild_radio.toggled.connect(self._on_strategy_changed)
-        s_lay.addWidget(self._rebuild_radio)
-        s_lay.addWidget(self._preserve_radio)
-        s_lay.addStretch(1)
-        self._run_preview_card.add_widget(
-            template_form_row("编号策略", strategy_row, parent=self._run_preview_card)
-        )
-        self._run_step_rows = [
-            _SceneOverviewRunStepRow(parent=self._run_preview_card) for _ in range(5)
-        ]
-        for row in self._run_step_rows:
-            self._run_preview_card.add_widget(row)
-        self._run_steps_label = QLabel("", self)
-        self._run_steps_label.setObjectName("scn_run_steps")
-        self._run_steps_label.setWordWrap(True)
-        self._run_steps_label.setVisible(False)
-        self._run_preview_card.add_widget(self._run_steps_label)
-
-        action_row = QWidget(self._run_preview_card)
-        action_layout = QHBoxLayout(action_row)
-        action_layout.setContentsMargins(0, 4, 0, 0)
-        action_layout.setSpacing(8)
-        action_layout.addStretch(1)
-        self._execute_btn = QPushButton("去执行", action_row)
-        self._execute_btn.setObjectName("scn_go_execute_btn")
-        self._execute_btn.setCursor(Qt.PointingHandCursor)
-        self._execute_btn.clicked.connect(self.execute_requested.emit)
-        action_layout.addWidget(self._execute_btn)
-        self._run_preview_card.add_widget(action_row)
-
         self._settings_card = Card(parent=self)
         self._settings_card.add_widget(
             self._make_scene_overview_header("sliders-horizontal", "方案规则")
         )
         self._settings_card.add_widget(self._make_scene_overview_separator())
+
         self._setting_rows: dict[str, QWidget] = {}
         for row_key in (
             "exam_blank_style",
             "exam_runtime_fields",
-            "materials",
             "scope",
+            "numbering",
+            "input_cleanup",
+            "watermark",
             "reference_format",
             "delivery",
         ):
@@ -731,7 +627,6 @@ class _SceneOverviewDetail(QWidget):
             self._setting_rows[row_key] = row
             self._settings_card.add_widget(row)
         layout.addWidget(self._settings_card)
-        layout.addWidget(self._run_preview_card)
         layout.addStretch(1)
         self._apply_theme()
         bind_theme(self, self._apply_theme)
@@ -896,16 +791,6 @@ class _SceneOverviewDetail(QWidget):
         finally:
             self._combo.blockSignals(False)
 
-        # Strategy controls emit toggled while projecting a newly loaded scene.
-        # Treat projection as read-only so it cannot mark the scene dirty or
-        # republish its bound template during mode activation.
-        self._is_syncing = True
-        try:
-            self._rebuild_radio.setChecked(scene.strict_mode)
-            self._preserve_radio.setChecked(not scene.strict_mode)
-        finally:
-            self._is_syncing = False
-
         # Summary
         self._refresh_summary()
 
@@ -928,8 +813,6 @@ class _SceneOverviewDetail(QWidget):
         scope_row = next((row for row in spec.key_settings if row.key == "scope"), None)
         scope_summary = scope_row.summary if scope_row is not None else "处理区域已配置"
         self._summary.setText(scope_summary)
-        self._run_steps_label.setText(self._format_run_preview_steps(spec.run_steps))
-        self._sync_run_preview_steps(spec.run_steps)
         for row in self._setting_rows.values():
             row.setVisible(False)
         for row_spec in spec.key_settings:
@@ -958,30 +841,9 @@ class _SceneOverviewDetail(QWidget):
             return template_name
         return label or str(template_id).strip()
 
-    def _format_run_preview_steps(self, steps: tuple[SceneRunStepSpec, ...]) -> str:
-        return "\n".join(
-            f"{index}. {step.title}：{step.detail}"
-            for index, step in enumerate(steps, start=1)
-        )
-
-    def _sync_run_preview_steps(self, steps: tuple[SceneRunStepSpec, ...]) -> None:
-        for index, row in enumerate(self._run_step_rows):
-            if index < len(steps):
-                row.set_step(steps[index])
-                row.setVisible(True)
-            else:
-                row.setVisible(False)
-
     def set_template_preview_action(self, action: str) -> None:
         self._template_preview_action = str(action or "").strip()
         self._refresh_summary()
-
-    def _on_strategy_changed(self, _checked: bool) -> None:
-        if self._is_syncing or self._current_scene is None:
-            return
-        self._current_scene.strict_mode = self._rebuild_radio.isChecked()
-        self._refresh_summary()
-        self.scene_edited.emit()
 
     def apply_theme(self) -> None:
         self._apply_theme()
@@ -1017,17 +879,12 @@ class _SceneOverviewDetail(QWidget):
         self._summary.setStyleSheet(
             f"font-size: {t.font_size_sm}px; color: {t.text_hint};"
         )
-        self._run_steps_label.setStyleSheet(
-            f"font-size: {t.font_size_sm}px; color: {t.text_primary}; line-height: 145%;"
-        )
         self._scene_action_row.apply_theme()
-        _apply_template_button_contract((self._execute_btn, "primary"))
         try:
             from src.shared.ui.icons.catalog import get_icon
 
             for icon_name, label in self._overview_header_icons.items():
                 label.setPixmap(get_icon(icon_name, 18, t.primary).pixmap(18, 18))
-            self._execute_btn.setIcon(get_icon("play-circle", 16, t.text_on_primary))
         except Exception:
             return
 
@@ -1113,6 +970,77 @@ class _ScopeDetail(QWidget):
 
 
 # ── 方案规则 ────────────────────────────────────────
+
+
+class _SceneNumberingRulesCard(QWidget):
+    """Independent editor for the plan-owned numbering strategy."""
+
+    scene_edited = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._current_scene: SceneWorkspace | None = None
+        self._is_syncing = False
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self._card = Card(parent=self)
+        self._card.set_header("编号策略", icon_name="list-ordered")
+
+        strategy_row = QWidget(self._card)
+        strategy_layout = QHBoxLayout(strategy_row)
+        strategy_layout.setContentsMargins(0, 0, 0, 0)
+        strategy_layout.setSpacing(8)
+        self._strategy_group = QButtonGroup(self)
+        self._strategy_group.setExclusive(True)
+        self._rebuild_radio = ThemedRadioButton("重建编号", strategy_row)
+        self._preserve_radio = ThemedRadioButton("保留原编号", strategy_row)
+        self._strategy_group.addButton(self._rebuild_radio, 0)
+        self._strategy_group.addButton(self._preserve_radio, 1)
+        self._rebuild_radio.setChecked(True)
+        self._rebuild_radio.toggled.connect(self._on_strategy_changed)
+        strategy_layout.addWidget(self._rebuild_radio)
+        strategy_layout.addWidget(self._preserve_radio)
+        strategy_layout.addStretch(1)
+        self._card.add_widget(
+            template_form_row("编号方式", strategy_row, parent=self._card)
+        )
+        layout.addWidget(self._card)
+
+    def set_scene(self, scene: SceneWorkspace) -> None:
+        self._current_scene = scene
+        self._is_syncing = True
+        try:
+            self._rebuild_radio.setChecked(bool(scene.strict_mode))
+            self._preserve_radio.setChecked(not bool(scene.strict_mode))
+        finally:
+            self._is_syncing = False
+
+    def focus_navigation_field(self, field_id: str) -> bool:
+        target = str(field_id or "").strip()
+        if target not in {
+            "numbering",
+            "numbering_strategy",
+            "strict_mode",
+            "scene.strict_mode",
+        }:
+            return False
+        control = (
+            self._rebuild_radio
+            if self._rebuild_radio.isChecked()
+            else self._preserve_radio
+        )
+        control.setFocus(Qt.OtherFocusReason)
+        return True
+
+    def _on_strategy_changed(self, _checked: bool) -> None:
+        if self._is_syncing or self._current_scene is None:
+            return
+        self._current_scene.strict_mode = self._rebuild_radio.isChecked()
+        self.scene_edited.emit()
 
 
 class _SceneOutputRulesCard(QWidget):
@@ -1375,11 +1303,15 @@ class _SceneRulesDetail(QWidget):
         super().__init__(parent)
         self._scope = scope
         self._output = output
+        self._numbering_rules = _SceneNumberingRulesCard(self)
         self._input_cleanup_rules = SceneInputCleanupRulesCard(self)
         self._output_rules = _SceneOutputRulesCard(self._output, self)
         self._watermark_rules = SceneWatermarkRulesCard(self)
         self._current_scene: SceneWorkspace | None = None
         self._mode_id = ""
+        self._numbering_rules.scene_edited.connect(
+            self._on_numbering_rules_edited
+        )
         self._input_cleanup_rules.scene_edited.connect(
             self._on_input_cleanup_rules_edited
         )
@@ -1392,6 +1324,7 @@ class _SceneRulesDetail(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         layout.addWidget(self._scope)
+        layout.addWidget(self._numbering_rules)
         layout.addWidget(self._input_cleanup_rules)
         layout.addWidget(self._watermark_rules)
         layout.addWidget(self._output_rules)
@@ -1413,6 +1346,7 @@ class _SceneRulesDetail(QWidget):
         )
         self._scope.set_scene(scene, template)
         self._scope.setVisible(not uses_master_assembly)
+        self._numbering_rules.set_scene(scene)
         self._input_cleanup_rules.set_scene(scene)
         self._watermark_rules.set_scene(scene)
         if hasattr(self._output, "set_scene"):
@@ -1441,12 +1375,18 @@ class _SceneRulesDetail(QWidget):
         if hasattr(self._output, "scene_edited"):
             self._output.scene_edited.emit()
 
+    def _on_numbering_rules_edited(self) -> None:
+        if hasattr(self._output, "scene_edited"):
+            self._output.scene_edited.emit()
+
     def _on_input_cleanup_rules_edited(self) -> None:
         if hasattr(self._output, "scene_edited"):
             self._output.scene_edited.emit()
 
     def focus_navigation_field(self, field_id: str) -> bool:
         target = str(field_id or "").strip()
+        if self._numbering_rules.focus_navigation_field(target):
+            return True
         if self._input_cleanup_rules.focus_navigation_field(target):
             return True
         if target.startswith(("watermark", "scene.watermark")):
@@ -1505,6 +1445,7 @@ class _SceneRulesDetail(QWidget):
     def apply_theme(self) -> None:
         for detail in (
             self._scope,
+            self._numbering_rules,
             self._input_cleanup_rules,
             self._output_rules,
             self._output,
@@ -1772,7 +1713,6 @@ class ScenePanel(SceneFileLifecycleMixin, BasePanel):
         self._overview.scene_changed.connect(self._on_scene_changed)
         self._overview.scene_edited.connect(self._on_scene_edited)
         self._overview.navigate_requested.connect(self._show_detail_from_overview)
-        self._overview.execute_requested.connect(self._navigate_to_quick_execute)
         self._overview.new_scene_requested.connect(self._on_new_scene_requested)
         self._overview.duplicate_scene_requested.connect(
             self._on_duplicate_scene_requested
@@ -2114,22 +2054,6 @@ class ScenePanel(SceneFileLifecycleMixin, BasePanel):
             return False
         Toast.show_success(f"已{action_label}: {name}")
         return True
-
-    def _navigate_to_quick_execute(self) -> None:
-        return_card_id = (
-            self._nav_rail.selected_card_id()
-            if hasattr(self, "_nav_rail")
-            and self._nav_rail.selected_card_id() in self._detail_map
-            else self._default_visible_card_id()
-        )
-        self.bridge.navigate_to_intent.emit(
-            {
-                "panel_id": "workbench",
-                "card_id": "quick_execute",
-                "return_panel_id": "scene",
-                "return_card_id": return_card_id,
-            }
-        )
 
     def _navigate_to_materials(self) -> None:
         """Open the canonical material-package owner surface.

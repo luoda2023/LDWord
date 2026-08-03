@@ -1,5 +1,5 @@
-from dataclasses import asdict
 import json
+from dataclasses import asdict
 from types import SimpleNamespace
 
 import pytest
@@ -9,24 +9,23 @@ from src.config.default_delivery_identity import project_default_delivery_identi
 from src.config.scene import DeliveryPreset
 from src.config.scene_presets import create_exam_scene, create_official_scene
 from src.config.template import TemplateConfig
+from src.ui.bridge import PanelBridge
 from src.ui.panels.scene_navigation_projection import (
     output_navigation_snapshot,
     output_result_nav_summary,
 )
 from src.ui.panels.scene_output_detail import _OutputDetail
+from src.ui.panels.scene_overview_projection import build_scene_overview_spec
 from src.ui.panels.scene_panel import (
     ScenePanel,
     _SceneOutputRulesCard,
     _SceneRulesDetail,
     _ScopeDetail,
 )
-from src.ui.bridge import PanelBridge
-from src.ui.panels.scene_overview_projection import build_scene_overview_spec
 from src.ui.panels.scene_summary_projection import (
     build_delivery_summary_items,
     build_scene_overview_summary_items,
 )
-
 
 INVALID_DEFAULT_ID = "missing_delivery"
 
@@ -98,7 +97,6 @@ def test_invalid_default_is_visible_across_summary_overview_and_navigation():
         item.key: item for item in build_scene_overview_summary_items(scene)
     }
     overview = build_scene_overview_spec(scene)
-    delivery_step = next(step for step in overview.run_steps if step.key == "deliver")
     delivery_row = next(row for row in overview.key_settings if row.key == "delivery")
     nav_summary = output_result_nav_summary(scene)
     nav_snapshot = output_navigation_snapshot(scene)
@@ -107,12 +105,11 @@ def test_invalid_default_is_visible_across_summary_overview_and_navigation():
     assert delivery_items["default_delivery"].value == expected
     assert delivery_items["default_artifacts"].value == "未设置"
     assert overview_items["delivery"].value == expected
-    assert expected in delivery_step.detail
     assert INVALID_DEFAULT_ID in delivery_row.summary
     assert expected in nav_summary
     assert expected in nav_snapshot["subtitle"]
     assert nav_snapshot["badge_text"] == "引用无效"
-    assert first_id not in delivery_step.detail
+    assert first_id not in delivery_row.summary
 
 
 def test_output_detail_keeps_invalid_identity_until_user_selects_valid_preset(qapp):

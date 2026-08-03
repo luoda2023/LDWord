@@ -19,10 +19,16 @@ from src.config.formula_policy import (
     ThesisFormulaRules,
     is_thesis_formula_mode,
 )
-from src.config.feature_configs import normalize_page_number_format_value
+from src.config.feature_configs import (
+    DEFAULT_HEADER_FOOTER_FONT_CN,
+    DEFAULT_HEADER_FOOTER_FONT_EN,
+    DEFAULT_HEADER_FOOTER_SIZE_PT,
+    normalize_page_number_format_value,
+)
 from src.config.heading_normalize import normalize_heading_numbering_payload
 from src.config.special_title_rules import parse_special_title_selector
 from src.config.style_semantics import (
+    display_font_size_with_name,
     normalize_font_size_display_text,
     normalize_spacing_unit,
 )
@@ -162,6 +168,180 @@ def add_template_compat_aliases(flat: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _move_legacy_section_feature_policies(payload: dict[str, Any]) -> None:
+    """Move feature-owned policies out of the historical section block."""
+
+    section = payload.get("section")
+    if not isinstance(section, Mapping):
+        return
+    section = dict(section)
+    legacy_caption_policy = section.pop("caption_table_break_policy", None)
+    legacy_link_mode = section.pop("header_footer_link_mode", None)
+    payload["section"] = section
+
+    caption = payload.get("caption")
+    if isinstance(caption, Mapping):
+        caption = dict(caption)
+        caption.setdefault(
+            "table_break_policy",
+            str(legacy_caption_policy or "preserve"),
+        )
+        payload["caption"] = caption
+
+    header_footer = payload.get("header_footer")
+    if isinstance(header_footer, Mapping):
+        header_footer = dict(header_footer)
+        behavior = header_footer.get("behavior")
+        if isinstance(behavior, Mapping):
+            behavior = dict(behavior)
+            if legacy_link_mode is not None:
+                behavior["link_to_previous"] = (
+                    "preserve"
+                    if str(legacy_link_mode) == "preserve_source"
+                    else "never"
+                )
+            header_footer["behavior"] = behavior
+        payload["header_footer"] = header_footer
+
+
+def apply_default_header_footer_typography(payload: dict[str, Any]) -> None:
+    """Fill historical blank header/footer typography with the product baseline."""
+
+    defaults: dict[str, Any] = {
+        "font_cn": DEFAULT_HEADER_FOOTER_FONT_CN,
+        "font_en": DEFAULT_HEADER_FOOTER_FONT_EN,
+        "size_pt": DEFAULT_HEADER_FOOTER_SIZE_PT,
+        "bold": False,
+        "italic": False,
+    }
+    for channel_name in ("header", "footer"):
+        channel = payload.get(channel_name)
+        if not isinstance(channel, Mapping):
+            continue
+        channel = dict(channel)
+        typography = channel.get("typography")
+        typography = dict(typography) if isinstance(typography, Mapping) else {}
+        for key, value in defaults.items():
+            if typography.get(key) in (None, ""):
+                typography[key] = value
+        channel["typography"] = typography
+        payload[channel_name] = channel
+
+
+_LEGACY_REFERENCE_TYPOGRAPHY_KEYS = ("font_cn", "font_en", "size_pt")
+
+
+def _extract_legacy_reference_typography(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Remove retired reference typography fields and return meaningful values."""
+
+    reference_style = payload.get("reference_style")
+    if not isinstance(reference_style, Mapping):
+        return {}
+    reference_style = dict(reference_style)
+    legacy: dict[str, Any] = {}
+    for key in _LEGACY_REFERENCE_TYPOGRAPHY_KEYS:
+        value = reference_style.pop(key, None)
+        if value not in (None, ""):
+            legacy[key] = copy.deepcopy(value)
+    payload["reference_style"] = reference_style
+    return legacy
+
+
+def _legacy_reference_size_display(legacy: Mapping[str, Any]) -> str | None:
+    value = legacy.get("size_pt")
+    if value in (None, ""):
+        return None
+    try:
+        return display_font_size_with_name(float(value))
+    except (TypeError, ValueError):
+        return ""
+
+
+def _promote_legacy_reference_typography(payload: dict[str, Any]) -> None:
+    """Promote retired template typography into the references style variant."""
+
+    legacy = _extract_legacy_reference_typography(payload)
+    if not legacy:
+        return
+
+    styles_raw = payload.get("styles")
+    styles = copy.deepcopy(dict(styles_raw)) if isinstance(styles_raw, Mapping) else {}
+    variant_raw = styles.get("references_body")
+    if isinstance(variant_raw, Mapping):
+        variant = copy.deepcopy(dict(variant_raw))
+    else:
+        base_raw = styles.get("body") or styles.get("normal")
+        if isinstance(base_raw, Mapping):
+            variant = copy.deepcopy(dict(base_raw))
+        else:
+            from src.config.template import StyleConfig
+
+            variant = asdict(StyleConfig())
+
+    variant.update(legacy)
+    size_display = _legacy_reference_size_display(legacy)
+    if size_display is not None:
+        variant["size_display"] = size_display
+    styles["references_body"] = _normalize_style_payload(variant)
+    payload["styles"] = styles
+
+
+def _promote_legacy_reference_typography_in_overrides(
+    payload: dict[str, Any],
+) -> None:
+    """Move retired override fields without inventing a full paragraph style."""
+
+    legacy = _extract_legacy_reference_typography(payload)
+    if not legacy:
+        return
+    styles_raw = payload.get("styles")
+    styles = copy.deepcopy(dict(styles_raw)) if isinstance(styles_raw, Mapping) else {}
+    variant_raw = styles.get("references_body")
+    variant = (
+        copy.deepcopy(dict(variant_raw))
+        if isinstance(variant_raw, Mapping)
+        else {}
+    )
+    variant.update(legacy)
+    size_display = _legacy_reference_size_display(legacy)
+    if size_display is not None:
+        variant["size_display"] = size_display
+    styles["references_body"] = variant
+    payload["styles"] = styles
+
+
+def _migrate_scene_reference_typography(payload: dict[str, Any]) -> None:
+    """Move retired scene-owned font overrides into template style overrides."""
+
+    legacy = _extract_legacy_reference_typography(payload)
+    if not legacy:
+        return
+
+    effective_overrides: dict[str, Any] = {}
+    for root in ("overrides", "template_overrides"):
+        raw_overrides = payload.get(root)
+        if isinstance(raw_overrides, Mapping):
+            effective_overrides.update(
+                flatten_dict("", unflatten_dict(raw_overrides))
+            )
+
+    current = payload.get("template_overrides")
+    target = copy.deepcopy(dict(current)) if isinstance(current, Mapping) else {}
+    for key, value in legacy.items():
+        path = f"styles.references_body.{key}"
+        if path not in effective_overrides:
+            target[path] = copy.deepcopy(value)
+    size_display = _legacy_reference_size_display(legacy)
+    if (
+        size_display is not None
+        and "styles.references_body.size_display" not in effective_overrides
+    ):
+        target["styles.references_body.size_display"] = size_display
+    payload["template_overrides"] = target
+
+
 def upgrade_legacy_user_template_layout_policies(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -206,29 +386,14 @@ def upgrade_legacy_user_template_layout_policies(
             "normalize_all" if legacy_break_type else "preserve_source",
         )
         section.setdefault("empty_break_policy", "preserve")
-        section.setdefault("caption_table_break_policy", "preserve")
-        header_footer = upgraded.get("header_footer")
-        behavior = (
-            header_footer.get("behavior")
-            if isinstance(header_footer, Mapping)
-            else None
-        )
-        link_to_previous = (
-            str(behavior.get("link_to_previous", "") or "")
-            if isinstance(behavior, Mapping)
-            else ""
-        )
-        section.setdefault(
-            "header_footer_link_mode",
-            "semantic_rebuild"
-            if link_to_previous == "never"
-            else "preserve_source",
-        )
         upgraded["section"] = section
+
+    _move_legacy_section_feature_policies(upgraded)
 
     header_footer = upgraded.get("header_footer")
     if isinstance(header_footer, Mapping):
         header_footer = dict(header_footer)
+        apply_default_header_footer_typography(header_footer)
         page_number_plan = header_footer.get("page_number_plan")
         if isinstance(page_number_plan, Mapping):
             page_number_plan = dict(page_number_plan)
@@ -241,6 +406,7 @@ def upgrade_legacy_user_template_layout_policies(
             page_number_plan.setdefault("even", copy.deepcopy(inherited_variant))
             header_footer["page_number_plan"] = page_number_plan
         upgraded["header_footer"] = header_footer
+    _promote_legacy_reference_typography(upgraded)
     return upgraded
 
 
@@ -440,6 +606,7 @@ def upgrade_scene_formula_policy_ownership(
         upgraded["thesis_formula_rules"] = rule_payload
     else:
         upgraded["thesis_formula_rules"] = None
+    _migrate_scene_reference_typography(upgraded)
     return upgraded
 
 
@@ -745,6 +912,9 @@ def normalize_template_payload(payload: Mapping[str, Any] | None) -> dict[str, A
     if header_footer_payload:
         normalized["header_footer"] = _normalize_header_footer_payload(header_footer_payload)
 
+    _move_legacy_section_feature_policies(normalized)
+    _promote_legacy_reference_typography(normalized)
+
     return normalized
 
 
@@ -753,6 +923,7 @@ def normalize_template_overrides(
 ) -> dict[str, Any]:
     """将 legacy dotted-key overrides 归一为 canonical dotted-key。"""
     nested = unflatten_dict(overrides)
+    _promote_legacy_reference_typography_in_overrides(nested)
     normalized = normalize_template_payload(nested)
     flat = add_template_compat_aliases(flatten_dict("", normalized))
     return {

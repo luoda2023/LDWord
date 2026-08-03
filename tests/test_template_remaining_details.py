@@ -1,4 +1,6 @@
+import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 
@@ -7,7 +9,8 @@ sys.path.insert(0, str(ROOT))
 
 from src.config.scene import SceneWorkspace
 from src.config.style_variant_semantics import is_variant_overridden
-from src.config.template import TemplateConfig
+from src.config.loader import load_compatible_user_template
+from src.config.template import StyleConfig, TemplateConfig
 from src.qt_api import QApplication
 from src.shared.ui.form_row import FormRow
 from src.shared.ui.summary_grid import SummaryGrid
@@ -107,23 +110,30 @@ def test_reference_detail_style_sections_use_one_grid_baseline():
         app.processEvents()
 
 
-def test_reference_detail_displays_legacy_typography_without_mutating_template():
+def test_legacy_reference_typography_is_migrated_to_style_variant(tmp_path):
     app = _app()
     template = TemplateConfig()
-    template.reference_style.font_cn = "黑体"
-    template.reference_style.font_en = "Calibri"
-    template.reference_style.size_pt = 11
+    template.styles["body"] = StyleConfig(alignment="right", bold=True)
+    payload = asdict(template)
+    payload["reference_style"].update(
+        {"font_cn": "黑体", "font_en": "Calibri", "size_pt": 11}
+    )
+    target = tmp_path / "legacy-reference-template.json"
+    target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    template = load_compatible_user_template(target)
     detail = ReferenceDetail()
 
     try:
         detail.set_template(template)
         app.processEvents()
 
-        assert is_variant_overridden(template, "references_body") is False
-        assert template.reference_style.font_cn == "黑体"
-        assert template.reference_style.font_en == "Calibri"
-        assert template.reference_style.size_pt == 11
-        assert "references_body" not in template.styles
+        assert not hasattr(template.reference_style, "font_cn")
+        assert not hasattr(template.reference_style, "font_en")
+        assert not hasattr(template.reference_style, "size_pt")
+        assert is_variant_overridden(template, "references_body") is True
+        assert template.styles["references_body"].alignment == "right"
+        assert template.styles["references_body"].bold is True
         assert detail._mode_combo.currentData() == "independent"
         assert detail._font_cn.selected_font() == "黑体"
         assert detail._font_en.selected_font() == "Calibri"
@@ -170,15 +180,23 @@ def test_template_panel_caption_detail_updates_preview_and_dirty_state():
         detail = panel._caption_detail
         detail._numbering_type_combo.setCurrentIndex(detail._numbering_type_combo.findData(True))
         detail._auto_insert_combo.setCurrentIndex(detail._auto_insert_combo.findData(False))
+        detail._table_break_policy_combo.setCurrentIndex(
+            detail._table_break_policy_combo.findData("remove_proven_redundant")
+        )
         app.processEvents()
 
         assert panel._current_template.caption.format_inserted is True
         assert panel._current_template.caption.auto_insert is False
+        assert (
+            panel._current_template.caption.table_break_policy
+            == "remove_proven_redundant"
+        )
         assert isinstance(panel._caption_detail._summary_grid, SummaryGrid)
         assert panel._caption_detail._summary_grid._tile_style == "module"
         assert len(panel._caption_detail._summary_grid.items()) == 3
         assert "Word 可更新编号" in panel._caption_detail._summary_grid.detail_for("numbering_rules")
         assert "缺失时不补齐" in panel._caption_detail._summary_grid.detail_for("numbering_rules")
+        assert "题注-表格冗余分节" in panel._caption_detail._summary_grid.detail_for("numbering_rules")
         assert "Word 可更新编号" in panel._overview_detail._rows["caption"]._value.text()
         assert "Word 可更新编号" in panel._nav_cards["tpl_caption"]._full_subtitle
         assert "域" not in panel._caption_detail._summary_grid.detail_for("numbering_rules")
