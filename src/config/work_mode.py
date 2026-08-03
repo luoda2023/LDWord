@@ -287,7 +287,10 @@ def execution_work_mode_issue(
             "execution_mode_not_canonical:scene.mode_id:"
             f"{scene_mode}:{scene_spec.mode_id}"
         )
-    if scene_spec.status != "active":
+    # ``hidden`` controls product navigation only. Persisted scenes and
+    # explicitly supported assistant routes (for example bidding authoring)
+    # must still be executable; only deprecated modes are runtime-inactive.
+    if scene_spec.status == "deprecated":
         return f"execution_mode_inactive:scene.mode_id:{scene_spec.mode_id}"
 
     requested_mode = str(requested_mode_id or "").strip()
@@ -301,7 +304,7 @@ def execution_work_mode_issue(
             "execution_mode_not_canonical:requested_mode_id:"
             f"{requested_mode}:{requested_spec.mode_id}"
         )
-    if requested_spec.status != "active":
+    if requested_spec.status == "deprecated":
         return f"execution_mode_inactive:requested_mode_id:{requested_spec.mode_id}"
     if requested_spec.mode_id != scene_spec.mode_id:
         return (

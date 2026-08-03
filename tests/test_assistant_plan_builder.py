@@ -78,6 +78,23 @@ def test_semantic_revision_uses_docx_as_material_and_requires_new_draft(tmp_path
     assert plan.production_input_artifact is None
 
 
+def test_existing_word_format_and_delivery_wording_stays_transform(tmp_path):
+    source = tmp_path / "report.docx"
+    source.write_bytes(b"test boundary only")
+
+    plan = FormDocumentPlanBuilder().build(
+        query="请把这个 Word 文档统一排版并生成最终文件",
+        workspace=_workspace_with_docx(source),
+        turn_id="turn-format-delivery-wording",
+    )
+
+    assert plan.operation == "transform"
+    assert plan.scene_ref["route_id"] == "quick_formatting_general"
+    assert plan.capability_ref.status == "executable"
+    assert plan.generation_required is False
+    assert plan.blocking_issues == ()
+
+
 def test_exam_layout_transform_accepts_docx_instead_of_markdown(tmp_path):
     source = tmp_path / "exam.docx"
     source.write_bytes(b"test boundary only")
@@ -425,6 +442,40 @@ def test_bidding_authoring_and_qualification_archive_are_distinct_plans(tmp_path
         "material_manifest",
         "material_package",
     )
+
+
+def test_qualification_archive_delivery_wording_does_not_become_authoring(tmp_path):
+    source = tmp_path / "qualification-index.docx"
+    source.write_bytes(b"placeholder")
+    workspace = WorkspaceSnapshot(
+        mode_id="custom",
+        mode_label="通用版",
+        scene_id="custom",
+        scene_source_type="builtin",
+        template_id="default",
+        template_source_type="builtin",
+        input_path=str(source),
+        input_name=source.name,
+        input_exists=True,
+        material_summary={
+            "package_id": "qualification-main",
+            "profile_id": "company-a",
+            "material_schema_ids": ["qualification_archive_assets_v1"],
+            "field_count": 2,
+            "asset_count": 2,
+        },
+    )
+
+    plan = FormDocumentPlanBuilder().build(
+        query="整理投标资质证书材料并生成归档清单和 ZIP 包",
+        workspace=workspace,
+        turn_id="turn-qualification-delivery-wording",
+    )
+
+    assert plan.operation == "transform"
+    assert plan.capability_ref.status == "executable"
+    assert plan.generation_contract.required is False
+    assert plan.blocking_issues == ()
 
 
 def test_bidding_authoring_plan_names_missing_materials_before_final_assembly():

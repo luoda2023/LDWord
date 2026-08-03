@@ -429,6 +429,34 @@ def test_generated_exam_quality_contract_warns_on_missing_difficulty_metadata():
     assert "difficulty_metadata_incomplete" in warnings
 
 
+def test_renderable_exam_incompleteness_is_reviewable_instead_of_blocking():
+    markdown = """# 六年级语文测验
+> 科目：语文　年级：六年级　考试时间：20 分钟　满分：10 分
+## 一、填空题
+1. 第一题。（5 分）
+   difficulty: 基础
+   knowledge_points: 识记
+2. 第二题。
+   difficulty: 中等
+   knowledge_points: 理解
+## 答案速查
+1. 示例答案
+"""
+    result = parse_exam_markdown_source(markdown)
+    kwargs = {
+        "intent": "生成六年级语文测验，共 2 道题，满分 10 分，考试时间 20 分钟",
+        "scene_id": "exam_quiz",
+    }
+
+    blockers = generated_exam_blockers(markdown, result, **kwargs)
+    warnings = generated_exam_warnings(markdown, result, **kwargs)
+
+    assert "answer_coverage_incomplete" not in blockers
+    assert "score_coverage_incomplete" not in blockers
+    assert "answer_coverage_incomplete" in warnings
+    assert "score_coverage_incomplete" in warnings
+
+
 def test_indented_numbered_requirements_remain_inside_one_question_stem():
     markdown = """# 编程题
 > 科目：信息技术　年级：高一　考试时间：20 分钟　满分：10 分

@@ -23,7 +23,10 @@ from src.shared.engine.fixed_layout_tables import (
     apply_fixed_layout_row_height_policy,
     row_height_state,
 )
-from src.shared.engine.exam_markdown_content import assert_no_exam_markdown_residue
+from src.shared.engine.exam_markdown_content import (
+    assert_no_exam_markdown_residue,
+    inspect_exam_markdown_payload,
+)
 from src.shared.engine.exam_paper_style import (
     _insert_exam_markdown_after_block,
     write_exam_paper_docx_files,
@@ -419,12 +422,31 @@ def inspect_exam_question_schema(config) -> ExamQuestionSchemaValidationResult:
         )
 
     normalized_payload = _normalize_exam_payload(payload)
-    return _validate_exam_payload(
+    validation = _validate_exam_payload(
         normalized_payload,
         source_key=source_key,
         family_id=family_id or EXAM_FAMILY_ID,
         metadata=getattr(config, "entity_data", {}) or {},
     )
+    semantic_findings = inspect_exam_markdown_payload(normalized_payload)
+    if not semantic_findings:
+        return validation
+    semantic_issues = tuple(
+        ExamQuestionSchemaIssue(
+            path=finding.path,
+            kind=finding.kind,
+            message=finding.message,
+            severity=finding.severity,
+        )
+        for finding in semantic_findings
+    )
+    issues = validation.issues + semantic_issues
+    status = (
+        "error"
+        if any(issue.severity == "error" for issue in issues)
+        else "warning"
+    )
+    return replace(validation, status=status, issues=issues)
 
 
 def plan_exam_delivery_output_paths(
@@ -721,7 +743,7 @@ def build_exam_delivery_runtime(
                 encoding="utf-8",
             )
 
-        review_release = quality_status in {
+        review_release = bool(validation.warning_count) or quality_status in {
             "quality_review_required",
             "quality_unverified",
         }
@@ -798,14 +820,7 @@ def build_exam_delivery_runtime(
         quality_manifest_path=(
             published_paths.get("visual-quality-manifest", "")
         ),
-        release_tier=(
-            "review"
-            if quality_status in {
-                "quality_review_required",
-                "quality_unverified",
-            }
-            else "final"
-        ),
+        release_tier="review" if review_release else "final",
     )
 
 

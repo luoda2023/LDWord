@@ -106,6 +106,15 @@ def test_ui_mode_normalizer_does_not_consult_scene_category():
     )
 
 
+def test_hidden_mode_is_not_visible_but_remains_explicitly_executable():
+    scene = SceneWorkspace(scene_id="bidding", mode_id="bidding")
+
+    assert execution_work_mode_issue(
+        scene,
+        requested_mode_id="bidding",
+    ) == ""
+
+
 def test_effective_mode_owner_preserves_unknown_explicit_mode_for_validation():
     scene = SceneWorkspace(scene_id="official", mode_id="official")
 

@@ -76,6 +76,7 @@ NATURAL_REQUEST_ROUTES: tuple[NaturalRequestRoute, ...] = (
         pack_id="quick_formatting",
         aliases=(
             "format word",
+            "统一排版",
             "clean document",
             "normalize report",
             "统一Word格式",

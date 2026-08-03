@@ -372,6 +372,14 @@ def resolve_assistant_capability(
     query: str = "",
 ) -> ResolvedAssistantCapability:
     route_id = route.route_id if route is not None else ""
+    if (
+        route_id == "bidding_qualification_archive"
+        and operation == TASK_OPERATION_AUTHOR
+    ):
+        # “生成归档清单/ZIP” describes archive delivery, not AI-authored
+        # document content. Keep this closed route on the deterministic
+        # transform pipeline even when the request contains “生成”.
+        operation = TASK_OPERATION_TRANSFORM
     configured_mode_id = _ROUTE_MODE_IDS.get(route_id, "")
     mode_id = configured_mode_id or str(workspace_mode_id or "custom")
     mode = get_work_mode(mode_id) or get_work_mode("custom")

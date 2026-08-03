@@ -11,6 +11,7 @@ from zipfile import BadZipFile, ZipFile
 
 from src.assistant.domain.exam_authoring_contract import (
     generated_exam_blockers,
+    generated_exam_warnings,
 )
 from src.assistant.contracts.document_plan import DocumentPlan
 from src.assistant.contracts.execution import ExecutionApproval, PreflightReceipt
@@ -33,11 +34,19 @@ from src.config.resolver import resolve_config
 from src.config.scene_surface_registry import scene_uses_exam_paper_surface
 from src.pipeline.runner import plan_pipeline_output_paths
 from src.services.exam_markdown_source import load_exam_markdown_source
-from src.services.production_execution import ProductionExecutionRequest, execute_production_request
+from src.services.production_execution import (
+    ProductionExecutionRequest,
+    execute_production_request,
+    production_material_template_contract,
+)
+from src.services.production_runtime.material_artifacts import (
+    plan_material_artifact_paths,
+)
 from src.shared.engine.exam_question_schema import (
     exam_delivery_filename_stem,
     plan_exam_delivery_output_paths,
 )
+from src.shared.engine.exam_markdown_content import inspect_exam_markdown_payload
 from src.config.official_document_profiles import (
     get_official_document_assembly_contract,
 )
@@ -118,6 +127,14 @@ class AssistantProductionAdapter:
             plan.production_contract.accepted_suffixes or (".docx",)
         ):
             issues.append("input_document_unsupported")
+        elif (
+            input_path.suffix.casefold() == ".docx"
+            and not _valid_delivery_artifact(
+                input_path,
+                artifact_key="final_docx",
+            )
+        ):
+            issues.append("input_document_invalid")
         else:
             input_hash = file_sha256(input_path)
             source = plan.production_input_artifact
@@ -459,6 +476,13 @@ def _finalize_material_snapshot_for_plan(
                 output_dir=output_root,
                 output_suffix=plan.output_policy.filename_suffix,
             )
+        planned.update(
+            plan_material_artifact_paths(
+                input_path=input_path,
+                output_dir=output_root,
+                config=config,
+            )
+        )
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         return None, (
             f"execution_output_plan_failed:{type(exc).__name__}",
@@ -477,6 +501,11 @@ def _finalize_material_snapshot_for_plan(
         master_revision = "sha256:" + hashlib.sha256(
             b"alavette.pipeline.generic.master.v1"
         ).hexdigest()
+    supported_fields, supported_roles, contract_issues = (
+        production_material_template_contract(input_path, snapshot)
+    )
+    if contract_issues:
+        return None, contract_issues
     finalized = finalize_execution_material_snapshot(
         ExecutionMaterialFinalizeRequest(
             snapshot=snapshot,
@@ -486,12 +515,9 @@ def _finalize_material_snapshot_for_plan(
             master_revision=master_revision,
             recipe_version=1,
             output_root=str(output_root),
-            output_paths=tuple(planned.values()),
-            supported_field_keys=tuple(sorted(values)),
-            # The production runner currently consumes only resolved text
-            # fields. Bound binary roles fail closed until a recipe declares
-            # their placement contract.
-            supported_resource_roles=(),
+            output_paths=tuple(str(path) for path in planned.values()),
+            supported_field_keys=tuple(sorted(supported_fields)),
+            supported_resource_roles=tuple(sorted(supported_roles)),
         )
     )
     if not finalized.ok or finalized.snapshot is None:
@@ -618,6 +644,12 @@ def _append_domain_input_findings(
         for item in result.issues
         if str(item.severity or "").casefold() != "error"
     )
+    for finding in inspect_exam_markdown_payload(result.payload):
+        code = f"{finding.kind}:{finding.path}"
+        if finding.severity == "error":
+            issues.append(f"exam_source_error:{code}")
+        else:
+            warnings.append(f"exam_source_warning:{code}")
     source = plan.production_input_artifact
     if source is not None and source.source_kind == "assistant_generated":
         try:
@@ -628,6 +660,18 @@ def _append_domain_input_findings(
             issues.extend(
                 f"exam_source_error:{code}"
                 for code in generated_exam_blockers(
+                    markdown,
+                    result,
+                    intent=plan.intent,
+                    scene_id=str(plan.scene_ref.get("id") or ""),
+                    scale_profile_id=str(
+                        plan.scene_ref.get("scale_profile_id") or ""
+                    ),
+                )
+            )
+            warnings.extend(
+                f"exam_source_warning:{code}"
+                for code in generated_exam_warnings(
                     markdown,
                     result,
                     intent=plan.intent,

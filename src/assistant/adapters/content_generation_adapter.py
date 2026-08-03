@@ -36,6 +36,7 @@ from src.assistant.contracts.task_plan import (
     SourceArtifactRef,
 )
 from src.shared.engine.exam_question_schema import parse_exam_markdown_source
+from src.shared.engine.exam_markdown_content import inspect_exam_markdown_payload
 from src.shared.engine.material_token_contract import (
     MaterialTokenNamespace,
     material_token,
@@ -365,6 +366,7 @@ class AssistantContentGenerationAdapter:
             normalized,
             source_path=str(markdown_path),
         )
+        semantic_findings = inspect_exam_markdown_payload(result.payload)
         blockers = list(
             generated_exam_blockers(
                 normalized,
@@ -373,6 +375,11 @@ class AssistantContentGenerationAdapter:
                 scene_id=scene_id,
                 scale_profile_id=scale_profile_id,
             )
+        )
+        blockers.extend(
+            f"{finding.kind}:{finding.path}"
+            for finding in semantic_findings
+            if finding.severity == "error"
         )
         if result.error_count or blockers:
             codes = [
@@ -428,6 +435,16 @@ class AssistantContentGenerationAdapter:
                     "severity": "warning",
                 }
                 for code in contract_warnings
+            )
+            + tuple(
+                {
+                    "path": finding.path,
+                    "kind": finding.kind,
+                    "message": finding.message,
+                    "severity": finding.severity,
+                }
+                for finding in semantic_findings
+                if finding.severity != "error"
             ),
         )
 
@@ -750,14 +767,14 @@ def _write_bidding_document_profile(
     logo_label.paragraph_format.keep_with_next = True
     logo_token = _insert_paragraph_after(
         logo_label,
-        material_token(MaterialTokenNamespace.IMAGE, "LOGO1"),
+        material_token(MaterialTokenNamespace.IMAGE, "logo"),
     )
     logo_token.alignment = 1
 
     seal_label = document.add_paragraph("企业公章")
     seal_label.paragraph_format.keep_with_next = True
     seal_token = document.add_paragraph(
-        material_token(MaterialTokenNamespace.IMAGE, "公章1")
+        material_token(MaterialTokenNamespace.IMAGE, "seal")
     )
     seal_token.alignment = 1
 

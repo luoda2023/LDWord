@@ -40,6 +40,9 @@ from src.services.execution_session.support import file_sha256
 from src.services.production_runtime.execution_runtime import (
     WorkbenchProductionRunner,
 )
+from src.services.production_runtime.material_artifacts import (
+    plan_material_artifact_paths,
+)
 from src.shared.engine.exact_material_placeholders import (
     scan_document_exact_placeholders,
 )
@@ -241,13 +244,20 @@ def finalize_production_material_snapshot(
             output_dir=destination,
             output_suffix=request.output_suffix,
         )
+        planned.update(
+            plan_material_artifact_paths(
+                input_path=source,
+                output_dir=destination,
+                config=config,
+            )
+        )
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         return None, (f"execution_output_plan_failed:{type(exc).__name__}",)
     if not planned:
         return None, ("execution_output_plan_empty",)
 
     supported_fields, supported_roles, material_issues = (
-        _production_material_template_contract(source, snapshot)
+        production_material_template_contract(source, snapshot)
     )
     if material_issues:
         return None, material_issues
@@ -352,15 +362,23 @@ def _plan_material_output_paths(
         field_scopes=dict(record.field_owners),
         exact_material_placeholders=True,
     )
-    return plan_pipeline_output_paths(
+    planned = plan_pipeline_output_paths(
         input_path,
         config,
         output_dir=output_root,
         output_suffix=request.output_suffix,
     )
+    planned.update(
+        plan_material_artifact_paths(
+            input_path=input_path,
+            output_dir=output_root,
+            config=config,
+        )
+    )
+    return planned
 
 
-def _production_material_template_contract(
+def production_material_template_contract(
     source: Path,
     snapshot: ExecutionMaterialSnapshot,
 ) -> tuple[set[str], set[str], tuple[str, ...]]:
@@ -473,4 +491,8 @@ def _terminal(status: str, error_text: str) -> dict[str, object]:
     }
 
 
-__all__ = ["ProductionExecutionRequest", "execute_production_request"]
+__all__ = [
+    "ProductionExecutionRequest",
+    "execute_production_request",
+    "production_material_template_contract",
+]

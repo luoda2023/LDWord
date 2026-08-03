@@ -31,8 +31,9 @@ from src.services.production_runtime.delivery_reporting import (
     primary_output_path,
     should_force_delivery_presets,
 )
-from src.services.production_runtime.material_artifacts import (
-    material_artifact_payload,
+from src.services.production_runtime.material_artifacts import material_artifact_payload
+from src.services.production_runtime.material_only_delivery import (
+    run_material_only_delivery,
 )
 from src.services.production_runtime.result_projection import (
     apply_official_draft_evidence,
@@ -176,6 +177,17 @@ class WorkbenchProductionRunner:
                 exact_material_placeholders=True,
             )
             modules = create_all_modules()
+            material_only = run_material_only_delivery(
+                config=config,
+                input_path=input_path,
+                output_dir=self._output_dir or input_path.parent,
+                material_snapshot=snapshot,
+                modules_total=len(modules),
+                progress_cb=progress_cb,
+                cancel_check=cancel_check,
+            )
+            if material_only is not None:
+                return material_only
             terminal_owner = pipeline_terminal_assembly_owner(config)
             selection = build_module_selection_plan(
                 modules,
@@ -254,10 +266,10 @@ class WorkbenchProductionRunner:
                     return blocked
                 progress_cb(3, 3, "Completed")
                 primary = next(iter(output_paths.values()), "")
-                quality_needs_review = runtime.quality_status in {
-                    "quality_unverified",
-                    "quality_review_required",
-                }
+                quality_needs_review = runtime.status == "warning" or (
+                    runtime.quality_status
+                    in {"quality_unverified", "quality_review_required"}
+                )
                 quality_summary = {
                     "quality_ok": "视觉质量验收通过",
                     "quality_unverified": "视觉质量尚未验证",
@@ -411,15 +423,9 @@ def _failed(message: str) -> dict[str, object]:
 
 
 def _cancelled() -> dict[str, object]:
-    return {
-        "status": "cancelled",
-        "output_path": "",
-        "output_paths": {},
-        "report_paths": [],
-        "failed_count": 0,
-        "artifact_failure_count": 0,
-        "error_text": "execution_cancelled",
-    }
+    payload = _failed("execution_cancelled")
+    payload.update(status="cancelled", failed_count=0)
+    return payload
 
 
 __all__: list[str] = []

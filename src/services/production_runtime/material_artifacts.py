@@ -24,6 +24,39 @@ class MaterialArtifactOutcome:
     material_package_receipt: dict[str, object] = field(default_factory=dict)
 
 
+def plan_material_artifact_paths(
+    *,
+    input_path: Path,
+    output_dir: Path,
+    config,
+) -> dict[str, Path]:
+    """Plan material-only deliverables before execution starts.
+
+    Some delivery families intentionally produce no primary DOCX.  Their
+    manifest/package paths are still real outputs and must participate in
+    containment, collision, and approval checks just like a formatted file.
+    """
+
+    manifest_enabled = _artifact_enabled(config, "material_manifest")
+    package_enabled = _artifact_enabled(config, "material_package")
+    if not manifest_enabled and not package_enabled:
+        return {}
+    source = Path(input_path).expanduser().resolve()
+    destination = Path(output_dir).expanduser().resolve()
+    base_name = f"{source.stem}_material_package"
+    planned = {
+        "material_manifest": destination / f"{source.stem}_material_manifest.json",
+    }
+    if package_enabled:
+        planned.update(
+            {
+                "material_package_directory": destination / base_name,
+                "material_package_zip": destination / f"{base_name}.zip",
+            }
+        )
+    return planned
+
+
 def publish_material_artifacts(
     *,
     input_path: Path,
@@ -336,5 +369,6 @@ def _receipt_payload(receipt: DeliveryPackageReceipt) -> dict[str, object]:
 __all__ = [
     "MaterialArtifactOutcome",
     "material_artifact_payload",
+    "plan_material_artifact_paths",
     "publish_material_artifacts",
 ]

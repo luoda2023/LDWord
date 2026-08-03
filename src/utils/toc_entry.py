@@ -114,7 +114,7 @@ def looks_like_reference_entry_line(text: str) -> bool:
     raw = (text or "").strip()
     if not raw:
         return False
-    if _RE_REFERENCE_ENTRY.match(raw):
+    if _RE_REFERENCE_ENTRY.match(raw) and not re.match(r"^\s*\d{1,4}\.\s+", raw):
         return True
     if not _RE_REFERENCE_ENTRY_PREFIX.match(raw):
         return False

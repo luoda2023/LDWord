@@ -450,7 +450,7 @@ def exam_generation_prompt_addendum(
     )
 
 
-def generated_exam_blockers(
+def _generated_exam_findings(
     markdown: str,
     result: ExamMarkdownImportResult,
     *,
@@ -458,7 +458,7 @@ def generated_exam_blockers(
     scene_id: str = "",
     scale_profile_id: str = "",
 ) -> tuple[str, ...]:
-    """Return stable blocker codes for one Assistant-generated exam draft."""
+    """Return every stable contract finding for one generated exam draft."""
 
     blockers: list[str] = []
     if _PLACEHOLDER_RE.search(str(markdown or "")):
@@ -688,6 +688,56 @@ def generated_exam_blockers(
     return tuple(dict.fromkeys(blockers))
 
 
+_REVIEWABLE_EXAM_FINDING_CODES = frozenset(
+    {
+        "missing_paper_title",
+        "missing_subject",
+        "missing_grade",
+        "missing_duration",
+        "missing_total_score",
+        "answer_coverage_incomplete",
+        "score_coverage_incomplete",
+        "declared_total_score_missing",
+        "total_score_mismatch",
+        "section_question_number_reference_mismatch",
+        "question_number_sequence_invalid",
+        "section_question_count_mismatch",
+        "section_score_mismatch",
+        "section_per_question_score_mismatch",
+        "choice_options_incomplete",
+        "duplicate_question_stem",
+        "requested_analysis_coverage_incomplete",
+    }
+)
+
+
+def _generated_exam_finding_is_reviewable(code: str) -> bool:
+    return str(code or "") in _REVIEWABLE_EXAM_FINDING_CODES
+
+
+def generated_exam_blockers(
+    markdown: str,
+    result: ExamMarkdownImportResult,
+    *,
+    intent: str = "",
+    scene_id: str = "",
+    scale_profile_id: str = "",
+) -> tuple[str, ...]:
+    """Return findings that make production unsafe or violate explicit intent."""
+
+    return tuple(
+        code
+        for code in _generated_exam_findings(
+            markdown,
+            result,
+            intent=intent,
+            scene_id=scene_id,
+            scale_profile_id=scale_profile_id,
+        )
+        if not _generated_exam_finding_is_reviewable(code)
+    )
+
+
 def generated_exam_warnings(
     markdown: str,
     result: ExamMarkdownImportResult,
@@ -703,7 +753,6 @@ def generated_exam_warnings(
     would violate the user's request or corrupt the downstream document.
     """
 
-    del markdown
     payload = dict(result.payload or {})
     blueprint = resolve_exam_blueprint(
         intent,
@@ -730,7 +779,17 @@ def generated_exam_warnings(
                 actual_difficulty_counts[difficulty] += 1
             else:
                 invalid_difficulty_count += 1
-    warnings: list[str] = []
+    warnings: list[str] = [
+        code
+        for code in _generated_exam_findings(
+            markdown,
+            result,
+            intent=intent,
+            scene_id=scene_id,
+            scale_profile_id=scale_profile_id,
+        )
+        if _generated_exam_finding_is_reviewable(code)
+    ]
     if len(knowledge_points) < blueprint.min_knowledge_point_count:
         warnings.append("knowledge_point_coverage_too_low")
     if result.summary.section_count < blueprint.min_section_count:

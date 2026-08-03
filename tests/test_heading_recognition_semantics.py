@@ -81,6 +81,19 @@ def test_heading_recognition_detects_references_section_from_reference_entry_clu
     assert doc_tree.get_section_for_paragraph(3) == "references"
 
 
+def test_numbered_report_subheadings_are_not_a_reference_cluster():
+    doc = Document()
+    doc.add_heading("测试结果", level=1)
+    doc.add_heading("1. 核心网络指标数据", level=3)
+    doc.add_paragraph("网络延迟和丢包率符合测试要求。")
+    doc.add_heading("2. 链路切换与稳定性", level=3)
+    doc.add_paragraph("备用链路已完成切换。")
+
+    context = _apply_heading_recognition(doc)
+
+    assert context.doc_tree.get_section("references") is None
+
+
 def test_heading_recognition_detects_toc_section_from_toc_styles():
     doc = Document()
     doc.add_paragraph("目录")

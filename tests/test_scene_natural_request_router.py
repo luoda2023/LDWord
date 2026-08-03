@@ -42,6 +42,13 @@ def test_natural_request_router_registry_is_complete_and_auditable():
         get_natural_request_route("missing_route")
 
 
+def test_plain_unified_layout_does_not_match_personal_or_bilingual_routes():
+    result = route_natural_scene_request("把这个 Word 文档统一排版")
+
+    assert result.status == "matched"
+    assert result.selected_route_id == "quick_formatting_general"
+
+
 def test_natural_request_router_matches_core_high_frequency_requests():
     cases = (
         (

@@ -172,6 +172,57 @@ def test_delivery_reports_follow_preset_artifact_toggles(tmp_path):
     assert all(Path(path).is_file() for path in paths)
 
 
+def test_dotted_source_stem_keeps_multi_preset_report_paths_distinct(tmp_path):
+    source = _source(tmp_path / "draft.bidding.docx")
+    scene = SceneWorkspace(
+        default_delivery_preset_id="original",
+        delivery_presets=[
+            DeliveryPreset(
+                preset_id=preset_id,
+                label=preset_id,
+                filename_template="{stem}_{preset_id}",
+                artifacts=OutputConfig(
+                    final_docx=True,
+                    compare_docx=False,
+                    report_json=True,
+                    report_markdown=True,
+                ),
+            )
+            for preset_id in ("original", "copy")
+        ],
+    )
+    config = resolve_config(TemplateConfig(), scene, {})
+    output_paths = {
+        preset_id: str(tmp_path / f"draft.bidding_{preset_id}.docx")
+        for preset_id in ("original", "copy")
+    }
+
+    planned = delivery_reporting.plan_delivery_artifact_paths(
+        input_path=source,
+        output_dir=tmp_path / "delivery",
+        config=config,
+        output_paths=output_paths,
+    )
+    paths = delivery_reporting.write_delivery_reports(
+        PipelineResult(success=True),
+        input_path=source,
+        output_dir=tmp_path / "delivery",
+        output_paths=output_paths,
+        config=config,
+        elapsed=0.25,
+        modules_enabled=0,
+        modules_total=0,
+    )
+
+    assert len(set(planned.values())) == 4
+    assert {Path(path).name for path in paths} == {
+        "draft.bidding_original_changes.json",
+        "draft.bidding_original_changes.md",
+        "draft.bidding_copy_changes.json",
+        "draft.bidding_copy_changes.md",
+    }
+
+
 def test_structured_intermediate_contains_delivery_contract(tmp_path):
     source = _source(tmp_path / "source.docx")
     config = _resolved_artifact_config(
@@ -302,6 +353,46 @@ def test_failed_run_still_publishes_reports_and_material_package(
     assert payload["status"] == "failed"
     assert payload["error_text"] == "broken delivery"
     assert all(Path(path).is_file() for path in payload["report_paths"])
+    assert Path(payload["material_manifest_paths"]["material"]).is_file()
+    assert Path(payload["material_package_paths"]["zip"]).is_file()
+
+
+def test_material_only_delivery_skips_irrelevant_document_validation(
+    tmp_path,
+    monkeypatch,
+):
+    source = _source(tmp_path / "qualification-index.docx")
+    output_root = tmp_path / "delivery"
+    scene = SceneWorkspace(
+        default_delivery_preset_id="attachment_package",
+        delivery_presets=[
+            DeliveryPreset(
+                preset_id="attachment_package",
+                label="Attachment package",
+                artifacts=OutputConfig(
+                    final_docx=False,
+                    material_manifest=True,
+                    material_package=True,
+                ),
+            )
+        ],
+    )
+    class _MustNotRunPipeline:
+        def __init__(self, **_kwargs):
+            raise AssertionError("material-only delivery must not build a DOCX pipeline")
+
+    monkeypatch.setattr(execution_runtime, "Pipeline", _MustNotRunPipeline)
+
+    payload = WorkbenchProductionRunner(
+        doc_path=str(source),
+        template=TemplateConfig(),
+        scene=scene,
+        output_dir=output_root,
+    ).run(lambda *_args: None, lambda: False)
+
+    assert payload["status"] == "success"
+    assert payload["output_paths"] == {}
+    assert payload["material_only_delivery"] is True
     assert Path(payload["material_manifest_paths"]["material"]).is_file()
     assert Path(payload["material_package_paths"]["zip"]).is_file()
 

@@ -8,7 +8,11 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
 from src.config.scene import ExamBlankStyleConfig, ExamPaperConfig
-from src.shared.engine.exam_markdown_content import ExamMarkdownContentError
+from src.shared.engine.exam_markdown_content import (
+    ExamMarkdownContentError,
+    compile_exam_markdown_with_findings,
+    inspect_exam_markdown_payload,
+)
 from src.shared.engine.exam_paper_style import (
     BUILTIN_EXAM_BLANK_STYLE_IDS,
     BUILTIN_EXAM_MASTER_DIR,
@@ -152,6 +156,66 @@ def test_exam_markdown_residue_gate_rejects_malformed_pipe_noise(tmp_path):
 
     with pytest.raises(ExamMarkdownContentError, match="pipe_noise"):
         write_exam_paper_docx_files("default_exam", tmp_path, payload=payload)
+
+
+def test_exam_markdown_answer_blanks_and_nested_styles_degrade_without_blocking(tmp_path):
+    payload = {
+        "title": "语文填空测试",
+        "sections": [
+            {
+                "title": "一、积累与运用",
+                "questions": [
+                    {
+                        "stem": (
+                            "补写诗句：________________？\n"
+                            "再写一句：________________，________________。"
+                        ),
+                        "answer": "示例答案",
+                        "score": "3",
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert inspect_exam_markdown_payload(payload) == ()
+    outputs = write_exam_paper_docx_files("default_exam", tmp_path, payload=payload)
+    student_text = _all_docx_text(Document(outputs.student_docx))
+
+    assert "＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿" in student_text
+
+    fragment, findings = compile_exam_markdown_with_findings(
+        "**外层 **内层** 外层**",
+        field_path="sections.0.questions.0.stem",
+    )
+    assert findings[0].kind == "inline_format_degraded"
+    assert fragment.blocks[0].inlines[0].text == "外层 内层 外层"
+
+
+def test_chinese_exam_foreign_text_contamination_is_review_warning():
+    payload = {
+        "subject": "语文",
+        "sections": [
+            {
+                "questions": [
+                    {
+                        "stem": "判断修辞：peste colere le batiment tremble comme une feuille.",
+                        "options": ["比喻", "拟人"],
+                    },
+                    {
+                        "stem": "根据拼音 zhen jing 写出汉字。",
+                    },
+                ]
+            }
+        ],
+    }
+
+    findings = inspect_exam_markdown_payload(payload)
+
+    assert len(findings) == 1
+    assert findings[0].kind == "unexpected_foreign_text_in_chinese_exam"
+    assert findings[0].severity == "warning"
+    assert findings[0].path == "sections.0.questions.0.stem"
 
 
 def test_exam_blank_style_copy_is_scene_owned_and_explicitly_resolvable():

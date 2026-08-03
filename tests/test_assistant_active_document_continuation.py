@@ -57,6 +57,7 @@ from src.assistant.ui.conversation_presentation import (
     build_interaction_action_scope,
 )
 from src.assistant.ui.exam_plan_editor import ExamPlanEditor
+from src.assistant.ui.document_workflow_mixin import _execution_result_body
 from src.ui.bridge import PanelBridge
 
 
@@ -843,6 +844,28 @@ def test_typed_draft_handoff_completes_preflight_and_execution_loop(
     finally:
         panel.shutdown_active_execution(1000)
         panel.close()
+
+
+def test_execution_result_body_exposes_failure_and_partial_delivery_evidence():
+    failed = _execution_result_body(
+        "failed",
+        {
+            "error_text": (
+                "ExamMarkdownContentError: exam_markdown_invalid:"
+                "sections.0.questions.8.stem:inline_nesting_invalid:"
+                "nested strong is unsupported"
+            )
+        },
+    )
+    partial = _execution_result_body(
+        "partial_success",
+        {"summary": "已发布 2 个候选文件"},
+    )
+
+    assert "sections.0.questions.8.stem" in failed
+    assert "nested strong is unsupported" in failed
+    assert "候选文档已经生成并保留" in partial
+    assert "已发布 2 个候选文件" in partial
 
 
 def _panel_with_bound_draft(

@@ -8,6 +8,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.config.scene import SceneWorkspace
 from src.services.production_runtime.material_artifacts import (
+    plan_material_artifact_paths,
     publish_material_artifacts,
 )
 
@@ -63,6 +64,27 @@ def test_publish_material_artifacts_is_noop_when_disabled(tmp_path):
     assert outcome.material_manifest_paths == {}
     assert outcome.material_package_paths == {}
     assert not list(tmp_path.glob("*material*"))
+
+
+def test_material_only_delivery_has_a_real_preflight_output_plan(tmp_path):
+    input_path = tmp_path / "qualification.archive.docx"
+    scene = SceneWorkspace(mode_id="bidding")
+    artifacts = scene.delivery_presets[0].artifacts
+    artifacts.final_docx = False
+    artifacts.material_manifest = True
+    artifacts.material_package = True
+
+    planned = plan_material_artifact_paths(
+        input_path=input_path,
+        output_dir=tmp_path / "out",
+        config=scene,
+    )
+
+    assert {key: path.name for key, path in planned.items()} == {
+        "material_manifest": "qualification.archive_material_manifest.json",
+        "material_package_directory": "qualification.archive_material_package",
+        "material_package_zip": "qualification.archive_material_package.zip",
+    }
 
 
 def test_material_package_redacts_local_paths_from_json_outputs(tmp_path):

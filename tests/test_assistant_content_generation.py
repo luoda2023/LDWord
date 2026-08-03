@@ -98,6 +98,31 @@ def test_bidding_draft_fails_closed_on_domain_contract_violations(
         )
 
 
+def test_bidding_local_profile_uses_canonical_logo_and_seal_roles(tmp_path):
+    draft = AssistantContentGenerationAdapter(tmp_path).compile_and_compose(
+        session_id="session-bidding-canonical-assets",
+        markdown=(
+            "# 投标文件\n\n"
+            "{{@text:company_name}}\n"
+            "{{@text:project_name}}\n"
+            "{{@text:legal_person}}\n\n"
+            "## 项目理解\n\n项目理解内容。\n\n"
+            "## 响应内容\n\n响应内容。\n\n"
+            "## 实施方案\n\n实施方案。\n\n"
+            "## 承诺事项\n\n承诺事项。\n"
+        ),
+        prompt_profile_id="assistant.bidding-markdown.v1",
+    )
+
+    text = "\n".join(
+        paragraph.text for paragraph in Document(draft.document_path).paragraphs
+    )
+    assert "{{@img:logo}}" in text
+    assert "{{@img:seal}}" in text
+    assert "{{@img:LOGO1}}" not in text
+    assert "{{@img:公章1}}" not in text
+
+
 def test_context_cannot_reach_provider_without_exact_disclosure_grant(tmp_path):
     with pytest.raises(PermissionError, match="not_authorized"):
         ContentGenerationRequest(

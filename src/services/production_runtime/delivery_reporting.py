@@ -543,7 +543,13 @@ def delivery_report_stem(input_path: Path, preset) -> str:
     rendered = (template or "{stem}_{preset_id}").format_map(
         _report_format_values(input_path, Path(), preset)
     )
-    return Path(rendered).stem or f"{input_path.stem}_final"
+    # A generated source can intentionally have a dotted stem such as
+    # ``draft.bidding``. ``Path.stem`` would treat ``.bidding_original`` as a
+    # suffix and collapse every preset to ``draft``, causing report collisions.
+    name = Path(rendered).name
+    if name.casefold().endswith(".docx"):
+        name = name[:-5]
+    return name or f"{input_path.stem}_final"
 
 
 def delivery_report_dir(

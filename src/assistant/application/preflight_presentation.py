@@ -50,6 +50,34 @@ _EXACT_ISSUE_MESSAGES = {
     "official_document_type_missing": "尚未确定公文文种。",
 }
 
+_EXAM_REVIEW_WARNING_MESSAGES = {
+    "missing_paper_title": "题稿缺少明确标题，将使用可用的文件名或默认标题。",
+    "missing_subject": "题稿缺少学科信息，请在交付前复核。",
+    "missing_grade": "题稿缺少年级信息，请在交付前复核。",
+    "missing_duration": "题稿缺少考试时长，请在交付前复核。",
+    "missing_total_score": "题稿缺少满分信息，请在交付前复核。",
+    "answer_coverage_incomplete": "部分题目缺少答案，答案卷会以“待补充”标记。",
+    "score_coverage_incomplete": "部分题目缺少分值，仍会生成候选版。",
+    "declared_total_score_missing": "题稿未声明总分，仍会生成候选版。",
+    "total_score_mismatch": "题目分值合计与声明总分不一致，请复核。",
+    "section_question_number_reference_mismatch": "大题标题中的题号范围与题目不一致，输出会统一编号。",
+    "question_number_sequence_invalid": "原题号不连续，输出会统一重新编号。",
+    "section_question_count_mismatch": "大题声明的题量与实际题量不一致，请复核。",
+    "section_score_mismatch": "大题声明分值与小题合计不一致，请复核。",
+    "section_per_question_score_mismatch": "大题标注的每题分值与实际分值不一致，请复核。",
+    "choice_options_incomplete": "部分选择题选项不完整，仍会生成候选版。",
+    "duplicate_question_stem": "题稿中存在重复题目，请复核。",
+    "requested_analysis_coverage_incomplete": "部分题目缺少要求的解析，请复核。",
+    "inline_format_degraded": "局部 Markdown 样式已退化为纯文本，正文内容仍会保留。",
+    "unexpected_foreign_text_in_chinese_exam": "语文题稿中疑似混入异常外语片段，已保留交付但请重点复核。",
+    "knowledge_point_coverage_too_low": "知识点覆盖偏少，请复核。",
+    "blueprint_section_count_too_low": "大题数量少于推荐规格，请复核。",
+    "blueprint_section_structure_mismatch": "大题结构与推荐规格不完全一致，请复核。",
+    "difficulty_metadata_incomplete": "部分题目缺少难度标记，请复核。",
+    "difficulty_metadata_invalid": "部分题目的难度标记无法识别，请复核。",
+    "difficulty_distribution_mismatch": "难度分布与推荐规格不完全一致，请复核。",
+}
+
 
 def present_preflight_issue(value: str) -> PreflightFindingPresentation:
     issue = str(value or "").strip()
@@ -167,6 +195,13 @@ def present_preflight_warning(value: str) -> str:
         return "参考资料仅用于内容起草；正式生成将使用当前结构化草稿。"
     if warning == "output_replacement_requested":
         return "本次任务申请覆盖已有输出，执行前请确认。"
+    if warning.startswith("exam_source_warning:"):
+        finding = warning.split(":", 1)[1]
+        code = finding.split(":", 1)[0]
+        return _EXAM_REVIEW_WARNING_MESSAGES.get(
+            code,
+            f"题稿存在可复核项（{code}），仍可生成候选版。",
+        )
     return warning
 
 
@@ -176,6 +211,10 @@ def present_preflight_card(
 ) -> PreflightCardPresentation:
     notices = tuple(present_preflight_warning(item) for item in receipt.warnings)
     if receipt.ready:
+        review_candidate = any(
+            str(item or "").startswith("exam_source_warning:")
+            for item in receipt.warnings
+        )
         plan_presentation = present_document_plan(plan)
         allowed = {
             "任务", "操作", "输入", "方案", "模板", "资料",
@@ -193,11 +232,24 @@ def present_preflight_card(
         ),)
         return PreflightCardPresentation(
             interaction_type="approval",
-            title="执行前检查已通过",
+            title=(
+                "可生成候选版，建议复核"
+                if review_candidate
+                else "执行前检查已通过"
+            ),
             body="",
             facts=facts,
             notices=notices,
-            actions=({"id": "approve_execute", "label": "确认并生成 Word"},),
+            actions=(
+                {
+                    "id": "approve_execute",
+                    "label": (
+                        "确认并生成候选 Word"
+                        if review_candidate
+                        else "确认并生成 Word"
+                    ),
+                },
+            ),
         )
 
     findings = tuple(present_preflight_issue(item) for item in receipt.issues)

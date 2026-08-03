@@ -202,6 +202,31 @@ def _content_generation_failure_presentation(error: str) -> tuple[str, str]:
     )
 
 
+def _execution_result_body(status: str, result: Mapping[str, object]) -> str:
+    """Project terminal evidence into a concise user-visible explanation."""
+
+    summary = " ".join(str(result.get("summary") or "").split())
+    if status == "success":
+        return summary
+    if status == "partial_success":
+        prefix = "候选文档已经生成并保留；存在需要人工复核的内容或质量项。"
+        return f"{prefix}\n{summary}" if summary else prefix
+    if status == "cancelled":
+        return "生成已取消，没有覆盖原文件。"
+    error = " ".join(str(result.get("error_text") or "").split())
+    if not error:
+        return "执行未能完成，且底层没有返回具体原因。请保留本次执行记录后重试。"
+    if "exam_markdown_invalid:" in error:
+        detail = error.split("exam_markdown_invalid:", 1)[1]
+        parts = detail.split(":", 2)
+        field_path = parts[0] if parts else "题稿字段"
+        reason = parts[2] if len(parts) > 2 else detail
+        return f"题稿字段 {field_path} 无法渲染：{reason}"
+    if len(error) > 600:
+        error = error[:599] + "…"
+    return f"失败原因：{error}"
+
+
 class AssistantDocumentWorkflowMixin:
     """Own the assistant document workflow outside the panel shell."""
 
@@ -2025,8 +2050,16 @@ class AssistantDocumentWorkflowMixin:
                 AssistantMessage.interaction(
                     role=ROLE_ASSISTANT,
                     interaction_type="artifact" if successful else "recovery",
-                    title="文档已生成" if status == "success" else ("部分文档已生成" if status == "partial_success" else "文档生成未完成"),
-                    body="",
+                    title=(
+                        "文档已生成"
+                        if status == "success"
+                        else (
+                            "候选文档已生成，建议复核"
+                            if status == "partial_success"
+                            else "文档生成未完成"
+                        )
+                    ),
+                    body=_execution_result_body(status, result),
                     payload={
                         "execution_id": worker.execution_id,
                         "actions": actions,

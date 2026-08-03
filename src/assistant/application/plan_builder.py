@@ -209,12 +209,18 @@ class FormDocumentPlanBuilder:
             selected_route.route_id if selected_route is not None else ""
         )
         operation = classify_task_operation(query)
+        if workspace.input_exists and is_format_mutation_request(query):
+            # “生成最终文件/交付件” describes the output of a formatting
+            # request; it does not turn an existing-document transform into
+            # content authoring.
+            operation = "transform"
         capability = resolve_assistant_capability(
             route=selected_route,
             workspace_mode_id=workspace.mode_id,
             operation=operation,
             query=query,
         )
+        operation = capability.operation
         mode_id = capability.mode_id
         mode = get_work_mode(mode_id) or get_work_mode("custom")
         if mode is None:  # pragma: no cover - guarded by Form registry tests.
