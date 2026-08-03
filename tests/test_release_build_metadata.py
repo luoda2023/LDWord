@@ -58,14 +58,42 @@ def test_skipped_full_regression_evidence_is_explicit(tmp_path):
     assert log.read_text(encoding="utf-8").splitlines() == [
         "status=skipped",
         "scope=full_pytest_suite",
-        "reason=explicit_unsigned_qa_fast_packaging",
-        "requested_by=user",
+        "reason=unsigned_qa_fast_packaging_policy",
+        "requested_by=release_policy",
         "release_ready=false",
         (
-            "note=Engineering gate, scene matrix, and targeted regressions passed; "
-            "this candidate is not a formal release."
+            "note=Engineering gate and scene matrix passed; full regression was not "
+            "run, so this candidate is not a formal release."
         ),
     ]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_unsigned_qa", "expected_skip"),
+    (
+        (("--unsigned-qa",), True, True),
+        (("--unsigned-qa", "--full-regression"), True, False),
+        ((), False, False),
+    ),
+)
+def test_release_cli_uses_layered_regression_policy(
+    monkeypatch,
+    capsys,
+    arguments,
+    expected_unsigned_qa,
+    expected_skip,
+):
+    calls = []
+
+    def record_build(*, unsigned_qa, skip_full_regression):
+        calls.append((unsigned_qa, skip_full_regression))
+        return Path("artifact")
+
+    monkeypatch.setattr(release_builder, "build_release", record_build)
+
+    assert release_builder.main(list(arguments)) == 0
+    assert calls == [(expected_unsigned_qa, expected_skip)]
+    assert capsys.readouterr().out == "[OK] Release artifacts: artifact\n"
 
 
 def test_release_gate_caches_are_removed_without_touching_source(tmp_path):

@@ -146,15 +146,20 @@ python main.py --gui
 # 扫描公开发布阻断项
 .\check_public_release.bat
 
-# 生成未签名的 Setup.exe 与便携 ZIP 候选
+# 生成未签名的快速 QA 候选（默认不跑 3558 项完整回归）
 .\package_release.bat --unsigned-qa
 
-# 在已配置签名证书的环境中生成正式制品
+# 需要正式候选强度时，让未签名 QA 也执行完整回归
+.\package_release.bat --unsigned-qa --full-regression
+
+# 在已配置签名证书的环境中生成正式制品（强制完整回归）
 .\package_release.bat
 
 # 清理可再生的构建输出
 .\clean_public_release.bat
 ```
+
+快速 QA 仍会执行工程门禁、场景矩阵、依赖与发布扫描、应用打包以及安装/启动/重装/卸载验证。完整回归继续由正式构建、显式 `--full-regression` 和 GitHub Python 3.12 作业承担；旧的 `--skip-full-regression` 参数保留兼容，但快速 QA 已不需要手动添加。
 
 用户文档入口：[`docs/user/00-开始这里.md`](docs/user/00-开始这里.md)、[`docs/user/quick-start.md`](docs/user/quick-start.md) 和 [`docs/user/user-guide.md`](docs/user/user-guide.md)。
 

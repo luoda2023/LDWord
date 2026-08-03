@@ -405,11 +405,11 @@ def _write_skipped_full_regression_log(path: Path) -> None:
     path.write_text(
         "status=skipped\n"
         "scope=full_pytest_suite\n"
-        "reason=explicit_unsigned_qa_fast_packaging\n"
-        "requested_by=user\n"
+        "reason=unsigned_qa_fast_packaging_policy\n"
+        "requested_by=release_policy\n"
         "release_ready=false\n"
-        "note=Engineering gate, scene matrix, and targeted regressions passed; "
-        "this candidate is not a formal release.\n",
+        "note=Engineering gate and scene matrix passed; full regression was not "
+        "run, so this candidate is not a formal release.\n",
         encoding="utf-8",
     )
 
@@ -717,16 +717,31 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Build a clearly labelled QA artifact without a signing certificate.",
     )
-    parser.add_argument(
+    regression_group = parser.add_mutually_exclusive_group()
+    regression_group.add_argument(
+        "--full-regression",
+        action="store_true",
+        help=(
+            "Run the full pytest suite. Official builds always run it; use this "
+            "to opt an unsigned QA build into the same gate."
+        ),
+    )
+    regression_group.add_argument(
         "--skip-full-regression",
         action="store_true",
-        help="Skip the full pytest suite; only valid with --unsigned-qa.",
+        help=(
+            "Compatibility flag for fast unsigned QA packaging. Unsigned QA "
+            "builds already use this policy by default."
+        ),
     )
     args = parser.parse_args(argv)
+    skip_full_regression = args.skip_full_regression or (
+        args.unsigned_qa and not args.full_regression
+    )
     try:
         output = build_release(
             unsigned_qa=args.unsigned_qa,
-            skip_full_regression=args.skip_full_regression,
+            skip_full_regression=skip_full_regression,
         )
     except (
         OSError,
