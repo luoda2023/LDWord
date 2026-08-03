@@ -11,6 +11,7 @@ Alavette Form V1.0 — 主入口
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from src.services.console_output import (
 # 项目根目录加入 sys.path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+
+_STARTUP_READY_FILE_ENV = "ALAVETTE_STARTUP_READY_FILE"
 
 
 class _ConsoleSafeArgumentParser(argparse.ArgumentParser):
@@ -51,6 +54,21 @@ def _create_gui_exception_logger(log_path: Path):
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(handler)
     return logger
+
+
+def _publish_startup_ready_probe(
+    environment: dict[str, str] | None = None,
+) -> Path | None:
+    """Confirm to packaging QA that the main window constructed successfully."""
+
+    values = os.environ if environment is None else environment
+    destination = str(values.get(_STARTUP_READY_FILE_ENV) or "").strip()
+    if not destination:
+        return None
+    path = Path(destination)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("ready\n", encoding="utf-8")
+    return path
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -178,6 +196,7 @@ def _start_gui(font_engine: str | None = None) -> int:
     _tooltip_guard = install_global_tooltip(app)
 
     win = MainWindow(enable_background_services=True)
+    _publish_startup_ready_probe()
 
     def _show_main_window() -> None:
         splash.set_status("正在打开首页")

@@ -106,13 +106,15 @@ def _run(command: tuple[str, ...]) -> None:
 
 
 def _verify_startup(executable: Path, data_root: Path) -> None:
-    data_root.mkdir(parents=True)
+    data_root.mkdir(parents=True, exist_ok=True)
+    ready_file = data_root / "startup-ready.txt"
     environment = os.environ.copy()
     environment.update(
         {
             "QT_QPA_PLATFORM": "offscreen",
             "APPDATA": str(data_root / "AppData"),
             "LOCALAPPDATA": str(data_root / "LocalAppData"),
+            "ALAVETTE_STARTUP_READY_FILE": str(ready_file),
         }
     )
     Path(environment["APPDATA"]).mkdir(parents=True)
@@ -123,13 +125,27 @@ def _verify_startup(executable: Path, data_root: Path) -> None:
         env=environment,
     )
     try:
-        try:
-            return_code = process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            return
+        deadline = time.monotonic() + 20
+        ready_seen_at: float | None = None
+        while time.monotonic() < deadline:
+            return_code = process.poll()
+            if return_code is not None:
+                raise InstallerVerificationError(
+                    "Installed application exited before startup readiness "
+                    f"with code {return_code}"
+                )
+            if ready_file.is_file():
+                if ready_file.read_text(encoding="utf-8").strip() != "ready":
+                    raise InstallerVerificationError(
+                        "Installed application wrote an invalid startup readiness marker"
+                    )
+                if ready_seen_at is None:
+                    ready_seen_at = time.monotonic()
+                elif time.monotonic() - ready_seen_at >= 2:
+                    return
+            time.sleep(0.1)
         raise InstallerVerificationError(
-            "Installed application exited during startup smoke test "
-            f"with code {return_code}"
+            "Installed application did not report startup readiness within 20 seconds"
         )
     finally:
         if process.poll() is None:

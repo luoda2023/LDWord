@@ -16,6 +16,20 @@ def test_parse_args_accepts_explicit_official_document_type():
     assert args.document_type == "letter"
 
 
+def test_startup_ready_probe_is_written_only_when_requested(tmp_path):
+    ready_file = tmp_path / "startup" / "ready.txt"
+
+    assert main._publish_startup_ready_probe({}) is None
+    assert not ready_file.exists()
+
+    result = main._publish_startup_ready_probe(
+        {"ALAVETTE_STARTUP_READY_FILE": str(ready_file)}
+    )
+
+    assert result == ready_file
+    assert ready_file.read_text(encoding="utf-8") == "ready\n"
+
+
 def test_run_cli_passes_explicit_document_type_to_production_entry(
     tmp_path,
     monkeypatch,

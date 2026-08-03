@@ -48,6 +48,25 @@ def _pyinstaller_hidden_imports() -> set[str]:
     raise AssertionError("PyInstaller Analysis.hiddenimports is missing")
 
 
+def _literal_src_dynamic_imports() -> set[str]:
+    modules: set[str] = set()
+    for source_path in (ROOT / "src").rglob("*.py"):
+        source_tree = ast.parse(source_path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(source_tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "import_module"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+                and node.args[0].value.startswith("src.")
+            ):
+                continue
+            modules.add(node.args[0].value)
+    return modules
+
+
 def test_release_shell_files_exist():
     required_files = [
         ROOT / "README.md",
@@ -233,6 +252,7 @@ def test_windows_package_script_delegates_to_gated_release_builder():
     assert builder.count("cwd=source_root") >= 7
 
     hidden_imports = _pyinstaller_hidden_imports()
+    assert _literal_src_dynamic_imports().issubset(hidden_imports)
     assert {factory.module_name for factory in PANEL_FACTORIES.values()}.issubset(
         hidden_imports
     )
