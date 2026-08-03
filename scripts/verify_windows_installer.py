@@ -44,6 +44,7 @@ def verify_installer(setup: Path, work_root: Path) -> dict[str, object]:
         raise InstallerVerificationError(
             f"Installed executable is missing: {executable}"
         )
+    _verify_packaged_imports(executable)
     _verify_startup(executable, work_root / "runtime-data")
     user_data_probe = (
         work_root
@@ -73,6 +74,7 @@ def verify_installer(setup: Path, work_root: Path) -> dict[str, object]:
         raise InstallerVerificationError(
             "In-place reinstall removed current-user application data"
         )
+    _verify_packaged_imports(executable)
 
     uninstaller = install_root / "unins000.exe"
     if not uninstaller.is_file():
@@ -103,6 +105,7 @@ def verify_installer(setup: Path, work_root: Path) -> dict[str, object]:
         "setup": str(setup),
         "install_root": str(install_root),
         "initial_install": "passed",
+        "packaged_lazy_imports": "passed",
         "installed_application_startup": "passed",
         "in_place_reinstall": "passed",
         "stale_payload_cleanup": "passed",
@@ -123,6 +126,28 @@ def _run(command: tuple[str, ...]) -> None:
         raise InstallerVerificationError(
             f"Installer command failed ({completed.returncode}): "
             + subprocess.list2cmdline(command)
+        )
+
+
+def _verify_packaged_imports(executable: Path) -> None:
+    environment = os.environ.copy()
+    environment.setdefault("QT_QPA_PLATFORM", "offscreen")
+    try:
+        completed = subprocess.run(
+            (str(executable), "--internal-package-import-probe"),
+            cwd=executable.parent,
+            env=environment,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise InstallerVerificationError(
+            "Installed application packaged import probe timed out"
+        ) from exc
+    if completed.returncode:
+        raise InstallerVerificationError(
+            "Installed application packaged import probe failed with code "
+            f"{completed.returncode}"
         )
 
 

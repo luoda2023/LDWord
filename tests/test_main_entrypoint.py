@@ -59,6 +59,37 @@ def test_uninstall_cleanup_command_is_dispatched_before_argument_parsing(monkeyp
     assert main.run_app(["--internal-uninstall-clean-user-data"]) == 73
 
 
+def test_package_import_probe_checks_frozen_and_lazy_runtime_modules(monkeypatch):
+    import importlib
+
+    imported: list[str] = []
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda module_name: imported.append(module_name),
+    )
+
+    assert main._run_package_import_probe() == 0
+    assert imported == [
+        "win32timezone",
+        "src.ui.panels.preferences_panel",
+        "src.assistant.ui.assistant_panel",
+        "src.ui.panels.workbench.batch_generation_detail",
+        "src.ui.panels.workbench.file_batch_execution_detail",
+    ]
+
+
+def test_package_import_probe_fails_closed_on_missing_module(monkeypatch):
+    import importlib
+
+    def missing_module(_module_name):
+        raise ModuleNotFoundError("missing packaged dependency")
+
+    monkeypatch.setattr(importlib, "import_module", missing_module)
+
+    assert main._run_package_import_probe() == 1
+
+
 def test_run_cli_passes_explicit_document_type_to_production_entry(
     tmp_path,
     monkeypatch,

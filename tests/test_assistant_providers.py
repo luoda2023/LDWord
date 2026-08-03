@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -253,6 +254,19 @@ def test_windows_credential_store_decodes_pywin32_utf16_blob(monkeypatch):
     assert WindowsCredentialSecretStore().get("cloud-main") == "secret-密钥"
 
 
+def test_windows_credential_store_requires_timezone_runtime(monkeypatch):
+    real_import = builtins.__import__
+
+    def import_without_timezone(name, *args, **kwargs):
+        if name == "win32timezone":
+            raise ModuleNotFoundError("No module named 'win32timezone'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_timezone)
+
+    assert WindowsCredentialSecretStore().available is False
+
+
 def test_provider_router_resolves_mock_without_secret(tmp_path):
     router = ProviderRouter(
         profiles=ProviderProfileStore(tmp_path / "profiles.json"),
@@ -312,6 +326,32 @@ def test_provider_readiness_is_local_safe_and_tracks_secret_state(tmp_path):
     ready = router.readiness("cloud-ready-check")
     assert ready.ready is True
     assert ready.reason_code == ""
+
+
+def test_provider_readiness_degrades_when_credential_dependency_is_missing(tmp_path):
+    class MissingDependencySecretStore:
+        def get(self, _profile_id):
+            raise ModuleNotFoundError("No module named 'win32timezone'")
+
+    profiles = ProviderProfileStore(tmp_path / "profiles.json")
+    profiles.upsert(
+        ProviderProfile(
+            profile_id="cloud-missing-runtime",
+            label="Cloud",
+            kind="openai_compatible",
+            model_id="example-model",
+            base_url="https://example.invalid/v1",
+        )
+    )
+    router = ProviderRouter(
+        profiles=profiles,
+        secrets=MissingDependencySecretStore(),
+    )
+
+    readiness = router.readiness("cloud-missing-runtime")
+
+    assert readiness.ready is False
+    assert readiness.reason_code == "credential_unavailable"
 
 
 def test_openai_compatible_stream_parses_sse_and_never_emits_secret():

@@ -252,6 +252,7 @@ def test_windows_package_script_delegates_to_gated_release_builder():
     assert builder.count("cwd=source_root") >= 7
 
     hidden_imports = _pyinstaller_hidden_imports()
+    assert "win32timezone" in hidden_imports
     assert _literal_src_dynamic_imports().issubset(hidden_imports)
     assert {factory.module_name for factory in PANEL_FACTORIES.values()}.issubset(
         hidden_imports

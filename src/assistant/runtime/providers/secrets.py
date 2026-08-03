@@ -62,7 +62,9 @@ class WindowsCredentialSecretStore:
         if sys.platform != "win32":
             return False
         try:
+            import pywintypes  # noqa: F401
             import win32cred  # noqa: F401
+            import win32timezone  # noqa: F401
         except ImportError:
             return False
         return True

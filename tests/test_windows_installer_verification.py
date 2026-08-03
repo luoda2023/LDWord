@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -80,3 +81,38 @@ def test_startup_verification_rejects_early_process_exit(tmp_path, monkeypatch):
         match="exited before startup readiness with code 1",
     ):
         verifier._verify_startup(Path("Alavette-Form.exe"), tmp_path)
+
+
+def test_packaged_import_probe_runs_internal_executable_command(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def run(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(verifier.subprocess, "run", run)
+
+    verifier._verify_packaged_imports(Path("installed/Alavette-Form.exe"))
+
+    assert captured["command"] == (
+        "installed\\Alavette-Form.exe",
+        "--internal-package-import-probe",
+    )
+    assert captured["cwd"] == Path("installed")
+    assert captured["check"] is False
+    assert captured["timeout"] == 30
+
+
+def test_packaged_import_probe_rejects_missing_runtime_dependency(monkeypatch):
+    monkeypatch.setattr(
+        verifier.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=1),
+    )
+
+    with pytest.raises(
+        verifier.InstallerVerificationError,
+        match="packaged import probe failed with code 1",
+    ):
+        verifier._verify_packaged_imports(Path("Alavette-Form.exe"))

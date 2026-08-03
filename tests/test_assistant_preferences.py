@@ -197,6 +197,54 @@ def test_saved_ai_profile_hot_syncs_into_assistant_home(qapp, tmp_path):
         assistant.close()
 
 
+def test_ai_surfaces_stay_available_when_credential_runtime_is_missing(qapp, tmp_path):
+    class MissingDependencySecretStore:
+        def get(self, _profile_id):
+            raise ModuleNotFoundError("No module named 'win32timezone'")
+
+    profiles = ProviderProfileStore(tmp_path / "providers.json")
+    profiles.upsert(
+        ProviderProfile(
+            profile_id="cloud-missing-runtime",
+            label="Cloud",
+            kind="openai_compatible",
+            model_id="example-model",
+            base_url="https://example.invalid/v1",
+        )
+    )
+    secrets = MissingDependencySecretStore()
+    bridge = PanelBridge()
+    preferences = PreferencesPanel(
+        bridge,
+        provider_profiles=profiles,
+        provider_secrets=secrets,
+    )
+    assistant = AssistantPanel(
+        bridge,
+        coordinator=AssistantSessionCoordinator(
+            AssistantSessionStore(tmp_path / "assistant-missing-runtime")
+        ),
+        provider_router=ProviderRouter(profiles=profiles, secrets=secrets),
+        first_level=True,
+    )
+    try:
+        preference_ids = {
+            preferences._ai_profile_combo.itemData(index)
+            for index in range(preferences._ai_profile_combo.count())
+        }
+        assistant_combo = assistant._creative_home.composer._model_combo
+        assistant_ids = {
+            assistant_combo.itemData(index)
+            for index in range(assistant_combo.count())
+        }
+
+        assert "cloud-missing-runtime" in preference_ids
+        assert "cloud-missing-runtime" in assistant_ids
+    finally:
+        assistant.close()
+        preferences.close()
+
+
 def test_provider_connection_result_is_persisted_and_projected(qapp, tmp_path):
     profiles = ProviderProfileStore(tmp_path / "providers.json")
     secrets = MemorySecretStore()

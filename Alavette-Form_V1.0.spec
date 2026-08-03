@@ -15,6 +15,7 @@ a = Analysis(
         'latex2mathml',
         'olefile',
         'pythoncom',
+        'win32timezone',
         'win32com.client',
         'src.application.materials',
         'src.assistant.ui.assistant_panel',

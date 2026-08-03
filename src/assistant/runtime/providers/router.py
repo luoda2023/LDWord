@@ -69,7 +69,7 @@ class ProviderRouter:
             )
         try:
             secret = str(self.secrets.get(profile.profile_id) or "").strip()
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except (ImportError, OSError, RuntimeError, TypeError, ValueError):
             return ProviderReadiness(
                 profile.profile_id,
                 False,
@@ -104,7 +104,7 @@ class ProviderRouter:
         if profile.kind == "openai_compatible":
             try:
                 secret = str(self.secrets.get(profile.profile_id) or "").strip()
-            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            except (ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:
                 raise ProviderResolutionError(
                     f"Provider credential is unavailable: {profile.label}"
                 ) from exc

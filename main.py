@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 _STARTUP_READY_FILE_ENV = "ALAVETTE_STARTUP_READY_FILE"
+_PACKAGE_IMPORT_PROBE_FLAG = "--internal-package-import-probe"
 _UNINSTALL_CLEANUP_FLAG = "--internal-uninstall-clean-user-data"
 
 
@@ -258,7 +259,10 @@ def run_app(argv: list[str] | None = None) -> int:
 
 
 def _run_internal_maintenance_command(argv: list[str]) -> int | None:
-    """Run installer-owned maintenance without importing Qt application code."""
+    """Run release-owned internal commands before public argument parsing."""
+
+    if argv == [_PACKAGE_IMPORT_PROBE_FLAG]:
+        return _run_package_import_probe()
 
     if argv != [_UNINSTALL_CLEANUP_FLAG]:
         return None
@@ -269,6 +273,26 @@ def _run_internal_maintenance_command(argv: list[str]) -> int | None:
     except Exception:  # noqa: BLE001 - process boundary used by the uninstaller
         return 1
     return 0 if result.succeeded else 1
+
+
+def _run_package_import_probe() -> int:
+    """Verify frozen-only and lazy UI imports in the installed payload."""
+
+    from importlib import import_module
+
+    required_modules = (
+        "win32timezone",
+        "src.ui.panels.preferences_panel",
+        "src.assistant.ui.assistant_panel",
+        "src.ui.panels.workbench.batch_generation_detail",
+        "src.ui.panels.workbench.file_batch_execution_detail",
+    )
+    try:
+        for module_name in required_modules:
+            import_module(module_name)
+    except Exception:  # noqa: BLE001 - executable self-test process boundary
+        return 1
+    return 0
 
 
 def _run_internal_office_child(argv: list[str]) -> int | None:
