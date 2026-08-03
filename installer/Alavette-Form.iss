@@ -57,6 +57,9 @@ SignedUninstaller=yes
 #endif
 
 [Languages]
+; Keep the Chinese messages in the repository so release output does not
+; depend on optional language files installed on the build machine.
+Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [InstallDelete]
