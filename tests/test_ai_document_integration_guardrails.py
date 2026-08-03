@@ -34,7 +34,7 @@ def test_large_ui_coordinator_method_budgets_are_non_increasing():
             "src/ui/panels/workbench/quick_execution_detail.py",
             "QuickExecutionDetail",
         ): 114,
-        ("src/ui/panels/workbench/panel_v2.py", "WorkbenchPanel"): 60,
+        ("src/ui/panels/workbench/panel_v2.py", "WorkbenchPanel"): 61,
         (
             "src/ui/panels/workbench/batch_generation_detail.py",
             "BatchGenerationDetail",

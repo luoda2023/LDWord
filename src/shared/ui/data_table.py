@@ -15,6 +15,27 @@ from src.qt_api import (
 from src.shared.ui.theme import bind_theme, get_theme
 
 
+def fit_table_height_to_contents(
+    table: QTableWidget,
+    *,
+    empty_row_height: int = 38,
+) -> int:
+    """Size a non-scrolling table to its header and visible rows."""
+
+    header = table.horizontalHeader()
+    header_height = max(header.height(), header.sizeHint().height())
+    body_height = sum(table.rowHeight(row) for row in range(table.rowCount()))
+    height = (
+        header_height
+        + (body_height or max(0, int(empty_row_height)))
+        + table.frameWidth() * 2
+    )
+    table.setMinimumHeight(height)
+    table.setMaximumHeight(height)
+    table.updateGeometry()
+    return height
+
+
 class DataTable(QTableWidget):
     """数据表格控件，支持列排序、行选中、固定列。
 

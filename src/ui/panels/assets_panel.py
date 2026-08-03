@@ -102,6 +102,7 @@ from src.shared.ui.asset_column_guide import AssetColumnGuide
 from src.shared.ui.base_dialog import BaseDialog
 from src.shared.ui.card import Card
 from src.shared.ui.compact_row_actions import CompactRowActions
+from src.shared.ui.data_table import fit_table_height_to_contents
 from src.shared.ui.detail_geometry import ScrollableDetailGeometrySync
 from src.shared.ui.dialogs import confirm, decision, input_text
 from src.shared.ui.inspector_form import InspectorForm
@@ -1890,7 +1891,7 @@ class AssetsPanel(BasePanel):
         if store is None:
             return False, ""
         preference = store.load().for_mode(self._mode_id)
-        if preference is None:
+        if preference is None or not preference.material_selection_configured:
             return False, ""
         package_id = str(preference.material_package_id or "").strip()
         return True, package_id if preference.material_enabled else ""
@@ -4867,7 +4868,7 @@ class AssetsPanel(BasePanel):
             self._source_banner.setText("尚未选择资料包")
             self._package_combo.setToolTip("选择资料包")
             self._overview_summary.clear()
-            self._fit_overview_preview_table()
+            fit_table_height_to_contents(self._overview_preview_table)
             return
         contract = get_package_material_contract(package)
         source_text = (
@@ -4964,7 +4965,7 @@ class AssetsPanel(BasePanel):
                 QTableWidgetItem(status),
             )
             self._overview_preview_table.setRowHeight(row, 38)
-        self._fit_overview_preview_table()
+        fit_table_height_to_contents(self._overview_preview_table)
 
     @staticmethod
     def _resource_overview_text(domain: str, names: tuple[str, ...]) -> str:
@@ -4980,17 +4981,6 @@ class AssetsPanel(BasePanel):
         visible_names = "、".join(names[:3])
         suffix = " …" if len(names) > 3 else ""
         return f"{len(names)} {unit} · {visible_names}{suffix}"
-
-    def _fit_overview_preview_table(self) -> None:
-        table = self._overview_preview_table
-        header = table.horizontalHeader()
-        header_height = max(header.height(), header.sizeHint().height())
-        body_height = sum(table.rowHeight(row) for row in range(table.rowCount()))
-        if not body_height:
-            body_height = 38
-        height = header_height + body_height + table.frameWidth() * 2
-        table.setFixedHeight(height)
-        table.updateGeometry()
 
     def _resolved_record(self, record_id: str):
         from src.domain.materials import MaterialResolver

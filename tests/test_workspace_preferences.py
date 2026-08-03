@@ -60,6 +60,7 @@ def test_workspace_preference_store_round_trips_versioned_mode_state(tmp_path):
     assert preference.execution_template_id == "thesis_gbt"
     assert preference.plan_enabled is False
     assert preference.template_enabled is False
+    assert preference.material_selection_configured is True
     assert preference.material_enabled is True
     assert preference.material_package_id == "package-1"
     assert preference.output_mode == "custom"
@@ -67,6 +68,19 @@ def test_workspace_preference_store_round_trips_versioned_mode_state(tmp_path):
     assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == (
         "workspace-preferences-v1"
     )
+
+
+def test_unrelated_mode_preferences_do_not_disable_default_material_selection(
+    tmp_path,
+):
+    store = WorkspacePreferenceStore(tmp_path / "workspace-preferences.json")
+
+    preference = store.update_mode("official", scene_id="official").for_mode(
+        "official"
+    )
+
+    assert preference is not None
+    assert preference.material_selection_configured is False
 
 
 def test_workspace_preference_store_ignores_corrupt_or_unknown_state(tmp_path):

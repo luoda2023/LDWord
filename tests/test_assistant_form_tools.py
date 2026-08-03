@@ -5,6 +5,9 @@ from docx import Document
 from src.assistant.adapters.form_tools import build_form_tool_registry
 from src.assistant.adapters.workspace_state_adapter import WorkspaceSnapshot
 from src.assistant.contracts.permissions import PermissionDecision
+from src.assistant.domain.docx_format_evidence import (
+    DOCX_FORMAT_EVIDENCE_SCHEMA_VERSION,
+)
 from src.assistant.tools.gateway import FormToolGateway
 from src.assistant.tools.registry import ToolCall
 
@@ -93,7 +96,7 @@ def test_document_inspection_can_return_structured_format_evidence(tmp_path):
 
     assert result.status == "success"
     evidence = result.output["format_evidence"]
-    assert evidence["schema_version"] == "docx-format-evidence-v1"
+    assert evidence["schema_version"] == DOCX_FORMAT_EVIDENCE_SCHEMA_VERSION
     assert evidence["source"]["name"] == path.name
     assert evidence["inventory"]["used_paragraph_style_count"] >= 2
 

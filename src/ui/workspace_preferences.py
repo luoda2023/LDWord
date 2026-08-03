@@ -38,6 +38,7 @@ class ModeWorkspacePreferences:
     execution_template_id: str = ""
     plan_enabled: bool = True
     template_enabled: bool = True
+    material_selection_configured: bool = False
     material_enabled: bool = False
     material_package_id: str = ""
     official_document_type_id: str = "notice"
@@ -100,6 +101,11 @@ class WorkspacePreferenceStore:
             raise TypeError(
                 "Unknown workspace preference fields: " + ", ".join(sorted(unknown))
             )
+        if (
+            {"material_enabled", "material_package_id"}.intersection(changes)
+            and "material_selection_configured" not in changes
+        ):
+            changes["material_selection_configured"] = True
         after = replace(before, **changes)
         if after == before and normalized_mode in current.modes:
             return current
@@ -158,6 +164,8 @@ def _mode_preferences_from_payload(
     if output_mode != "custom" or not custom_output_dir:
         output_mode = "default"
         custom_output_dir = ""
+    material_enabled = _boolean(payload.get("material_enabled"), False)
+    material_package_id = _text(payload.get("material_package_id"))
     return ModeWorkspacePreferences(
         scene_id=_text(payload.get("scene_id")),
         template_id=_text(payload.get("template_id")),
@@ -167,8 +175,12 @@ def _mode_preferences_from_payload(
         execution_template_id=_text(payload.get("execution_template_id")),
         plan_enabled=_boolean(payload.get("plan_enabled"), True),
         template_enabled=_boolean(payload.get("template_enabled"), True),
-        material_enabled=_boolean(payload.get("material_enabled"), False),
-        material_package_id=_text(payload.get("material_package_id")),
+        material_selection_configured=_boolean(
+            payload.get("material_selection_configured"),
+            bool(material_enabled or material_package_id),
+        ),
+        material_enabled=material_enabled,
+        material_package_id=material_package_id,
         official_document_type_id=(
             _text(payload.get("official_document_type_id")) or "notice"
         ),
