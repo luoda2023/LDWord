@@ -37,6 +37,8 @@ from src.services.production_runtime.material_only_delivery import (
 )
 from src.services.production_runtime.result_projection import (
     apply_official_draft_evidence,
+    cancelled_execution_payload,
+    failed_execution_payload,
     project_pipeline_result_evidence,
 )
 from src.shared.engine.exam_question_schema import (
@@ -92,21 +94,16 @@ class WorkbenchProductionRunner:
         exam_markdown = suffix in {".md", ".markdown"} and scene_uses_exam_paper_surface(
             self._scene
         )
-        official_draft = suffix == ".json" and scene_uses_official_document_surface(
-            self._scene
-        )
-        official_source_formatting = (
-            suffix == ".docx"
-            and scene_uses_official_document_surface(self._scene)
-            and self._material_snapshot is None
-        )
+        official_surface = scene_uses_official_document_surface(self._scene)
+        official_draft = suffix == ".json" and official_surface
+        snapshot = self._material_snapshot
+        official_source_formatting = suffix == ".docx" and official_surface and snapshot is None
         if suffix != ".docx" and not exam_markdown and not official_draft:
             return _failed(f"input_document_unsupported:{input_path.suffix}")
         if cancel_check():
             return _cancelled()
         if unsupported_target := unsupported_delivery_target_template_issue(self._scene):
             return _failed(unsupported_target)
-        snapshot = self._material_snapshot
         if snapshot is not None:
             if snapshot.work_mode_id != str(self._scene.mode_id or "").strip():
                 return _failed("execution_material_mode_mismatch")
@@ -198,11 +195,8 @@ class WorkbenchProductionRunner:
                 modules,
                 formatting_runtime.production_module_selector(config, record),
             )
-            enabled = (
-                []
-                if terminal_owner or official_source_formatting
-                else list(selection.select_modules(modules))
-            )
+            skip_modules = terminal_owner or official_source_formatting
+            enabled = [] if skip_modules else list(selection.select_modules(modules))
             official_master = None
             exam_master = None
             if terminal_owner == "official":
@@ -421,21 +415,11 @@ class WorkbenchProductionRunner:
 
 
 def _failed(message: str) -> dict[str, object]:
-    return {
-        "status": "failed",
-        "output_path": "",
-        "output_paths": {},
-        "report_paths": [],
-        "failed_count": 1,
-        "artifact_failure_count": 0,
-        "error_text": str(message),
-    }
+    return failed_execution_payload(message)
 
 
 def _cancelled() -> dict[str, object]:
-    payload = _failed("execution_cancelled")
-    payload.update(status="cancelled", failed_count=0)
-    return payload
+    return cancelled_execution_payload()
 
 
 __all__: list[str] = []

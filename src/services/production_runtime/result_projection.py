@@ -27,6 +27,28 @@ from src.reporting.material_assembly import (
 from src.services.official_draft_source import OfficialDraftSource
 
 
+def cancelled_execution_payload() -> dict[str, object]:
+    """Return the stable terminal payload for a cancelled execution."""
+
+    payload = failed_execution_payload("execution_cancelled")
+    payload.update(status="cancelled", failed_count=0)
+    return payload
+
+
+def failed_execution_payload(message: str) -> dict[str, object]:
+    """Return the stable terminal payload for a rejected execution."""
+
+    return {
+        "status": "failed",
+        "output_path": "",
+        "output_paths": {},
+        "report_paths": [],
+        "failed_count": 1,
+        "artifact_failure_count": 0,
+        "error_text": str(message),
+    }
+
+
 def project_pipeline_result_evidence(result) -> dict[str, object]:
     """Return JSON-safe evidence already computed by the pipeline."""
 
@@ -97,4 +119,9 @@ def apply_official_draft_evidence(
         )
 
 
-__all__ = ["apply_official_draft_evidence", "project_pipeline_result_evidence"]
+__all__ = [
+    "apply_official_draft_evidence",
+    "cancelled_execution_payload",
+    "failed_execution_payload",
+    "project_pipeline_result_evidence",
+]
