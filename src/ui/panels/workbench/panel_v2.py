@@ -669,6 +669,21 @@ class DocumentExecutionDetail(QWidget):
         self._output_card.set_source_paths(self.selected_paths())
         self._output_card.set_topology(topology)
         self._execution_footer.set_context(topology, readiness)
+        ready_status = ""
+        single_detail = self._details["single"]
+        execution_scene = single_detail.execution_scene()
+        if (
+            str(getattr(execution_scene, "mode_id", "") or "").strip()
+            == "official"
+            and topology.document_count
+        ):
+            material_selection = single_detail.execution_material_selection()
+            ready_status = (
+                "已准备：按公文母版组装"
+                if material_selection is not None
+                else "已准备：按文种套用内置公文母版"
+            )
+        self._execution_footer.set_ready_status(ready_status)
         self._execution_footer.set_repair_action(
             label=str(getattr(repair_action, "label", "") or ""),
             target_type=str(

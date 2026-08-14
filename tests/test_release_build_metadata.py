@@ -17,8 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_windows_version_resource_comes_from_app_metadata():
     rendered = render_windows_version_info()
 
-    assert "filevers=(1, 0, 0, 0)" in rendered
-    assert "prodvers=(1, 0, 0, 0)" in rendered
+    assert "filevers=(1, 0, 1, 0)" in rendered
+    assert "prodvers=(1, 0, 1, 0)" in rendered
     assert f"StringStruct('ProductName', '{APP_DISPLAY_NAME}')" in rendered
     assert f"StringStruct('ProductVersion', '{APP_SEMVER}')" in rendered
     assert f"StringStruct('OriginalFilename', '{APP_PACKAGE_NAME}.exe')" in rendered

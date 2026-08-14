@@ -70,6 +70,7 @@ def project_pipeline_result_evidence(result) -> dict[str, object]:
         "journal_citations",
         "coverage_boundaries",
         "parameter_runtime_consumption",
+        "official_source_formatting",
     ):
         payload[key] = plain_data(
             getattr(context, key, None) if context is not None else None

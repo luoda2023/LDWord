@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import copy
-import re
-from dataclasses import replace
 from pathlib import Path
 
 from src.application.materials import (
-    RUNTIME_IMAGE_WATERMARK_KEY,
     MaterialPreviewSnapshot,
     MaterialRuntimeFieldPreview,
 )
@@ -27,10 +24,6 @@ from src.config.official_document_profiles import (
     get_official_document_profile,
     list_common_official_document_profiles,
 )
-from src.config.official_material_form import (
-    OFFICIAL_MATERIAL_FIELD_SPECS,
-    official_material_field_label,
-)
 from src.config.scene import SceneWorkspace
 from src.config.scene_presets import (
     CAPABILITY_FEATURE_CARD_ORDER,
@@ -44,6 +37,7 @@ from src.config.scene_surface_registry import (
     scene_uses_official_document_surface,
 )
 from src.config.work_mode import get_work_mode, resolve_work_mode_id
+from src.domain.materials import MaterialIssue, MaterialRunSelection
 from src.qt_api import (
     QButtonGroup,
     QFileDialog,
@@ -60,16 +54,12 @@ from src.qt_api import (
     Signal,
 )
 from src.services.execution_result_contract import normalize_terminal_payload
-from src.shared.engine.material_token_contract import (
-    MaterialTokenNamespace,
-    material_token,
-)
 from src.shared.ui import ThemedRadioButton
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
 from src.shared.ui.icons.catalog import get_icon
 from src.shared.ui.keyed_widget_list import KeyedWidgetListController
-from src.shared.ui.layout_sync import refresh_layout_chain, refresh_layout_chain_later
+from src.shared.ui.layout_sync import refresh_layout_chain_later
 from src.shared.ui.official_field_value_edit import OfficialFieldValueEdit
 from src.shared.ui.path_action_semantics import PathAction, path_action_presentation
 from src.shared.ui.sizing import apply_size_class, resolved_control_height
@@ -84,9 +74,9 @@ from src.ui.adapters.config_selector_models import (
     template_selector_options,
 )
 from src.ui.adapters.workbench_execution_gate import ExecutionGateDecision
-from src.domain.materials import MaterialIssue, MaterialRunSelection
 from src.ui.panels.workbench.state import ExecutionResultState
 
+from .material_state import material_execution_gate, material_issue_lines
 from .quick_execution_drop_area import QuickExecutionDropArea
 from .quick_execution_feedback_mixin import QuickExecutionFeedbackMixin
 from .quick_execution_floating_fields_mixin import QuickExecutionFloatingFieldsMixin
@@ -99,13 +89,13 @@ from .quick_execution_presenter import (
 from .quick_execution_source_presenter import (
     build_exam_source_projection,
     build_official_document_readiness_projection,
+    official_source_execution_gate,
     resolve_official_document_profile_id,
 )
 from .quick_material_preview import QuickMaterialPreview
 from .quick_material_preview_presenter import (
     build_quick_material_preview_projection,
 )
-from .material_state import material_execution_gate, material_issue_lines
 
 
 def _strip_library_combo_prefix(label: str) -> str:
@@ -1129,6 +1119,10 @@ class QuickExecutionDetail(
             preview_snapshot=self._material_preview_snapshot,
             plan_label=self._active_plan_label(),
             template_label=self._active_template_combo_label(),
+            document_path=(
+                self.document_path() if hasattr(self, "_drop_area") else ""
+            ),
+            material_enabled=bool(self._material_package_enabled),
         )
 
     def _official_profile_id(self) -> str:
@@ -1742,9 +1736,14 @@ class QuickExecutionDetail(
         self._emit_summary_changed()
 
     def current_execution_gate_decision(self) -> ExecutionGateDecision:
-        return material_execution_gate(
-            self.execution_material_selection(),
-            self._material_issues,
+        return official_source_execution_gate(
+            material_execution_gate(
+                self.execution_material_selection(), self._material_issues
+            ),
+            official_scene=self._is_official_document_scene(),
+            material_enabled=self._material_package_enabled,
+            document_path=self.document_path(),
+            profile_id=self._official_profile_id(),
         )
 
     def _request_material_repair(self) -> None:
@@ -1773,7 +1772,7 @@ class QuickExecutionDetail(
         document_path = str(self.document_path() or "").strip()
         execution_scene = self.execution_scene()
         selection = self.execution_material_selection()
-        decision = material_execution_gate(selection, self._material_issues)
+        decision = self.current_execution_gate_decision()
         self._material_preview.set_projection(
             build_quick_material_preview_projection(
                 execution_scene,

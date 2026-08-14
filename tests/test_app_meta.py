@@ -10,8 +10,8 @@ from src import app_meta
 
 def test_display_names_match_expected_branding():
     assert app_meta.APP_DISPLAY_NAME == "Alavette Form"
-    assert app_meta.APP_DISPLAY_NAME_FULL == "Alavette Form V1.0.0"
-    assert app_meta.APP_VERSION == "V1.0.0"
+    assert app_meta.APP_DISPLAY_NAME_FULL == "Alavette Form V1.0.1"
+    assert app_meta.APP_VERSION == "V1.0.1"
     assert app_meta.APP_RELEASE_LINE == "V1.0"
     assert app_meta.APP_DISPLAY_NAME in app_meta.APP_DISPLAY_NAME_FULL
 
@@ -25,9 +25,9 @@ def test_release_versions_have_one_semantic_source_of_truth():
     )
 
     assert project_version is not None
-    assert app_meta.APP_SEMVER == project_version.group(1) == "1.0.0"
-    assert app_meta.APP_VERSION == "V1.0.0"
-    assert app_meta.APP_FILE_VERSION == (1, 0, 0, 0)
+    assert app_meta.APP_SEMVER == project_version.group(1) == "1.0.1"
+    assert app_meta.APP_VERSION == "V1.0.1"
+    assert app_meta.APP_FILE_VERSION == (1, 0, 1, 0)
 
 
 def test_package_and_cli_names_use_expected_safe_formats():

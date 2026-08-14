@@ -48,6 +48,7 @@ from src.pipeline.module_phases import (
     module_scope_behavior,
     order_modules_by_phase,
 )
+from src.pipeline.official_source_stage import execute_official_source_stage
 from src.pipeline.result import PipelineResult
 from src.pipeline.scheduler import (
     validate_data_flow,
@@ -217,6 +218,7 @@ class Pipeline(PipelineValidationMixin, PipelineJournalGovernanceMixin):
         defer_field_refresh: bool = False,
         document_structure_evidence: DocumentStructureEvidence | None = None,
         document_scope_decisions: tuple[RegionDecision, ...] = (),
+        official_source_formatting: bool = False,
     ) -> None:
         self._config = config
         self._output_dir = Path(output_dir) if output_dir else None
@@ -241,6 +243,7 @@ class Pipeline(PipelineValidationMixin, PipelineJournalGovernanceMixin):
         self._defer_field_refresh = bool(defer_field_refresh)
         self._document_structure_evidence = document_structure_evidence
         self._document_scope_decisions = tuple(document_scope_decisions or ())
+        self._official_source_formatting = bool(official_source_formatting)
         self._tracker = ChangeTracker()
         self._mathtype_fallback_receipts: list[dict[str, object]] = []
 
@@ -271,9 +274,11 @@ class Pipeline(PipelineValidationMixin, PipelineJournalGovernanceMixin):
         if self._is_cancelled():
             return self._cancelled_result()
 
+        config_mode_id = str(getattr(self._config, "mode_id", "") or "custom")
+        scope_mode_id = "official_source" if self._official_source_formatting else config_mode_id
         scope_issue = document_scope_policy_issue(
             getattr(self._config, "document_scope", None),
-            mode_id=str(getattr(self._config, "mode_id", "") or "custom"),
+            mode_id=scope_mode_id,
         )
         if scope_issue:
             return PipelineResult(
@@ -282,7 +287,6 @@ class Pipeline(PipelineValidationMixin, PipelineJournalGovernanceMixin):
                 error=scope_issue,
                 config=self._config,
             )
-
         configuration_issue = pipeline_configuration_integrity_issue(self._config)
         if configuration_issue:
             return PipelineResult(
@@ -291,7 +295,6 @@ class Pipeline(PipelineValidationMixin, PipelineJournalGovernanceMixin):
                 error=configuration_issue,
                 config=self._config,
             )
-
         path = Path(doc_path)
         logical_path = self._logical_source_path or path
         terminal_owner = pipeline_terminal_assembly_owner(self._config)
@@ -336,7 +339,7 @@ class Pipeline(PipelineValidationMixin, PipelineJournalGovernanceMixin):
             source_doc_dir=str(logical_path.parent),
             working_doc_path=str(path),
             working_doc_dir=str(path.parent),
-            mode_id=str(getattr(self._config, "mode_id", "") or "custom"),
+            mode_id=scope_mode_id,
             document_scope=copy.deepcopy(
                 getattr(self._config, "document_scope", None)
                 or DocumentScopePolicy()
@@ -421,6 +424,12 @@ class Pipeline(PipelineValidationMixin, PipelineJournalGovernanceMixin):
         )
         if module_result is not None:
             return module_result
+        if self._official_source_formatting:
+            self._emit(step, total_steps, "Formatting existing official document")
+            outcome = execute_official_source_stage(doc, document_type_id=self._official_document_type_id, tracker=self._tracker)
+            ctx.official_source_formatting = outcome.result
+            if outcome.error:
+                return self._failed_result(error=outcome.error, doc=doc, original_doc=original_doc, ctx=ctx)
         return self._complete_generic_pipeline(
             doc=doc,
             original_doc=original_doc,

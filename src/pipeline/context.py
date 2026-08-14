@@ -44,6 +44,7 @@ class PipelineContext:
     exam_question_schema: Any | None = None
     exam_delivery_runtime: Any | None = None
     official_document_assembly: Any | None = None
+    official_source_formatting: Any | None = None
     terminal_assembly_owner: str = ""
     journal_rule_source_governance: Any | None = None
     journal_citations: Any | None = None

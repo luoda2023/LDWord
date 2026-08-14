@@ -15,7 +15,7 @@ from src.qt_api import (
     QWidget,
     Signal,
 )
-from src.shared.ui.button_style import apply_button_variant
+from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
 from src.shared.ui.card import Card
 from src.shared.ui.icons.catalog import get_icon
 from src.shared.ui.sizing import apply_size_class, resolved_control_height
@@ -64,6 +64,7 @@ class WorkbenchExecutionFooter(Card):
         self._confirmation_required = False
         self._external_status_text = ""
         self._external_status_tone = "warning"
+        self._ready_status_text = ""
         self._result_path = ""
         self._result_is_directory = False
         self._topology = DocumentExecutionTopology(
@@ -180,6 +181,13 @@ class WorkbenchExecutionFooter(Card):
             self._refresh_idle_projection()
         else:
             self._refresh_actions()
+
+    def set_ready_status(self, message: str) -> None:
+        """Describe the resolved execution strategy while the run is idle."""
+
+        self._ready_status_text = _compact_text(message)
+        if not self._execution_running and self._last_result_status == "idle":
+            self._refresh_idle_projection()
 
     def set_blocking_message(self, message: str) -> None:
         """Project an external inline blocker without entering confirmation."""
@@ -396,7 +404,7 @@ class WorkbenchExecutionFooter(Card):
                 "warning",
             )
         elif self._can_execute():
-            self._set_status("已准备完成", "success")
+            self._set_status(self._ready_status_text or "已准备完成", "success")
         else:
             self._set_status("请先完成上方必需项", "hint")
         self._progress.setVisible(False)
@@ -564,6 +572,11 @@ class WorkbenchExecutionFooter(Card):
 
     def _apply_footer_theme(self) -> None:
         theme = get_theme()
+        # The shared footer is a sibling of the legacy quick-execution detail,
+        # so it cannot inherit that widget's button QSS.  Keep the rendering
+        # contract local to the footer; otherwise variant-only buttons fall
+        # back to the platform style and can disappear against a white card.
+        self.setStyleSheet(build_button_stylesheet(theme))
         for button, variant, size in (
             (self._execute_button, "primary", "lg"),
             (self._repair_button, "secondary", "lg"),

@@ -1,7 +1,7 @@
 """Centralized application naming metadata."""
 
 APP_DISPLAY_NAME = "Alavette Form"
-APP_SEMVER = "1.0.0"
+APP_SEMVER = "1.0.1"
 APP_RELEASE_LINE = "V" + ".".join(APP_SEMVER.split(".")[:2])
 APP_VERSION = f"V{APP_SEMVER}"
 APP_FILE_VERSION = (*tuple(int(part) for part in APP_SEMVER.split(".")), 0)

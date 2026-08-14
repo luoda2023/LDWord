@@ -43,6 +43,18 @@ def test_document_scope_roles_are_mode_specific_and_master_modes_have_no_selecto
     assert "resume" in selectable_document_scope_roles("thesis")
     assert "resume" not in selectable_document_scope_roles("technical")
     assert selectable_document_scope_roles("official") == ()
+    assert selectable_document_scope_roles("official_source") == (
+        "cover",
+        "abstract_cn",
+        "abstract_en",
+        "toc",
+        "body",
+        "references",
+        "errata",
+        "appendix",
+        "acknowledgment",
+        "resume",
+    )
     assert selectable_document_scope_roles("exam") == ()
 
 

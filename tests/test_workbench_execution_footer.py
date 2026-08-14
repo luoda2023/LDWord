@@ -72,6 +72,33 @@ def test_blocked_footer_keeps_generation_action_and_points_to_source(qapp):
         footer.close()
 
 
+def test_footer_owns_button_variant_stylesheet(qapp):
+    footer = WorkbenchExecutionFooter()
+    try:
+        _set_ready_document_context(footer)
+
+        stylesheet = footer.styleSheet()
+        assert 'QPushButton[variant="primary"]' in stylesheet
+        assert 'QPushButton[variant="secondary"]' in stylesheet
+        assert footer._execute_button.property("variant") == "primary"
+        assert not footer._execute_button.isHidden()
+        assert footer._execute_button.isEnabled()
+    finally:
+        footer.close()
+
+
+def test_footer_can_explain_the_resolved_official_strategy(qapp):
+    footer = WorkbenchExecutionFooter()
+    try:
+        _set_ready_document_context(footer)
+        footer.set_ready_status("已准备：按文种套用内置公文母版")
+
+        assert footer._status_label.text() == "已准备：按文种套用内置公文母版"
+        assert footer._execute_button.isEnabled()
+    finally:
+        footer.close()
+
+
 def test_footer_uses_indeterminate_progress_until_total_is_known(qapp):
     footer = WorkbenchExecutionFooter()
     try:

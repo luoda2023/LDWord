@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
+
+from docx import Document
 
 from src.application.materials import MaterialPreviewSnapshot
 from src.config.master_library import get_master
@@ -16,7 +19,14 @@ from src.services.exam_markdown_source import (
     is_exam_markdown_source_path,
     load_exam_markdown_source,
 )
+from src.shared.engine.official_source_formatting import (
+    detect_official_source_roles,
+)
 from src.ui.adapters.config_selector_models import master_display_label
+from src.ui.adapters.workbench_execution_gate import (
+    ExecutionGateDecision,
+    decide_execution_gate,
+)
 
 
 def build_exam_source_projection(
@@ -209,12 +219,46 @@ def build_official_document_readiness_projection(
     preview_snapshot: MaterialPreviewSnapshot | None,
     plan_label: str,
     template_label: str,
+    document_path: str = "",
+    material_enabled: bool = True,
 ) -> tuple[str, dict[str, str]]:
-    """Project the selected official contract and current material readiness."""
+    """Project the selected official strategy and its current readiness."""
 
     profile = get_official_document_profile(profile_id)
-    contract = get_official_document_assembly_contract(profile_id)
     profile_label = str(getattr(profile, "label", "") or profile_id or "通知").strip()
+    contract = get_official_document_assembly_contract(profile_id)
+    path_text = str(document_path or "").strip()
+    if not material_enabled:
+        source_name = Path(path_text).name if path_text else ""
+        master_id = str(
+            getattr(contract, "master_id", "") or "official_gbt_standard"
+        )
+        master = get_master(master_id, "official")
+        master_label = str(
+            getattr(master, "label", "") or master_id
+        ).strip()
+        mapping_summary, mapping_text = _official_source_mapping_projection(
+            path_text,
+            profile_id,
+        )
+        return (
+            (
+                mapping_summary
+                if source_name
+                else "等待公文底稿"
+            ),
+            {
+                "source": (
+                    f"保留原文校版：{source_name}"
+                    if source_name
+                    else "请上传需要校版的 DOCX"
+                ),
+                "assembly": f"{profile_label} · 套用{master_label}",
+                "delivery": str(template_label or "").strip() or "GB/T 9704 公文格式",
+                "fields": mapping_text,
+            },
+        )
+
     if contract is None:
         return (
             "公文执行前检查：文种契约缺失",
@@ -328,8 +372,151 @@ def _official_master_and_template_text(master_id: str, template_label: str) -> s
     return master_label or template_text or "按当前公文配置"
 
 
+def _official_source_mapping_projection(
+    document_path: str,
+    profile_id: str,
+) -> tuple[str, str]:
+    roles, warnings, error = _official_source_analysis(document_path, profile_id)
+    if error:
+        return (
+            "已有公文校版：结构识别失败",
+            "未能读取段落结构；生成前请检查文档",
+        )
+
+    role_labels = {
+        "organization": "发文机关",
+        "document_no": "文号",
+        "title": "标题",
+        "recipient": "主送机关",
+        "attachment_note": "附件",
+        "issuer": "落款",
+        "issue_date": "日期",
+        "copy_scope": "抄送",
+    }
+    ordered_roles = (
+        "organization",
+        "document_no",
+        "title",
+        "recipient",
+        "attachment_note",
+        "issuer",
+        "issue_date",
+        "copy_scope",
+    )
+    present = {role.role for role in roles}
+    labels = [role_labels[key] for key in ordered_roles if key in present]
+    body_count = sum(role.role in {"body", "body_heading"} for role in roles)
+    if body_count:
+        insert_at = min(4, len(labels))
+        labels.insert(insert_at, f"正文 {body_count} 段")
+    fields_text = "已识别：" + "、".join(labels) if labels else "未识别到公文角色"
+
+    warning_labels = {
+        "official_source_empty": "未识别文本",
+        "official_source_title_not_detected": "标题",
+        "official_source_title_needs_review": "标题",
+        "official_source_body_not_detected": "正文",
+        "official_source_document_no_not_detected": "文号",
+        "official_source_issue_date_not_detected": "日期",
+    }
+    review_labels = tuple(
+        dict.fromkeys(warning_labels.get(warning, warning) for warning in warnings)
+    )
+    if review_labels:
+        fields_text += "；套版提示：" + "、".join(review_labels)
+        summary = f"已有公文校版：将套用母版（{len(review_labels)} 项提示）"
+    else:
+        summary = f"已有公文校版：已识别 {len(roles)} 个段落角色"
+    return summary, fields_text
+
+
+def official_source_execution_issues(
+    document_path: str,
+    profile_id: str,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return hard input failures and non-blocking source-mapping notices."""
+
+    if not str(document_path or "").strip():
+        return (), ()
+    _roles, warnings, error = _official_source_analysis(document_path, profile_id)
+    if error:
+        return (("无法读取公文段落结构，请重新选择 DOCX",), ())
+    warning_set = set(warnings)
+    blockers: list[str] = []
+    notices: list[str] = []
+    if "official_source_empty" in warning_set:
+        notices.append("未识别到文本段落；仍将应用所选公文母版版面")
+    if "official_source_title_not_detected" in warning_set:
+        notices.append("未识别到独立标题；其余内容仍按正文和落款规则套版")
+    if "official_source_body_not_detected" in warning_set:
+        notices.append("未识别到独立正文；已识别段落仍按对应公文角色套版")
+    if "official_source_title_needs_review" in warning_set:
+        notices.append("公文标题识别置信度较低，请核对识别预览")
+    if "official_source_document_no_not_detected" in warning_set:
+        notices.append("未识别到发文字号；无文号文种可忽略")
+    if "official_source_issue_date_not_detected" in warning_set:
+        notices.append("未识别到成文日期，请核对原文")
+    return tuple(blockers), tuple(notices)
+
+
+def official_source_execution_gate(
+    material_decision: ExecutionGateDecision,
+    *,
+    official_scene: bool,
+    material_enabled: bool,
+    document_path: str,
+    profile_id: str,
+) -> ExecutionGateDecision:
+    """Merge source-structure findings into the shared execution gate."""
+
+    if not official_scene or material_enabled:
+        return material_decision
+    blockers, warnings = official_source_execution_issues(document_path, profile_id)
+    return decide_execution_gate(
+        blocking_reasons=(*material_decision.blocking_reasons, *blockers),
+        warning_reasons=(*material_decision.warning_reasons, *warnings),
+        confirmation_reasons=material_decision.confirmation_reasons,
+        primary_action=material_decision.primary_action,
+    )
+
+
+def _official_source_analysis(document_path: str, profile_id: str):
+    path = Path(str(document_path or "").strip())
+    if not path.is_file():
+        return (), (), "source_missing"
+    try:
+        stat = path.stat()
+        return _cached_official_source_analysis(
+            str(path.resolve()),
+            int(stat.st_mtime_ns),
+            int(stat.st_size),
+            str(profile_id or "").strip(),
+        )
+    except (OSError, TypeError, ValueError):
+        return (), (), "source_unreadable"
+
+
+@lru_cache(maxsize=32)
+def _cached_official_source_analysis(
+    document_path: str,
+    _modified_ns: int,
+    _size: int,
+    profile_id: str,
+):
+    try:
+        roles, warnings = detect_official_source_roles(
+            Document(document_path),
+            document_type_id=profile_id,
+        )
+    except Exception:  # noqa: BLE001 - invalid DOCX must become a gate blocker
+        return (), (), "source_parse_failed"
+    return roles, warnings, ""
+
+
 __all__ = [
     "build_exam_source_projection",
     "build_official_document_readiness_projection",
+    "official_source_execution_gate",
+    "official_source_execution_issues",
     "resolve_official_document_profile_id",
 ]

@@ -95,6 +95,11 @@ class WorkbenchProductionRunner:
         official_draft = suffix == ".json" and scene_uses_official_document_surface(
             self._scene
         )
+        official_source_formatting = (
+            suffix == ".docx"
+            and scene_uses_official_document_surface(self._scene)
+            and self._material_snapshot is None
+        )
         if suffix != ".docx" and not exam_markdown and not official_draft:
             return _failed(f"input_document_unsupported:{input_path.suffix}")
         if cancel_check():
@@ -193,7 +198,11 @@ class WorkbenchProductionRunner:
                 modules,
                 formatting_runtime.production_module_selector(config, record),
             )
-            enabled = [] if terminal_owner else list(selection.select_modules(modules))
+            enabled = (
+                []
+                if terminal_owner or official_source_formatting
+                else list(selection.select_modules(modules))
+            )
             official_master = None
             exam_master = None
             if terminal_owner == "official":
@@ -342,6 +351,7 @@ class WorkbenchProductionRunner:
                 official_master=official_master,
                 exam_master=exam_master,
                 official_document_type_id=self._document_type_id,
+                official_source_formatting=official_source_formatting,
                 **formatting_runtime.document_scope_pipeline_kwargs(self._document_scope_context, working_input_path if snapshot is not None else None),
             )
             result = pipeline.execute(str(working_input_path))

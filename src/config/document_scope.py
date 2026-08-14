@@ -12,7 +12,6 @@ from typing import Literal
 
 from src.config.section_semantics import canonicalize_section_type
 
-
 DocumentScopeMode = Literal["all", "body", "selected"]
 
 DOCUMENT_SCOPE_MODES: tuple[str, ...] = ("all", "body", "selected")
@@ -53,6 +52,9 @@ _SELECTABLE_ROLES_BY_MODE: dict[str, tuple[str, ...]] = {
     "bidding": ("toc", "body", "appendix"),
     # Official documents and exam papers use structured/master assembly.
     "official": (),
+    # Runtime-only route for an existing official DOCX. The source document
+    # remains the content owner, so every detected region may be formatted.
+    "official_source": ALL_DOCUMENT_REGION_ROLES,
     "exam": (),
 }
 

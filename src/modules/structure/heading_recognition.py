@@ -8,22 +8,23 @@ from typing import TYPE_CHECKING
 
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-from src.config.special_title_rules import match_special_title_model
 from src.config.section_semantics import canonicalize_section_type
+from src.config.special_title_rules import match_special_title_model
 from src.modules.base import BaseModule, ModuleMeta
-from src.shared.engine.docx_heading_semantics import get_paragraph_outline_level
+from src.shared.engine.document_structure_model import DocSection, DocTree, HeadingInfo
 from src.shared.engine.document_text_heuristics import (
     looks_like_date_placeholder_line,
     looks_like_numbered_toc_entry_with_page_suffix,
     looks_like_reference_entry_line,
     looks_like_toc_entry_line,
 )
-from src.shared.engine.document_structure_model import DocSection, DocTree, HeadingInfo
+from src.shared.engine.docx_heading_semantics import get_paragraph_outline_level
 from src.shared.engine.style_resolver import get_heading_level
 
 if TYPE_CHECKING:
     from docx import Document
     from docx.text.paragraph import Paragraph
+
     from src.config.resolved import ResolvedConfig
     from src.pipeline.context import PipelineContext
     from src.pipeline.tracker import ChangeTracker
