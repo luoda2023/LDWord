@@ -1,0 +1,75 @@
+{
+  "stages": [
+    {
+      "stage_id": "decision",
+      "order": 1,
+      "label": "决策立项",
+      "doc_kinds": [
+        "项目建议书",
+        "可行性研究报告",
+        "投资估算"
+      ],
+      "source": "01+08"
+    },
+    {
+      "stage_id": "design",
+      "order": 2,
+      "label": "设计报批",
+      "doc_kinds": [
+        "初步设计说明",
+        "设计概算",
+        "施工图设计说明",
+        "施工图预算"
+      ],
+      "source": "08+01"
+    },
+    {
+      "stage_id": "transaction",
+      "order": 3,
+      "label": "招投标与合同",
+      "doc_kinds": [
+        "招标文件",
+        "投标文件",
+        "施工合同",
+        "分包合同",
+        "采购合同"
+      ],
+      "source": "05"
+    },
+    {
+      "stage_id": "implementation",
+      "order": 4,
+      "label": "施工实施",
+      "doc_kinds": [
+        "施工组织设计",
+        "专项施工方案",
+        "技术交底",
+        "工艺标准"
+      ],
+      "source": "02+03+04"
+    },
+    {
+      "stage_id": "completion",
+      "order": 5,
+      "label": "竣工结算",
+      "doc_kinds": [
+        "工程结算书",
+        "结算审计方案",
+        "签证索赔报告"
+      ],
+      "source": "06"
+    },
+    {
+      "stage_id": "throughout",
+      "order": 6,
+      "label": "贯穿造价分析",
+      "doc_kinds": [
+        "造价分析手册",
+        "定额分析",
+        "目标成本测算",
+        "PPT汇报"
+      ],
+      "source": "07+08"
+    }
+  ]
+}

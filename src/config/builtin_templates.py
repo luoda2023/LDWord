@@ -23,6 +23,7 @@ _CANONICAL_TEMPLATE_ROOT = _PROJECT_ROOT / "config_library" / "templates"
 # remains an explicit mode-scoped resource in each slot.
 _BUILTIN_TEMPLATE_RESOURCES: tuple[tuple[str, str], ...] = (
     ("custom", "default"),
+    ("engineering", "eng_document"),
     ("exam", "default"),
     ("thesis", "thesis_gbt"),
     ("thesis", "thesis_custom"),
@@ -39,6 +40,7 @@ _BUILTIN_TEMPLATE_RESOURCES: tuple[tuple[str, str], ...] = (
 
 _PRIMARY_TEMPLATE_MODES: dict[str, str] = {
     "default": "custom",
+    "eng_document": "engineering",
     "thesis_gbt": "thesis",
     "thesis_custom": "thesis",
     "bid_engineering": "bidding",

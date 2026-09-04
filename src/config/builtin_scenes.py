@@ -19,6 +19,7 @@ _CANONICAL_SCENE_ROOT = _PROJECT_ROOT / "config_library" / "plans"
 
 _BUILTIN_SCENE_RESOURCES: tuple[tuple[str, str], ...] = (
     ("custom", "custom"),
+    ("engineering", "engineering"),
     ("exam", "exam"),
     ("exam", "exam_quiz"),
     ("exam", "exam_term"),
