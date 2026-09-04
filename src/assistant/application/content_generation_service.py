@@ -427,6 +427,7 @@ class AssistantContentGenerationService:
         )
         chapter_markdowns: list[str] = []
         notes = request.outline_notes
+        written_summary: list[str] = []
         for index, title in enumerate(titles, start=1):
             note = str(notes[index - 1]).strip() if index - 1 < len(notes) else ""
             note_text = (
@@ -437,10 +438,20 @@ class AssistantContentGenerationService:
                 if note
                 else ""
             )
+            memory_text = ""
+            if written_summary:
+                memory_text = (
+                    "\n\n【前文记忆：避免与已写章节重复】\n"
+                    "以下是前文各章已经写过的核心观点与结论摘要，后续章节不得再"
+                    "整段复述或展开这些内容；如需提及只能一句话带过并引导读者"
+                    "参见对应章节。各章标题必须与给定目录一致，不得改名或漏章。\n"
+                    + "\n".join(written_summary)
+                )
             chapter_prompt = (
                 base_prompt
                 + "\n\n【分阶段生成：单个章节】\n"
                 + doc_context
+                + memory_text
                 + f"\n\n当前只撰写第 {index} 章，标题必须为：{title}\n"
                 "只输出该章正文，不得输出全文标题、前言、目录、其他章节或结语汇总；"
                 "按该章内容需要组织二级/三级标题、段落与简单表格。"
@@ -460,6 +471,7 @@ class AssistantContentGenerationService:
             cleaned = chapter_text.strip()
             if cleaned:
                 chapter_markdowns.append(cleaned)
+                written_summary.append(_chapter_memory_summary(index, title, cleaned))
         full_markdown = "\n\n".join(chapter_markdowns) + "\n"
         return self.adapter.compile_generated(
             session_id=request.session_id,
@@ -1217,3 +1229,36 @@ def _exam_question_phase_blockers(
 
 
 __all__ = ["AssistantContentGenerationService", "ContentGenerationRequest"]
+
+
+
+def _chapter_memory_summary(
+    index: int,
+    title: str,
+    markdown: str,
+    *,
+    budget: int = 220,
+) -> str:
+    """Compact a finished chapter into a short memory entry for later chapters.
+
+    The summarised entry tells the next chapter what has already been covered so
+    the model does not re-explain the same material.  Heading text plus the
+    first sentences of each section are kept; body prose is truncated.
+    """
+    heading_re = re.compile(r"^#{1,4}\s+(.*)$", re.MULTILINE)
+    lines = [ln for ln in str(markdown or "").splitlines() if ln.strip()]
+    picks: list[str] = []
+    for ln in lines:
+        stripped = ln.strip()
+        m = heading_re.match(stripped)
+        if m:
+            picks.append(m.group(1).strip())
+        elif picks and not stripped.startswith(("|", "```", "-", "*", "1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.")):
+            picks.append(stripped)
+        if sum(len(p) for p in picks) >= budget:
+            break
+    body = "；".join(picks) if picks else title
+    if len(body) > 520:
+        body = body[:520] + "…"
+    return f"第 {index} 章《{title}》已覆盖：{body}"
+
