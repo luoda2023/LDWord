@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from src.shared.win_process import run_hidden
 import sys
 import tempfile
 import uuid
@@ -234,7 +235,7 @@ def _automation_word_process_ids() -> set[int] | None:
         "ForEach-Object { $_.ProcessId }"
     )
     try:
-        proc = subprocess.run(
+        proc = run_hidden(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
             capture_output=True,
             text=True,
@@ -269,7 +270,7 @@ def _terminate_process_ids(process_ids: set[int]) -> None:
         "}"
     )
     try:
-        subprocess.run(
+        run_hidden(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
             capture_output=True,
             text=True,
@@ -301,7 +302,7 @@ def _refresh_via_pywin32(doc_path: Path, timeout_sec: int) -> tuple[bool, str]:
     cmd = [sys.executable, "-c", _PYWIN32_REFRESH_CHILD]
     before_word_ids = _automation_word_process_ids()
     try:
-        proc = subprocess.run(
+        proc = run_hidden(
             cmd,
             env=env,
             capture_output=True,
@@ -335,7 +336,7 @@ def _refresh_via_powershell(doc_path: Path, timeout_sec: int) -> tuple[bool, str
     ]
     before_word_ids = _automation_word_process_ids()
     try:
-        proc = subprocess.run(
+        proc = run_hidden(
             cmd,
             env=env,
             capture_output=True,

@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+from src.shared.win_process import popen_hidden, run_hidden
 import tempfile
 import time
 from dataclasses import dataclass, replace
@@ -599,7 +600,7 @@ def _run_layout_child(
                 if os.name == "nt"
                 else 0
             )
-            process = subprocess.Popen(
+            process = popen_hidden(
                 command,
                 cwd=str(Path(__file__).resolve().parents[3]),
                 stdout=subprocess.PIPE,
@@ -806,7 +807,7 @@ def _terminate_child(process: subprocess.Popen[str]) -> None:
         return
     if os.name == "nt":
         try:
-            completed = subprocess.run(
+            completed = run_hidden(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 capture_output=True,
                 text=True,
@@ -832,7 +833,7 @@ def _ensure_owned_pid_stopped(pid: int | None) -> str:
         time.sleep(0.05)
     if os.name == "nt":
         try:
-            completed = subprocess.run(
+            completed = run_hidden(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
                 capture_output=True,
                 text=True,

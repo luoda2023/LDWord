@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from src.shared.win_process import run_hidden
 import sys
 
 from PIL import Image
@@ -208,7 +209,7 @@ def _render_docx_to_pdf_libreoffice(
     docx_path: Path,
     pdf_path: Path,
 ) -> None:
-    completed = subprocess.run(
+    completed = run_hidden(
         [
             str(soffice_path),
             "--headless",

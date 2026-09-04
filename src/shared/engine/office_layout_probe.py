@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from src.shared.win_process import popen_hidden, run_hidden
 import sys
 import tempfile
 import time
@@ -443,7 +444,7 @@ def _run_provider_child(
         if os.name == "nt":
             creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         try:
-            process = subprocess.Popen(
+            process = popen_hidden(
                 command,
                 cwd=str(Path(__file__).resolve().parents[3]),
                 stdout=subprocess.PIPE,
@@ -616,7 +617,7 @@ def _terminate_child_process(process: subprocess.Popen[str]) -> None:
         return
     if os.name == "nt":
         try:
-            subprocess.run(
+            run_hidden(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 capture_output=True,
                 text=True,
@@ -651,7 +652,7 @@ def _ensure_owned_process_stopped(pid: int | None) -> str:
         time.sleep(0.05)
     if os.name == "nt":
         try:
-            completed = subprocess.run(
+            completed = run_hidden(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
                 capture_output=True,
                 text=True,
@@ -708,7 +709,7 @@ def _process_ids_for_names(names: Sequence[str]) -> set[int]:
         "ForEach-Object { $_.Id }"
     )
     try:
-        completed = subprocess.run(
+        completed = run_hidden(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
             capture_output=True,
             text=True,

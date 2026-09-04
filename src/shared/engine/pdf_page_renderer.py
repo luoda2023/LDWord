@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from src.shared.win_process import run_hidden
 from pathlib import Path
 
 
@@ -101,7 +102,7 @@ def _render_with_pdftoppm(
             *command,
         ]
     try:
-        completed = subprocess.run(
+        completed = run_hidden(
             command,
             check=False,
             capture_output=True,

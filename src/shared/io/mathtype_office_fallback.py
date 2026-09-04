@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+from src.shared.win_process import run_hidden
 import tempfile
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -301,7 +302,7 @@ def extract_mathtype_mathml_with_word(doc_path: str, timeout_sec: int = 30) -> t
         request_path=doc_path,
     )
     try:
-        proc = subprocess.run(
+        proc = run_hidden(
             cmd,
             env=env,
             capture_output=True,
