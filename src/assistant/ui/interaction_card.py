@@ -234,7 +234,7 @@ class AssistantInteractionCard(QFrame):
             else:
                 self._progress.setRange(0, 0)
                 self._progress.setTextVisible(False)
-                self._progress.setMaximumWidth(180)
+                # 不确定进度（等待中）也铺满卡片宽度，不再限制为 180px 短条。
             layout.addWidget(self._progress)
 
         self._actions = QHBoxLayout()
