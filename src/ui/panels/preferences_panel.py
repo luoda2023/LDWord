@@ -243,12 +243,14 @@ class PreferencesPanel(BasePanel):
 
         self._identity_card = self._build_identity_card()
         self._guide_card = self._build_usage_guide_card()
+        self._stage_card = self._build_engineering_stage_card()
         self._inspect_card = self._build_inspect_card()
         self._support_card = self._build_support_card()
         self._license_card = self._build_license_card()
         for card in (
             self._identity_card,
             self._guide_card,
+            self._stage_card,
             self._inspect_card,
             self._support_card,
             self._license_card,
@@ -360,21 +362,90 @@ class PreferencesPanel(BasePanel):
         # AI 长文档线
         card.add_step(
             index=6,
-            title="在「AI 文档助手」对话中起草长文档",
+            title="先选对「AI 模型」（对话输入框下方）",
             detail=(
-                "例如告诉它“帮我写一份可研报告，按我给的目录大纲分章节写，每章"
-                "不要重复”。它会先生成计划卡片：确认阶段/文种/大纲后点「生成并校验"
-                "内容」，即按大纲逐章生成并汇总为一份完整文档草稿。"
+                "默认出厂已带「LUODA 官方服务」（模型 neizhiAPI）；若显示「本地演示」"
+                "则不会真正作答。请切换到官方服务或你自建的服务后再开始。"
             ),
             panel_label="打开 AI 助手",
             panel_index=panel_index("assistant"),
         )
         card.add_step(
             index=7,
-            title="内容定稿后回到「工作台」排版交付",
+            title="在「AI 文档助手」里描述你要的文档",
             detail=(
-                "AI 生成的草稿会进入排版流程，套用模板与资料包做最终规范排版；"
-                "数百页的报告也能按统一版式一次产出。"
+                "两种起点任选：直接描述（如“帮我写一份可研报告，按工程阶段分章节”），"
+                "或上传你的目录/大纲/项目概况（.md/.docx/.doc/.wps）后说“按这个目录写，"
+                "分章节，不要重复”。"
+            ),
+            panel_label="打开 AI 助手",
+            panel_index=panel_index("assistant"),
+        )
+        card.add_step(
+            index=8,
+            title="看「计划卡片」并授权材料",
+            detail=(
+                "AI 会先生成计划卡片，列出阶段/文种/大纲。若上传了目录或正文，会请求你"
+                "确认是否把附件发送给模型——点「确认并生成」后才会真正逐章撰写。"
+            ),
+        )
+        card.add_step(
+            index=9,
+            title="逐章生成并汇总成整篇草稿",
+            detail=(
+                "AI 按大纲一章一章生成（每章带前文记忆、避免重复），最终汇总为一份"
+                "完整 Markdown/Word 草稿。几百页的整本报告也按此链路产出。"
+            ),
+        )
+        card.add_step(
+            index=10,
+            title="定稿后回到「工作台」排版交付",
+            detail=(
+                "把 AI 生成的草稿交给工作台，套用你的模板与资料包做规范排版，一次产出"
+                "统一版式的正式 DOCX/WPS。"
+            ),
+            panel_label="打开工作台",
+            panel_index=panel_index("workbench"),
+        )
+        card.panel_jumped.connect(self._jump_to_panel)
+        return card
+
+    def _build_engineering_stage_card(self) -> DesignSystemCard:
+        """About-page advanced guide: engineering projects are written stage by
+        stage (decision -> design -> transaction -> implementation ->
+        completion -> throughout) and finally merged into one whole report."""
+        card = GuideFlowCard(
+            "进阶 · 工程界分阶段成书",
+            (
+                "工程文档不是一次写成的：先按项目阶段选用不同模板、让 AI 分阶段起草，"
+                "最后把各阶段文本汇总为一份完整报告。下面列出 6 个阶段与典型文种，"
+                "任一步都可在「AI 文档助手」或「方案配置」中选用。"
+            ),
+            icon_name="mountain-snow",
+            parent=self._content,
+        )
+        stage_docs = (
+            ("① 决策立项", "项目建议书 / 可行性研究报告 / 投资估算", "回答建不建、值不值、可不可行，输出立项报批与评审用的决策文件。"),
+            ("② 设计报批", "初步设计说明 / 设计概算 / 施工图设计说明 / 施工图预算", "把批复规模落到工程方案与造价，用于设计报批。"),
+            ("③ 招投标与合同", "招标文件 / 投标文件 / 施工合同 / 分包合同 / 采购合同", "把设计成果转化为采购与缔约文本。"),
+            ("④ 施工实施", "施工组织设计 / 专项施工方案 / 技术交底 / 工艺标准", "把设计图纸变成可执行的施工部署与作业指导。"),
+            ("⑤ 竣工结算", "工程结算书 / 结算审计方案 / 签证索赔报告", "核对实际完成量与价款，锁定成本。"),
+            ("⑥ 贯穿造价分析", "造价分析手册 / 定额分析 / 目标成本测算 / PPT 汇报", "跨阶段做指标测算、定额分析与目标成本。"),
+        )
+        for index, (stage, docs, summary) in enumerate(stage_docs, start=1):
+            card.add_step(
+                index=index,
+                title=f"{stage}：{docs}",
+                detail=summary,
+                panel_label="打开 AI 助手",
+                panel_index=panel_index("assistant"),
+            )
+        card.add_step(
+            index=7,
+            title="全阶段汇总为整本报告",
+            detail=(
+                "把各阶段在 AI 助手生成的内容交给「工作台」排版，即可把分阶段产物汇编成"
+                "一份统一版式的完整报告；也可用「按目录写整本」一次成书。"
             ),
             panel_label="打开工作台",
             panel_index=panel_index("workbench"),
