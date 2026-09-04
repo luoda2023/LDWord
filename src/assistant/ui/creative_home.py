@@ -10,6 +10,7 @@ import time
 
 from src.qt_api import (
     QColor,
+    QPushButton,
     QDesktopServices,
     QFileDialog,
     QFrame,
@@ -1041,6 +1042,14 @@ class AssistantHeroComposer(QWidget):
         self._update_send_state()
 
 
+_STARTER_PROMPTS = (
+    "写一份施工组织设计大纲",
+    "写一份可研报告（分章节）",
+    "按我给的目录写一本手册",
+    "排版一份正式公文",
+)
+
+
 class AssistantCreativeHome(QWidget):
     """First-level empty state for the LDWord creative home."""
 
@@ -1115,14 +1124,37 @@ class AssistantCreativeHome(QWidget):
         composer_slot_layout.setSpacing(0)
         composer_slot_layout.addWidget(self.composer, 0, Qt.AlignVCenter)
         center_layout.addWidget(self._composer_slot)
-        # Mirror the title band below so the composer itself stays centered.
-        center_layout.addSpacing(_HERO_TITLE_HEIGHT + _HERO_TITLE_GAP)
+        # 创作起步提示：示例需求点按即填入输入框，帮助新用户理解能做什么。
+        self._starter_label = QLabel("可以这样开始", self._center)
+        self._starter_label.setObjectName("assistant_home_starter_label")
+        starter_wrap = QHBoxLayout()
+        starter_wrap.setContentsMargins(0, 0, 0, 0)
+        starter_wrap.setSpacing(8)
+        starter_wrap.addWidget(self._starter_label)
+        self._starter_buttons: list[QPushButton] = []
+        for text in _STARTER_PROMPTS:
+            button = QPushButton(text, self._center)
+            button.setObjectName("assistant_home_starter")
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(
+                lambda _checked=False, prompt=text: self._apply_starter(prompt)
+            )
+            self._starter_buttons.append(button)
+            starter_wrap.addWidget(button)
+        starter_wrap.addStretch(1)
+        center_layout.addLayout(starter_wrap)
+        center_layout.addSpacing(20)
 
         root.addWidget(self._center, 0, Qt.AlignCenter)
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
         self._update_center_width()
+
+    def _apply_starter(self, prompt: str) -> None:
+        """Fill a starter prompt into the composer without sending yet."""
+        self.composer.set_text(str(prompt or ""))
+        self.composer.focus_input()
 
     def _on_composer_text_changed(self, text: str) -> None:
         self.text_changed.emit(text)
@@ -1485,6 +1517,24 @@ class AssistantCreativeHome(QWidget):
             QFrame#assistant_home_composer_slot {{
                 background: transparent;
                 border: none;
+            }}
+            QLabel#assistant_home_starter_label {{
+                color: {theme.text_hint};
+                background: transparent;
+                font-size: {theme.font_size_sm}px;
+            }}
+            QPushButton#assistant_home_starter {{
+                color: {theme.text_secondary};
+                background: {theme.bg_card};
+                border: 1px solid {theme.border_light};
+                border-radius: {theme.radius_md}px;
+                padding: 5px 12px;
+                font-size: {theme.font_size_sm}px;
+            }}
+            QPushButton#assistant_home_starter:hover {{
+                color: {theme.primary};
+                background: {theme.bg_hover};
+                border-color: {theme.primary};
             }}
             QScrollBar:vertical {{
                 background: transparent;
