@@ -373,7 +373,7 @@ def _official_user_master_fallback(
         keywords = str(Document(str(path)).core_properties.keywords or "")
     except (OSError, ValueError):
         keywords = ""
-    marker = "alavette:official-layout="
+    marker = "ldword:official-layout="
     layout_id = ""
     for token in keywords.split(","):
         token = token.strip()

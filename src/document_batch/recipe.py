@@ -92,7 +92,7 @@ class DocumentBatchPlan:
         output_root = Path(self.output_root)
         output_root.mkdir(parents=True, exist_ok=True)
         staging = Path(
-            tempfile.mkdtemp(prefix=".alavette-document-batch-", dir=output_root)
+            tempfile.mkdtemp(prefix=".ldword-document-batch-", dir=output_root)
         )
         staged: list[
             tuple[
@@ -404,7 +404,7 @@ def compile_document_batch_plan(
             ).encode("utf-8")
         ).hexdigest()
         master_revision = "sha256:" + hashlib.sha256(
-            b"alavette.document_batch.master.v1"
+            b"ldword.document_batch.master.v1"
         ).hexdigest()
         finalized = finalize_execution_material_snapshot(
             ExecutionMaterialFinalizeRequest(

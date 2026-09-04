@@ -1,5 +1,5 @@
 {
-  "kind": "alavette.material_package",
+  "kind": "ldword.material_package",
   "schema_version": 1,
   "package_id": "pkg_ffaed595dbd047be94a322fae7691c2c",
   "display_name": "报告资料包样例",

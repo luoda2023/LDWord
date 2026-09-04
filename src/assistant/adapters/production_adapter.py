@@ -499,7 +499,7 @@ def _finalize_material_snapshot_for_plan(
     else:
         master_id = "pipeline.generic.v1"
         master_revision = "sha256:" + hashlib.sha256(
-            b"alavette.pipeline.generic.master.v1"
+            b"ldword.pipeline.generic.master.v1"
         ).hexdigest()
     supported_fields, supported_roles, contract_issues = (
         production_material_template_contract(input_path, snapshot)

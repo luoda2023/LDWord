@@ -96,7 +96,7 @@ class MaterialSuiteGenerationRunner:
 
         staging_root = Path(
             tempfile.mkdtemp(
-                prefix=f".alavette-{run_id}-",
+                prefix=f".ldword-{run_id}-",
                 dir=str(output_root),
             )
         )
@@ -278,7 +278,7 @@ class MaterialSuiteGenerationRunner:
             )
 
         manifest = {
-            "kind": "alavette.material_suite_record_receipt",
+            "kind": "ldword.material_suite_record_receipt",
             "version": 1,
             "run_id": run_id,
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -521,7 +521,7 @@ def _write_run_reports(
     cancelled: bool,
 ) -> list[str]:
     payload = {
-        "kind": "alavette.material_suite_run_report",
+        "kind": "ldword.material_suite_run_report",
         "version": 1,
         "run_id": run_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),

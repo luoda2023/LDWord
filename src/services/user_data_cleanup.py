@@ -47,7 +47,7 @@ def clear_current_user_data(
 ) -> UserDataCleanupResult:
     """Remove default local data and application-owned provider credentials.
 
-    The default deliberately ignores ``ALAVETTE_FORM_HOME``: an uninstaller must
+    The default deliberately ignores ``LDWORD_FORM_HOME``: an uninstaller must
     never recursively delete an arbitrary developer-supplied override path.
     """
 

@@ -1474,7 +1474,7 @@ def _is_equation_table(table: Table | object) -> bool:
         for tag in ("w:tblCaption", "w:tblDescription"):
             hint = tbl_pr.find(qn(tag))
             value = (hint.get(qn("w:val")) or "") if hint is not None else ""
-            if value.strip().casefold() == "alavette-equation-table":
+            if value.strip().casefold() == "ldword-equation-table":
                 has_explicit_marker = True
                 break
     if has_explicit_marker:

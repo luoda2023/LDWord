@@ -15,7 +15,7 @@ from PIL import Image
 from src.shared.engine.pdf_page_renderer import render_pdf_pages_png
 
 
-REAL_WORD_PREVIEW_ENV = "ALAVETTE_REAL_WORD_PREVIEW"
+REAL_WORD_PREVIEW_ENV = "LDWORD_REAL_WORD_PREVIEW"
 DocxPdfRenderer = Callable[[Path, Path], str | None]
 ComRendererSpec = tuple[str, str]
 

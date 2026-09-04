@@ -735,7 +735,7 @@ def _has_explicit_equation_table_marker(table: Table) -> bool:
     for tag in ("w:tblCaption", "w:tblDescription"):
         marker = table_properties.find(qn(tag))
         value = (marker.get(qn("w:val")) or "") if marker is not None else ""
-        if value.strip().casefold() == "alavette-equation-table":
+        if value.strip().casefold() == "ldword-equation-table":
             return True
     return False
 

@@ -271,7 +271,7 @@ def _write_compare_docx_artifacts(
         )
         target.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
-            prefix=".alavette-compare-",
+            prefix=".ldword-compare-",
             dir=target.parent,
         ) as temporary_directory:
             stage = Path(temporary_directory) / target.name

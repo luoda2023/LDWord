@@ -15,7 +15,7 @@ from collections.abc import MutableMapping
 from collections.abc import Sequence
 
 
-FONT_ENGINE_ENV_VAR = "ALAVETTE_FORM_FONT_ENGINE"
+FONT_ENGINE_ENV_VAR = "LDWORD_FORM_FONT_ENGINE"
 QT_PLATFORM_ENV_VAR = "QT_QPA_PLATFORM"
 FONT_ENGINE_CHOICES = ("freetype", "directwrite", "system")
 WINDOWS_YAHEI_FONT_FILES: tuple[str, ...] = (
@@ -183,7 +183,7 @@ def configure_windows_font_engine(
     Precedence on the native Windows platform is:
 
     1. an explicit ``requested`` value (the command-line option),
-    2. ``ALAVETTE_FORM_FONT_ENGINE``,
+    2. ``LDWORD_FORM_FONT_ENGINE``,
     3. an existing ``QT_QPA_PLATFORM=windows:fontengine=...`` option,
     4. the production default, FreeType.
 

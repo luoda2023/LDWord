@@ -280,7 +280,7 @@ def finalize_production_material_snapshot(
     else:
         master_id = "pipeline.generic.v1"
         master_revision = "sha256:" + hashlib.sha256(
-            b"alavette.pipeline.generic.master.v1"
+            b"ldword.pipeline.generic.master.v1"
         ).hexdigest()
     finalized = finalize_execution_material_snapshot(
         ExecutionMaterialFinalizeRequest(

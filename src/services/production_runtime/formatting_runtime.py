@@ -71,7 +71,7 @@ def prepare_formatting_input(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     work_dir = Path(
-        tempfile.mkdtemp(prefix=".alavette-material-format-", dir=output_dir)
+        tempfile.mkdtemp(prefix=".ldword-material-format-", dir=output_dir)
     )
     materialized = work_dir / source_path.name
     try:

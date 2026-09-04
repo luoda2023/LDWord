@@ -27,6 +27,10 @@ from src.services.problem_report import (
     build_problem_report,
     resolve_log_path,
 )
+from src.services.document_inspector import (
+    format_inspection_report,
+    inspect_document,
+)
 from src.services.license_catalog import (
     LicenseCatalogError,
     load_license_catalog,
@@ -41,6 +45,7 @@ from src.shared.ui.input_style import build_text_input_stylesheet
 from src.shared.ui.master_detail_shell import MasterDetailShell
 from src.shared.ui.navigation_card import NavigationCard
 from src.shared.ui.license_dialog import LicenseDialog
+from src.shared.ui.preview_dialog import TextPreviewDialog
 from src.shared.ui.sizing import apply_size_class
 from src.shared.ui.styled_combo_box import StyledComboBox
 from src.shared.ui.theme import bind_theme, get_theme
@@ -223,10 +228,12 @@ class PreferencesPanel(BasePanel):
         content_layout.addWidget(self._page_title)
 
         self._identity_card = self._build_identity_card()
+        self._inspect_card = self._build_inspect_card()
         self._support_card = self._build_support_card()
         self._license_card = self._build_license_card()
         for card in (
             self._identity_card,
+            self._inspect_card,
             self._support_card,
             self._license_card,
         ):
@@ -250,6 +257,7 @@ class PreferencesPanel(BasePanel):
     def _connect_signals(self) -> None:
         self._open_log_button.clicked.connect(self._open_log_file)
         self._export_report_button.clicked.connect(self._export_problem_report)
+        self._inspect_button.clicked.connect(self._run_document_inspection)
         self._license_button.clicked.connect(self._show_project_license)
         self._third_party_button.clicked.connect(self._show_third_party_licenses)
         self._nav_rail.card_selected.connect(self._select_settings_page)
@@ -311,6 +319,59 @@ class PreferencesPanel(BasePanel):
 
         card.add_layout(row)
         return card
+
+    def _build_inspect_card(self) -> DesignSystemCard:
+        card = DesignSystemCard("文档体检", parent=self._content)
+        card.set_header("文档体检", icon_name="file-search")
+
+        hint = QLabel(
+            "统计 DOCX 字数与内容元素，并检查修订痕迹、批注和文档属性中的"
+            "个人信息，方便交付与脱敏。只读分析，不会修改原文档。",
+            card,
+        )
+        hint.setWordWrap(True)
+        apply_text_role(hint, TextRole.BODY)
+        card.add_widget(hint)
+
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(10)
+        self._inspect_button = self._make_button(
+            "选择文档并体检",
+            icon_name="search",
+            primary=True,
+        )
+        inspect_privacy = "体检在本机完成，不会上传文档内容。"
+        self._inspect_button.setToolTip(inspect_privacy)
+        self._inspect_button.setAccessibleDescription(inspect_privacy)
+        actions.addWidget(self._inspect_button)
+        actions.addStretch(1)
+        card.add_layout(actions)
+
+        return card
+
+    def _run_document_inspection(self) -> None:
+        selected, _filter = QFileDialog.getOpenFileName(
+            self,
+            "选择要体检的 Word 文档",
+            str(Path.home()),
+            "Word 文档 (*.docx)",
+        )
+        if not selected:
+            return
+        inspection = inspect_document(selected)
+        report = format_inspection_report(inspection)
+        if not inspection.exists:
+            Toast.show_error("文件不存在或不可读")
+            return
+        dialog = TextPreviewDialog(
+            report,
+            title="文档体检报告",
+            subtitle=Path(selected).name,
+            preferred_size=QSize(860, 640),
+            parent=self,
+        )
+        dialog.exec()
 
     def _build_support_card(self) -> DesignSystemCard:
         card = DesignSystemCard("问题处理", parent=self._content)

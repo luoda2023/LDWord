@@ -24,10 +24,10 @@ from src.shared.ui.theme import bind_theme, get_theme
 from src.shared.ui.typography_policy import TextRole, apply_text_role
 
 
-TOOLTIP_PLACEMENT_PROPERTY = "_alavette_tooltip_placement"
-TOOLTIP_ROLE_PROPERTY = "_alavette_tooltip_role"
-TOOLTIP_DELAY_PROPERTY = "_alavette_tooltip_delay_ms"
-TOOLTIP_ENABLED_PROPERTY = "_alavette_tooltip_enabled"
+TOOLTIP_PLACEMENT_PROPERTY = "_ldword_tooltip_placement"
+TOOLTIP_ROLE_PROPERTY = "_ldword_tooltip_role"
+TOOLTIP_DELAY_PROPERTY = "_ldword_tooltip_delay_ms"
+TOOLTIP_ENABLED_PROPERTY = "_ldword_tooltip_enabled"
 
 DEFAULT_DELAY_MS = 120
 NAV_DELAY_MS = 80
@@ -105,12 +105,12 @@ def tooltip_position_for(
 def install_global_tooltip(app: QApplication) -> "GlobalTooltipController":
     """Install the shared tooltip controller once for the QApplication."""
 
-    existing = getattr(app, "_alavette_global_tooltip_controller", None)
+    existing = getattr(app, "_ldword_global_tooltip_controller", None)
     if existing is not None:
         return existing
     controller = GlobalTooltipController(app)
     app.installEventFilter(controller)
-    app._alavette_global_tooltip_controller = controller
+    app._ldword_global_tooltip_controller = controller
     return controller
 
 

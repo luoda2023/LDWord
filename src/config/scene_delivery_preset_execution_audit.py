@@ -422,7 +422,7 @@ N2_176_DELIVERY_PRESET_EXECUTION_SPECS: tuple[
                 "test",
                 "def test_compare_docx_artifact_is_atomically_published",
                 'compare_path = Path(paths["review"])',
-                'assert not list(compare_path.parent.glob(".alavette-compare-*"))',
+                'assert not list(compare_path.parent.glob(".ldword-compare-*"))',
             ),
         ),
     ),

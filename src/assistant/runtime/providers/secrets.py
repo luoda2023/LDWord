@@ -8,7 +8,7 @@ import sys
 from typing import Protocol
 
 
-SECRET_SERVICE_PREFIX = "Alavette-Form/assistant/provider"
+SECRET_SERVICE_PREFIX = "LDWord/assistant/provider"
 
 
 class ProviderSecretStore(Protocol):
@@ -41,7 +41,7 @@ class EnvironmentSecretStore:
         self._env = os.environ if env is None else env
 
     def get(self, profile_id: str) -> str:
-        key = "ALAVETTE_FORM_AI_KEY_" + str(profile_id).upper().replace("-", "_")
+        key = "LDWORD_FORM_AI_KEY_" + str(profile_id).upper().replace("-", "_")
         return str(self._env.get(key, "") or "")
 
     def set(self, profile_id: str, secret: str) -> None:

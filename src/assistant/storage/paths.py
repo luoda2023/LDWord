@@ -8,7 +8,7 @@ from pathlib import Path
 from src.app_meta import APP_DATA_DIR_NAME, APP_HOME_DIR_NAME
 
 
-ASSISTANT_HOME_ENV = "ALAVETTE_FORM_ASSISTANT_HOME"
+ASSISTANT_HOME_ENV = "LDWORD_FORM_ASSISTANT_HOME"
 
 
 def assistant_storage_root(*, env: dict[str, str] | None = None) -> Path:

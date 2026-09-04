@@ -120,7 +120,7 @@ class ExamUserMasterPoolAudit:
 
     def to_payload(self) -> dict[str, object]:
         return {
-            "kind": "alavette.exam_master.user_pool_audit",
+            "kind": "ldword.exam_master.user_pool_audit",
             "version": 1,
             "pool_id": self.pool_id,
             "user_master_dir": str(self.user_master_dir),
@@ -190,7 +190,7 @@ class ExamUserMasterArchivePlan:
     def to_payload(self) -> dict[str, object]:
         planned_names = self.planned_file_names()
         return {
-            "kind": "alavette.exam_master.user_pool_archive_plan",
+            "kind": "ldword.exam_master.user_pool_archive_plan",
             "version": 1,
             "dry_run": self.dry_run,
             "pool_id": self.audit.pool_id,

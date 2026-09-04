@@ -6,6 +6,7 @@ LDWord V1.0 — 主入口
     python main.py input.docx --scene plan.json        # 按方案引用解析模板
     python main.py input.docx --template template.json # 显式覆盖模板
     python main.py --gui                               # GUI 模式
+    python main.py report.docx --inspect               # 文档体检（字数/修订/元数据）
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from src.services.console_output import (
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-_STARTUP_READY_FILE_ENV = "ALAVETTE_STARTUP_READY_FILE"
+_STARTUP_READY_FILE_ENV = "LDWORD_STARTUP_READY_FILE"
 _PACKAGE_IMPORT_PROBE_FLAG = "--internal-package-import-probe"
 _UNINSTALL_CLEANUP_FLAG = "--internal-uninstall-clean-user-data"
 
@@ -94,12 +95,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument("--gui", action="store_true", help="启动 GUI 模式")
     p.add_argument(
+        "--inspect",
+        action="store_true",
+        help="文档体检模式：统计字数/元素并检查修订、批注与元数据，不执行排版",
+    )
+    p.add_argument(
         "--font-engine",
         choices=("freetype", "directwrite", "system"),
         default=None,
         help=(
             "Windows GUI 字体后端（默认 freetype；也可通过 "
-            "ALAVETTE_FORM_FONT_ENGINE 设置）"
+            "LDWORD_FORM_FONT_ENGINE 设置）"
         ),
     )
     return p.parse_args(argv)
@@ -242,6 +248,44 @@ def _run_cli(args: argparse.Namespace) -> int:
         return 1
 
 
+def _run_inspect(args: argparse.Namespace) -> int:
+    """执行文档体检：输出字数/元素统计与风险提示，不修改原文件。"""
+    input_path = Path(args.input)
+
+    if not input_path.exists():
+        console_print(f"[ERROR] 输入文件不存在: {input_path}")
+        return 1
+    if input_path.suffix.lower() != ".docx":
+        console_print(
+            f"[ERROR] 不支持的文件格式: {input_path.suffix} (仅支持 .docx)"
+        )
+        return 1
+
+    from src.services.document_inspector import (
+        format_inspection_report,
+        inspect_document,
+    )
+
+    inspection = inspect_document(input_path)
+    console_print(format_inspection_report(inspection))
+    if not inspection.exists or inspection.errors:
+        return 1
+
+    # 可选的报告文件输出：与文档同目录
+    report_path = input_path.with_name(
+        f"{input_path.stem}_体检报告.txt"
+    )
+    try:
+        report_path.write_text(
+            format_inspection_report(inspection), encoding="utf-8"
+        )
+        console_print(f"体检报告已保存: {report_path}")
+    except OSError as exc:
+        console_print(f"[WARN] 报告保存失败: {exc}")
+        return 0
+    return 0
+
+
 def run_app(argv: list[str] | None = None) -> int:
     """Route startup to GUI or CLI based on the provided arguments."""
     configure_console_output()
@@ -255,6 +299,8 @@ def run_app(argv: list[str] | None = None) -> int:
     args = parse_args(raw_argv)
     if args.gui or not args.input:
         return _start_gui(args.font_engine)
+    if args.inspect:
+        return _run_inspect(args)
     return _run_cli(args)
 
 

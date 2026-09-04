@@ -26,7 +26,7 @@ from src.shared.engine.material_token_contract import parse_material_token
 SUITE_TOKEN_PATTERN = re.compile(r"\{\{([^{}\r\n]+)\}\}")
 SUPPORTED_WORD_SUFFIXES = frozenset({".docx"})
 SUPPORTED_EXCEL_SUFFIXES = frozenset({".xlsx", ".xlsm"})
-TEMPLATE_SUITE_KIND = "alavette.template_suite"
+TEMPLATE_SUITE_KIND = "ldword.template_suite"
 TEMPLATE_SUITE_VERSION = 1
 EMIT_SCOPES = frozenset({"package_once", "group_once", "record_once"})
 
@@ -548,7 +548,7 @@ def compile_material_suite_plan(
                 master_id="material_suite_master",
                 master_revision="sha256:"
                 + hashlib.sha256(
-                    b"alavette.material_suite.master.v1"
+                    b"ldword.material_suite.master.v1"
                 ).hexdigest(),
                 recipe_version=1,
                 output_root=str(output.resolve()),

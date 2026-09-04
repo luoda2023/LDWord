@@ -59,7 +59,7 @@ def write_official_master_family_docx(
     document = Document()
     document.core_properties.title = f"GB/T 9704 official master: {family}"
     document.core_properties.subject = "LDWord official-document master"
-    document.core_properties.keywords = f"alavette:official-layout={family}"
+    document.core_properties.keywords = f"ldword:official-layout={family}"
     document.core_properties.comments = OFFICIAL_MASTER_VERSION
 
     _configure_page(document, hide_first_page_number=family == "letter")

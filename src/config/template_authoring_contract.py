@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-AUTHORING_BASELINE_KIND = "alavette.template_authoring.baseline"
-AUTHORING_RESULT_KIND = "alavette.template_authoring.result"
+AUTHORING_BASELINE_KIND = "ldword.template_authoring.baseline"
+AUTHORING_RESULT_KIND = "ldword.template_authoring.result"
 AUTHORING_SCHEMA_VERSION = 1
 AUTHORING_PROMPT_VERSION = 5
 

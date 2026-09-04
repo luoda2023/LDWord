@@ -49,7 +49,7 @@ _SESSION_ID_ROLE = int(Qt.UserRole)
 _SESSION_PINNED_ROLE = int(Qt.UserRole) + 1
 _SESSION_CORRUPT_ROLE = int(Qt.UserRole) + 2
 _SESSION_TITLE_ROLE = int(Qt.UserRole) + 3
-_SESSION_MIME_TYPE = "application/x-alavette-assistant-session"
+_SESSION_MIME_TYPE = "application/x-ldword-assistant-session"
 
 SESSION_ICON_OPTIONS = (
     ("message-circle", "对话"),

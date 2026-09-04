@@ -17,7 +17,7 @@ from dataclasses import fields as dataclass_fields
 from types import MappingProxyType
 from typing import Any, Literal
 
-MATERIAL_PACKAGE_KIND = "alavette.material_package"
+MATERIAL_PACKAGE_KIND = "ldword.material_package"
 MATERIAL_PACKAGE_SCHEMA_VERSION = 1
 MATERIAL_RECORD_LIFECYCLES = frozenset(
     {"draft", "active", "disabled", "archived"}

@@ -9,7 +9,7 @@ from pathlib import Path
 from src.app_meta import APP_DATA_DIR_NAME, APP_HOME_DIR_NAME
 
 
-APP_HOME_ENV = "ALAVETTE_FORM_HOME"
+APP_HOME_ENV = "LDWORD_FORM_HOME"
 
 
 def default_app_data_root(*, env: Mapping[str, str] | None = None) -> Path:

@@ -168,7 +168,7 @@ def _mark_equation_table(table) -> None:
     if description is None:
         description = OxmlElement("w:tblDescription")
         tbl_pr.append(description)
-    description.set(qn("w:val"), "alavette-equation-table")
+    description.set(qn("w:val"), "ldword-equation-table")
 
 
 __all__ = ["FormulaToTableModule"]
