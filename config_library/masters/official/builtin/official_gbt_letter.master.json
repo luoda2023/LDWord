@@ -55,7 +55,7 @@
     "legacy_aliases": []
   },
   "placeholder_index": {
-    "sha256": "1fa00733c48865a2b3ef1cf8c346f1993055b6b00150dde8cc3706589c9752ed",
+    "sha256": "5e0376e587d8eac299c185f74c4574c8b96f7361b7322e2d3287386ab8bcd9ca",
     "scanner_version": "master-placeholder-index-v1",
     "placeholder_ids": [
       "@text:official_organization",

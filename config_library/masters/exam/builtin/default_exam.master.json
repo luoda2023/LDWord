@@ -45,7 +45,7 @@
     ]
   },
   "placeholder_index": {
-    "sha256": "8dfeeea204a2338c29c9eaabf742af7092ff39ee30af05bf61f3b7e0030c69d9",
+    "sha256": "d76ab307f417473557be249028d08467c0144af0b77023c76001f192a73987da",
     "scanner_version": "master-placeholder-index-v1",
     "placeholder_ids": [
       "af_title",
@@ -76,6 +76,32 @@
       "af_total_score": 1,
       "af_questions": 1,
       "af_answer_area": 1
+    },
+    "placeholder_surfaces": {
+      "af_title": [
+        "word/document.xml:/w:document/w:body/w:p[1]"
+      ],
+      "af_version": [
+        "word/document.xml:/w:document/w:body/w:p[2]"
+      ],
+      "af_subject": [
+        "word/document.xml:/w:document/w:body/w:p[3]"
+      ],
+      "af_grade": [
+        "word/document.xml:/w:document/w:body/w:p[3]"
+      ],
+      "af_duration": [
+        "word/document.xml:/w:document/w:body/w:p[3]"
+      ],
+      "af_total_score": [
+        "word/document.xml:/w:document/w:body/w:p[3]"
+      ],
+      "af_questions": [
+        "word/document.xml:/w:document/w:body/w:p[8]"
+      ],
+      "af_answer_area": [
+        "word/document.xml:/w:document/w:body/w:p[9]"
+      ]
     },
     "reference_page_excluded": false
   },

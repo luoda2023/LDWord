@@ -50,7 +50,7 @@
     "legacy_aliases": []
   },
   "placeholder_index": {
-    "sha256": "3d8a14abd274d12377fb39739e8c3c3c2d6af20341034d6673e20e3cf572b734",
+    "sha256": "915d782c6d376fda3b115e4bd277f90338aadd2e3becccfbc70e99196f04d8a9",
     "scanner_version": "master-placeholder-index-v1",
     "placeholder_ids": [
       "@text:official_organization",
