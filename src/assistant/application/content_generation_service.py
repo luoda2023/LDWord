@@ -92,6 +92,10 @@ class ContentGenerationRequest:
     scale_profile_id: str = ""
     document_type_id: str = ""
     authoritative_fields: Mapping[str, object] | None = None
+    # 工程分章生成：selected outline section titles (空则单次整篇)
+    outline_titles: tuple[str, ...] = ()
+    engineering_stage_id: str = ""
+    engineering_doc_kind: str = ""
 
     def __post_init__(self) -> None:
         if not self.session_id or not self.turn_id or not self.prompt.strip():
@@ -166,6 +170,16 @@ class AssistantContentGenerationService:
                     delta_callback(
                         Path(draft.markdown_path).read_text(encoding="utf-8")
                     )
+                return draft
+
+            if request.outline_titles:
+                draft = self._generate_engineering_sections(
+                    request,
+                    gateway,
+                    user_content=user_content,
+                    cancellation=cancellation,
+                    delta_callback=delta_callback,
+                )
                 return draft
 
             system_prompt = system_prompt_for_profile(request.prompt_profile_id)
@@ -374,6 +388,74 @@ class AssistantContentGenerationService:
             except ValueError as exc:
                 last_error = str(exc)
         raise ValueError(last_error or "exam_answer_phase_blocked")
+
+    def _generate_engineering_sections(
+        self,
+        request: ContentGenerationRequest,
+        gateway: ModelGateway,
+        *,
+        user_content: str,
+        cancellation: AssistantCancellationToken | None,
+        delta_callback=None,
+    ) -> GeneratedDraft:
+        """按工程文档大纲逐章调用模型，顺序拼接成一份完整 Markdown 草稿。
+
+        每章一次独立请求，携带全局大纲与章节上下文；章节标题固定为大纲给定标题，
+        避免模型自行增删章节。随后统一编译为独立 docx 草稿（与 narrative 一致）。
+        """
+        titles = tuple(
+            str(title).strip() for title in request.outline_titles if str(title).strip()
+        )
+        if not titles:
+            raise ValueError("engineering_outline_empty")
+        base_prompt = system_prompt_for_profile(request.prompt_profile_id)
+        doc_context = "\n".join(
+            part
+            for part in (
+                f"工程阶段：{request.engineering_stage_id or '未指定'}",
+                f"文档类型：{request.engineering_doc_kind or '未指定'}",
+                "整篇文档章节大纲：",
+                *[f"{i}. {title}" for i, title in enumerate(titles, start=1)],
+            )
+            if part
+        )
+        chapter_markdowns: list[str] = []
+        for index, title in enumerate(titles, start=1):
+            chapter_prompt = (
+                base_prompt
+                + "\n\n【分阶段生成：单个章节】\n"
+                + doc_context
+                + f"\n\n当前只撰写第 {index} 章，标题必须为：{title}\n"
+                "只输出该章正文，不得输出全文标题、前言、目录、其他章节或结语汇总；"
+                "按该章内容需要组织二级/三级标题、段落与简单表格。"
+            )
+            chapter_text = self._collect_provider_text(
+                gateway,
+                self._provider_request(
+                    request,
+                    system_prompt=chapter_prompt,
+                    user_content=user_content,
+                    generation_phase=f"engineering_chapter_{index}",
+                ),
+                cancellation=cancellation,
+                delta_callback=delta_callback,
+            )
+            cleaned = chapter_text.strip()
+            if cleaned:
+                chapter_markdowns.append(cleaned)
+        full_markdown = "\n\n".join(chapter_markdowns) + "\n"
+        return self.adapter.compile_generated(
+            session_id=request.session_id,
+            markdown=full_markdown,
+            artifact_kind=request.artifact_kind,
+            intent=request.prompt,
+            scene_id=request.scene_id,
+            scale_profile_id=request.scale_profile_id,
+            prompt_profile_id=request.prompt_profile_id,
+            document_type_id=request.document_type_id,
+            authoritative_fields=request.authoritative_fields,
+            cancelled=(cancellation.cancelled if cancellation is not None else None),
+        )
 
     def _generate_exam_sections(
         self,

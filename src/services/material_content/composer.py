@@ -659,6 +659,29 @@ def _new_staging_path(output):
     return Path(raw_path)
 
 
+def _replace_over_existing(source, target):
+    """Replace ``target`` with ``source`` robustly on Windows.
+
+    ``os.replace`` can raise WinError 5/183 on some hosts when the destination
+    was just written by python-docx or a filesystem filter briefly scans it.
+    Fall back to remove-then-rename when the atomic replace is refused.
+    """
+    try:
+        os.replace(source, target)
+        return
+    except OSError:
+        pass
+    try:
+        target.unlink(missing_ok=True)
+        os.rename(source, target)
+    except OSError:
+        # Last resort: copy + delete keeps a valid target for callers that
+        # cannot tolerate a missing destination window.
+        import shutil
+
+        shutil.move(str(source), str(target))
+
+
 def _canonicalize_docx_package(path):
     canonical_path = path.with_name(path.name + ".canonical")
     try:
@@ -675,7 +698,7 @@ def _canonicalize_docx_package(path):
                 info.create_system = 3
                 info.external_attr = 0o100644 << 16
                 target_zip.writestr(info, source_package.read_part(name))
-        os.replace(canonical_path, path)
+        _replace_over_existing(canonical_path, path)
     finally:
         canonical_path.unlink(missing_ok=True)
 

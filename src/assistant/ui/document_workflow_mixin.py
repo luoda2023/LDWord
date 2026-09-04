@@ -15,6 +15,9 @@ from src.assistant.adapters.content_generation_adapter import (
     generated_draft_source_ref,
     is_generated_draft,
 )
+from src.assistant.application.capability_registry import (
+    ENGINEERING_PROMPT_PROFILE_ID,
+)
 from src.assistant.application.content_generation_service import (
     AssistantContentGenerationService,
     ContentGenerationRequest,
@@ -109,6 +112,7 @@ from src.assistant.ui.workers import (
     PreflightWorker,
 )
 from src.application.materials import ExecutionMaterialSnapshot
+from src.config.engineering_stage_library import resolve_engineering_outline
 from src.config.library import load_scene_from_library
 from src.qt_api import (
     QComboBox,
@@ -992,6 +996,10 @@ class AssistantDocumentWorkflowMixin:
             else None
         )
         generation_id = uuid4().hex
+        engineering_outline = _resolve_engineering_request_outline(
+            plan.generation_contract.prompt_profile_id,
+            plan.intent,
+        )
         request = ContentGenerationRequest(
             session_id=session.session_id,
             turn_id=plan.created_by_turn_id,
@@ -1017,6 +1025,9 @@ class AssistantDocumentWorkflowMixin:
             ),
             document_type_id=plan.production_contract.document_type_id,
             authoritative_fields=authoritative_fields,
+            outline_titles=engineering_outline[2],
+            engineering_stage_id=engineering_outline[0],
+            engineering_doc_kind=engineering_outline[1],
         )
         adapter = AssistantContentGenerationAdapter(self._coordinator.store.root)
         service = AssistantContentGenerationService(adapter)
@@ -2252,3 +2263,13 @@ class AssistantDocumentWorkflowMixin:
             self._refresh_session_list(
                 select_session_id=self._active_session.session_id
             )
+
+
+def _resolve_engineering_request_outline(
+    prompt_profile_id: str,
+    intent: str,
+) -> tuple[str, str, tuple[str, ...]]:
+    """Resolve engineering stage/doc outline for staged chapter generation."""
+    if str(prompt_profile_id or "").strip() != ENGINEERING_PROMPT_PROFILE_ID:
+        return ("", "", ())
+    return resolve_engineering_outline(intent)
