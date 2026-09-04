@@ -604,8 +604,9 @@ class PreferencesPanel(BasePanel):
         )
         self._ai_url_hint.setObjectName("preferences_ai_url_hint")
         self._ai_url_hint.setWordWrap(True)
+        self._ai_url_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
         apply_text_role(self._ai_url_hint, TextRole.CAPTION)
-        card.add_widget(self._ai_url_hint)
+        card.add_widget(self._form_aligned_caption_around(self._ai_url_hint, card))
         self._ai_model_input = QLineEdit(card)
         self._ai_model_input.setPlaceholderText("模型 ID")
         self._ai_model_input.setAccessibleName("模型 ID")
@@ -671,8 +672,9 @@ class PreferencesPanel(BasePanel):
         self._ai_status = QLabel("", card)
         self._ai_status.setObjectName("preferences_ai_status")
         self._ai_status.setWordWrap(True)
+        self._ai_status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         apply_text_role(self._ai_status, TextRole.CAPTION)
-        card.add_widget(self._ai_status)
+        card.add_widget(self._form_aligned_caption_around(self._ai_status, card))
         layout.addWidget(card)
         layout.addStretch(1)
         self._reload_ai_profiles()
@@ -878,6 +880,43 @@ class PreferencesPanel(BasePanel):
             font-weight: {theme.font_weight_medium};
             """
         )
+
+    def _form_aligned_caption_around(self, label: QLabel, parent=None) -> QWidget:
+        """Indent an existing caption label so it starts at the control column."""
+        theme = get_theme()
+        holder = QWidget(parent)
+        holder.setObjectName("preferences_ai_aligned_caption")
+        lay = QHBoxLayout(holder)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        pad = QWidget(holder)
+        pad.setFixedWidth(theme.form_row_label_width + 4)
+        lay.addWidget(pad)
+        label.setParent(holder)
+        lay.addWidget(label, 1)
+        return holder
+
+
+    def _form_aligned_caption(self, text: str, parent=None) -> QWidget:
+        """Render a caption indented to align with form controls (labels are
+        fixed-width FormRow labels), so hints/status never start at the card
+        edge while inputs start after the label column."""
+        theme = get_theme()
+        holder = QWidget(parent)
+        holder.setObjectName("preferences_ai_aligned_caption")
+        lay = QHBoxLayout(holder)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        pad = QWidget(holder)
+        pad.setFixedWidth(theme.form_row_label_width + 4)
+        lay.addWidget(pad)
+        label = QLabel(text, holder)
+        label.setObjectName("preferences_ai_aligned_caption_label")
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        apply_text_role(label, TextRole.CAPTION)
+        lay.addWidget(label, 1)
+        return holder
 
     def _start_new_ai_profile(self) -> None:
         if self._ai_form_dirty:
