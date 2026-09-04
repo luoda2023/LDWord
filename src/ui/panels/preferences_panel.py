@@ -501,8 +501,10 @@ class PreferencesPanel(BasePanel):
         apply_size_class(self._ai_url_input, "md")
         card.add_widget(FormRow("API 地址", self._ai_url_input, parent=card))
         self._ai_url_hint = QLabel(
-            "HTTPS 可指向任意服务器；HTTP 仅允许本机/内网地址（如需放行公网 HTTP 服务器，"
-            "请把其主机名加入环境变量 LDWORD_FORM_ALLOW_HTTP，多个用英文逗号分隔）。",
+            "HTTPS 可指向任意服务器。HTTP 仅允许本机/内网地址及官方服务 "
+            "（47.114.75.115 已内置放行，可直接使用 LUODA 官方服务）；"
+            "如需放行其他公网 HTTP 服务器，请把其主机名加入环境变量 "
+            "LDWORD_FORM_ALLOW_HTTP（多个用英文逗号分隔）。",
             card,
         )
         self._ai_url_hint.setObjectName("preferences_ai_url_hint")
