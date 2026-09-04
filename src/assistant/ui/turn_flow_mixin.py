@@ -395,7 +395,7 @@ class AssistantTurnFlowMixin(
                 route_id_override="engineering_document_authoring",
             )
             if policy.capability.executable:
-                self._create_local_form_plan(
+                self._active_session = self._create_local_form_plan(
                     self._active_session,
                     query=normalized,
                     turn_id=uuid4().hex,
