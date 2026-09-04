@@ -34,6 +34,7 @@ class WorkspaceSnapshot:
     input_exists: bool
     material_summary: dict[str, Any]
     document_type_id: str = ""
+    material_refs: tuple[dict[str, object], ...] = ()
 
     def to_dict(self, *, include_local_path: bool = False) -> dict[str, Any]:
         payload: dict[str, Any] = {

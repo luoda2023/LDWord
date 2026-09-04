@@ -401,6 +401,20 @@ class FormDocumentPlanBuilder:
             warnings.append("已添加的 DOCX 将作为内容材料读取；不会覆盖原文件。")
         revision = 1 if previous_plan is None else previous_plan.revision + 1
         plan_id = previous_plan.plan_id if previous_plan is not None else uuid4().hex
+        directory_materials: tuple[dict[str, object], ...] = ()
+        if (
+            capability.executable
+            and capability.operation == TASK_OPERATION_AUTHOR
+            and capability.mode_id == "engineering"
+        ):
+            from src.assistant.application.directory_authoring_parser import (
+                parse_directory_attachments,
+            )
+            parsed_titles, parsed_notes, _outline, _err, found = (
+                parse_directory_attachments(workspace.material_refs)
+            )
+            if found:
+                directory_materials = tuple(dict(item) for item in workspace.material_refs)
         source_artifacts: tuple[SourceArtifactRef, ...] = ()
         if input_path is not None and workspace.input_exists:
             role = (
@@ -461,9 +475,13 @@ class FormDocumentPlanBuilder:
             },
             template_ref={"id": template_id},
             material_refs=(
-                ({"path": str(input_path), "name": input_path.name, "type": "file"},)
-                if input_path is not None and generation_mode == "from_material"
-                else ()
+                directory_materials
+                if directory_materials
+                else (
+                    ({"path": str(input_path), "name": input_path.name, "type": "file"},)
+                    if input_path is not None and generation_mode == "from_material"
+                    else ()
+                )
             ),
             operation=operation,
             capability_ref=capability_ref,

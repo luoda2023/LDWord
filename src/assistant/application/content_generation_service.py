@@ -97,6 +97,9 @@ class ContentGenerationRequest:
     outline_notes: tuple[str, ...] = ()
     engineering_stage_id: str = ""
     engineering_doc_kind: str = ""
+    directory_outline_text: str = ""
+    directory_doc_hint: str = ""
+    directory_root_title: str = ""
 
     def __post_init__(self) -> None:
         if not self.session_id or not self.turn_id or not self.prompt.strip():
@@ -415,11 +418,19 @@ class AssistantContentGenerationService:
         if not titles:
             raise ValueError("engineering_outline_empty")
         base_prompt = system_prompt_for_profile(request.prompt_profile_id)
+        directory_root = str(request.directory_root_title or "").strip()
+        if directory_root:
+            directory_root = f"文档名称：{directory_root}"
+        doc_hint_line = str(request.directory_doc_hint or "").strip()
+        if doc_hint_line:
+            doc_hint_line = f"文档类型提示：{doc_hint_line}"
         doc_context = "\n".join(
             part
             for part in (
                 f"工程阶段：{request.engineering_stage_id or '未指定'}",
                 f"文档类型：{request.engineering_doc_kind or '未指定'}",
+                directory_root,
+                doc_hint_line,
                 "整篇文档章节大纲：",
                 *[f"{i}. {title}" for i, title in enumerate(titles, start=1)],
             )

@@ -74,6 +74,9 @@ from src.assistant.ui.workers import (
     AssistantTurnWorker,
 )
 from src.config.material_package_library import material_package_repository
+from src.assistant.application.directory_authoring_parser import (
+    is_directory_authoring_trigger,
+)
 from src.config.work_mode import get_work_mode
 
 _ASSISTANT_ATTACHMENT_MEDIA_TYPES = {
@@ -374,6 +377,35 @@ class AssistantTurnFlowMixin(
                 self._active_session,
                 document_job=invalidated_job,
             )
+        # Directory-driven long-document authoring: the user attaches an
+        # outline (Markdown/plain text) and asks to write by it.  Route to
+        # the engineering authoring plan so the UI presents the outline
+        # card and the chapter-by-chapter generator handles the rest.
+        directory_route = self._directory_authoring_route_for_context(
+            normalized,
+            context_refs,
+        )
+        if directory_route is not None:
+            workspace = directory_route
+            material_snapshot = self._current_execution_material_snapshot()
+            policy = evaluate_request_policy(
+                normalized,
+                workspace_mode_id=workspace.mode_id,
+                has_attachment=bool(context_refs),
+                route_id_override="engineering_authoring",
+            )
+            if policy.capability.executable:
+                self._create_local_form_plan(
+                    self._active_session,
+                    query=normalized,
+                    turn_id=uuid4().hex,
+                    workspace=workspace,
+                    material_snapshot=material_snapshot,
+                    route_id_override="engineering_authoring",
+                )
+                self._render_active_session()
+                self._refresh_session_list(select_session_id=self._active_session.session_id)
+                return True
         workspace = self._workspace_snapshot_for_session(self._active_session)
         material_snapshot = self._current_execution_material_snapshot()
         policy = evaluate_request_policy(
@@ -454,6 +486,41 @@ class AssistantTurnFlowMixin(
             template_authoring_strategy=template_authoring_strategy,
         )
 
+    def _directory_authoring_route_for_context(
+        self,
+        query: str,
+        context_refs: tuple[dict[str, object], ...],
+    ):
+        """Return an engineering-mode workspace snapshot when the user asks
+        to write a document by an attached outline, else None."""
+        if not is_directory_authoring_trigger(query):
+            return None
+        if not context_refs:
+            return None
+        from src.assistant.application.directory_authoring_parser import (
+            parse_directory_attachments,
+        )
+        _t, _n, _o, _err, found = parse_directory_attachments(context_refs)
+        if not found:
+            return None
+        mode = get_work_mode('engineering') or get_work_mode('custom')
+        if mode is None:
+            return None
+        from src.assistant.adapters.workspace_state_adapter import WorkspaceSnapshot
+        return WorkspaceSnapshot(
+            mode_id='engineering',
+            mode_label=str(getattr(mode, 'label', "") or 'engineering'),
+            scene_id=str(getattr(mode, 'default_scene_id', "") or 'engineering'),
+            scene_source_type='builtin',
+            template_id=str(getattr(mode, 'default_template_id', "") or 'eng_document'),
+            template_source_type='builtin',
+            input_path="",
+            input_name="",
+            input_exists=False,
+            material_summary={},
+            document_type_id="",
+            material_refs=tuple(dict(item) for item in context_refs),
+        )
     def _consume_submitted_context_refs(self) -> None:
         """Clear only pending composer materials after a turn accepts them."""
 

@@ -262,6 +262,19 @@ def present_document_plan(plan: DocumentPlan) -> DocumentPlanPresentation:
             ),
         )
     source_roles = {item.role for item in plan.source_artifacts}
+    if assembler != "exam" and plan.material_refs:
+        from src.assistant.application.directory_authoring_parser import (
+            parse_directory_attachments,
+        )
+        _mt, _mn, _mo, _merr, has_outline = parse_directory_attachments(plan.material_refs)
+        if has_outline:
+            facts += (
+                (
+                    "写作方式",
+                    f"按附件目录逐章撰写（{len(_mt)} 章）",
+                ),
+                ("数据范围", "附件目录与概况正文需确认后发送模型"),
+            )
     if assembler != "exam" and SOURCE_ROLE_REFERENCE_MATERIAL in source_roles:
         facts += (("数据范围", "材料正文需确认后发送模型"),)
     elif assembler != "exam" and SOURCE_ROLE_STANDARD_FORMAT_REFERENCE in source_roles:

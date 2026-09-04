@@ -999,7 +999,9 @@ class AssistantDocumentWorkflowMixin:
         engineering_outline = _resolve_engineering_request_outline(
             plan.generation_contract.prompt_profile_id,
             plan.intent,
+            material_refs=tuple(dict(item) for item in plan.material_refs),
         )
+        directory_payload = _directory_authoring_payload_from_plan(plan, engineering_outline)
         request = ContentGenerationRequest(
             session_id=session.session_id,
             turn_id=plan.created_by_turn_id,
@@ -1029,6 +1031,9 @@ class AssistantDocumentWorkflowMixin:
             outline_notes=engineering_outline[3],
             engineering_stage_id=engineering_outline[0],
             engineering_doc_kind=engineering_outline[1],
+            directory_outline_text=directory_payload["outline_text"],
+            directory_doc_hint=directory_payload["doc_hint"],
+            directory_root_title=directory_payload["root_title"],
         )
         adapter = AssistantContentGenerationAdapter(self._coordinator.store.root)
         service = AssistantContentGenerationService(adapter)
@@ -2266,11 +2271,63 @@ class AssistantDocumentWorkflowMixin:
             )
 
 
+def _directory_authoring_payload_from_plan(
+    plan: DocumentPlan,
+    engineering_outline: tuple[str, str, tuple[str, ...], tuple[str, ...]],
+) -> dict[str, object]:
+    """Build directory metadata for the content request (may be empty)."""
+    payload: dict[str, object] = {
+        "outline_text": "",
+        "doc_hint": "",
+        "root_title": "",
+    }
+    if str(plan.generation_contract.prompt_profile_id or "").strip() != ENGINEERING_PROMPT_PROFILE_ID:
+        return payload
+    from src.assistant.application.directory_authoring_parser import (
+        parse_authoring_payload,
+    )
+    parsed = parse_authoring_payload(
+        plan.intent,
+        attachments=tuple(dict(item) for item in plan.material_refs),
+        context_text="",
+    )
+    if not parsed["found_any"]:
+        return payload
+    titles = tuple(parsed["titles"])
+    if not titles:
+        return payload
+    payload["outline_text"] = str(parsed["outline_text"] or "")
+    payload["doc_hint"] = str(parsed["doc_hint"] or "")
+    payload["root_title"] = str(parsed["root_title"] or "")
+    return payload
+
+
 def _resolve_engineering_request_outline(
     prompt_profile_id: str,
     intent: str,
+    *,
+    material_refs: tuple[dict[str, object], ...] = (),
 ) -> tuple[str, str, tuple[str, ...], tuple[str, ...]]:
-    """Resolve engineering stage/doc outline plus per-chapter notes."""
+    """Resolve engineering stage/doc outline plus per-chapter notes.
+
+    A user-attached outline (Markdown/plain text chapter list) always wins
+    over the built-in keyword-matched guide, so the software writes strictly
+    by the user's own directory.
+    """
     if str(prompt_profile_id or "").strip() != ENGINEERING_PROMPT_PROFILE_ID:
         return ("", "", (), ())
+    from src.assistant.application.directory_authoring_parser import (
+        parse_directory_attachments,
+    )
+    parsed_titles, parsed_notes, _outline_text, _error, found = (
+        parse_directory_attachments(material_refs)
+    )
+    if found and parsed_titles:
+        return (
+            "",
+            "",
+            tuple(str(item).strip() for item in parsed_titles if str(item).strip()),
+            tuple(str(item).strip() for item in parsed_notes),
+        )
     return resolve_engineering_guide(intent)
+
