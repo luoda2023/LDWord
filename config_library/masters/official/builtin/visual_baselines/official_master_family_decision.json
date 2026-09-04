@@ -1,0 +1,42 @@
+{
+  "status": "split_master_family_accepted",
+  "recommendation": "keep_document_types_routed_to_verified_layout_families",
+  "profile_ids": [
+    "notice",
+    "letter",
+    "minutes",
+    "report",
+    "request",
+    "approval"
+  ],
+  "shared_master_id": "official_gbt_standard",
+  "split_candidate_profile_ids": [
+    "letter",
+    "minutes",
+    "report",
+    "request"
+  ],
+  "candidate_master_ids": {
+    "letter": "official_gbt_letter",
+    "minutes": "official_gbt_minutes",
+    "report": "official_gbt_upward",
+    "request": "official_gbt_upward"
+  },
+  "verification_statuses": {
+    "notice": "visual_baseline_ok",
+    "letter": "visual_baseline_ok",
+    "minutes": "visual_baseline_ok",
+    "report": "visual_baseline_ok",
+    "request": "visual_baseline_ok",
+    "approval": "visual_baseline_ok"
+  },
+  "baseline_statuses": {
+    "notice": "baseline_ok",
+    "letter": "baseline_ok",
+    "minutes": "baseline_ok",
+    "report": "baseline_ok",
+    "request": "baseline_ok",
+    "approval": "baseline_ok"
+  },
+  "issues": []
+}

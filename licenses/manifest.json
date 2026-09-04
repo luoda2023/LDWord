@@ -1,0 +1,479 @@
+{
+  "schema_version": 1,
+  "component_count": 18,
+  "components": [
+    {
+      "id": "alavette-flow-derived",
+      "name": "Alavette Flow source-derived modules",
+      "purpose": "AI 会话消息、取消、事件与 Provider 适配基础",
+      "license_expression": "MIT",
+      "version": "2026-07-16 source snapshot",
+      "python_distributions": [],
+      "documents": [
+        {
+          "title": "Alavette Flow MIT License",
+          "license_id": "MIT",
+          "path": "static/alavette-flow/LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "python-runtime",
+      "name": "Python",
+      "purpose": "应用运行环境",
+      "license_expression": "PSF-2.0",
+      "homepage": "https://www.python.org/",
+      "version": "3.12.10",
+      "python_distributions": [],
+      "documents": [
+        {
+          "title": "Python 许可证与第三方声明",
+          "license_id": "PSF-2.0",
+          "path": "static/python/LICENSE.txt"
+        }
+      ]
+    },
+    {
+      "id": "qt-for-python",
+      "name": "Qt for Python (PySide6)",
+      "purpose": "桌面界面与窗口组件",
+      "license_expression": "LGPL-3.0-only",
+      "declared_license_expression": "LGPL-3.0-only OR GPL-3.0-only",
+      "display_license": "LGPL-3.0",
+      "homepage": "https://www.qt.io/qt-for-python",
+      "note": "本发行版按 LGPLv3 使用 Qt for Python；完整条款随安装包提供。",
+      "version": "6.11.1",
+      "python_distributions": [
+        "PySide6_Essentials",
+        "shiboken6"
+      ],
+      "documents": [
+        {
+          "title": "GNU LGPL 3.0",
+          "license_id": "LGPL-3.0-only",
+          "path": "static/qt/LGPL-3.0-only.txt"
+        },
+        {
+          "title": "GNU GPL 3.0",
+          "license_id": "GPL-3.0-only",
+          "path": "static/qt/GPL-3.0-only.txt"
+        }
+      ]
+    },
+    {
+      "id": "python-docx",
+      "name": "python-docx",
+      "purpose": "Word 文档读写",
+      "license_expression": "MIT",
+      "homepage": "https://github.com/python-openxml/python-docx",
+      "version": "1.2.0",
+      "python_distributions": [
+        "python-docx"
+      ],
+      "documents": [
+        {
+          "title": "python-docx 主许可证",
+          "license_id": "MIT",
+          "path": "packages/python-docx/LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "lxml",
+      "name": "lxml",
+      "purpose": "XML 文档处理",
+      "license_expression": "BSD-3-Clause",
+      "homepage": "https://lxml.de/",
+      "version": "6.1.1",
+      "python_distributions": [
+        "lxml"
+      ],
+      "documents": [
+        {
+          "title": "lxml 主许可证",
+          "license_id": "BSD-3-Clause",
+          "path": "packages/lxml/LICENSE.txt"
+        },
+        {
+          "title": "lxml · LICENSES.txt",
+          "license_id": "BSD-3-Clause",
+          "path": "packages/lxml/LICENSES.txt"
+        }
+      ]
+    },
+    {
+      "id": "latex2mathml",
+      "name": "latex2mathml",
+      "purpose": "LaTeX 公式转换为 MathML",
+      "license_expression": "MIT",
+      "homepage": "https://github.com/roniemartinez/latex2mathml",
+      "version": "3.79.0",
+      "python_distributions": [
+        "latex2mathml"
+      ],
+      "documents": [
+        {
+          "title": "latex2mathml 主许可证",
+          "license_id": "MIT",
+          "path": "packages/latex2mathml/LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "olefile",
+      "name": "olefile",
+      "purpose": "MathType/OLE 复合文档解析",
+      "license_expression": "BSD-2-Clause AND HPND",
+      "display_license": "BSD-2-Clause + PIL",
+      "homepage": "https://www.decalage.info/python/olefile",
+      "version": "0.47",
+      "python_distributions": [
+        "olefile"
+      ],
+      "documents": [
+        {
+          "title": "olefile 主许可证",
+          "license_id": "BSD-2-Clause AND HPND",
+          "path": "packages/olefile/LICENSE.txt"
+        }
+      ]
+    },
+    {
+      "id": "typing-extensions",
+      "name": "typing_extensions",
+      "purpose": "Python 类型兼容支持",
+      "license_expression": "PSF-2.0",
+      "homepage": "https://github.com/python/typing_extensions",
+      "version": "4.16.0",
+      "python_distributions": [
+        "typing_extensions"
+      ],
+      "documents": [
+        {
+          "title": "typing_extensions 主许可证",
+          "license_id": "PSF-2.0",
+          "path": "packages/typing-extensions/LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "pillow",
+      "name": "Pillow",
+      "purpose": "图片读取与处理",
+      "license_expression": "MIT-CMU",
+      "homepage": "https://python-pillow.github.io/",
+      "version": "12.3.0",
+      "python_distributions": [
+        "Pillow"
+      ],
+      "documents": [
+        {
+          "title": "Pillow 主许可证",
+          "license_id": "MIT-CMU",
+          "path": "packages/pillow/LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "markdown-it-py",
+      "name": "markdown-it-py",
+      "purpose": "Markdown 内容解析",
+      "license_expression": "MIT",
+      "homepage": "https://github.com/executablebooks/markdown-it-py",
+      "version": "4.2.0",
+      "python_distributions": [
+        "markdown-it-py"
+      ],
+      "documents": [
+        {
+          "title": "markdown-it-py 主许可证",
+          "license_id": "MIT",
+          "path": "packages/markdown-it-py/LICENSE"
+        },
+        {
+          "title": "markdown-it-py · LICENSE.markdown-it",
+          "license_id": "MIT",
+          "path": "packages/markdown-it-py/LICENSE.markdown-it"
+        }
+      ]
+    },
+    {
+      "id": "mdurl",
+      "name": "mdurl",
+      "purpose": "Markdown 链接地址处理",
+      "license_expression": "MIT",
+      "homepage": "https://github.com/executablebooks/mdurl",
+      "version": "0.1.2",
+      "python_distributions": [
+        "mdurl"
+      ],
+      "documents": [
+        {
+          "title": "mdurl 主许可证",
+          "license_id": "MIT",
+          "path": "packages/mdurl/LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "pyyaml",
+      "name": "PyYAML",
+      "purpose": "YAML 配置读取",
+      "license_expression": "MIT",
+      "homepage": "https://pyyaml.org/",
+      "version": "6.0.3",
+      "python_distributions": [
+        "PyYAML"
+      ],
+      "documents": [
+        {
+          "title": "PyYAML 主许可证",
+          "license_id": "MIT",
+          "path": "packages/pyyaml/LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "openpyxl",
+      "name": "openpyxl",
+      "purpose": "Excel 工作簿读写",
+      "license_expression": "MIT",
+      "homepage": "https://openpyxl.readthedocs.io/",
+      "version": "3.1.5",
+      "python_distributions": [
+        "openpyxl"
+      ],
+      "documents": [
+        {
+          "title": "openpyxl 主许可证",
+          "license_id": "MIT",
+          "path": "packages/openpyxl/LICENCE.rst"
+        }
+      ]
+    },
+    {
+      "id": "et-xmlfile",
+      "name": "et_xmlfile",
+      "purpose": "OpenXML 流式写入",
+      "license_expression": "MIT",
+      "homepage": "https://foss.heptapod.net/openpyxl/et_xmlfile",
+      "version": "2.0.0",
+      "python_distributions": [
+        "et_xmlfile"
+      ],
+      "documents": [
+        {
+          "title": "et_xmlfile · LICENCE.python",
+          "license_id": "MIT",
+          "path": "packages/et-xmlfile/LICENCE.python"
+        },
+        {
+          "title": "et_xmlfile 主许可证",
+          "license_id": "MIT",
+          "path": "packages/et-xmlfile/LICENCE.rst"
+        },
+        {
+          "title": "et_xmlfile · AUTHORS.txt",
+          "license_id": "MIT",
+          "path": "packages/et-xmlfile/AUTHORS.txt"
+        }
+      ]
+    },
+    {
+      "id": "pypdfium2",
+      "name": "pypdfium2 / PDFium",
+      "purpose": "PDF 页面渲染",
+      "license_expression": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+      "display_license": "Apache-2.0 / BSD",
+      "homepage": "https://github.com/pypdfium2-team/pypdfium2",
+      "version": "5.11.0",
+      "python_distributions": [
+        "pypdfium2"
+      ],
+      "documents": [
+        {
+          "title": "pypdfium2 / PDFium · LICENSES · Apache-2.0.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/LICENSES/Apache-2.0.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · LICENSES · BSD-3-Clause.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/LICENSES/BSD-3-Clause.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · LICENSES · CC-BY-4.0.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/LICENSES/CC-BY-4.0.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · abseil.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/abseil.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · agg23.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/agg23.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · fast_float.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/fast_float.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · freetype.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/freetype.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · icu.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/icu.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · lcms.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/lcms.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · libjpeg_turbo.ijg",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/libjpeg_turbo.ijg"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · libjpeg_turbo.md",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/libjpeg_turbo.md"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · libopenjpeg.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/libopenjpeg.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · libpng.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/libpng.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · libtiff.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/libtiff.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · llvm-libc.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/llvm-libc.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · pdfium-binaries.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/pdfium-binaries.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · pdfium.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/pdfium.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · simdutf.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/simdutf.txt"
+        },
+        {
+          "title": "pypdfium2 / PDFium · BUILD_LICENSES · zlib.txt",
+          "license_id": "Apache-2.0 OR BSD-3-Clause / dependency licenses",
+          "path": "packages/pypdfium2/data/windows_x64/BUILD_LICENSES/zlib.txt"
+        }
+      ]
+    },
+    {
+      "id": "pywin32",
+      "name": "pywin32",
+      "purpose": "Windows 系统与 Office 集成",
+      "license_expression": "PSF-2.0",
+      "homepage": "https://github.com/mhammond/pywin32",
+      "version": "312",
+      "python_distributions": [
+        "pywin32"
+      ],
+      "documents": [
+        {
+          "title": "pywin32 · adodbapi · license.txt",
+          "license_id": "PSF-2.0",
+          "path": "packages/pywin32/adodbapi/license.txt"
+        },
+        {
+          "title": "pywin32 · com · License.txt",
+          "license_id": "PSF-2.0",
+          "path": "packages/pywin32/com/License.txt"
+        },
+        {
+          "title": "pywin32 · pythonwin · License.txt",
+          "license_id": "PSF-2.0",
+          "path": "packages/pywin32/pythonwin/License.txt"
+        },
+        {
+          "title": "pywin32 · Scintilla · License.txt",
+          "license_id": "PSF-2.0",
+          "path": "packages/pywin32/pythonwin/Scintilla/License.txt"
+        },
+        {
+          "title": "pywin32 · idle · LICENSE.txt",
+          "license_id": "PSF-2.0",
+          "path": "packages/pywin32/pythonwin/pywin/idle/LICENSE.txt"
+        },
+        {
+          "title": "pywin32 · win32 · License.txt",
+          "license_id": "PSF-2.0",
+          "path": "packages/pywin32/win32/License.txt"
+        },
+        {
+          "title": "pywin32 · MAPIStubLibrary · LICENSE",
+          "license_id": "PSF-2.0",
+          "path": "packages/pywin32/com/win32comext/mapi/src/MAPIStubLibrary/LICENSE"
+        },
+        {
+          "title": "pywin32 · isapi · README.txt",
+          "license_id": "PSF-2.0",
+          "path": "packages/pywin32/isapi/README.txt"
+        }
+      ]
+    },
+    {
+      "id": "lucide-icons",
+      "name": "Lucide Icons",
+      "purpose": "应用界面图标",
+      "license_expression": "ISC AND MIT",
+      "display_license": "ISC + MIT",
+      "homepage": "https://lucide.dev/",
+      "note": "部分图标源自 Feather Icons，并适用随 Lucide 官方许可附带的 MIT 条款。",
+      "version": "内嵌快照",
+      "python_distributions": [],
+      "documents": [
+        {
+          "title": "Lucide 与 Feather 许可",
+          "license_id": "ISC AND MIT",
+          "path": "static/lucide/LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "openssl",
+      "name": "OpenSSL",
+      "purpose": "随发行包提供的加密运行库",
+      "license_expression": "Apache-2.0",
+      "homepage": "https://www.openssl.org/",
+      "version": "3.0.16",
+      "python_distributions": [],
+      "documents": [
+        {
+          "title": "OpenSSL 许可证",
+          "license_id": "Apache-2.0",
+          "path": "static/openssl/LICENSE.txt"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,333 @@
+{
+  "profiles": [
+    {
+      "profile_id": "basic",
+      "label": "Basic document count",
+      "notes": ["Uses the broad local document scope."]
+    },
+    {
+      "profile_id": "thesis_cn",
+      "label": "Chinese thesis count",
+      "scope": "academic_document",
+      "primary_metrics": [
+        "cjk_characters",
+        "characters_no_spaces",
+        "reference_count",
+        "figure_count",
+        "table_count",
+        "equation_count"
+      ],
+      "notes": ["First-pass thesis profile; school-specific exclusions are not final."]
+    },
+    {
+      "profile_id": "school_thesis",
+      "label": "School thesis count",
+      "scope": "academic_document",
+      "primary_metrics": [
+        "cjk_characters",
+        "characters_no_spaces",
+        "reference_count",
+        "figure_count",
+        "table_count",
+        "equation_count"
+      ],
+      "notes": ["Scene default for thesis; exact school rules still need profile data."]
+    },
+    {
+      "profile_id": "journal_words",
+      "label": "Journal main-text words",
+      "scope": "main_text",
+      "included_scopes": ["body"],
+      "excluded_scopes": ["reference_heading", "references", "back_matter", "tables"],
+      "primary_metrics": ["english_words", "characters_no_spaces", "figure_count", "table_count"],
+      "notes": [
+        "Counts main body text for journal-style checks; references and table text are excluded from text metrics."
+      ]
+    },
+    {
+      "profile_id": "administrative_sections",
+      "label": "Administrative section and archive inventory",
+      "scope": "official_policy_package",
+      "included_scopes": ["body", "tables", "headers", "footers", "field_codes"],
+      "excluded_scopes": ["references", "back_matter"],
+      "primary_metrics": [
+        "paragraph_count",
+        "characters_no_spaces",
+        "table_count",
+        "headers_count",
+        "footers_count",
+        "field_codes_count"
+      ],
+      "count_references": false,
+      "notes": [
+        "Tracks official/policy sections, header/footer fields, and archive metadata ranges.",
+        "It does not validate administrative decision substance or legal validity."
+      ]
+    },
+    {
+      "profile_id": "journal_display_items",
+      "label": "Journal display items",
+      "scope": "display_items",
+      "included_scopes": ["tables"],
+      "excluded_scopes": ["body", "reference_heading", "references", "back_matter"],
+      "primary_metrics": ["figure_count", "table_count", "equation_count"],
+      "count_references": false,
+      "notes": ["Tracks display-item related metrics for journal packages."]
+    },
+    {
+      "profile_id": "bid_package",
+      "label": "Bidding package count",
+      "scope": "package_document",
+      "included_scopes": ["body", "back_matter", "tables"],
+      "excluded_scopes": ["reference_heading", "references"],
+      "primary_metrics": ["characters_no_spaces", "table_count", "figure_count"],
+      "count_references": false,
+      "notes": ["Bidding documents treat attachments and tables as package content."]
+    },
+    {
+      "profile_id": "application_word_limits",
+      "label": "Project application word limits",
+      "scope": "application_body",
+      "included_scopes": ["body", "tables"],
+      "excluded_scopes": ["reference_heading", "references", "back_matter"],
+      "primary_metrics": ["cjk_characters", "english_words", "characters_no_spaces"],
+      "section_limits": [
+        {
+          "section_id": "summary",
+          "label": "Project summary",
+          "heading_patterns": ["摘要", "项目摘要", "summary"],
+          "max_characters_no_spaces": 500,
+          "required": true
+        },
+        {
+          "section_id": "basis",
+          "label": "Rationale and background",
+          "heading_patterns": ["立项依据", "背景", "basis", "background"],
+          "max_characters_no_spaces": 2000
+        },
+        {
+          "section_id": "objectives",
+          "label": "Objectives and scope",
+          "heading_patterns": ["目标", "研究内容", "建设内容", "objectives", "scope"],
+          "max_characters_no_spaces": 1500
+        },
+        {
+          "section_id": "implementation",
+          "label": "Implementation plan",
+          "heading_patterns": ["实施方案", "实施计划", "技术路线", "implementation", "work plan"],
+          "max_characters_no_spaces": 2500
+        },
+        {
+          "section_id": "budget",
+          "label": "Budget description",
+          "heading_patterns": ["预算", "经费", "budget"],
+          "max_characters_no_spaces": 1000
+        }
+      ],
+      "notes": [
+        "Attachment inventory is handled by a separate application profile.",
+        "Section limits are first-pass defaults and should be overridden by reviewed application-specific rules when available."
+      ]
+    },
+    {
+      "profile_id": "attachment_inventory",
+      "label": "Attachment inventory",
+      "scope": "attachment_inventory",
+      "included_scopes": ["back_matter", "tables"],
+      "excluded_scopes": ["body", "reference_heading", "references"],
+      "primary_metrics": ["table_count", "figure_count", "characters_no_spaces"],
+      "count_references": false,
+      "notes": ["First-pass inventory profile; it does not verify attachment truthfulness."]
+    },
+    {
+      "profile_id": "product_asset_inventory",
+      "label": "Product and pre-sales asset inventory",
+      "scope": "product_sales_package",
+      "included_scopes": ["body", "tables", "headers", "footers", "field_codes"],
+      "excluded_scopes": ["reference_heading", "references", "back_matter"],
+      "primary_metrics": [
+        "characters_no_spaces",
+        "table_count",
+        "figure_count",
+        "field_codes_count"
+      ],
+      "count_references": false,
+      "notes": [
+        "Tracks product/pre-sales body text, tables, figures, and field-code ranges for customer/internal/package delivery.",
+        "It does not judge marketing copy quality, quotation correctness, or sales strategy."
+      ]
+    },
+    {
+      "profile_id": "contract_fields",
+      "label": "Contract key field and review inventory",
+      "scope": "contract_delivery",
+      "included_scopes": ["body", "headers", "footers", "comments", "tracked_changes", "field_codes"],
+      "excluded_scopes": ["references", "back_matter"],
+      "primary_metrics": ["paragraph_count", "characters_no_spaces", "comments_count", "tracked_changes_count", "field_codes_count"],
+      "count_references": false,
+      "notes": [
+        "Tracks contract review ranges and Word objects for delivery evidence; it is not legal review or clause validation."
+      ]
+    },
+    {
+      "profile_id": "exam_items",
+      "label": "Exam item count",
+      "scope": "exam_source",
+      "included_scopes": ["body", "tables"],
+      "excluded_scopes": ["reference_heading", "references", "back_matter"],
+      "primary_metrics": ["paragraph_count", "table_count", "equation_count"],
+      "count_references": false,
+      "notes": [
+        "Question schema validation supplies real item and score evidence; this profile keeps Word-side object counts for exam delivery reports."
+      ]
+    },
+    {
+      "profile_id": "teaching_sections",
+      "label": "Teaching section count",
+      "scope": "teaching_material",
+      "included_scopes": ["body", "tables"],
+      "excluded_scopes": ["reference_heading", "references"],
+      "primary_metrics": ["paragraph_count", "characters_no_spaces", "figure_count"],
+      "count_references": false
+    },
+    {
+      "profile_id": "bilingual_parallel_text",
+      "label": "Bilingual parallel text inventory",
+      "scope": "bilingual_review",
+      "included_scopes": ["body", "tables", "comments"],
+      "excluded_scopes": ["reference_heading", "references"],
+      "primary_metrics": ["paragraph_count", "characters_no_spaces", "english_words", "comments_count"],
+      "count_references": false,
+      "notes": [
+        "Tracks reviewable bilingual text ranges and comments; it does not judge translation quality."
+      ]
+    },
+    {
+      "profile_id": "disclosure_section_inventory",
+      "label": "Regulated disclosure section inventory",
+      "scope": "disclosure_package",
+      "included_scopes": ["body", "tables", "headers", "footers", "comments"],
+      "excluded_scopes": ["reference_heading", "references"],
+      "primary_metrics": ["paragraph_count", "table_count", "figure_count", "comments_count"],
+      "count_references": false,
+      "notes": [
+        "Tracks section, table, figure, and comment inventory for disclosure packages; it is not an audit or assurance check."
+      ]
+    },
+    {
+      "profile_id": "batch_item_inventory",
+      "label": "Batch item and residue inventory",
+      "scope": "batch_document_package",
+      "included_scopes": ["body", "tables", "headers", "footers", "textboxes", "field_codes"],
+      "excluded_scopes": ["reference_heading", "references"],
+      "primary_metrics": [
+        "paragraph_count",
+        "table_count",
+        "textboxes_count",
+        "field_codes_count",
+        "characters_no_spaces"
+      ],
+      "count_references": false,
+      "notes": [
+        "Tracks Word-side ranges for batch forms, HR letters, certificates, and placeholder-residue reports.",
+        "It does not validate personnel, business, or submitted form data truthfulness."
+      ]
+    },
+    {
+      "profile_id": "chapter_inventory",
+      "label": "Long document chapter inventory",
+      "scope": "long_document_package",
+      "included_scopes": ["body", "tables", "headers", "footers", "field_codes"],
+      "excluded_scopes": ["reference_heading", "references"],
+      "primary_metrics": [
+        "paragraph_count",
+        "characters_no_spaces",
+        "table_count",
+        "figure_count",
+        "field_codes_count"
+      ],
+      "count_references": false,
+      "notes": [
+        "Tracks chapter/body/table/field-code ranges for long-document review, proof, final, and archive delivery.",
+        "Technical chapter inventory runtime evidence remains authoritative for chapter hierarchy diagnostics."
+      ]
+    },
+    {
+      "profile_id": "finance_attachment_inventory",
+      "label": "Finance quote and attachment inventory",
+      "scope": "finance_quote_package",
+      "included_scopes": ["body", "tables", "headers", "footers", "field_codes", "comments"],
+      "excluded_scopes": ["reference_heading", "references"],
+      "primary_metrics": [
+        "paragraph_count",
+        "characters_no_spaces",
+        "table_count",
+        "comments_count",
+        "field_codes_count"
+      ],
+      "count_references": false,
+      "notes": [
+        "Tracks quote, budget, table, comment, and attachment-report ranges for finance document packages.",
+        "It does not perform financial audit judgment or verify quotation correctness."
+      ]
+    },
+    {
+      "profile_id": "patent_section_inventory",
+      "label": "Patent section and figure inventory",
+      "scope": "patent_document_package",
+      "included_scopes": ["body", "tables", "headers", "footers", "field_codes", "comments"],
+      "excluded_scopes": ["reference_heading", "references"],
+      "primary_metrics": [
+        "paragraph_count",
+        "characters_no_spaces",
+        "figure_count",
+        "table_count",
+        "field_codes_count"
+      ],
+      "count_references": false,
+      "notes": [
+        "Tracks patent disclosure, specification, figure, and field-code ranges for professional review packages.",
+        "It does not judge patentability, claim validity, infringement risk, or legal drafting quality."
+      ]
+    },
+    {
+      "profile_id": "word_xml_full",
+      "label": "Full Word XML audit count",
+      "scope": "word_xml_package",
+      "included_scopes": [
+        "body",
+        "reference_heading",
+        "references",
+        "back_matter",
+        "tables",
+        "headers",
+        "footers",
+        "footnotes",
+        "endnotes",
+        "comments",
+        "textboxes",
+        "hidden_text",
+        "tracked_changes",
+        "field_codes"
+      ],
+      "excluded_scopes": [],
+      "primary_metrics": [
+        "characters_no_spaces",
+        "english_words",
+        "headers_count",
+        "footers_count",
+        "footnotes_count",
+        "endnotes_count",
+        "comments_count",
+        "textboxes_count",
+        "hidden_text_count",
+        "tracked_changes_count",
+        "field_codes_count",
+        "field_results_count"
+      ],
+      "notes": [
+        "Audit profile that includes supported Word package XML ranges. It is not a submission-system canonical count."
+      ]
+    }
+  ]
+}

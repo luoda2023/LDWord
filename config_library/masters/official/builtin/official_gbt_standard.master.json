@@ -1,0 +1,166 @@
+{
+  "master_id": "official_gbt_standard",
+  "mode_id": "official",
+  "label": "GB/T 9704 通用红头公文版式",
+  "family": "official",
+  "layout_family": "common",
+  "source_type": "builtin",
+  "docx_path": "config_library/masters/official/builtin/official_gbt_standard.docx",
+  "summary": "普通平行文和下行文红头版式；文种规则由工作台资料契约控制。",
+  "status": "内置，已接入文种版式路由和 runtime 公文装配",
+  "template_config_id": "official_gbt",
+  "compatible_template_config_ids": [
+    "official_gbt",
+    "official_custom"
+  ],
+  "master_version": "official-master-family-gbt-2026-08-02-r5",
+  "placeholder_contract": {
+    "required": [
+      "official_title",
+      "official_body"
+    ],
+    "optional": [
+      "official_security_level",
+      "official_urgency",
+      "official_organization",
+      "official_document_no",
+      "official_recipient",
+      "official_attachment_note",
+      "official_issuer",
+      "official_issue_date",
+      "official_copy_scope",
+      "official_printing_org",
+      "official_printing_date"
+    ],
+    "runtime_fields": [
+      "title",
+      "body",
+      "organization",
+      "document_no",
+      "recipient",
+      "attachment_note",
+      "issuer",
+      "issue_date",
+      "security_level",
+      "urgency",
+      "signer",
+      "copy_scope",
+      "printing_org",
+      "printing_date",
+      "meeting_date",
+      "participants"
+    ],
+    "generated_fields": [
+      "delivery_version"
+    ],
+    "runtime_inserted_placeholders": [],
+    "legacy_aliases": []
+  },
+  "placeholder_index": {
+    "sha256": "ed2be8aaaf8eda3598b47581abb7493c31d8815c7b4376760475dfb4543fab6e",
+    "scanner_version": "master-placeholder-index-v1",
+    "placeholder_ids": [
+      "@text:official_security_level",
+      "@text:official_urgency",
+      "@text:official_organization",
+      "@text:official_document_no",
+      "@text:official_title",
+      "@text:official_recipient",
+      "@text:official_body",
+      "@text:official_attachment_note",
+      "@text:official_issuer",
+      "@text:official_issue_date",
+      "@text:official_copy_scope",
+      "@text:official_printing_org",
+      "@text:official_printing_date"
+    ],
+    "raw_occurrence_counts": {
+      "@text:official_security_level": 1,
+      "@text:official_urgency": 1,
+      "@text:official_organization": 1,
+      "@text:official_document_no": 1,
+      "@text:official_title": 1,
+      "@text:official_recipient": 1,
+      "@text:official_body": 1,
+      "@text:official_attachment_note": 1,
+      "@text:official_issuer": 1,
+      "@text:official_issue_date": 1,
+      "@text:official_copy_scope": 1,
+      "@text:official_printing_org": 1,
+      "@text:official_printing_date": 1
+    },
+    "replaceable_occurrence_counts": {
+      "@text:official_security_level": 1,
+      "@text:official_urgency": 1,
+      "@text:official_organization": 1,
+      "@text:official_document_no": 1,
+      "@text:official_title": 1,
+      "@text:official_recipient": 1,
+      "@text:official_body": 1,
+      "@text:official_attachment_note": 1,
+      "@text:official_issuer": 1,
+      "@text:official_issue_date": 1,
+      "@text:official_copy_scope": 1,
+      "@text:official_printing_org": 1,
+      "@text:official_printing_date": 1
+    },
+    "placeholder_surfaces": {
+      "@text:official_security_level": [
+        "word/document.xml:/w:document/w:body/w:p[2]"
+      ],
+      "@text:official_urgency": [
+        "word/document.xml:/w:document/w:body/w:p[3]"
+      ],
+      "@text:official_organization": [
+        "word/document.xml:/w:document/w:body/w:p[4]"
+      ],
+      "@text:official_document_no": [
+        "word/document.xml:/w:document/w:body/w:p[5]"
+      ],
+      "@text:official_title": [
+        "word/document.xml:/w:document/w:body/w:p[7]"
+      ],
+      "@text:official_recipient": [
+        "word/document.xml:/w:document/w:body/w:p[8]"
+      ],
+      "@text:official_body": [
+        "word/document.xml:/w:document/w:body/w:p[9]"
+      ],
+      "@text:official_attachment_note": [
+        "word/document.xml:/w:document/w:body/w:p[10]"
+      ],
+      "@text:official_issuer": [
+        "word/document.xml:/w:document/w:body/w:p[12]"
+      ],
+      "@text:official_issue_date": [
+        "word/document.xml:/w:document/w:body/w:p[13]"
+      ],
+      "@text:official_copy_scope": [
+        "word/document.xml:/w:document/w:body/w:tbl/w:tr/w:tc/w:p[1]"
+      ],
+      "@text:official_printing_org": [
+        "word/document.xml:/w:document/w:body/w:tbl/w:tr/w:tc/w:p[3]"
+      ],
+      "@text:official_printing_date": [
+        "word/document.xml:/w:document/w:body/w:tbl/w:tr/w:tc/w:p[3]"
+      ]
+    },
+    "reference_page_excluded": false
+  },
+  "supported_assembly_types": [
+    "resolution",
+    "decision",
+    "bulletin",
+    "announcement",
+    "notice_public",
+    "opinion",
+    "notice",
+    "circular",
+    "approval"
+  ],
+  "boundaries": [
+    "does not certify official release validity",
+    "does not verify seal legality",
+    "does not replace archive-office approval"
+  ]
+}

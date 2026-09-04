@@ -1,0 +1,228 @@
+{
+  "name": "期中期末",
+  "description": "把完整题目装配成期中期末试卷",
+  "category": "exam_paper",
+  "category_label": "试卷",
+  "scene_id": "exam_term",
+  "mode_id": "exam",
+  "display_order": 22,
+  "template_id": "default",
+  "compatible_template_ids": [
+    "default"
+  ],
+  "master_id": "default_exam",
+  "document_scope": {
+    "mode": "all",
+    "selected_roles": []
+  },
+  "module_switches": {
+    "page_setup": true,
+    "section_format": true,
+    "paragraph_style": true,
+    "header_footer": true,
+    "heading_recognition": true,
+    "heading_numbering": true,
+    "toc": true,
+    "caption": true,
+    "table_format": true,
+    "figure_table_center": true,
+    "entity_fill": false,
+    "source_fill": false,
+    "placeholder_replace": false,
+    "image_insertion": false,
+    "watermark": false,
+    "md_cleanup": true,
+    "whitespace_normalize": true,
+    "validation": true,
+    "citation_link": false,
+    "reference_format": false
+  },
+  "input_source_profile": {
+    "accepted_formats": [
+      "markdown",
+      "docx"
+    ],
+    "structured_formats": [
+      "json"
+    ],
+    "markdown_policy": "preview_and_cleanup",
+    "latex_policy": "formula_fragments_only",
+    "require_material_package": false,
+    "material_schema_id": "exam_items_v1",
+    "material_schema_ids": [
+      "exam_items_v1"
+    ],
+    "required_material_fields": [],
+    "required_image_roles": [],
+    "high_risk_imports": [
+      "full_latex_project"
+    ],
+    "failure_policy": "warn"
+  },
+  "compliance_profile": {
+    "profile_id": "exam_paper",
+    "rule_family": "exam_paper",
+    "count_profile_id": "",
+    "enabled_checks": [
+      "validation",
+      "object_preflight"
+    ],
+    "check_scopes": [
+      "body",
+      "tables",
+      "figures"
+    ],
+    "report_level": "summary",
+    "failure_policy": "warn",
+    "object_preflight": {
+      "enabled": true,
+      "preservation_mode": "warn",
+      "scan_targets": [
+        "ole_objects",
+        "embedded_workbooks",
+        "embedded_packages",
+        "visio_drawings",
+        "macros",
+        "tracked_changes",
+        "comments",
+        "hidden_text",
+        "textboxes",
+        "content_controls",
+        "fields"
+      ],
+      "block_on": [
+        "macros",
+        "ole_objects"
+      ],
+      "skip_high_risk_modules": true,
+      "skip_modules_by_finding": {
+        "ole_objects": [
+          "section_format"
+        ],
+        "embedded_workbooks": [
+          "section_format"
+        ],
+        "visio_drawings": [
+          "section_format"
+        ],
+        "macros": [
+          "section_format"
+        ]
+      }
+    }
+  },
+  "default_delivery_preset_id": "student",
+  "delivery_presets": [
+    {
+      "preset_id": "student",
+      "label": "学生卷",
+      "target_template_id": "default",
+      "output_dir_template": "{document_dir}/output",
+      "filename_template": "{stem}_{preset_id}",
+      "artifacts": {
+        "final_docx": true,
+        "compare_docx": false,
+        "compare_text": false,
+        "compare_formatting": false,
+        "report_json": true,
+        "report_markdown": true,
+        "material_manifest": false,
+        "material_package": false,
+        "review_pdf": false
+      },
+      "content_visibility_rules": [
+        {
+          "rule_id": "hide_answers",
+          "label": "隐藏答案与解析",
+          "selector_type": "marker_block",
+          "selector": "answer",
+          "action": "remove"
+        },
+        {
+          "rule_id": "hide_explanations",
+          "label": "隐藏解析",
+          "selector_type": "marker_block",
+          "selector": "explanation",
+          "action": "remove"
+        }
+      ],
+      "include_structured_intermediate": false,
+      "report_level": "summary"
+    },
+    {
+      "preset_id": "answer",
+      "label": "答案版",
+      "target_template_id": "default",
+      "output_dir_template": "{document_dir}/output",
+      "filename_template": "{stem}_{preset_id}",
+      "artifacts": {
+        "final_docx": true,
+        "compare_docx": false,
+        "compare_text": false,
+        "compare_formatting": false,
+        "report_json": true,
+        "report_markdown": true,
+        "material_manifest": false,
+        "material_package": false,
+        "review_pdf": false
+      },
+      "content_visibility_rules": [],
+      "include_structured_intermediate": false,
+      "report_level": "summary"
+    }
+  ],
+  "exam_paper": {
+    "question_structure_mode": "markdown_headings",
+    "answer_policy": "student_plus_answer",
+    "custom_blank_styles": [],
+    "runtime_fields": [
+      "title",
+      "subject",
+      "grade",
+      "duration",
+      "total_score"
+    ]
+  },
+  "md_cleanup": {
+    "preserve_existing_word_lists": true,
+    "formula_copy_noise_cleanup": true,
+    "suppress_formula_fake_lists": true,
+    "list_marker_separator": "tab",
+    "ordered_list_style": "mixed",
+    "unordered_list_style": "word_default"
+  },
+  "whitespace": {
+    "normalize_space_variants": true,
+    "convert_tabs": true,
+    "remove_zero_width": true,
+    "collapse_multiple_spaces": true,
+    "trim_paragraph_edges": true,
+    "smart_full_half_convert": true,
+    "punctuation_by_context": true,
+    "bracket_by_inner_language": true,
+    "fullwidth_alnum_to_halfwidth": true,
+    "quote_by_context": false,
+    "protect_reference_numbering": true,
+    "context_min_confidence": 2
+  },
+  "citation_link": {
+    "auto_number_reference_entries": true,
+    "superscript_outer_page_numbers": false
+  },
+  "reference_style": {
+    "hanging_indent_cm": 0.74,
+    "space_after_pt": 0,
+    "space_after_unit": "pt"
+  },
+  "watermark": {
+    "enabled": false,
+    "text": "",
+    "color": "#C0C0C0",
+    "rotation": -45,
+    "font_size": 48
+  },
+  "template_overrides": {},
+  "batch_preset": null,
+  "strict_mode": false,
+  "thesis_formula_rules": null
+}

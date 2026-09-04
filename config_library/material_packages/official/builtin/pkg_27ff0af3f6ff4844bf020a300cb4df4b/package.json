@@ -1,0 +1,46 @@
+{
+  "kind": "alavette.material_package",
+  "schema_version": 1,
+  "package_id": "pkg_27ff0af3f6ff4844bf020a300cb4df4b",
+  "display_name": "请示资料包样例",
+  "work_mode_id": "official",
+  "material_contract_id": "official_document_v1",
+  "shared_scope": {
+    "fields": {},
+    "resources": {},
+    "derivations": {},
+    "timelines": {},
+    "provenance": {}
+  },
+  "groups": [],
+  "records": [
+    {
+      "record_id": "rec_f491aa3a2cf8499cba096e66f3fe9b5a",
+      "display_name": "请示",
+      "group_id": "",
+      "lifecycle": "active",
+      "scope": {
+        "fields": {
+          "document_type": "request",
+          "title": "关于升级电子档案管理系统的请示",
+          "body": "为提升电子档案归集和利用效率，拟对现有管理系统进行升级。妥否，请批示。",
+          "organization": "示例市档案局",
+          "document_no": "示档请〔2026〕4号",
+          "recipient": "示例市人民政府",
+          "signer": "张明",
+          "issuer": "示例市档案局",
+          "issue_date": "2026年7月10日",
+          "attachment_note": "电子档案管理系统升级方案",
+          "printing_org": "示例市档案局办公室",
+          "printing_date": "2026年7月10日"
+        },
+        "resources": {},
+        "derivations": {},
+        "timelines": {},
+        "provenance": {}
+      },
+      "origin": {}
+    }
+  ],
+  "metadata": {}
+}

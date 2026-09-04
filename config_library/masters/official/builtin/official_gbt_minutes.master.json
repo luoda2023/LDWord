@@ -1,0 +1,158 @@
+{
+  "master_id": "official_gbt_minutes",
+  "mode_id": "official",
+  "label": "GB/T 9704 纪要格式",
+  "family": "official",
+  "layout_family": "minutes",
+  "source_type": "builtin",
+  "docx_path": "config_library/masters/official/builtin/official_gbt_minutes.docx",
+  "summary": "纪要标志、期号、制发机关日期栏和会议字段专用版式。",
+  "status": "内置，已接入文种版式路由和 runtime 公文装配",
+  "template_config_id": "official_gbt",
+  "compatible_template_config_ids": [
+    "official_gbt",
+    "official_custom"
+  ],
+  "master_version": "official-master-family-gbt-2026-08-02-r5",
+  "placeholder_contract": {
+    "required": [
+      "official_title",
+      "official_body"
+    ],
+    "optional": [
+      "official_security_level",
+      "official_urgency",
+      "official_organization",
+      "official_document_no",
+      "official_issuer",
+      "official_issue_date",
+      "official_meeting_time",
+      "official_meeting_attendees",
+      "official_copy_scope",
+      "official_printing_org",
+      "official_printing_date"
+    ],
+    "runtime_fields": [
+      "title",
+      "body",
+      "organization",
+      "document_no",
+      "recipient",
+      "attachment_note",
+      "issuer",
+      "issue_date",
+      "security_level",
+      "urgency",
+      "signer",
+      "copy_scope",
+      "printing_org",
+      "printing_date",
+      "meeting_date",
+      "participants"
+    ],
+    "generated_fields": [
+      "delivery_version"
+    ],
+    "runtime_inserted_placeholders": [],
+    "legacy_aliases": []
+  },
+  "placeholder_index": {
+    "sha256": "35d2e7937f2daf55d0f4cbd56d69d4ea1072f130e36495cd28c2fe3e136e6df5",
+    "scanner_version": "master-placeholder-index-v1",
+    "placeholder_ids": [
+      "@text:official_security_level",
+      "@text:official_urgency",
+      "@text:official_organization",
+      "@text:official_document_no",
+      "@text:official_issuer",
+      "@text:official_issue_date",
+      "@text:official_title",
+      "@text:official_meeting_time",
+      "@text:official_meeting_attendees",
+      "@text:official_body",
+      "@text:official_copy_scope",
+      "@text:official_printing_org",
+      "@text:official_printing_date"
+    ],
+    "raw_occurrence_counts": {
+      "@text:official_security_level": 1,
+      "@text:official_urgency": 1,
+      "@text:official_organization": 1,
+      "@text:official_document_no": 1,
+      "@text:official_issuer": 1,
+      "@text:official_issue_date": 1,
+      "@text:official_title": 1,
+      "@text:official_meeting_time": 1,
+      "@text:official_meeting_attendees": 1,
+      "@text:official_body": 1,
+      "@text:official_copy_scope": 1,
+      "@text:official_printing_org": 1,
+      "@text:official_printing_date": 1
+    },
+    "replaceable_occurrence_counts": {
+      "@text:official_security_level": 1,
+      "@text:official_urgency": 1,
+      "@text:official_organization": 1,
+      "@text:official_document_no": 1,
+      "@text:official_issuer": 1,
+      "@text:official_issue_date": 1,
+      "@text:official_title": 1,
+      "@text:official_meeting_time": 1,
+      "@text:official_meeting_attendees": 1,
+      "@text:official_body": 1,
+      "@text:official_copy_scope": 1,
+      "@text:official_printing_org": 1,
+      "@text:official_printing_date": 1
+    },
+    "placeholder_surfaces": {
+      "@text:official_security_level": [
+        "word/document.xml:/w:document/w:body/w:p[2]"
+      ],
+      "@text:official_urgency": [
+        "word/document.xml:/w:document/w:body/w:p[3]"
+      ],
+      "@text:official_organization": [
+        "word/document.xml:/w:document/w:body/w:p[4]"
+      ],
+      "@text:official_document_no": [
+        "word/document.xml:/w:document/w:body/w:p[5]"
+      ],
+      "@text:official_issuer": [
+        "word/document.xml:/w:document/w:body/w:tbl[1]/w:tr/w:tc[1]/w:p"
+      ],
+      "@text:official_issue_date": [
+        "word/document.xml:/w:document/w:body/w:tbl[1]/w:tr/w:tc[2]/w:p"
+      ],
+      "@text:official_title": [
+        "word/document.xml:/w:document/w:body/w:p[7]"
+      ],
+      "@text:official_meeting_time": [
+        "word/document.xml:/w:document/w:body/w:p[8]"
+      ],
+      "@text:official_meeting_attendees": [
+        "word/document.xml:/w:document/w:body/w:p[9]"
+      ],
+      "@text:official_body": [
+        "word/document.xml:/w:document/w:body/w:p[10]"
+      ],
+      "@text:official_copy_scope": [
+        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr/w:tc/w:p[1]"
+      ],
+      "@text:official_printing_org": [
+        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr/w:tc/w:p[3]"
+      ],
+      "@text:official_printing_date": [
+        "word/document.xml:/w:document/w:body/w:tbl[2]/w:tr/w:tc/w:p[3]"
+      ]
+    },
+    "reference_page_excluded": false
+  },
+  "supported_assembly_types": [
+    "minutes"
+  ],
+  "boundaries": [
+    "does not certify official release validity",
+    "does not verify seal legality",
+    "does not replace archive-office approval"
+  ]
+}

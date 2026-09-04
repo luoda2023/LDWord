@@ -1,0 +1,188 @@
+"""
+table_builder — 表格构建工具
+
+创建/修改 Word 表格：行列操作、边框设置、单元格合并。
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+
+from src.shared.engine.ooxml_ops import qn, find_or_create
+
+if TYPE_CHECKING:
+    from docx import Document
+    from docx.table import Table
+
+
+def create_table(
+    doc: Document,
+    rows: int,
+    cols: int,
+    *,
+    style: str | None = None,
+) -> Table:
+    """在文档末尾创建表格。"""
+    table = doc.add_table(rows=rows, cols=cols)
+    if style:
+        table.style = style
+    return table
+
+
+def set_cell_text(table: Table, row: int, col: int, text: str) -> None:
+    """设置单元格文本。"""
+    table.rows[row].cells[col].text = text
+
+
+def set_column_width(table: Table, col: int, width_cm: float) -> None:
+    """设置列宽 (cm)。"""
+    from src.shared.engine.units import cm_to_emu
+    width = cm_to_emu(width_cm)
+    for row in table.rows:
+        cell = row.cells[col]
+        tc = cell._element
+        tcPr = find_or_create(tc, "w:tcPr")
+        tcW = find_or_create(tcPr, "w:tcW")
+        tcW.set(qn("w:w"), str(width))
+        tcW.set(qn("w:type"), "dxa")
+
+
+def merge_cells(
+    table: Table,
+    start_row: int, start_col: int,
+    end_row: int, end_col: int,
+) -> None:
+    """合并单元格区域。"""
+    cell_a = table.cell(start_row, start_col)
+    cell_b = table.cell(end_row, end_col)
+    cell_a.merge(cell_b)
+
+
+# ── 边框 ─────────────────────────────────────────
+
+def set_table_borders(
+    table: Table,
+    mode: str = "full_grid",
+    *,
+    width_pt: float = 0.5,
+    header_width_pt: float = 1.0,
+    bottom_width_pt: float = 0.5,
+) -> None:
+    """设置表格边框样式。
+
+    mode:
+    - "full_grid": 全框线
+    - "three_line": 三线表
+    - "none": 无边框
+    """
+    if mode == "full_grid":
+        _apply_full_grid(table, width_pt)
+    elif mode == "three_line":
+        _apply_three_line(table, header_width_pt, bottom_width_pt)
+    elif mode == "none":
+        _apply_no_border(table)
+
+
+def _apply_full_grid(table: Table, width_pt: float) -> None:
+    """全框线。"""
+    tbl = table._element
+    tblPr = find_or_create(tbl, "w:tblPr")
+    borders = find_or_create(tblPr, "w:tblBorders")
+
+    width_eighth = int(width_pt * 8)
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        border = find_or_create(borders, f"w:{side}")
+        border.set(qn("w:val"), "single")
+        border.set(qn("w:sz"), str(width_eighth))
+        border.set(qn("w:space"), "0")
+        border.set(qn("w:color"), "000000")
+
+
+def _apply_three_line(table: Table, outer_pt: float, inner_pt: float) -> None:
+    """严格三线表：上/下外边线同宽，表头下分隔线更细，无竖线/内部横线。"""
+    tbl = table._element
+    tblPr = find_or_create(tbl, "w:tblPr")
+    borders = find_or_create(tblPr, "w:tblBorders")
+
+    outer_eighth = max(1, int(outer_pt * 8))
+    inner_eighth = max(1, int(inner_pt * 8))
+
+    clear_cell_border_overrides(tbl)
+
+    for side in ("left", "right", "insideH", "insideV"):
+        border = find_or_create(borders, f"w:{side}")
+        border.set(qn("w:val"), "none")
+        border.set(qn("w:sz"), "0")
+
+    for side in ("top", "bottom"):
+        border = find_or_create(borders, f"w:{side}")
+        border.set(qn("w:val"), "single")
+        border.set(qn("w:sz"), str(outer_eighth))
+        border.set(qn("w:space"), "0")
+        border.set(qn("w:color"), "000000")
+
+    if not table.rows:
+        return
+
+    for cell in table.rows[0].cells:
+        tc_pr = find_or_create(cell._element, "w:tcPr")
+        tc_borders = find_or_create(tc_pr, "w:tcBorders")
+        border = find_or_create(tc_borders, "w:bottom")
+        border.set(qn("w:val"), "single")
+        border.set(qn("w:sz"), str(inner_eighth))
+        border.set(qn("w:space"), "0")
+        border.set(qn("w:color"), "000000")
+
+
+def clear_cell_border_overrides(tbl_el) -> None:
+    """移除单元格级边框覆盖，让表格级边框策略重新接管。"""
+    for tc in tbl_el.iter(qn("w:tc")):
+        tc_pr = tc.find(qn("w:tcPr"))
+        if tc_pr is None:
+            continue
+        tc_borders = tc_pr.find(qn("w:tcBorders"))
+        if tc_borders is not None:
+            tc_pr.remove(tc_borders)
+
+
+def _apply_no_border(table: Table) -> None:
+    """无边框。"""
+    tbl = table._element
+    tblPr = find_or_create(tbl, "w:tblPr")
+    for tag in ("w:tblStyle", "w:tblLook"):
+        old = tblPr.find(qn(tag))
+        if old is not None:
+            tblPr.remove(old)
+    borders = find_or_create(tblPr, "w:tblBorders")
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        border = find_or_create(borders, f"w:{side}")
+        border.set(qn("w:val"), "none")
+        border.set(qn("w:sz"), "0")
+
+    for cell in table._element.iter(qn("w:tc")):
+        tc_pr = find_or_create(cell, "w:tcPr")
+        tc_borders = find_or_create(tc_pr, "w:tcBorders")
+        for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            border = find_or_create(tc_borders, f"w:{side}")
+            border.set(qn("w:val"), "none")
+            border.set(qn("w:sz"), "0")
+
+
+def set_repeat_header_row(table: Table, row: int = 0) -> None:
+    """设置重复标题行（跨页时重复表头）。"""
+    tr = table.rows[row]._element
+    trPr = find_or_create(tr, "w:trPr")
+    header = find_or_create(trPr, "w:tblHeader")
+    header.set(qn("w:val"), "1")
+
+
+def clear_repeat_header_row(table: Table, row: int = 0) -> None:
+    """移除重复标题行标记。"""
+    if row < 0 or row >= len(table.rows):
+        return
+    tr_pr = table.rows[row]._element.find(qn("w:trPr"))
+    if tr_pr is None:
+        return
+    for header in list(tr_pr.findall(qn("w:tblHeader"))):
+        tr_pr.remove(header)

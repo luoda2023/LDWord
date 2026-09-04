@@ -1,0 +1,119 @@
+{
+  "schema_version": 2,
+  "generated_on": "2026-08-02",
+  "renderer": {
+    "docx_to_pdf": "word_com",
+    "word_version": "16.0.20131.20112",
+    "office_platform": "x64",
+    "python_version": "3.12.10"
+  },
+  "rasterizer": {
+    "name": "pypdfium2",
+    "version": "5.11.0",
+    "pdfium_version": "151.0.7920.0"
+  },
+  "master": {
+    "master_id": "official_gbt_standard",
+    "path": "../official_gbt_standard.docx",
+    "sha256": "ed2be8aaaf8eda3598b47581abb7493c31d8815c7b4376760475dfb4543fab6e"
+  },
+  "masters": {
+    "official_gbt_standard": {
+      "path": "../official_gbt_standard.docx",
+      "sha256": "ed2be8aaaf8eda3598b47581abb7493c31d8815c7b4376760475dfb4543fab6e"
+    },
+    "official_gbt_upward": {
+      "path": "../official_gbt_upward.docx",
+      "sha256": "57d7f858b4b0953f9f9baa273f523fd2c134f05a8652ae9b71f8b12afd8b477f"
+    },
+    "official_gbt_letter": {
+      "path": "../official_gbt_letter.docx",
+      "sha256": "1fa00733c48865a2b3ef1cf8c346f1993055b6b00150dde8cc3706589c9752ed"
+    },
+    "official_gbt_minutes": {
+      "path": "../official_gbt_minutes.docx",
+      "sha256": "35d2e7937f2daf55d0f4cbd56d69d4ea1072f130e36495cd28c2fe3e136e6df5"
+    },
+    "official_gbt_order": {
+      "path": "../official_gbt_order.docx",
+      "sha256": "3d8a14abd274d12377fb39739e8c3c3c2d6af20341034d6673e20e3cf572b734"
+    }
+  },
+  "profiles": {
+    "notice": {
+      "master_id": "official_gbt_standard",
+      "png": "notice_official_sample_page-1.png",
+      "sha256": "6e8733884424ec70a49b1a9c13bc7dc5e0b6133316bd5eb0f6445058a385e590",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    },
+    "letter": {
+      "master_id": "official_gbt_letter",
+      "png": "letter_official_sample_page-1.png",
+      "sha256": "36ee23deb7f710fc22522a3c3d7033624cd51a0521e05de20672cd044489a876",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    },
+    "minutes": {
+      "master_id": "official_gbt_minutes",
+      "png": "minutes_official_sample_page-1.png",
+      "sha256": "97e7be353e4452059e3f46c87a1dfa91c1eb53b56979a5e2fafd69cda2c65602",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    },
+    "report": {
+      "master_id": "official_gbt_upward",
+      "png": "report_official_sample_page-1.png",
+      "sha256": "660bb84e14a6e5fc2f793c9f010830671ca4016cd1051bc4f7f7438db249c0df",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    },
+    "request": {
+      "master_id": "official_gbt_upward",
+      "png": "request_official_sample_page-1.png",
+      "sha256": "af920d015aa13eac20ff6d3bc4014fca7d7a96074bde130a6c891945c209e565",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    },
+    "approval": {
+      "master_id": "official_gbt_standard",
+      "png": "approval_official_sample_page-1.png",
+      "sha256": "cba8eacc42afc915d67a16e8ddea68a2a55e9d6f045fd964ed1024445f5aa88b",
+      "width": 1191,
+      "height": 1684,
+      "page_count": 1,
+      "verification_status": "visual_baseline_ok",
+      "human_review": "passed"
+    }
+  },
+  "review": {
+    "status": "passed",
+    "master_family_decision": "split_master_family_accepted",
+    "notes": [
+      "notice and approval use the ordinary redhead family",
+      "report and request use the upward signer family",
+      "letter uses the letter-form double-rule family and hides the first-page number",
+      "minutes uses a dedicated minutes mark and meeting-information structure",
+      "small-title-Song roles are not force-bolded and each numbered heading stays with its following body paragraph",
+      "ordinary imprints are a non-splitting one-cell block with an internal separator anchored to the final page text-area bottom",
+      "letter copy scope is carried in the body story on the final page and asymmetric red rules are preserved",
+      "letter, ordinary redhead, and order marks were remeasured at approximately 30 mm, 72 mm, and 57 mm from the physical page top",
+      "all six core samples render as one nonblank page without clipping, placeholder residue or trailing blank pages"
+    ]
+  }
+}

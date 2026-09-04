@@ -1,0 +1,81 @@
+{
+  "kind": "alavette.material_package",
+  "schema_version": 1,
+  "package_id": "pkg_d47a4d51a9fd408195db973db06b6036",
+  "display_name": "通用文档资料包样例",
+  "work_mode_id": "custom",
+  "material_contract_id": "generic_document_v1",
+  "shared_scope": {
+    "fields": {},
+    "resources": {},
+    "derivations": {},
+    "timelines": {},
+    "provenance": {}
+  },
+  "groups": [],
+  "records": [
+    {
+      "record_id": "rec_7812fe99e2c0476290e80655ccbb4802",
+      "display_name": "通用文档",
+      "group_id": "",
+      "lifecycle": "active",
+      "scope": {
+        "fields": {
+          "title": "示例文档标题",
+          "subtitle": "资料包统一架构",
+          "author": "示例作者",
+          "organization": "示例单位",
+          "date": "2026-07-31",
+          "body": "此记录用于验证通用版资料绑定、预览和批量生成。"
+        },
+        "resources": {},
+        "derivations": {},
+        "timelines": {},
+        "provenance": {}
+      },
+      "origin": {}
+    }
+  ],
+  "metadata": {
+    "material_contract_extensions": {
+      "fields": [
+        {
+          "key": "title",
+          "label": "Document title",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        },
+        {
+          "key": "subtitle",
+          "label": "Subtitle",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        },
+        {
+          "key": "author",
+          "label": "Author",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        },
+        {
+          "key": "organization",
+          "label": "Organization",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        },
+        {
+          "key": "date",
+          "label": "Date",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        },
+        {
+          "key": "body",
+          "label": "Body",
+          "required": false,
+          "allowed_scopes": ["shared", "group", "record", "run"]
+        }
+      ]
+    }
+  }
+}
