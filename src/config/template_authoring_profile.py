@@ -175,6 +175,23 @@ _PROFILES: tuple[TemplateAuthoringProfile, ...] = (
         version=2,
     ),
     TemplateAuthoringProfile(
+        profile_id="template_authoring.engineering.v1",
+        authorable_roots=TEMPLATE_AUTHORABLE_ROOTS,
+        frozen_roots=TEMPLATE_FROZEN_ROOTS,
+        required_style_roles=("body", "heading"),
+        master_boundaries=(
+            "工程封面、固定表格骨架（如指标汇总表、工程量清单）、固定分节骨架与盖章区属于 engineering_master 母版。",
+            "可研/施组/专项方案/交底/合同/结算/概算的行业章节骨架由各阶段大纲与母版表达，不写入排版模板。",
+        ),
+        scene_boundaries=(
+            "决策/设计/交易/实施/竣工结算/贯穿造价分析六阶段切换、资料要求、批量与交付策略属于工程方案。",
+        ),
+        material_boundaries=(
+            "engineering_document_v1 的项目名称、地点、规模、阶段、文种、投资估算、信息价与参考文件等逐项目变化内容属于工程资料。",
+        ),
+        version=1,
+    ),
+    TemplateAuthoringProfile(
         profile_id="template_authoring.report.v1",
         authorable_roots=TEMPLATE_AUTHORABLE_ROOTS,
         frozen_roots=TEMPLATE_FROZEN_ROOTS,

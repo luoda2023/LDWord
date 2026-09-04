@@ -270,6 +270,48 @@ MATERIAL_SCHEMAS: tuple[MaterialSchema, ...] = (
         ),
     ),
     MaterialSchema(
+        schema_id="engineering_document_v1",
+        label="Engineering document materials",
+        family="engineering",
+        description=(
+            "Stage fields and reference roles for engineering documents: "
+            "project, scale, stage, cost and source files."
+        ),
+        fields=(
+            MaterialFieldSpec("project_name", "Project name"),
+            MaterialFieldSpec("project_location", "Project location", required=False),
+            MaterialFieldSpec("project_scale", "Project scale", required=False),
+            MaterialFieldSpec("engineering_stage", "Engineering stage"),
+            MaterialFieldSpec("doc_kind", "Document kind"),
+            MaterialFieldSpec("design_org", "Design organization", required=False),
+            MaterialFieldSpec("owner_org", "Owner organization", required=False),
+            MaterialFieldSpec("invest_estimate", "Investment estimate", required=False),
+            MaterialFieldSpec("currency", "Currency", required=False),
+            MaterialFieldSpec("cost_standard", "Cost standard", required=False),
+            MaterialFieldSpec("info_price_month", "Information price month", required=False),
+            MaterialFieldSpec("version", "Version", required=False),
+        ),
+        asset_roles=(
+            MaterialAssetRoleSpec(
+                "reference_doc",
+                "Reference document",
+                required=False,
+                cardinality="multiple",
+                accepted_types=("docx", "pdf", "xlsx", "zip"),
+                material_domain="attachment",
+                max_items=None,
+            ),
+            MaterialAssetRoleSpec("diagram", "Engineering diagram", required=False, cardinality="multiple", max_items=None),
+            MaterialAssetRoleSpec("logo", "Organization logo", required=False),
+        ),
+        batch_mode="single",
+        boundaries=(
+            "does not verify engineering cost correctness",
+            "does not certify budget or tender legality",
+            "does not replace licensed engineer review or statutory approval",
+        ),
+    ),
+    MaterialSchema(
         schema_id="journal_materials_v1",
         label="Journal materials legacy profile",
         family="journal_en",
