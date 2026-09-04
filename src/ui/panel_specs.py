@@ -20,7 +20,7 @@ PANEL_SPECS: tuple[PanelSpec, ...] = (
     PanelSpec(id="scene", title="方案配置", icon="mountain-snow"),
     PanelSpec(id="template", title="模板管理", icon="scroll-text"),
     PanelSpec(id="assets", title="资料包", icon="package"),
-    PanelSpec(id="assistant", title="AI 文档助手", icon="sparkles"),
+    PanelSpec(id="assistant", title="AI 文档助手", icon="sparkles", group="ai"),
     PanelSpec(id="theme", title="主题编辑器", icon="palette", group="bottom"),
     PanelSpec(id="preferences", title="偏好设置", icon="settings", group="bottom"),
 )

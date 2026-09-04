@@ -59,6 +59,8 @@ from src.shared.ui.toast import Toast
 from src.shared.ui.typography_policy import TextRole, apply_text_role, brand_font
 from src.ui.base_panel import BasePanel
 from src.shared.ui.icons.catalog import get_app_logo, get_icon
+from src.ui.panel_specs import panel_index
+from src.ui.panels.usage_guide_widgets import GuideFlowCard
 from src.assistant.provider_settings_facade import (
     HybridSecretStore,
     ProviderProbeWorker,
@@ -240,11 +242,13 @@ class PreferencesPanel(BasePanel):
         content_layout.addWidget(self._page_title)
 
         self._identity_card = self._build_identity_card()
+        self._guide_card = self._build_usage_guide_card()
         self._inspect_card = self._build_inspect_card()
         self._support_card = self._build_support_card()
         self._license_card = self._build_license_card()
         for card in (
             self._identity_card,
+            self._guide_card,
             self._inspect_card,
             self._support_card,
             self._license_card,
@@ -288,6 +292,98 @@ class PreferencesPanel(BasePanel):
         self._ai_check_button.clicked.connect(self._check_ai_profile)
         self._ai_new_button.clicked.connect(self._start_new_ai_profile)
         self.bridge.preferences_page_requested.connect(self.show_preferences_page)
+
+    def _build_usage_guide_card(self) -> DesignSystemCard:
+        """About-page quick-start guide for the two real LDWord workflows."""
+
+        card = GuideFlowCard(
+            "快速上手 · 两条工作流",
+            (
+                "本软件分两条主线：上方「排版装配」把已有文档按方案与模板做成规范件；"
+                "「AI 文档助手」则按大纲起草长篇内容，再一键排版成 Word。"
+                "下面每一步都可直接跳转到对应面板。"
+            ),
+            icon_name="book-open",
+            parent=self._content,
+        )
+
+        # 排版装配线
+        card.add_step(
+            index=1,
+            title="先选「工作模式」（窗口左上角）",
+            detail=(
+                "通用版 / 工程文档版 / 试卷版 / 论文版 / 公文版。工程文档版自带"
+                "决策、设计、招投标、施工、竣工、贯穿等分阶段行业大纲。"
+            ),
+        )
+        card.add_step(
+            index=2,
+            title="在「方案配置」里定义文档规则",
+            detail=(
+                "告诉软件这份文档属于哪个阶段/文种、需要哪些章节要素；已有内置"
+                "工程阶段与文种可一键选择，也可以复制后自行微调。"
+            ),
+            panel_label="打开方案配置",
+            panel_index=panel_index("scene"),
+        )
+        card.add_step(
+            index=3,
+            title="在「模板管理」里定版式",
+            detail=(
+                "页边距、字体字号、标题样式、表格、公式、页眉页脚与目录都在这套"
+                "模板里。可从内置库选用，也可以把一份规范的 DOCX 导入作为母版。"
+            ),
+            panel_label="打开模板管理",
+            panel_index=panel_index("template"),
+        )
+        card.add_step(
+            index=4,
+            title="在「资料包」里放事实素材",
+            detail=(
+                "公司名、项目名、负责人、Logo、数据表等会被自动填入占位。素材越齐，"
+                "生成结果越真实可信。"
+            ),
+            panel_label="打开资料包",
+            panel_index=panel_index("assets"),
+        )
+        card.add_step(
+            index=5,
+            title="到「工作台」排版生成",
+            detail=(
+                "选择要排版的 Word 文档，选定方案/模板/资料后点「生成文档」。"
+                "排版在本机后台静默完成，直接产出规范 DOCX/WPS。"
+            ),
+            panel_label="打开工作台",
+            panel_index=panel_index("workbench"),
+        )
+
+        # AI 长文档线
+        card.add_step(
+            index=6,
+            title="在「AI 文档助手」对话中起草长文档",
+            detail=(
+                "例如告诉它“帮我写一份可研报告，按我给的目录大纲分章节写，每章"
+                "不要重复”。它会先生成计划卡片：确认阶段/文种/大纲后点「生成并校验"
+                "内容」，即按大纲逐章生成并汇总为一份完整文档草稿。"
+            ),
+            panel_label="打开 AI 助手",
+            panel_index=panel_index("assistant"),
+        )
+        card.add_step(
+            index=7,
+            title="内容定稿后回到「工作台」排版交付",
+            detail=(
+                "AI 生成的草稿会进入排版流程，套用模板与资料包做最终规范排版；"
+                "数百页的报告也能按统一版式一次产出。"
+            ),
+            panel_label="打开工作台",
+            panel_index=panel_index("workbench"),
+        )
+        card.panel_jumped.connect(self._jump_to_panel)
+        return card
+
+    def _jump_to_panel(self, panel_index: int) -> None:
+        self.bridge.navigate_to_panel.emit(int(panel_index))
 
     def _build_identity_card(self) -> DesignSystemCard:
         card = DesignSystemCard(parent=self._content)

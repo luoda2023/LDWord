@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from src.app_paths import app_data_root
 from src.config.atomic_io import atomic_write_text
-from src.qt_api import QButtonGroup, QPushButton, QSize, QVBoxLayout, QWidget, Signal, Qt
+from src.qt_api import QButtonGroup, QLabel, QPushButton, QSize, QSizePolicy, QVBoxLayout, QWidget, Signal, Qt
 
 from src.shared.ui.theme import get_theme, bind_theme
 from src.shared.ui.tooltip import disable_global_tooltip, set_global_tooltip
@@ -74,9 +74,11 @@ class _NavButton(QPushButton):
         icon_name: str,
         *,
         parent=None,
+        purpose: str = "",
     ):
         super().__init__(parent)
         self.nav_id = nav_id
+        self.purpose = str(purpose or "")
         self._icon_name = icon_name
         self._active = False
         self._expanded = False
@@ -137,6 +139,21 @@ class _NavButton(QPushButton):
         self.apply_theme()
 
 
+_MAIN_PURPOSE_HINTS = {
+    "workbench": "选择文档并排版装配/生成交付件",
+    "scene": "定义文档类型与工程阶段等规则",
+    "template": "管理页边距/字体/表格等版式模板",
+    "assets": "整理公司名/项目名/Logo 等事实素材",
+}
+_AI_PURPOSE_HINTS = {
+    "assistant": "与 AI 对话，按大纲起草/生成长文档",
+}
+_BOTTOM_PURPOSE_HINTS = {
+    "theme": "切换与定制界面配色",
+    "preferences": "AI 模型/密钥、文档体检、使用说明",
+}
+
+
 class Sidebar(QWidget):
     """侧边导航栏，图标 / 图标+文字 双态。
 
@@ -181,20 +198,38 @@ class Sidebar(QWidget):
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
 
-        for i, spec in enumerate(self._panel_specs):
-            if spec.group != "main":
-                continue
-            btn = _NavButton(spec.id, spec.title, spec.icon)
-            self._group.addButton(btn, i)
-            self._buttons[i] = btn
-            layout.addWidget(btn, 0, Qt.AlignHCenter)
+        self._section_groups = (
+            ("main", "① 排版装配", _MAIN_PURPOSE_HINTS),
+            ("ai", "② AI 创作", _AI_PURPOSE_HINTS),
+        )
+        self._section_labels: dict[str, QLabel] = {}
+        for group_index, (group_id, group_title, hints) in enumerate(self._section_groups):
+            label = self._make_section_label(group_title)
+            label.setProperty("sidebarSection", group_id)
+            self._section_labels[group_id] = label
+            if group_index:
+                layout.addSpacing(10)
+            layout.addWidget(label, 0, Qt.AlignHCenter)
+            for i, spec in enumerate(self._panel_specs):
+                if spec.group != group_id:
+                    continue
+                btn = _NavButton(spec.id, spec.title, spec.icon)
+                btn.purpose = hints.get(spec.id, "")
+                self._group.addButton(btn, i)
+                self._buttons[i] = btn
+                layout.addWidget(btn, 0, Qt.AlignHCenter)
 
         layout.addStretch()
 
+        bottom_label = self._make_section_label("个性化")
+        bottom_label.setProperty("sidebarSection", "bottom")
+        self._section_labels["bottom"] = bottom_label
+        layout.addWidget(bottom_label, 0, Qt.AlignHCenter)
         for idx, spec in enumerate(self._panel_specs):
             if spec.group != "bottom":
                 continue
             btn = _NavButton(spec.id, spec.title, spec.icon)
+            btn.purpose = _BOTTOM_PURPOSE_HINTS.get(spec.id, "")
             self._group.addButton(btn, idx)
             self._buttons[idx] = btn
             layout.addWidget(btn, 0, Qt.AlignHCenter)
@@ -215,6 +250,15 @@ class Sidebar(QWidget):
         # 若省略这一步，按钮样式仍停留在“收起”态（无左对齐/无 padding），
         # 用户首次点击其它面板触发 set_active 时才被纠正，造成文字“移位”。
         self._apply_theme()
+
+    def _make_section_label(self, title: str) -> QLabel:
+        label = QLabel(title, self)
+        label.setObjectName("sidebar_section_label")
+        label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        label.setContentsMargins(8, 6, 0, 2)
+        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        label.setVisible(self._expanded)
+        return label
 
     # ── 展开/收起 ──
     @property
@@ -267,6 +311,9 @@ class Sidebar(QWidget):
                 role="nav",
                 delay_ms=80,
             )
+        # 分区标题随展开态显隐
+        for label in self._section_labels.values():
+            label.setVisible(expanded)
         # 导航按钮文字显隐由样式驱动：展开显示文字、收起隐藏
         for btn in self._buttons:
             if btn is None:
@@ -308,6 +355,13 @@ class Sidebar(QWidget):
             #sidebar {{
                 background: {t.bg_sidebar};
                 border-bottom-left-radius: {t.shell_radius}px;
+            }}
+            QLabel#sidebar_section_label {{
+                color: {t.text_hint};
+                background: transparent;
+                font-size: {t.font_size_xs}px;
+                font-weight: {t.font_weight_emphasis};
+                letter-spacing: 1px;
             }}
         """
         )
