@@ -102,6 +102,61 @@ def get_engineering_stage(stage_id: str) -> EngineeringStage | None:
     )
 
 
+def resolve_engineering_guide(
+    intent: str,
+    *,
+    stage_hint: str = "",
+    doc_kind_hint: str = "",
+) -> tuple[str, str, tuple[str, ...], tuple[str, ...]]:
+    """Match a user intent to a stage/doc kind and return its authored guide.
+
+    Returns (stage_id, doc_kind, section_titles, section_notes).  Notes carry
+    the per-chapter must-include outline and field/table requirements distilled
+    from the industry format specs; empty titles mean no match.
+    """
+    text = str(intent or "").strip()
+    if not text:
+        return ("", "", (), ())
+    normalized = text.casefold()
+    best_stage: EngineeringStage | None = None
+    best_doc: EngineeringDocKind | None = None
+    best_rank = -1
+    hint = str(doc_kind_hint or "").strip().casefold()
+    stage_h = str(stage_hint or "").strip().casefold()
+    for stage in list_engineering_stages():
+        if stage_h and stage.stage_id.casefold() == stage_h:
+            if best_stage is None or stage.order < (best_stage.order or 99):
+                best_stage = stage
+        for doc in stage.documents:
+            rank = 0
+            kind = doc.kind.casefold()
+            if hint and hint == kind:
+                rank += 4
+            if hint and hint in kind:
+                rank += 2
+            for token in (kind,):
+                if token and token in normalized:
+                    rank += 3
+            for alias in _DOC_KIND_ALIASES.get(doc.kind, ()):
+                if alias and alias.casefold() in normalized:
+                    rank += 3
+            if rank > best_rank:
+                best_rank = rank
+                best_stage = stage
+                best_doc = doc
+    if best_stage is None or best_doc is None or best_rank <= 0:
+        return ("", "", (), ())
+    titles = tuple(
+        section.title for section in best_doc.sections if section.title.strip()
+    )
+    notes = tuple(
+        section.note
+        for section in best_doc.sections
+        if section.title.strip()
+    )
+    return (best_stage.stage_id, best_doc.kind, titles, notes)
+
+
 def resolve_engineering_outline(
     intent: str,
     *,
@@ -158,6 +213,7 @@ _DOC_KIND_ALIASES: dict[str, tuple[str, ...]] = {
     "初步设计说明": ("初设", "初步设计"),
     "设计概算": ("概算",),
     "施工图设计说明": ("施工图",),
+    "施工图预算": ("施工图预算", "预算", "清单预算"),
     "工程结算书": ("结算",),
     "结算审计方案": ("审计方案", "结算审计"),
     "签证索赔报告": ("索赔", "签证"),
@@ -182,5 +238,6 @@ __all__ = [
     "EngineeringStage",
     "get_engineering_stage",
     "list_engineering_stages",
+    "resolve_engineering_guide",
     "resolve_engineering_outline",
 ]

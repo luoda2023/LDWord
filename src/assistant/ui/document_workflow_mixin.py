@@ -112,7 +112,7 @@ from src.assistant.ui.workers import (
     PreflightWorker,
 )
 from src.application.materials import ExecutionMaterialSnapshot
-from src.config.engineering_stage_library import resolve_engineering_outline
+from src.config.engineering_stage_library import resolve_engineering_guide
 from src.config.library import load_scene_from_library
 from src.qt_api import (
     QComboBox,
@@ -1026,6 +1026,7 @@ class AssistantDocumentWorkflowMixin:
             document_type_id=plan.production_contract.document_type_id,
             authoritative_fields=authoritative_fields,
             outline_titles=engineering_outline[2],
+            outline_notes=engineering_outline[3],
             engineering_stage_id=engineering_outline[0],
             engineering_doc_kind=engineering_outline[1],
         )
@@ -2268,8 +2269,8 @@ class AssistantDocumentWorkflowMixin:
 def _resolve_engineering_request_outline(
     prompt_profile_id: str,
     intent: str,
-) -> tuple[str, str, tuple[str, ...]]:
-    """Resolve engineering stage/doc outline for staged chapter generation."""
+) -> tuple[str, str, tuple[str, ...], tuple[str, ...]]:
+    """Resolve engineering stage/doc outline plus per-chapter notes."""
     if str(prompt_profile_id or "").strip() != ENGINEERING_PROMPT_PROFILE_ID:
-        return ("", "", ())
-    return resolve_engineering_outline(intent)
+        return ("", "", (), ())
+    return resolve_engineering_guide(intent)

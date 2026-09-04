@@ -94,6 +94,7 @@ class ContentGenerationRequest:
     authoritative_fields: Mapping[str, object] | None = None
     # 工程分章生成：selected outline section titles (空则单次整篇)
     outline_titles: tuple[str, ...] = ()
+    outline_notes: tuple[str, ...] = ()
     engineering_stage_id: str = ""
     engineering_doc_kind: str = ""
 
@@ -104,6 +105,11 @@ class ContentGenerationRequest:
             self,
             "context_documents",
             tuple(dict(item) for item in self.context_documents),
+        )
+        object.__setattr__(
+            self,
+            "outline_notes",
+            tuple(str(item) for item in self.outline_notes),
         )
         object.__setattr__(
             self,
@@ -420,7 +426,17 @@ class AssistantContentGenerationService:
             if part
         )
         chapter_markdowns: list[str] = []
+        notes = request.outline_notes
         for index, title in enumerate(titles, start=1):
+            note = str(notes[index - 1]).strip() if index - 1 < len(notes) else ""
+            note_text = (
+                "\n该章必须覆盖的要点与行业惯例：" + note + "\n"
+                "把这些要点展开为规范的小节结构（如 1.1/1.2/1.3），"
+                "凡行业惯例要求表格的要点必须用 Markdown 表格呈现；"
+                "数值与事实缺失处用“待补充”占位。"
+                if note
+                else ""
+            )
             chapter_prompt = (
                 base_prompt
                 + "\n\n【分阶段生成：单个章节】\n"
@@ -428,6 +444,7 @@ class AssistantContentGenerationService:
                 + f"\n\n当前只撰写第 {index} 章，标题必须为：{title}\n"
                 "只输出该章正文，不得输出全文标题、前言、目录、其他章节或结语汇总；"
                 "按该章内容需要组织二级/三级标题、段落与简单表格。"
+                + note_text
             )
             chapter_text = self._collect_provider_text(
                 gateway,
