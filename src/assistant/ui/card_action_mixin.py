@@ -296,6 +296,9 @@ class AssistantCardActionMixin:
                 consume_draft=True,
             )
             self._active_session = session
+            # Typed document actions append a user message too; always land
+            # at the newest turn rather than preserving an older scroll offset.
+            self._force_follow_latest = True
             self._render_active_session()
             self._refresh_session_list(select_session_id=session.session_id)
 

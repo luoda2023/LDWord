@@ -176,6 +176,7 @@ class AssistantPanel(
         self._turn_preview_widget: AssistantConversationMessage | None = None
         self._rendered_session_id = ""
         self._follow_latest_layout_pending = False
+        self._force_follow_latest = False
         super().__init__(bridge, parent)
         self._pending_draft_session_id = ""
         self._draft_save_timer = QTimer(self)
@@ -1228,7 +1229,11 @@ class AssistantPanel(
             return
         same_session = self._rendered_session_id == session.session_id
         previous_scroll = self._message_scroll.verticalScrollBar().value()
-        follow_latest = not same_session or self._is_near_latest()
+        force_follow = self._force_follow_latest
+        self._force_follow_latest = False
+        follow_latest = (
+            force_follow or not same_session or self._is_near_latest()
+        )
         self._conversation_stack.setCurrentWidget(self._active_page)
         self._header_widget.setVisible(True)
         self._conversation_title.setText(session.title)

@@ -139,6 +139,10 @@ class AssistantTurnFlowMixin(
             context_refs_override=context_refs_override,
         )
         if accepted:
+            # A user submission should always land the conversation at the
+            # latest message, even when the reader had scrolled up through
+            # history.  The flag is consumed by the next render pass.
+            self._force_follow_latest = True
             self._consume_submitted_context_refs()
         return accepted
 

@@ -85,9 +85,11 @@ class AssistantViewportMixin:
                 self._active_page.width()
                 - self._message_scroll.verticalScrollBar().sizeHint().width(),
             )
+        # 与对话消息共用 3/4 阅读列，保证卡片与消息同宽对齐。
+        reading_cap = max(420, int(viewport_width * 0.75))
         return min(
             TOKENS.assistant_message_max_width,
-            max(260, viewport_width - 96),
+            reading_cap,
         )
 
     def _sync_active_reading_widths(self) -> None:

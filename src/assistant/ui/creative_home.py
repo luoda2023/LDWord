@@ -24,6 +24,7 @@ from src.qt_api import (
     QSizePolicy,
     QTextCursor,
     QTextEdit,
+    QTextOption,
     QToolButton,
     QTimer,
     QUrl,
@@ -54,15 +55,15 @@ _GRID_FILL_FADE_IN = 0.30
 _GRID_FILL_HOLD = 0.18
 _GRID_LINE_ALPHA = 20
 _GRID_AMBIENT_ALPHA = (5, 8, 6, 7)
-_HERO_COMPOSER_HEIGHT = 220
-_COMPACT_COMPOSER_HEIGHT = 154
+_HERO_COMPOSER_HEIGHT = 150
+_COMPACT_COMPOSER_HEIGHT = 118
 _HERO_STABLE_SLOT_HEIGHT = 240
 _HERO_TITLE_HEIGHT = 44
 _HERO_TITLE_GAP = 30
-_HERO_EDIT_HEIGHT = 84
-_HERO_EDIT_HEIGHT_WITH_ATTACHMENT = 56
-_COMPACT_EDIT_HEIGHT = 52
-_COMPACT_EDIT_HEIGHT_WITH_ATTACHMENT = 38
+_HERO_EDIT_HEIGHT = 44
+_HERO_EDIT_HEIGHT_WITH_ATTACHMENT = 30
+_COMPACT_EDIT_HEIGHT = 30
+_COMPACT_EDIT_HEIGHT_WITH_ATTACHMENT = 24
 _HERO_ROOT_SPACING = 10
 _COMPACT_ROOT_SPACING = 9
 _ATTACHMENT_SLOT_HEIGHT = 34
@@ -292,6 +293,10 @@ class AssistantHeroComposer(QWidget):
         )
         self._text_edit.setAcceptRichText(False)
         self._text_edit.setFrameShape(QFrame.NoFrame)
+        self._text_edit.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        # Tall prompts scroll inside the compact editor instead of expanding
+        # the composer beyond its reserved slot.
+        self._text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._text_edit.setFixedHeight(
             _COMPACT_EDIT_HEIGHT if mode == "compact" else _HERO_EDIT_HEIGHT
         )

@@ -53,6 +53,7 @@ from PySide6.QtGui import (
     QShortcut,
     QTextBlockFormat,
     QTextCursor,
+    QTextOption,
 )
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -201,6 +202,7 @@ __all__ = [
     "QTextBlockFormat",
     "QTextCursor",
     "QTextEdit",
+    "QTextOption",
     "QTimer",
     "QToolButton",
     "QToolTip",

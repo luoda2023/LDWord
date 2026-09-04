@@ -33,6 +33,10 @@ _USER_BUBBLE_WIDTH = 640
 _USER_BUBBLE_HORIZONTAL_MARGIN = 13
 _USER_BUBBLE_BORDER_WIDTH = 1
 _MESSAGE_SIDE_MARGIN = 48
+# 阅读列最宽不超过所在视口宽度的 3/4；低于 3/4 视口很窄时退化为整行减去
+# 两侧边距，避免消息被挤压到无法阅读。
+_READING_WIDTH_RATIO = 0.75
+_READING_MIN_COLUMN = 420
 
 
 class AssistantConversationSurface(QWidget):
@@ -214,31 +218,23 @@ class AssistantConversationMessage(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         row_width = max(0, event.size().width())
-        column_width = min(_MESSAGE_COLUMN_WIDTH, row_width)
+        # 整条阅读列统一取视口宽度的 3/4（上限仍 860），AI 与用户消息共用
+        # 同一条轴：AI 靠左缘、用户气泡靠右缘，视觉对齐一致。
+        if row_width <= 0:
+            return
+        ratio_cap = max(_READING_MIN_COLUMN, int(row_width * _READING_WIDTH_RATIO))
+        column_width = min(_MESSAGE_COLUMN_WIDTH, ratio_cap, row_width)
         self._column.setFixedWidth(column_width)
         if not hasattr(self, "_column_layout"):
             return
-        # Design places every message kind on the same 820 px reading column
-        # with 48 px compact side margins.  The outer 860 px column supplies
-        # the desktop 20 px inset; below that width the inset grows so text,
-        # user bubbles and interaction cards keep one shared axis.
         reading_width = min(
             _ASSISTANT_CONTENT_WIDTH,
-            max(0, row_width - (_MESSAGE_SIDE_MARGIN * 2)),
+            max(0, column_width - 40),
         )
-        reading_left = max(
-            _MESSAGE_SIDE_MARGIN,
-            (row_width - reading_width) // 2,
-        )
-        column_left = max(0, (row_width - column_width) // 2)
-        left_margin = max(0, reading_left - column_left)
-        right_margin = max(0, column_width - left_margin - reading_width)
-        self._column_layout.setContentsMargins(
-            left_margin,
-            0,
-            right_margin,
-            0,
-        )
+        if self._role == "user":
+            reading_width = max(0, column_width - 40)
+        self._column_layout.setContentsMargins(0, 0, 0, 0)
+        # 在列内把阅读内容居中摆放（列本身已是视口 3/4 宽）
         if self._role == "user":
             self._sync_user_bubble_width(reading_width)
 
@@ -254,10 +250,10 @@ class AssistantConversationMessage(QWidget):
             _USER_BUBBLE_HORIZONTAL_MARGIN + _USER_BUBBLE_BORDER_WIDTH
         )
         preferred_width = min(
-            _USER_BUBBLE_WIDTH,
+            int(available_width),
             natural_text_width + horizontal_chrome,
         )
-        target_width = max(0, min(int(available_width), preferred_width))
+        target_width = max(0, preferred_width)
         if self._bubble.width() == target_width:
             return
         self._bubble.setFixedWidth(target_width)
@@ -289,7 +285,7 @@ class AssistantConversationMessage(QWidget):
         bubble_row.addStretch(1)
         self._bubble = QFrame(self._column)
         self._bubble.setObjectName("assistant_user_bubble")
-        self._bubble.setMaximumWidth(_USER_BUBBLE_WIDTH)
+        self._bubble.setMaximumWidth(_ASSISTANT_CONTENT_WIDTH - 40)
         self._bubble.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Minimum)
         bubble_layout = QVBoxLayout(self._bubble)
         bubble_layout.setContentsMargins(
@@ -305,7 +301,8 @@ class AssistantConversationMessage(QWidget):
         self._body_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._body_label.setWordWrap(True)
         self._body_label.setMaximumWidth(
-            _USER_BUBBLE_WIDTH
+            _ASSISTANT_CONTENT_WIDTH
+            - 40
             - 2 * (_USER_BUBBLE_HORIZONTAL_MARGIN + _USER_BUBBLE_BORDER_WIDTH)
         )
         bubble_layout.addWidget(self._body_label)

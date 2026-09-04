@@ -1,7 +1,7 @@
 """
 title_bar — 自定义标题栏
 
-模仿微信风格：~40px高度，左侧标题，右侧窗口控制按钮，可拖拽移动窗口。
+模仿微信风格：60px 高度，左侧标题，右侧窗口控制按钮，可拖拽移动窗口。
 颜色全部来自 theme token（bg_sidebar / text_sidebar）。
 """
 
@@ -22,10 +22,10 @@ from src.shared.ui.icons.catalog import get_app_logo, get_icon
 
 
 class TitleBar(QWidget):
-    """自定义标题栏 — 40px 高度，可拖拽。"""
+    """自定义标题栏 — 60px 高度，可拖拽。"""
 
-    HEIGHT = 40
-    ICON_SIZE = 14
+    HEIGHT = 60
+    ICON_SIZE = 16
 
     def __init__(
         self,
@@ -68,7 +68,7 @@ class TitleBar(QWidget):
         self._work_mode_combo = StyledComboBox(self)
         self._work_mode_combo.setObjectName("titlebar_work_mode_combo")
         self._work_mode_combo.set_titlebar_mode(True)
-        self._work_mode_combo.setFixedSize(128, 28)
+        self._work_mode_combo.setFixedSize(150, 38)
         self._work_mode_combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._work_mode_combo.setToolTip("选择当前工作模式。")
         for mode in list_work_modes():
@@ -108,7 +108,7 @@ class TitleBar(QWidget):
         btn = QPushButton()
         btn.setObjectName(object_name)
         set_global_tooltip(btn, tooltip, placement="bottom", role="chrome")
-        btn.setFixedSize(46, self.HEIGHT)
+        btn.setFixedSize(56, self.HEIGHT)
         btn.setCursor(Qt.PointingHandCursor)
         btn.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
         return btn
