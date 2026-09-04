@@ -21,8 +21,14 @@ from src.assistant.contracts.messages import (
     ROLE_USER,
 )
 from src.assistant.runtime.cancellation import AssistantCancellationToken
+from src.assistant.runtime.providers.profiles import (
+    ensure_luoda_official_ready,
+)
 from src.assistant.runtime.providers.router import (
     ProviderRouter,
+)
+from src.assistant.runtime.providers.secrets import (
+    HybridSecretStore,
 )
 from src.assistant.runtime.turn_runner import (
     AssistantTurnRunner,
@@ -126,6 +132,15 @@ class AssistantPanel(
         self._coordinator = coordinator or AssistantSessionCoordinator()
         self._fixed_turn_runner = turn_runner
         self._provider_router = provider_router or ProviderRouter()
+        if not self._fixed_turn_runner:
+            from src.app_meta import LUODA_OFFICIAL_DEFAULT_KEY
+
+            ensure_luoda_official_ready(
+                profiles=self._provider_router.profiles,
+                secret=LUODA_OFFICIAL_DEFAULT_KEY,
+                secret_store=getattr(self._provider_router, "secrets", None)
+                or HybridSecretStore(),
+            )
         journal = ExecutionJournalStore(self._coordinator.store.root / "executions")
         self._document_jobs = document_jobs or DocumentJobController(journal=journal)
         self._recovery = AssistantSessionRecovery(
