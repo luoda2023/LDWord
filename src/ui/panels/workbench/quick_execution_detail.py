@@ -1051,11 +1051,11 @@ class QuickExecutionDetail(
             )
             return
         self._drop_area.configure_file_acceptance(
-            suffixes=(".docx",),
+            suffixes=(".docx", ".doc", ".wps"),
             idle_title="拖拽文件至此处",
-            idle_suffix="支持格式：.docx",
+            idle_suffix="支持格式：.docx / .doc / .wps",
             dialog_title="选择文档",
-            dialog_label="Word 文档",
+            dialog_label="Word / WPS 文档",
             icon_text="W",
         )
 

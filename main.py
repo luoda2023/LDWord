@@ -220,6 +220,28 @@ def _start_gui(font_engine: str | None = None) -> int:
         instance_lock.unlock()
 
 
+
+_SUPPORTED_CLI_SUFFIXES = frozenset({".docx", ".doc", ".wps"})
+
+
+def _resolve_cli_input(path: Path):
+    """Return (docx_path, converted_message).  Convert .doc/.wps via office COM."""
+    suffix = path.suffix.casefold()
+    if suffix not in _SUPPORTED_CLI_SUFFIXES:
+        raise ValueError(f"unsupported_format:{suffix or '(none)'}")
+    if suffix == ".docx":
+        return path, ""
+    from src.services.legacy_word_import import ensure_editable_docx
+    result = ensure_editable_docx(path)
+    note = ""
+    if result.converted:
+        note = (
+            f"[INFO] 已将 .{suffix[1:]} 文档转换为 .docx 后继续"
+            + (f"（{result.message}）" if result.message else "")
+        )
+    return result.docx_path, note
+
+
 def _run_cli(args: argparse.Namespace) -> int:
     """执行 CLI 模式。"""
     input_path = Path(args.input)
@@ -227,11 +249,13 @@ def _run_cli(args: argparse.Namespace) -> int:
     if not input_path.exists():
         console_print(f"[ERROR] 输入文件不存在: {input_path}")
         return 1
-    if input_path.suffix.lower() != ".docx":
-        console_print(
-            f"[ERROR] 不支持的文件格式: {input_path.suffix} (仅支持 .docx)"
-        )
+    try:
+        input_path, conversion_note = _resolve_cli_input(input_path)
+    except Exception as exc:  # noqa: BLE001 - CLI process boundary
+        console_print(f"[ERROR] 输入文档处理失败: {str(exc) or type(exc).__name__}")
         return 1
+    if conversion_note:
+        console_print(conversion_note)
 
     from src.cli_runner import run
 
@@ -255,11 +279,13 @@ def _run_inspect(args: argparse.Namespace) -> int:
     if not input_path.exists():
         console_print(f"[ERROR] 输入文件不存在: {input_path}")
         return 1
-    if input_path.suffix.lower() != ".docx":
-        console_print(
-            f"[ERROR] 不支持的文件格式: {input_path.suffix} (仅支持 .docx)"
-        )
+    try:
+        input_path, conversion_note = _resolve_cli_input(input_path)
+    except Exception as exc:  # noqa: BLE001 - CLI process boundary
+        console_print(f"[ERROR] 输入文档处理失败: {str(exc) or type(exc).__name__}")
         return 1
+    if conversion_note:
+        console_print(conversion_note)
 
     from src.services.document_inspector import (
         format_inspection_report,

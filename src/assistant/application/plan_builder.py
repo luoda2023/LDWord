@@ -492,6 +492,8 @@ def _source_media_type(path: Path) -> str:
     suffix = path.suffix.casefold()
     return {
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".doc": "application/msword",
+        ".wps": "application/vnd.ms-works",
         ".md": "text/markdown",
         ".markdown": "text/markdown",
         ".json": "application/json",

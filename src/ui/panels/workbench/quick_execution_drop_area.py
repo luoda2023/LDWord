@@ -33,10 +33,10 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         self.setObjectName("wb_v2_drop_area")
         self._file_path = ""
         self._hovering = False
-        self._accepted_suffixes = (".docx",)
+        self._accepted_suffixes = (".docx", ".doc", ".wps")
         self._idle_icon_text = "W"
         self._idle_title = "拖拽文件至此处"
-        self._idle_suffix = "支持格式：.docx"
+        self._idle_suffix = "支持格式：.docx / .doc / .wps"
         self._idle_hint = "或点击右侧按钮从本地选择"
         self._hover_title = "松开以加载文件"
         self._hover_hint = "文件将被立即载入"
@@ -313,6 +313,8 @@ class QuickExecutionDropArea(RoundedSurfaceFrame):
         if suffix == ".json":
             return "J"
         if suffix == ".docx":
+            return "W"
+        if suffix in {".doc", ".wps"}:
             return "W"
         return self._idle_icon_text or "W"
 

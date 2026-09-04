@@ -31,6 +31,8 @@ from src.qt_api import QTimer
 
 _ASSISTANT_ATTACHMENT_MEDIA_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc": "application/msword",
+    ".wps": "application/vnd.ms-works",
     ".md": "text/markdown",
     ".markdown": "text/markdown",
 }

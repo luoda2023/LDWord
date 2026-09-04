@@ -86,6 +86,29 @@ def execute_production_request(
     if not input_path.is_file():
         return _terminal("failed", f"input_document_missing:{input_path}")
     suffix = input_path.suffix.casefold()
+    if suffix in {".doc", ".wps"}:
+        # Legacy binary Word/WPS sources are converted to .docx through the
+        # locally registered office COM automation before entering the engine.
+        from src.services.legacy_word_import import (
+            LegacyWordImportError,
+            ensure_editable_docx,
+        )
+
+        try:
+            converted = ensure_editable_docx(input_path)
+        except (LegacyWordImportError, OSError) as exc:
+            return _terminal(
+                "failed",
+                f"input_document_conversion_failed:{str(exc) or type(exc).__name__}",
+            )
+        request = replace(
+            request,
+            input_path=converted.docx_path,
+        )
+        input_path = converted.docx_path
+        suffix = input_path.suffix.casefold()
+        if callable(progress_callback):
+            progress_callback(0, 0, f"已将 {input_path.name} 转换为可编辑格式")
     exam_markdown = (
         suffix in {".md", ".markdown"}
         and scene_uses_exam_paper_surface(

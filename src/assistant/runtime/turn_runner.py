@@ -69,7 +69,7 @@ EventSink = Callable[[AssistantEvent], object]
 _MAX_ATTACHMENT_CONTEXT_CHARACTERS = 40_000
 _MAX_ATTACHMENT_FORMAT_EVIDENCE_CHARACTERS = 20_000
 _MAX_ATTACHMENT_COUNT = 6
-_SUPPORTED_ATTACHMENT_SUFFIXES = frozenset({".docx", ".md", ".markdown"})
+_SUPPORTED_ATTACHMENT_SUFFIXES = frozenset({".docx", ".doc", ".wps", ".md", ".markdown"})
 _WAITING_STATUSES = {
     TURN_WAITING_USER_QUESTION,
     TURN_WAITING_DATA_PERMISSION,
@@ -349,7 +349,7 @@ def build_attachment_context(
                 or source_strategy == TEMPLATE_AUTHORING_FORMAT_CLONE
             )
         )
-        if evidence_allowed and suffix != ".docx":
+        if evidence_allowed and suffix not in {".docx", ".doc", ".wps"}:
             # Markdown can be useful reference content, but it cannot provide
             # Word package geometry or style evidence.
             format_evidence_errors.append(
@@ -404,6 +404,9 @@ def build_attachment_context(
                 remaining -= len(body)
         if evidence_allowed:
             try:
+                if path.suffix.casefold() in {".doc", ".wps"}:
+                    from src.services.legacy_word_import import ensure_editable_docx
+                    path = ensure_editable_docx(path).docx_path
                 format_evidence = extract_docx_format_evidence(path)
                 if source_strategy == TEMPLATE_AUTHORING_FORMAT_CLONE:
                     format_evidence = _format_clone_evidence(format_evidence)
@@ -592,6 +595,9 @@ def _extract_attachment_text(path: Path) -> str:
 
     if path.suffix.casefold() in {".md", ".markdown"}:
         return path.read_text(encoding="utf-8-sig").strip()
+    if path.suffix.casefold() in {".doc", ".wps"}:
+        from src.services.legacy_word_import import ensure_editable_docx
+        path = ensure_editable_docx(path).docx_path
     document = Document(str(path))
     chunks = [
         paragraph.text

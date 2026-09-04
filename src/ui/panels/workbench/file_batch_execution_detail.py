@@ -56,8 +56,8 @@ class FileBatchSourceArea(RoundedSurfaceFrame):
         self.setObjectName("wb_file_batch_source_area")
         self.setMinimumHeight(76)
         self.setAutoFillBackground(False)
-        self._accepted_suffixes = (".docx",)
-        self._dialog_label = "Word 文档"
+        self._accepted_suffixes = (".docx", ".doc", ".wps")
+        self._dialog_label = "Word / WPS 文档"
         self._manifest = DocumentInputManifest()
         self._policy = self._build_policy()
 
@@ -646,8 +646,8 @@ class FileBatchExecutionDetail(QWidget):
             )
             return
         self._source_area.configure_file_acceptance(
-            suffixes=(".docx",),
-            dialog_label="Word 文档",
+            suffixes=(".docx", ".doc", ".wps"),
+            dialog_label="Word / WPS 文档",
         )
 
     def _populate_scene_options(self, *, current_scene_id: str = "") -> None:

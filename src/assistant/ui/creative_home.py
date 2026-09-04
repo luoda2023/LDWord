@@ -69,6 +69,8 @@ _ATTACHMENT_SLOT_HEIGHT = 34
 _MAX_COMPOSER_ATTACHMENTS = 6
 _ATTACHMENT_MEDIA_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc": "application/msword",
+    ".wps": "application/vnd.ms-works",
     ".md": "text/markdown",
     ".markdown": "text/markdown",
 }
@@ -762,7 +764,7 @@ class AssistantHeroComposer(QWidget):
             self,
             "添加文档材料",
             start,
-            "文档材料 (*.docx *.md *.markdown);;Word 文档 (*.docx);;Markdown (*.md *.markdown)",
+            "文档材料 (*.docx *.doc *.wps *.md *.markdown);;Word / WPS 文档 (*.docx *.doc *.wps);;Markdown (*.md *.markdown)",
         )
         if paths:
             self._add_document_paths(tuple(paths))
@@ -793,7 +795,7 @@ class AssistantHeroComposer(QWidget):
             self.set_submission_error(
                 "暂不支持这些材料："
                 + "、".join(name for name in unsupported if name)
-                + "。当前支持 DOCX 和 Markdown。"
+                + "。当前支持 DOCX / DOC / WPS 和 Markdown。"
             )
         elif not overflow:
             self.set_submission_error("")

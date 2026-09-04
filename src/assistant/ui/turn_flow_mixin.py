@@ -78,6 +78,8 @@ from src.config.work_mode import get_work_mode
 
 _ASSISTANT_ATTACHMENT_MEDIA_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc": "application/msword",
+    ".wps": "application/vnd.ms-works",
     ".md": "text/markdown",
     ".markdown": "text/markdown",
 }

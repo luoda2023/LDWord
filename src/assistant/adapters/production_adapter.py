@@ -121,11 +121,16 @@ class AssistantProductionAdapter:
             f"plan_blocked:{item.code}"
             for item in plan.blocking_issues
         )
+        _accepted_input_suffixes = set(
+            plan.production_contract.accepted_suffixes or (".docx",)
+        )
+        if ".docx" in _accepted_input_suffixes:
+            # Legacy binary Word (.doc) and WPS Writer (.wps) sources are
+            # converted to .docx at execution time by the production facade.
+            _accepted_input_suffixes.update({".doc", ".wps"})
         if not input_path.is_file():
             issues.append("input_document_missing")
-        elif input_path.suffix.casefold() not in set(
-            plan.production_contract.accepted_suffixes or (".docx",)
-        ):
+        elif input_path.suffix.casefold() not in _accepted_input_suffixes:
             issues.append("input_document_unsupported")
         elif (
             input_path.suffix.casefold() == ".docx"
