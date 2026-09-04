@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from src.app_meta import APP_DISPLAY_NAME, APP_VERSION
+from src.app_meta import APP_AUTHOR, APP_DISPLAY_NAME, APP_HOMEPAGE, APP_VERSION
 from src.qt_api import (
     QDesktopServices,
     QFileDialog,
@@ -308,6 +308,15 @@ class PreferencesPanel(BasePanel):
         version_row.addStretch(1)
         text_column.addWidget(self._app_name)
         text_column.addLayout(version_row)
+        self._author_label = QLabel(f"作者：{APP_AUTHOR}", card)
+        text_column.addWidget(self._author_label)
+        self._homepage_label = QLabel(
+            f'<a href="{APP_HOMEPAGE}" style="color:{get_theme().text_link};'
+            f'text-decoration:none;">官网：{APP_HOMEPAGE}</a>',
+            card,
+        )
+        self._homepage_label.setOpenExternalLinks(True)
+        text_column.addWidget(self._homepage_label)
         self._local_processing_note = QLabel(
             "文档仅在本机处理，不会自动上传。",
             card,
@@ -1131,6 +1140,12 @@ class PreferencesPanel(BasePanel):
         )
         self._version_label.setStyleSheet(
             f"color: {theme.text_secondary}; background: transparent;"
+        )
+        self._author_label.setStyleSheet(
+            f"color: {theme.text_secondary}; background: transparent;"
+        )
+        self._homepage_label.setStyleSheet(
+            f"color: {theme.text_link}; background: transparent;"
         )
         self._local_processing_note.setStyleSheet(
             f"color: {theme.text_secondary}; background: transparent;"

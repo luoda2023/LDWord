@@ -94,6 +94,8 @@ _SVG = {
     "chevron-left": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
 
     "chevron-right": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
+    "chevrons-left": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>',
+    "chevrons-right": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/></svg>',
     "ellipsis": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></svg>',
 
     "info": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
@@ -309,12 +311,17 @@ def invalidate_icon_cache() -> None:
 
 
 def get_app_logo(size: int = 24) -> QIcon:
-    """渲染 App 专属 Logo (app_logo.svg)，双色跟随主题。
+    """渲染 App 品牌 Logo。
 
-    SVG 中使用语义占位符（不依赖具体 hex 值）:
-        __LOGO_DARK__  → theme.logo_dark
-        __LOGO_LIGHT__ → theme.logo_light
+    优先使用位图品牌标 (app_logo.png)；缺失时回退到双色跟随主题的
+    app_logo.svg（语义占位符 __LOGO_DARK__/__LOGO_LIGHT__ 由主题驱动）。
     """
+
+    png_path = Path(__file__).parent / "app_logo.png"
+    if png_path.exists():
+        icon = QIcon(str(png_path))
+        if not icon.isNull():
+            return icon
 
     svg_path = Path(__file__).parent / "app_logo.svg"
     if not svg_path.exists():

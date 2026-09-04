@@ -1,6 +1,9 @@
 """Centralized application naming metadata."""
 
 APP_DISPLAY_NAME = "LDWord"
+APP_AUTHOR = "LUODA"
+APP_HOMEPAGE = "https://dicad.cn"
+
 APP_SEMVER = "1.0.0"
 APP_RELEASE_LINE = "V" + ".".join(APP_SEMVER.split(".")[:2])
 APP_VERSION = f"V{APP_SEMVER}"
