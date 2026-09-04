@@ -49,6 +49,11 @@ def provider_origin(value: str) -> tuple[str, str, int]:
 _ALLOW_HTTP_HOSTS_ENV = "LDWORD_FORM_ALLOW_HTTP_HOSTS"
 _HTTP_ALLOWLIST_ENV = "LDWORD_FORM_ALLOW_HTTP"
 
+# Official LUODA cloud AI proxy shipped with the product.  The endpoint is
+# plain HTTP on a public host, so it is listed here explicitly instead of
+# requiring every customer to add an environment allow-list entry.
+_BUILTIN_HTTP_TRUSTED_HOSTS = frozenset({"47.114.75.115"})
+
 
 def _is_loopback_host(hostname: str) -> bool:
     normalized = str(hostname or "").strip().rstrip(".").casefold()
@@ -96,7 +101,10 @@ def _allowlist_http_hosts() -> set[str]:
 def _http_allowed_host(hostname: str) -> bool:
     if _is_loopback_host(hostname) or _is_private_intranet_host(hostname):
         return True
-    return str(hostname or "").strip().rstrip(".").casefold() in _allowlist_http_hosts()
+    normalized = str(hostname or "").strip().rstrip(".").casefold()
+    if normalized in _BUILTIN_HTTP_TRUSTED_HOSTS:
+        return True
+    return normalized in _allowlist_http_hosts()
 
 
 __all__ = ["provider_origin", "validate_provider_endpoint"]

@@ -18,3 +18,8 @@ APP_TEMP_DIR_NAME = "ldword_form_refresh"
 APP_DATA_DIR_NAME = "LDWord"
 APP_HOME_DIR_NAME = ".ldword_form"
 APP_CUSTOM_THEMES_ENV = "LDWORD_FORM_CUSTOM_THEMES_FILE"
+
+# ── 出厂内置 LUODA 云端 AI 服务 ─────────────────────────────
+# 官方模型网关代理密钥（客户可随时在“偏好设置 → AI 模型”中修改或改用
+# 自己的服务；此处仅为全新安装提供开箱即用的默认连接）。
+LUODA_OFFICIAL_DEFAULT_KEY = "sk-proxy-local-51f5bd4b979"

@@ -7,6 +7,7 @@ panel from depending on the assistant package's internal UI and runtime layout.
 from src.assistant.runtime.providers.profiles import (
     ProviderProfile,
     ProviderProfileStore,
+    ensure_luoda_official_ready,
 )
 from src.assistant.runtime.providers.router import (
     ProviderResolutionError,
@@ -25,6 +26,7 @@ from src.assistant.ui.provider_probe_worker import ProviderProbeWorker
 
 __all__ = [
     "HybridSecretStore",
+    "ensure_luoda_official_ready",
     "ProviderProbeWorker",
     "ProviderProfile",
     "ProviderProfileStore",

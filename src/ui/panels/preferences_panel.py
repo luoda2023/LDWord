@@ -7,7 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from src.app_meta import APP_AUTHOR, APP_DISPLAY_NAME, APP_HOMEPAGE, APP_VERSION
+from src.app_meta import (
+    APP_AUTHOR,
+    APP_DISPLAY_NAME,
+    APP_HOMEPAGE,
+    APP_VERSION,
+    LUODA_OFFICIAL_DEFAULT_KEY,
+)
 from src.qt_api import (
     QDesktopServices,
     QFileDialog,
@@ -61,6 +67,7 @@ from src.assistant.provider_settings_facade import (
     ProviderResolutionError,
     ProviderRouter,
     ProviderSecretStore,
+    ensure_luoda_official_ready,
     provider_connection_badge,
     provider_connection_status_text,
     provider_error_text,
@@ -175,6 +182,11 @@ class PreferencesPanel(BasePanel):
     ) -> None:
         self._provider_profiles = provider_profiles or ProviderProfileStore()
         self._provider_secrets = provider_secrets or HybridSecretStore()
+        ensure_luoda_official_ready(
+            profiles=self._provider_profiles,
+            secret=LUODA_OFFICIAL_DEFAULT_KEY,
+            secret_store=self._provider_secrets,
+        )
         self._provider_probe_worker: ProviderProbeWorker | None = None
         self._provider_probe_profile_id = ""
         self._loading_ai_form = False

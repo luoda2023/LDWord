@@ -115,6 +115,31 @@ def default_mock_profile() -> ProviderProfile:
     )
 
 
+LUODA_OFFICIAL_PROFILE_ID = "luoda-official"
+LUODA_OFFICIAL_LABEL = "LUODA 官方服务"
+LUODA_OFFICIAL_BASE_URL = "http://47.114.75.115:40000/v1"
+LUODA_OFFICIAL_MODEL_ID = "neizhiAPI"
+
+
+def default_luoda_profile() -> ProviderProfile:
+    """Built-in LUODA cloud AI profile shipped with fresh installs.
+
+    Uses the official proxy endpoint.  The host is covered by the built-in
+    HTTP trust list in endpoint_security, so no manual env allow-list entry
+    is required for this specific official endpoint.
+    """
+    return ProviderProfile(
+        profile_id=LUODA_OFFICIAL_PROFILE_ID,
+        label=LUODA_OFFICIAL_LABEL,
+        kind="openai_compatible",
+        model_id=LUODA_OFFICIAL_MODEL_ID,
+        base_url=LUODA_OFFICIAL_BASE_URL,
+        timeout_seconds=90.0,
+        enabled=True,
+        connection_status="untested",
+    )
+
+
 def provider_extra_body_with_model_defaults(
     model_id: str,
     extra_body: Mapping[str, Any] | None = None,
@@ -156,7 +181,7 @@ class ProviderProfileStore:
 
     def list_profiles(self) -> tuple[ProviderProfile, ...]:
         if not self.path.is_file():
-            return (default_mock_profile(),)
+            self._seed_if_fresh()
         payload = self._read_payload()
         raw_profiles = payload.get("profiles", ())
         if not isinstance(raw_profiles, list):
@@ -169,6 +194,23 @@ class ProviderProfileStore:
         if not any(item.profile_id == "mock-default" for item in profiles):
             profiles = (default_mock_profile(), *profiles)
         return profiles
+
+    def _seed_if_fresh(self) -> None:
+        """Create the store file on first run with built-in profiles.
+
+        Fresh installs get the LUODA official cloud profile plus the local
+        mock demo so AI works out of the box.  Existing user files are never
+        rewritten here; callers wanting a reset use delete_all instead.
+        """
+        if self.path.is_file():
+            return
+        seeded = (
+            default_luoda_profile(),
+            default_mock_profile(),
+        )
+        active = LUODA_OFFICIAL_PROFILE_ID
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._write_payload({"profiles": seeded, "active_profile_id": active})
 
     def get(self, profile_id: str) -> ProviderProfile:
         for profile in self.list_profiles():
@@ -256,12 +298,20 @@ class ProviderProfileStore:
         *,
         active_profile_id: str,
     ) -> None:
+        self._write_payload(
+            {
+                "profiles": profiles,
+                "active_profile_id": active_profile_id,
+            }
+        )
+
+    def _write_payload(self, values: Mapping[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "schema_version": PROVIDER_PROFILE_STORE_SCHEMA_VERSION,
             "contract_kind": "provider_profile_store",
-            "active_profile_id": active_profile_id,
-            "profiles": [item.to_dict() for item in profiles],
+            "active_profile_id": str(values.get("active_profile_id") or ""),
+            "profiles": [item.to_dict() for item in values.get("profiles", ())],
         }
         temporary = self.path.with_suffix(f".json.{os.getpid()}.tmp")
         try:
@@ -284,13 +334,58 @@ class ProviderProfileStore:
                 pass
 
 
+def ensure_luoda_official_ready(
+    *,
+    profiles: ProviderProfileStore | None = None,
+    secret: str = "",
+    secret_store=None,
+) -> bool:
+    """Bootstrap the built-in LUODA cloud AI on first run.
+
+    The provider-profile store seeds the official profile automatically when
+    the store file is absent.  This helper additionally records the factory
+    secret into the writable secure store when the official profile exists but
+    has no secret yet, so a fresh install can talk to the LUODA cloud AI out
+    of the box.  Customer edits in the settings UI are never overwritten: the
+    helper only fills an empty slot.
+
+    Returns True when the official profile is present and ready (secret set).
+    """
+    store = profiles or ProviderProfileStore()
+    official = None
+    for item in store.list_profiles():
+        if item.profile_id == LUODA_OFFICIAL_PROFILE_ID:
+            official = item
+            break
+    if official is None:
+        return False
+    if secret_store is not None and str(secret or "").strip():
+        try:
+            existing = str(secret_store.get(LUODA_OFFICIAL_PROFILE_ID) or "").strip()
+        except Exception:  # noqa: BLE001 - secure store may be unavailable
+            existing = ""
+        if not existing:
+            try:
+                secret_store.set(LUODA_OFFICIAL_PROFILE_ID, str(secret).strip())
+            except Exception:  # noqa: BLE001 - best-effort bootstrap
+                return False
+            return True
+    return bool(official.enabled)
+
+
 __all__ = [
     "GLM_5_2_MAX_OUTPUT_TOKENS",
     "PROVIDER_CONNECTION_STATUSES",
+    "LUODA_OFFICIAL_BASE_URL",
+    "LUODA_OFFICIAL_LABEL",
+    "LUODA_OFFICIAL_MODEL_ID",
+    "LUODA_OFFICIAL_PROFILE_ID",
     "PROVIDER_KINDS",
     "PROVIDER_PROFILE_STORE_SCHEMA_VERSION",
     "ProviderProfile",
     "ProviderProfileStore",
+    "default_luoda_profile",
     "default_mock_profile",
+    "ensure_luoda_official_ready",
     "provider_extra_body_with_model_defaults",
 ]
