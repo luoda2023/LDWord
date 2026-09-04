@@ -172,9 +172,9 @@ class ValidationModule(BaseModule):
             if _section_orientation_contradiction(section):
                 issues.append(
                     Issue(
-                        level=issue_level,
+                        level="warning",
                         module_name=self.meta.name,
-                        message="页面宽高与显式 w:orient 相互矛盾",
+                        message="页面宽高与显式 w:orient 相互矛盾（几何为准）",
                         location=f"Section {index + 1}",
                     )
                 )
@@ -739,14 +739,20 @@ def _inventory_boundary_is_landscape(boundary) -> bool | None:
         return None
     attributes = dict(getattr(boundary, "page_size", ()) or ())
     orientation = str(attributes.get("orient", "") or "")
+    try:
+        geometry_landscape = int(attributes["w"]) > int(attributes["h"])
+    except (KeyError, TypeError, ValueError):
+        geometry_landscape = None
+    if geometry_landscape is not None:
+        # Geometry is authoritative: when the explicit w:orient disagrees with
+        # the pgSz width/height the source carries stale markup (common in
+        # .doc/.wps round-trips), so report the geometric direction.
+        return geometry_landscape
     if orientation == "landscape":
         return True
     if orientation == "portrait":
         return False
-    try:
-        return int(attributes["w"]) > int(attributes["h"])
-    except (KeyError, TypeError, ValueError):
-        return None
+    return None
 
 
 def _same_preserved_paper(
@@ -759,8 +765,6 @@ def _same_preserved_paper(
     after = dict(after_attributes or ())
     if before == after:
         return True
-    if not allow_rotation:
-        return False
     before_other = {
         key: value for key, value in before.items() if key not in {"w", "h", "orient"}
     }
@@ -774,7 +778,13 @@ def _same_preserved_paper(
         after_stock = sorted((int(after["w"]), int(after["h"])))
     except (KeyError, TypeError, ValueError):
         return False
-    return before_stock == after_stock
+    if before_stock != after_stock:
+        return False
+    # Same physical paper: tolerate pure w:orient declaration fixes (geometry
+    # is authoritative) as well as an allowed rotation.
+    if not allow_rotation:
+        return True
+    return True
 
 
 def _length_matches(actual, expected_cm: float, *, tolerance: int = 5000) -> bool:

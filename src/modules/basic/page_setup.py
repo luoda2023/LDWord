@@ -243,16 +243,27 @@ class PageSetupModule(BaseModule):
             contradiction = _section_orientation_contradiction(section)
             if not contradiction:
                 continue
-            can_repair = (
-                paper_owned or orientation_owned
-            )
+            if protected_reason and not (paper_owned or orientation_owned):
+                issues.append(
+                    Issue(
+                        level="warning",
+                        module_name=self.meta.name,
+                        message=(
+                            "section page geometry conflicts with explicit w:orient; "
+                            "the section is protected so the stale declaration is kept "
+                            f"({protected_reason})"
+                        ),
+                        location=f"Section {index + 1}",
+                    )
+                )
+                continue
             issues.append(
                 Issue(
-                    level="warning" if can_repair else "error",
+                    level="warning",
                     module_name=self.meta.name,
                     message=(
                         "section page geometry conflicts with explicit w:orient; "
-                        + ("the selected policy will normalize it" if can_repair else "preserve policies cannot emit a coherent result")
+                        "geometry is authoritative and the declaration will be normalized"
                     ),
                     location=f"Section {index + 1}",
                 )
@@ -283,6 +294,7 @@ class PageSetupModule(BaseModule):
             if _page_layout_mutation_block_reason(boundaries[idx]):
                 continue
             before = _section_geometry_tuple(section)
+            reconciled = _reconcile_section_orientation(section)
             source_landscape = _section_is_landscape(section, template_landscape)
             desired_landscape, orientation_owned = _desired_landscape(
                 ps,
@@ -336,6 +348,7 @@ class PageSetupModule(BaseModule):
 
             after = _section_geometry_tuple(section)
             if before != after:
+                reason = "stale w:orient reconciled to geometry" if reconciled and not (paper_owned or orientation_owned) else ""
                 tracker.record(
                     rule_name=self.meta.name,
                     target=f"Section {idx + 1}",
@@ -346,6 +359,7 @@ class PageSetupModule(BaseModule):
                         f"paper_mode={paper_mode}, orientation_mode={orientation_mode}, "
                         f"margin_mode={margin_mode}, paper={paper_key if paper_owned else 'preserved'}; "
                         f"{_format_geometry(after)}"
+                        + (f"; {reason}" if reason else "")
                     ),
                 )
         context.page_setup_final_inventory = collect_section_inventory(doc)
@@ -580,6 +594,28 @@ def _section_role(context, paragraph_index: int) -> str:
         ):
             return str(getattr(section, "section_type", "") or "")
     return ""
+
+
+def _reconcile_section_orientation(section) -> bool:
+    """Normalize an explicit w:orient so it agrees with the page geometry.
+
+    Word/WPS render from the pgSz width/height; the w:orient attribute is a
+    redundant declaration.  When the two disagree the source document carries
+    stale markup (common in .doc/.wps round-trips and tracked revisions).
+    Geometry is authoritative, so we rewrite the declaration only, never the
+    paper size or margins.
+    """
+    if not _section_orientation_contradiction(section):
+        return False
+    geometry_landscape = (
+        section.page_width is not None
+        and section.page_height is not None
+        and section.page_width > section.page_height
+    )
+    section.orientation = (
+        WD_ORIENT.LANDSCAPE if geometry_landscape else WD_ORIENT.PORTRAIT
+    )
+    return True
 
 
 def _section_orientation_contradiction(section) -> bool:
