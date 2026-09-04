@@ -1333,9 +1333,10 @@ class AssistantPanel(
                     card_host = QWidget(self._message_host)
                     card_host.setObjectName("assistant_interaction_reading_column")
                     card_layout = QHBoxLayout(card_host)
-                    card_layout.setContentsMargins(20, 8, 20, 8)
+                    # 与 AI 文本消息同轴：卡片贴左缘（16px 呼吸边距），右侧
+                    # stretch 吸收剩余宽度，不再双侧居中留下对称空白。
+                    card_layout.setContentsMargins(16, 8, 8, 8)
                     card_layout.setSpacing(0)
-                    card_layout.addStretch(1)
                     card = AssistantInteractionCard(
                         interaction_type=interaction_type,
                         title=card_title,
@@ -1344,7 +1345,6 @@ class AssistantPanel(
                         parent=card_host,
                     )
                     card.action_requested.connect(self._handle_card_action)
-                    card.setMaximumWidth(TOKENS.assistant_message_max_width)
                     # Apply the final geometry before the card enters a visible
                     # layout. Letting Qt paint its natural width first and then
                     # fixing it on a timer produces a conspicuous center jump.

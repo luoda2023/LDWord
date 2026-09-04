@@ -622,15 +622,14 @@ class AssistantInteractionCard(QFrame):
         return self.presentation.eyebrow
 
     def preferred_width(self, available_width: int) -> int:
-        """Return a readable card width without weakening compact layouts."""
+        """卡片宽度与对话消息同轴：跟随调用方给出的阅读列宽（视口 3/4）。
 
-        upper_bound = {
-            "artifact": TOKENS.plan_card_max_width,
-            "plan": TOKENS.plan_card_max_width,
-            "progress": TOKENS.progress_card_max_width,
-            "recovery": TOKENS.plan_card_max_width,
-        }.get(self.interaction_type, TOKENS.assistant_message_max_width)
-        return min(max(260, int(available_width)), upper_bound)
+        卡片是结构化交互面，内部通过网格/边距自然约束可读性，不再用固定
+        上限在宽屏下单独截窄，保证“对话窗口宽度一致、最多 3/4”的视觉规则。
+        窄视口时仍保 260px 下限避免挤压。
+        """
+
+        return max(260, int(available_width))
 
     def _tone_colors(self):
         theme = get_theme()

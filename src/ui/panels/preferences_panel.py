@@ -460,7 +460,6 @@ class PreferencesPanel(BasePanel):
         content = QWidget(self._shell.detail_container)
         content.setObjectName("preferences_ai_content")
         content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        content.setMaximumWidth(960)
         layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 8, 0, 8)
         layout.setSpacing(16)

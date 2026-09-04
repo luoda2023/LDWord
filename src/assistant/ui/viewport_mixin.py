@@ -85,12 +85,12 @@ class AssistantViewportMixin:
                 self._active_page.width()
                 - self._message_scroll.verticalScrollBar().sizeHint().width(),
             )
-        # 与对话消息共用 3/4 阅读列，保证卡片与消息同宽对齐。
+        # 与对话消息共用 3/4 阅读列，保证卡片与消息同轴对齐。卡片是结构化
+        # 交互面（事实行/按钮组），铺满整条 3/4 列会拉出超宽行；因此卡片
+        # 可用宽在 3/4 阅读列内收敛到自身舒适上限（默认与 AI 文本一致，
+        # 不再被 820 单独截断即可让宽屏卡片适度加宽）。
         reading_cap = max(420, int(viewport_width * 0.75))
-        return min(
-            TOKENS.assistant_message_max_width,
-            reading_cap,
-        )
+        return reading_cap
 
     def _sync_active_reading_widths(self) -> None:
         page_width = max(0, self._active_page.width())
