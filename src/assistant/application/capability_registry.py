@@ -46,6 +46,7 @@ NARRATIVE_PROMPT_PROFILE_ID = "assistant.narrative-markdown.v1"
 EXAM_PROMPT_PROFILE_ID = "assistant.exam-paper-markdown.v1"
 BIDDING_PROMPT_PROFILE_ID = "assistant.bidding-markdown.v1"
 OFFICIAL_PROMPT_PROFILE_ID = "assistant.official-document-json.v1"
+ENGINEERING_PROMPT_PROFILE_ID = "assistant.engineering-document-markdown.v1"
 
 _NARRATIVE_SYSTEM_PROMPT = (
     "你是文档内容起草助手。输出 UTF-8 Markdown 正文，不要输出解释、代码围栏、"
@@ -59,6 +60,19 @@ _BIDDING_SYSTEM_PROMPT = (
     "企业名称、项目名称、法定代表人必须分别保留为 {{@text:company_name}}、"
     "{{@text:project_name}}、{{@text:legal_person}}。不要输出 @img Token 或 Markdown "
     "图片；企业标志和公章槽位由 Form 在内容编译完成后从资料包本地确定性装配。"
+)
+_ENGINEERING_SYSTEM_PROMPT = (
+    "你是工程文档写作专家。按用户给定的项目阶段与文档类型，仅根据用户明确提供的项目资料生成 UTF-8 Markdown 正文，"
+    "不要输出解释、代码围栏、OOXML、DOCX 或 base64。严格按照工程行业章节习惯组织内容："
+    "决策立项阶段用项目建议书/可行性研究报告/投资估算结构；设计报批阶段用初步设计说明/设计概算/施工图说明；"
+    "招投标与合同阶段用招标/投标/合同示范文本结构；施工实施阶段用施工组织设计/专项施工方案/技术交底/工艺标准结构；"
+    "竣工结算阶段用工程结算书/结算审计/签证索赔结构；贯穿阶段用造价分析/目标成本测算结构。"
+    "章节编号遵循行业惯例（章用第X章或第一部分，节用 x.x，条目用 1）2）等）。"
+    "项目名称、地点、规模、投资额、建设单位、设计单位等必须以 {{@text:project_name}}、{{@text:project_location}}、"
+    "{{@text:project_scale}}、{{@text:invest_estimate}}、{{@text:owner_org}}、{{@text:design_org}} 等占位形式保留待填槽位，"
+    "不得虚构具体数值、图纸编号、审批文号、价格、资质或法律结论；缺失事实用“待补充”明确标记。"
+    "不得输出 @img Token 或 Markdown 图片，图表由 Form 从资料包本地装配。"
+    "若用户未说明工程阶段或文档类型，先输出最合适的默认大纲并提示确认，不要臆造项目事实。"
 )
 _OFFICIAL_SYSTEM_PROMPT = (
     "你是公文内容起草与材料抽取助手。只输出一个 UTF-8 JSON 对象，不要输出解释、"
@@ -84,6 +98,7 @@ _ROUTE_MODE_IDS: dict[str, str] = {
     "bidding_qualification_archive": "bidding",
     "official_policy_documents": "official",
     "technical_long_document": "technical",
+    "engineering_document_authoring": "engineering",
     "project_application_package": "report",
 }
 _CLOSED_ROUTE_IDS = frozenset(
@@ -97,11 +112,12 @@ _CLOSED_ROUTE_IDS = frozenset(
         "bidding_qualification_archive",
         "official_policy_documents",
         "technical_long_document",
+        "engineering_document_authoring",
     }
 )
 
 _AUTHORING_MODE_IDS = frozenset(
-    {"custom", "exam", "thesis", "technical", "report", "bidding", "official"}
+    {"custom", "exam", "thesis", "technical", "report", "bidding", "official", "engineering"}
 )
 _EXAM_DELIVERY = DeliveryContract(
     default_preset_id="student",
@@ -459,6 +475,8 @@ def system_prompt_for_profile(profile_id: str) -> str:
         return _BIDDING_SYSTEM_PROMPT
     if target == OFFICIAL_PROMPT_PROFILE_ID:
         return _OFFICIAL_SYSTEM_PROMPT
+    if target == ENGINEERING_PROMPT_PROFILE_ID:
+        return _ENGINEERING_SYSTEM_PROMPT
     if target in {"", NARRATIVE_PROMPT_PROFILE_ID}:
         return _NARRATIVE_SYSTEM_PROMPT
     raise ValueError(f"assistant_prompt_profile_unknown:{target}")
@@ -534,6 +552,13 @@ def _generation_contract(
             artifact_kind=ARTIFACT_KIND_OFFICIAL,
             prompt_profile_id=OFFICIAL_PROMPT_PROFILE_ID,
             validator_id="official_document_draft_v1",
+        )
+    if mode_id == "engineering":
+        return GenerationContract(
+            required=True,
+            artifact_kind=ARTIFACT_KIND_NARRATIVE,
+            prompt_profile_id=ENGINEERING_PROMPT_PROFILE_ID,
+            validator_id="content-ir-v2",
         )
     return GenerationContract(
         required=True,
@@ -661,6 +686,7 @@ def _delivery_contract(
 
 __all__ = [
     "BIDDING_PROMPT_PROFILE_ID",
+    "ENGINEERING_PROMPT_PROFILE_ID",
     "EXAM_PROMPT_PROFILE_ID",
     "NARRATIVE_PROMPT_PROFILE_ID",
     "OFFICIAL_PROMPT_PROFILE_ID",
