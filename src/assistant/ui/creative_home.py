@@ -10,6 +10,7 @@ import time
 
 from src.qt_api import (
     QColor,
+    QDialog,
     QPushButton,
     QDesktopServices,
     QFileDialog,
@@ -45,6 +46,9 @@ from src.assistant.ui.message_components import (
     AssistantComposerAttachmentChip,
 )
 from src.shared.ui.icons.catalog import get_icon
+from src.assistant.ui.engineering_reference_picker import (
+    EngineeringReferencePicker,
+)
 
 
 _GRID_SPACING = 42
@@ -1105,6 +1109,16 @@ class AssistantCreativeHome(QWidget):
         title_line.addWidget(self._title)
         title_line.addStretch(1)
         title_row.addLayout(title_line, 1)
+        # 工程范本库：从用户登记的工程文档里选一份真实范本，作为附件让 AI
+        # 学习它的章节目录与写作惯例，再分章节起草同类工程文件。
+        self._library_button = QPushButton("📚 工程范本库", self._center)
+        self._library_button.setObjectName("assistant_home_library_button")
+        self._library_button.setCursor(Qt.PointingHandCursor)
+        self._library_button.setToolTip(
+            "从工程范本库选一份真实工程文档，AI 按它的目录与写法生成同类文档"
+        )
+        self._library_button.clicked.connect(self._open_reference_library)
+        title_row.addWidget(self._library_button, 0, Qt.AlignVCenter)
         center_layout.addLayout(title_row)
         center_layout.addSpacing(_HERO_TITLE_GAP)
 
@@ -1153,8 +1167,46 @@ class AssistantCreativeHome(QWidget):
 
     def _apply_starter(self, prompt: str) -> None:
         """Fill a starter prompt into the composer without sending yet."""
-        self.composer.set_text(str(prompt or ""))
+        self._fill_starter(str(prompt or ""))
+
+    def _fill_starter(self, prompt: str, *, paths: tuple[str, ...] = ()) -> None:
+        """Apply the sample-learn flow into the home composer.
+
+        A reference sample appends its real document as an attachment so the
+        turn pipeline resolves the outline from the file (directory authoring)
+        instead of guessing from keywords.
+        """
+        if paths:
+            self.composer.set_document_paths(tuple(paths))
+        if prompt:
+            self.composer.set_text(prompt)
         self.composer.focus_input()
+
+    def _open_reference_library(self) -> None:
+        """Pick an engineering reference sample to learn from."""
+        from src.config.engineering_reference import (
+            list_engineering_reference_samples,
+        )
+
+        if not list_engineering_reference_samples():
+            from src.shared.ui.dialogs import warning as dialog_warning
+
+            dialog_warning(
+                "暂无工程范本",
+                "工程范本库还没有可用的范本文件。\n请把真实工程文档放进你的资料文件夹"
+                "（例如 H:\\AI-model），并在用户数据目录"
+                "config_library/engineering_reference/manifest.json 登记清单后重试。",
+                parent=self,
+            )
+            return
+        picker = EngineeringReferencePicker(self)
+        if picker.exec() != QDialog.Accepted:
+            return
+        path = picker.selected_path()
+        prompt = picker.selected_prompt()
+        if not path:
+            return
+        self._fill_starter(prompt, paths=(path,))
 
     def _on_composer_text_changed(self, text: str) -> None:
         self.text_changed.emit(text)
@@ -1535,6 +1587,19 @@ class AssistantCreativeHome(QWidget):
                 color: {theme.primary};
                 background: {theme.bg_hover};
                 border-color: {theme.primary};
+            }}
+            QPushButton#assistant_home_library_button {{
+                color: {theme.primary};
+                background: {theme.bg_card};
+                border: 1px dashed {theme.primary};
+                border-radius: {theme.radius_md}px;
+                padding: 5px 12px;
+                font-size: {theme.font_size_sm}px;
+            }}
+            QPushButton#assistant_home_library_button:hover {{
+                color: {theme.text_on_primary};
+                background: {theme.primary};
+                border-style: solid;
             }}
             QScrollBar:vertical {{
                 background: transparent;
