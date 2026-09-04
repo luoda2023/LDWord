@@ -26,6 +26,7 @@ _SCHEMA_MODE_IDS = {
     "exam_items_v1": "exam",
     "teaching_assets_v1": "exam",
     "thesis_school_rule_context_v1": "thesis",
+    "engineering_document_v1": "engineering",
 }
 
 _DEFAULT_CONTRACT_IDS = {
@@ -33,6 +34,7 @@ _DEFAULT_CONTRACT_IDS = {
     "exam": "exam_items_v1",
     "thesis": "thesis_school_rule_context_v1",
     "official": "official_document_v1",
+    "engineering": "engineering_document_v1",
 }
 
 
