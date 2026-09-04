@@ -392,7 +392,7 @@ class AssistantTurnFlowMixin(
                 normalized,
                 workspace_mode_id=workspace.mode_id,
                 has_attachment=bool(context_refs),
-                route_id_override="engineering_authoring",
+                route_id_override="engineering_document_authoring",
             )
             if policy.capability.executable:
                 self._create_local_form_plan(
@@ -401,7 +401,7 @@ class AssistantTurnFlowMixin(
                     turn_id=uuid4().hex,
                     workspace=workspace,
                     material_snapshot=material_snapshot,
-                    route_id_override="engineering_authoring",
+                    route_id_override="engineering_document_authoring",
                 )
                 self._render_active_session()
                 self._refresh_session_list(select_session_id=self._active_session.session_id)
