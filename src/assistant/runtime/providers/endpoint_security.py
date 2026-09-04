@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 from urllib.parse import urlparse
 
 
@@ -24,9 +25,10 @@ def validate_provider_endpoint(value: str, *, allow_path_query: bool = False) ->
             "Provider endpoint must be HTTP(S) without embedded credentials, "
             "query, or fragment"
         )
-    if parsed.scheme == "http" and not _is_loopback_host(parsed.hostname):
+    if parsed.scheme == "http" and not _http_allowed_host(parsed.hostname):
         raise ValueError(
-            "Provider HTTP endpoints are allowed only for localhost or loopback IPs"
+            "Provider HTTP endpoints are allowed only for loopback, private "
+            "intranet hosts, or hosts listed in " + _HTTP_ALLOWLIST_ENV
         )
     return endpoint
 
@@ -44,6 +46,10 @@ def provider_origin(value: str) -> tuple[str, str, int]:
     return parsed.scheme.casefold(), str(parsed.hostname).casefold(), port
 
 
+_ALLOW_HTTP_HOSTS_ENV = "LDWORD_FORM_ALLOW_HTTP_HOSTS"
+_HTTP_ALLOWLIST_ENV = "LDWORD_FORM_ALLOW_HTTP"
+
+
 def _is_loopback_host(hostname: str) -> bool:
     normalized = str(hostname or "").strip().rstrip(".").casefold()
     if normalized == "localhost":
@@ -52,6 +58,45 @@ def _is_loopback_host(hostname: str) -> bool:
         return ipaddress.ip_address(normalized).is_loopback
     except ValueError:
         return False
+
+
+def _is_private_intranet_host(hostname: str) -> bool:
+    """True for RFC1918 / link-local / CGNAT / unique-local addresses."""
+    normalized = str(hostname or "").strip().rstrip(".").casefold()
+    if normalized == "localhost":
+        return True
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError:
+        return False
+    return (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_reserved
+        or address.is_global
+        and int(address) in _CGNAT_RANGE
+    )
+
+
+_CGNAT_RANGE = range(int(ipaddress.ip_address("100.64.0.0")), int(ipaddress.ip_address("100.127.255.255")) + 1)
+
+
+def _allowlist_http_hosts() -> set[str]:
+    """Return explicitly trusted HTTP hostnames from the environment."""
+    raw = str(os.environ.get(_HTTP_ALLOWLIST_ENV, "") or "").strip()
+    allowed: set[str] = set()
+    for item in raw.replace(";", ",").split(","):
+        host = str(item or "").strip().rstrip(".").casefold()
+        if host:
+            allowed.add(host)
+    return allowed
+
+
+def _http_allowed_host(hostname: str) -> bool:
+    if _is_loopback_host(hostname) or _is_private_intranet_host(hostname):
+        return True
+    return str(hostname or "").strip().rstrip(".").casefold() in _allowlist_http_hosts()
 
 
 __all__ = ["provider_origin", "validate_provider_endpoint"]

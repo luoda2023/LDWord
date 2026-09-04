@@ -484,10 +484,19 @@ class PreferencesPanel(BasePanel):
         apply_size_class(self._ai_label_input, "md")
         card.add_widget(FormRow("显示名称", self._ai_label_input, parent=card))
         self._ai_url_input = QLineEdit(card)
-        self._ai_url_input.setPlaceholderText("https://api.example.com/v1")
+        self._ai_url_input.setPlaceholderText("https://api.example.com/v1 或 http://内网服务器:端口/v1")
         self._ai_url_input.setAccessibleName("API 地址")
         apply_size_class(self._ai_url_input, "md")
         card.add_widget(FormRow("API 地址", self._ai_url_input, parent=card))
+        self._ai_url_hint = QLabel(
+            "HTTPS 可指向任意服务器；HTTP 仅允许本机/内网地址（如需放行公网 HTTP 服务器，"
+            "请把其主机名加入环境变量 LDWORD_FORM_ALLOW_HTTP，多个用英文逗号分隔）。",
+            card,
+        )
+        self._ai_url_hint.setObjectName("preferences_ai_url_hint")
+        self._ai_url_hint.setWordWrap(True)
+        apply_text_role(self._ai_url_hint, TextRole.CAPTION)
+        card.add_widget(self._ai_url_hint)
         self._ai_model_input = QLineEdit(card)
         self._ai_model_input.setPlaceholderText("模型 ID")
         self._ai_model_input.setAccessibleName("模型 ID")
