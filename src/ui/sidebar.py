@@ -211,6 +211,10 @@ class Sidebar(QWidget):
 
         # 初始几何按已恢复的展开态应用
         self._apply_expanded_geometry(initial=True)
+        # 展开态恢复后再应用一次主题：构造期的 apply_theme 早于几何设定，
+        # 若省略这一步，按钮样式仍停留在“收起”态（无左对齐/无 padding），
+        # 用户首次点击其它面板触发 set_active 时才被纠正，造成文字“移位”。
+        self._apply_theme()
 
     # ── 展开/收起 ──
     @property

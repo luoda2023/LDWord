@@ -133,16 +133,25 @@ class AssistantTurnFlowMixin(
         source: AssistantHeroComposer | None = None,
         context_refs_override: tuple[dict[str, object], ...] | None = None,
     ) -> bool:
-        accepted = self._submit_message(
-            text,
-            source=source,
-            context_refs_override=context_refs_override,
-        )
+        # Set the follow-latest intent BEFORE the submit path runs: an
+        # accepted submission renders the active session synchronously inside
+        # _submit_message (which consumes the flag), so setting it afterwards
+        # would leave the viewport at the reader's old scroll offset instead of
+        # landing on the newest message at the bottom.
+        self._force_follow_latest = True
+        accepted = False
+        try:
+            accepted = bool(
+                self._submit_message(
+                    text,
+                    source=source,
+                    context_refs_override=context_refs_override,
+                )
+            )
+        finally:
+            if not accepted:
+                self._force_follow_latest = False
         if accepted:
-            # A user submission should always land the conversation at the
-            # latest message, even when the reader had scrolled up through
-            # history.  The flag is consumed by the next render pass.
-            self._force_follow_latest = True
             self._consume_submitted_context_refs()
         return accepted
 
