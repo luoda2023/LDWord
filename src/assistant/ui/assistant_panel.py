@@ -572,6 +572,9 @@ class AssistantPanel(
         self._marktext_view.setObjectName("assistant_marktext_view")
         self._marktext_view.setFixedWidth(560)
         self._marktext_view.hide()
+        self._marktext_view.close_requested.connect(
+            self._hide_marktext_view
+        )
         self._marktext_view.bridge.request_export_docx.connect(
             self._on_marktext_export_docx
         )
@@ -771,7 +774,11 @@ class AssistantPanel(
         dock = getattr(self, "_outline_dock", None)
         if dock is not None:
             dock.set_current(int(index))
-        self._show_marktext_view()
+        # The right-side MarkText surface is deliberately NOT auto-shown when a
+        # chapter is activated: the streamed body (with tables) already renders
+        # live in the left conversation, and an auto-popping dark editor slab
+        # only steals the viewport and reads as "useless black space".  It stays
+        # collapsed until the user explicitly opens it.
 
     # ---- embedded MarkText (right-side) view sync ------------------------
     def _show_marktext_view(self) -> None:

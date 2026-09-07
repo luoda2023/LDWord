@@ -452,6 +452,9 @@ class AssistantConversationMessage(QWidget):
             self._status_label.setText(str(status_text))
             self._status_row.show()
         self._footer.setVisible(bool(self._text))
+        body = getattr(self, "_markdown", None)
+        if body is not None:
+            body.finalize_live_body()
 
     def _copy_text(self) -> None:
         QApplication.clipboard().setText(self._text)

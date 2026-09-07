@@ -27,6 +27,7 @@ from src.qt_api import (
     QLabel,
     QObject,
     QProgressBar,
+    QPushButton,
     QThread,
     QVBoxLayout,
     QWidget,
@@ -1520,6 +1521,10 @@ window.onerror = function(msg, src, line, col, err) {
 class EmbeddedMarkTextView(QWidget):
     """Right-side embedded MarkText (Muya) editor with QWebChannel back to Qt."""
 
+    # Emitted when the user clicks the header's 收起/关闭 control so the
+    # owning panel can collapse the right-side editor surface.
+    close_requested = Signal()
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.bridge = MarkTextBridge(self)
@@ -1550,6 +1555,7 @@ class EmbeddedMarkTextView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        layout.addWidget(self._build_header_bar())
         layout.addWidget(self._view)
 
         # Overlay that shows “松开插入图片” while image files are dragged over
@@ -1568,6 +1574,50 @@ class EmbeddedMarkTextView(QWidget):
         self._drop_hint_timer.setSingleShot(True)
         self._drop_hint_timer.setInterval(_DROP_REJECT_HINT_MS)
         self._drop_hint_timer.timeout.connect(self._auto_hide_drop_hint)
+
+    def _build_header_bar(self) -> QWidget:
+        """A slim header above the editor so the panel is always dismissible.
+
+        The right-side MarkText surface is shown automatically while authoring
+        chapters, and previously offered no visible close control.  This small
+        bar titles it and gives an unmistakable 收起 (×) button that collapses
+        the whole surface.
+        """
+        theme = get_theme()
+        bg = str(getattr(theme, "panel", "#1f2226") or "#1f2226")
+        fg = str(getattr(theme, "text_secondary", "#b8bec6") or "#b8bec6")
+        border = str(getattr(theme, "divider", "#3a3f46") or "#3a3f46")
+        bar = QWidget(self)
+        bar.setObjectName("marktext_header_bar")
+        bar.setFixedHeight(36)
+        bar.setStyleSheet(
+            f"QWidget#marktext_header_bar {{ background:{bg}; }}"
+            f"QLabel {{ color:{fg}; font-size:12px; }}"
+        )
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(12, 0, 8, 0)
+        row.setSpacing(8)
+        title = QLabel("实时排版预览", bar)
+        row.addWidget(title)
+        row.addStretch(1)
+        close_btn = QPushButton("收起 ×", bar)
+        close_btn.setObjectName("marktext_close_btn")
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setToolTip("收起右侧实时排版视图")
+        close_btn.setFixedHeight(24)
+        close_btn.setStyleSheet(
+            f"QPushButton#marktext_close_btn {{"
+            f"  background:{bg}; color:{fg}; border:1px solid {border};"
+            f"  border-radius:4px; padding:0 10px; font-size:12px;"
+            f"}}"
+            f"QPushButton#marktext_close_btn:hover {{"
+            f"  background:{border}; color:#ffffff;"
+            f"}}"
+        )
+        close_btn.clicked.connect(self.close_requested)
+        row.addWidget(close_btn)
+        self._marktext_close_button = close_btn
+        return bar
 
     def _auto_hide_drop_hint(self) -> None:
         self._show_drop_hint(False)

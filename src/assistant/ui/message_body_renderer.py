@@ -22,6 +22,7 @@ from src.qt_api import (
     QTextBlockFormat,
     QTextCursor,
     QTextEdit,
+    QTimer,
     Qt,
     Signal,
 )
@@ -88,6 +89,16 @@ class AssistantMessageBodyRenderer(QTextEdit):
         self.document().documentLayout().documentSizeChanged.connect(
             lambda _size: self._sync_height()
         )
+        # While the assistant is streaming, plain-text appends keep the view
+        # responsive; a throttled markdown re-parse turns the accumulated text
+        # into real formatted content (headings, lists, emphasis) so the user
+        # sees the document being typeset, not raw Markdown symbols.  The timer
+        # fires only when new deltas keep arriving and is stopped once the
+        # message is finalised.
+        self._live_format_timer = QTimer(self)
+        self._live_format_timer.setSingleShot(True)
+        self._live_format_timer.setInterval(180)
+        self._live_format_timer.timeout.connect(self._reformat_live_as_markdown)
         self.apply_semantic_theme()
 
     def set_markdown(self, text: str) -> None:
@@ -103,6 +114,7 @@ class AssistantMessageBodyRenderer(QTextEdit):
         self._prepare_document()
         self.setPlainText(self._source_text)
         self._apply_document_geometry()
+        self._arm_live_reformat()
 
     def append_live_text(self, text: str) -> None:
         delta = str(text or "")
@@ -114,6 +126,40 @@ class AssistantMessageBodyRenderer(QTextEdit):
         cursor.movePosition(QTextCursor.End)
         cursor.insertText(delta)
         self.setTextCursor(cursor)
+        self._arm_live_reformat()
+
+    def finalize_live_body(self) -> None:
+        """Stop live throttling and render the final body as Markdown."""
+        timer = getattr(self, "_live_format_timer", None)
+        if timer is not None:
+            timer.stop()
+        if self._live:
+            self._live = False
+            self._render_source_markdown()
+
+    def _arm_live_reformat(self) -> None:
+        """(Re)arm the throttled markdown re-parse during streaming."""
+        timer = getattr(self, "_live_format_timer", None)
+        if timer is not None and not timer.isActive():
+            timer.start()
+
+    def _reformat_live_as_markdown(self) -> None:
+        """Re-parse the streamed text into formatted content (throttled)."""
+        if not self._live or not self._source_text.strip():
+            return
+        was_at_end = self.verticalScrollBar().value() >= (
+            self.verticalScrollBar().maximum() - 8
+        ) if self.verticalScrollBar().maximum() > 0 else True
+        self._prepare_document()
+        self.setMarkdown(self._source_text)
+        self._apply_document_geometry()
+        if was_at_end:
+            self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+
+    def _render_source_markdown(self) -> None:
+        self._prepare_document()
+        self.setMarkdown(self._source_text)
+        self._apply_document_geometry()
 
     def apply_semantic_theme(self) -> None:
         self._prepare_document()
