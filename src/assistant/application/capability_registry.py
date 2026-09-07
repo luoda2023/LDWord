@@ -48,9 +48,19 @@ BIDDING_PROMPT_PROFILE_ID = "assistant.bidding-markdown.v1"
 OFFICIAL_PROMPT_PROFILE_ID = "assistant.official-document-json.v1"
 ENGINEERING_PROMPT_PROFILE_ID = "assistant.engineering-document-markdown.v1"
 
+# 统一的章节单位约定：所有会长文档 Markdown 写作模式共用，各 prompt 都从这里
+# 引用。措辞由 src/shared/engine/chapter_units.render_chapter_units_directive()
+# 从单一权威单位清单生成，保证提示里的单位词与识别器/测试永不漂移。
+from src.shared.engine.chapter_units import render_chapter_units_directive
+
+CHAPTER_UNITS_DIRECTIVE = render_chapter_units_directive()
+
+
 _NARRATIVE_SYSTEM_PROMPT = (
     "你是文档内容起草助手。输出 UTF-8 Markdown 正文，不要输出解释、代码围栏、"
     "OOXML、DOCX 或 base64。使用清晰标题、段落、列表和简单表格；不要虚构引用。"
+    "若文档分章/分篇组织，章节命名遵循本软件统一识别约定："
+    + CHAPTER_UNITS_DIRECTIVE
 )
 _BIDDING_SYSTEM_PROMPT = (
     "你是投标文件正文起草助手。仅根据用户明确提供的项目与企业资料生成 UTF-8 "
@@ -60,18 +70,23 @@ _BIDDING_SYSTEM_PROMPT = (
     "企业名称、项目名称、法定代表人必须分别保留为 {{@text:company_name}}、"
     "{{@text:project_name}}、{{@text:legal_person}}。不要输出 @img Token 或 Markdown "
     "图片；企业标志和公章槽位由 Form 在内容编译完成后从资料包本地确定性装配。"
+    "若文档分章/分篇组织，章节命名遵循本软件统一识别约定："
+    + CHAPTER_UNITS_DIRECTIVE
 )
 _ENGINEERING_SYSTEM_PROMPT = (
     "你是工程文档写作专家。按用户给定的项目阶段与文档类型，仅根据用户明确提供的项目资料生成 UTF-8 Markdown 正文，"
-    "不要输出解释、代码围栏、OOXML、DOCX 或 base64。严格按照工程行业章节习惯组织内容："
+    "不要输出解释、代码围栏、OOXML 或 DOCX。严格按照工程行业章节习惯组织内容："
     "决策立项阶段用项目建议书/可行性研究报告/投资估算结构；设计报批阶段用初步设计说明/设计概算/施工图说明；"
     "招投标与合同阶段用招标/投标/合同示范文本结构；施工实施阶段用施工组织设计/专项施工方案/技术交底/工艺标准结构；"
     "竣工结算阶段用工程结算书/结算审计/签证索赔结构；贯穿阶段用造价分析/目标成本测算结构。"
-    "章节编号遵循行业惯例（章用第X章或第一部分，节用 x.x，条目用 1）2）等）。"
-    "项目名称、地点、规模、投资额、建设单位、设计单位等必须以 {{@text:project_name}}、{{@text:project_location}}、"
+    "章节编号遵循行业惯例，并按本软件统一识别约定书写："
+    + CHAPTER_UNITS_DIRECTIVE
+    + "项目名称、地点、规模、投资额、建设单位、设计单位等必须以 {{@text:project_name}}、{{@text:project_location}}、"
     "{{@text:project_scale}}、{{@text:invest_estimate}}、{{@text:owner_org}}、{{@text:design_org}} 等占位形式保留待填槽位，"
     "不得虚构具体数值、图纸编号、审批文号、价格、资质或法律结论；缺失事实用“待补充”明确标记。"
-    "不得输出 @img Token 或 Markdown 图片，图表由 Form 从资料包本地装配。"
+    "如需在文档中插入示意图、流程图、图表等真实图片，可以用 Markdown 图片语法直接内联 base64 数据"
+    "（形如 ![说明](data:image/png;base64,...)），系统会自动把图片落地为文件并嵌入 DOCX；"
+    "无法用 base64 表达或无需真实图片的位置，用【图：说明】占位符标记，不要省略。"
     "若用户未说明工程阶段或文档类型，先输出最合适的默认大纲并提示确认，不要臆造项目事实。"
 )
 _OFFICIAL_SYSTEM_PROMPT = (
@@ -686,6 +701,7 @@ def _delivery_contract(
 
 __all__ = [
     "BIDDING_PROMPT_PROFILE_ID",
+    "CHAPTER_UNITS_DIRECTIVE",
     "ENGINEERING_PROMPT_PROFILE_ID",
     "EXAM_PROMPT_PROFILE_ID",
     "NARRATIVE_PROMPT_PROFILE_ID",

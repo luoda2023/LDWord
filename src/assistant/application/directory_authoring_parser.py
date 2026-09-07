@@ -96,7 +96,8 @@ _KIND_HINT_TERMS = (
     "交底",
 )
 _CHAPTER_RE = re.compile(
-    r"^\s*(?:第\s*[一二三四五六七八九十百千万0-9１-９]+\s*[章篇部分卷]|"
+    # 统一中文章节约定：第X(单元|部分|章|篇|部|卷|分)=顶级章节；节为章内小节不在此列。
+    r"^\s*(?:第\s*[一二三四五六七八九十百千万0-9１-９]+\s*(?:单元|部分|[章篇部卷分])|"
     r"[一二三四五六七八九十百千万]+[、.．]|[0-9]+[、.．]\s*|[（(]?[一二三四五六七八九十]+[)）]\s*)"
 )
 _DEEP_PREFIX_RE = re.compile(r"^(?:[0-9]+(?:\.[0-9]+)*[、.．]?\s*|[一二三四五六七八九十]+[、.．]\s*)")
@@ -156,7 +157,10 @@ def parse_directory_attachments(
             continue
         path = Path(path_text).expanduser()
         suffix = path.suffix.casefold()
-        if suffix not in {".md", ".markdown", ".txt", ".docx", ".doc", ".wps"}:
+        if suffix not in {
+            ".md", ".markdown", ".txt", ".docx", ".doc", ".wps",
+            ".xlsx", ".xlsm", ".pptx", ".pptm",
+        }:
             continue
         if not path.is_file():
             continue
@@ -165,6 +169,15 @@ def parse_directory_attachments(
             try:
                 text = path.read_text(encoding="utf-8-sig", errors="replace")
             except OSError:
+                continue
+        elif suffix in {".xlsx", ".xlsm", ".pptx", ".pptm"}:
+            try:
+                from src.assistant.application.office_outline_source import (
+                    office_text_for_outline,
+                )
+
+                text = office_text_for_outline(path)
+            except Exception:  # noqa: BLE001 - unreadable office source
                 continue
         else:
             try:
@@ -226,11 +239,13 @@ def parse_authoring_payload(
 
 
 _TOP_CHAPTER_RE = re.compile(
-    r"^(?:第\s*[一二三四五六七八九十百千万0-9１-９]+\s*[章篇部分卷]|"
+    r"^(?:第\s*[一二三四五六七八九十百千万0-9１-９]+\s*(?:单元|部分|[章篇部卷分])|"
     r"[一二三四五六七八九十百千万]+[、.．]|[（(]?[一二三四五六七八九十]+[)）])"
 )
 _SUB_HEADING_RE = re.compile(r"^(?:[0-9]+(?:\.[0-9]+)*\s*[、.．]?|[（(][0-9]+[)）])\s*")
-_PLAIN_CHAPTER_RE = re.compile(r"^第\s*[一二三四五六七八九十百千万0-9１-９]+\s*[章篇部分卷]")
+_PLAIN_CHAPTER_RE = re.compile(
+    r"^第\s*[一二三四五六七八九十百千万0-9１-９]+\s*(?:单元|部分|[章篇部卷分])"
+)
 
 
 def _is_top_chapter(text: str) -> bool:

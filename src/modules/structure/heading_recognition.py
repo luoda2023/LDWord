@@ -38,8 +38,17 @@ LEVEL_PATTERNS: list[tuple[int, re.Pattern[str]]] = [
     (3, re.compile(r"^\d+\.\d+\.\d+[\s\u3000\t]")),
     (2, re.compile(r"^\d+\.\d+[\s\u3000\t]")),
     (1, re.compile(r"^\d+[\s\u3000\t]")),
-    (1, re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+[\u7ae0\u8282\u7bc7][\s\u3000]")),
-    (2, re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+\u8282[\s\u3000]")),
+    # 统一中文章节约定：第X(单元|部分|章|篇|部|卷|分)=顶级(H1)，第X节=章内小节(H2)
+    (
+        1,
+        re.compile(
+            r"^\u7b2c\s*[\u4e00-\u9fff\d]+\s*(?:\u5355\u5143|\u90e8\u5206|[\u7ae0\u7bc7\u90e8\u5377\u5206])[\s\u3000]"
+        ),
+    ),
+    (
+        2,
+        re.compile(r"^\u7b2c\s*[\u4e00-\u9fff\d]+\s*\u8282[\s\u3000]"),
+    ),
     (2, re.compile(r"^[\u4e00-\u9fff]{1,4}[、.)）][\s\u3000]?")),
     (3, re.compile(r"^[（(][\u4e00-\u9fff]{1,4}[)）]")),
     (4, re.compile(r"^\d+[)）][\s\u3000\t]")),
@@ -50,7 +59,9 @@ LEVEL_PATTERNS: list[tuple[int, re.Pattern[str]]] = [
 
 BODY_START_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"^#{1,6}\s+"),
-    re.compile(r"^\u7b2c[\u4e00-\u9fff\d]+[\u7ae0\u8282\u7bc7]"),
+    re.compile(
+        r"^\u7b2c\s*[\u4e00-\u9fff\d]+\s*(?:\u5355\u5143|\u90e8\u5206|[\u7ae0\u7bc7\u90e8\u5377\u5206\u8282])"
+    ),
     re.compile(r"^\d+[\.、．]\S"),
     re.compile(r"^\d+\s+\S"),
 ]
