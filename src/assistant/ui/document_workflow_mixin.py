@@ -1611,16 +1611,14 @@ class AssistantDocumentWorkflowMixin:
                     right.append_chapter_delta(int(index or 0), str(feed))
                 except (OSError, ValueError, RuntimeError):
                     pass
-        if right is not None and feed:
-            # The right view is parked on the chapter being written: keep the
-            # left conversation pinned to the latest live text so both panes
-            # scroll together.
+        if feed:
+            # 逐章写作期间始终把对话区钉在最新正文：无论用户此前是否滚动
+            # 离开底部，每一行新正文都会自动滚回让正在写的文字保持可见。
+            # (layout settle timer 在静止 ~80ms 后解除钉住，所以流式一停
+            # 用户即可自由翻阅已写内容。)
             scroll = getattr(self, "_schedule_stream_scroll_to_bottom", None)
             if scroll is not None:
                 scroll()
-        elif hasattr(self, "_is_near_latest") and self._is_near_latest():
-            if hasattr(self, "_schedule_stream_scroll_to_bottom"):
-                self._schedule_stream_scroll_to_bottom()
         if rest:
             timer = getattr(self, "_chapter_reveal_timer", None)
             if timer is not None and not timer.isActive():
