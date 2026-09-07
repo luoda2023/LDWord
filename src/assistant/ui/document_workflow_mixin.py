@@ -1314,6 +1314,21 @@ class AssistantDocumentWorkflowMixin:
         dock_present = getattr(self, "_dock_outline_present", None)
         if dock_present is not None:
             dock_present(list(titles or ()))
+        # 默认打开右侧 Markdown 编辑视图并停在第一章：用户确认目录后就要
+        # 逐章看 AI 写作，右侧编辑器应当直接可见（可随时点“收起”关掉），
+        # 不需要用户再手动点开。后续点章节浏览不会再次自动弹出。
+        marktext_view = getattr(self, "_marktext_view", None)
+        if marktext_view is not None and not marktext_view.isVisible():
+            try:
+                self._refresh_marktext_view()
+            except (OSError, ValueError, RuntimeError):
+                pass
+            marktext_view.show()
+            marktext_view.raise_()
+            try:
+                marktext_view.set_active_chapter(1)
+            except (AttributeError, TypeError, ValueError):
+                pass
 
     def _hide_chapter_board(self) -> None:
         board = getattr(self, "_chapter_board", None)
