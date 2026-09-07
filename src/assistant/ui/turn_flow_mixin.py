@@ -1477,8 +1477,17 @@ class AssistantTurnFlowMixin(
             )
         self._composer.set_submission_gate(gate)
         self._empty_input.set_submission_gate(gate)
-        self._composer.set_busy(owns_local_operation or owns_turn)
+        busy = owns_local_operation or owns_turn
+        self._composer.set_busy(busy)
         self._empty_input.set_busy(False)
+        # A dedicated stop button must stay visible while this session is
+        # generating so cancellation is unmistakable (the composer's own control
+        # morphs into a small square icon which is easy to miss).  When another
+        # session owns the running operation, ``busy`` is False and we hide it
+        # (this page cannot cancel that other session's work).
+        stop_button = getattr(self, "_stop_button", None)
+        if stop_button is not None:
+            stop_button.setVisible(busy)
 
     def _sync_turn_worker_alias(self) -> None:
         session_id = (
