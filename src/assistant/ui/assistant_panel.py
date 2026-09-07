@@ -496,6 +496,17 @@ class AssistantPanel(
         if self._embedded:
             header.addWidget(self._embedded_session_combo)
         header.addStretch(1)
+        # A dedicated, unmistakable red stop control pinned to the top-right of
+        # the assistant panel.  It is driven by turn_flow_mixin
+        # (_sync_composer_busy_state) and shown only while the active session is
+        # actually generating, so it never clutters idle screens.
+        self._stop_button = QPushButton("停止生成", self._header_widget)
+        self._stop_button.setObjectName("assistant_stop")
+        self._stop_button.setCursor(Qt.PointingHandCursor)
+        self._stop_button.hide()
+        apply_button_variant(self._stop_button, "danger")
+        header.addWidget(self._stop_button)
+        header.addSpacing(6)
         header.addWidget(self._header_more_button)
         header.addWidget(self._context_toggle)
         layout.addWidget(self._header_widget)
@@ -604,20 +615,6 @@ class AssistantPanel(
         self._provider_combo = self._composer._model_combo
         self._provider_settings_button = self._composer._model_settings_button
         composer_layout.addWidget(self._composer)
-
-        # A dedicated, unmistakable stop control shown while this session is
-        # generating (driven by turn_flow_mixin._sync_composer_busy_state).  It
-        # sits right beside the composer instead of relying on the composer's
-        # own send control, which only morphs into a small square icon.
-        self._stop_button = QPushButton("停止生成", composer_host)
-        self._stop_button.setObjectName("assistant_stop")
-        self._stop_button.setCursor(Qt.PointingHandCursor)
-        self._stop_button.hide()
-        # Danger variant so the dedicated stop reads as a clear, red abort
-        # control (kept in sync by panel_theme_mixin across theme changes).
-        apply_button_variant(self._stop_button, "danger")
-        composer_layout.addWidget(self._stop_button)
-        composer_layout.addSpacing(12)
         composer_layout.addStretch(1)
         layout.addWidget(composer_host)
         return page
