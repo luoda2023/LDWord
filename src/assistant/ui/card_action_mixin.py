@@ -7,6 +7,7 @@ from pathlib import Path
 
 from src.assistant.application.active_document_continuation import (
     ACTION_APPROVE_EXECUTE,
+    ACTION_CONFIRM_OUTLINE_AND_GENERATE,
     ACTION_GENERATE_CONTENT_DRAFT,
     ACTION_OPEN_ARTIFACT,
     ACTION_OPEN_CONTENT_DRAFT,
@@ -275,6 +276,7 @@ class AssistantCardActionMixin:
             )
         )
         if local_operation_running and action_id in {
+            ACTION_CONFIRM_OUTLINE_AND_GENERATE,
             ACTION_GENERATE_CONTENT_DRAFT,
             ACTION_REVISE_CONTENT_DRAFT,
             ACTION_PREFLIGHT,
@@ -323,6 +325,12 @@ class AssistantCardActionMixin:
             self._run_preflight(session, plan)
         elif action_id == ACTION_GENERATE_CONTENT_DRAFT:
             self._start_content_generation(session, plan)
+        elif action_id == ACTION_CONFIRM_OUTLINE_AND_GENERATE:
+            self._start_content_generation(
+                session,
+                plan,
+                outline_confirmed=True,
+            )
         elif action_id == ACTION_REVISE_CONTENT_DRAFT:
             self._revise_content_draft(
                 session,

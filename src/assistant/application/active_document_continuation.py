@@ -33,6 +33,7 @@ from src.assistant.contracts.jobs import (
 )
 
 ACTION_APPROVE_EXECUTE = "approve_execute"
+ACTION_CONFIRM_OUTLINE_AND_GENERATE = "confirm_outline_then_generate"
 ACTION_GENERATE_CONTENT_DRAFT = "generate_content_draft"
 ACTION_OPEN_ARTIFACT = "open_artifact"
 ACTION_OPEN_OUTPUT_FOLDER = "open_output_folder"
@@ -45,6 +46,7 @@ ACTION_RESTORE_PREVIOUS_DRAFT = "restore_previous_draft"
 DOCUMENT_ACTION_IDS = frozenset(
     {
         ACTION_APPROVE_EXECUTE,
+        ACTION_CONFIRM_OUTLINE_AND_GENERATE,
         ACTION_GENERATE_CONTENT_DRAFT,
         ACTION_OPEN_ARTIFACT,
         ACTION_OPEN_OUTPUT_FOLDER,
@@ -58,6 +60,18 @@ DOCUMENT_ACTION_IDS = frozenset(
 
 _ACTION_STATUSES = {
     ACTION_APPROVE_EXECUTE: frozenset({JOB_NEEDS_EXECUTION_APPROVAL}),
+    # Directory confirmation surfaces only while the plan is ready and no
+    # generation has run yet. Reuse the generate set so the confirm card can
+    # still be shown after a cancelled/failed attempt (regenerate path).
+    ACTION_CONFIRM_OUTLINE_AND_GENERATE: frozenset(
+        {
+            JOB_PLAN_READY,
+            JOB_CONTENT_GENERATION_READY,
+            JOB_CONTENT_DRAFT_READY,
+            JOB_FAILED,
+            JOB_CANCELLED,
+        }
+    ),
     ACTION_GENERATE_CONTENT_DRAFT: frozenset(
         {
             JOB_PLAN_READY,
@@ -365,6 +379,7 @@ def validate_active_document_action(
         ACTION_PREFLIGHT,
         ACTION_RETRY_PREFLIGHT,
         ACTION_GENERATE_CONTENT_DRAFT,
+        ACTION_CONFIRM_OUTLINE_AND_GENERATE,
         ACTION_APPROVE_EXECUTE,
         ACTION_REVISE_CONTENT_DRAFT,
         ACTION_RESTORE_PREVIOUS_DRAFT,
@@ -374,9 +389,10 @@ def validate_active_document_action(
     ):
         return "assistant_document_action_plan_stale"
 
-    if normalized_action == ACTION_GENERATE_CONTENT_DRAFT and (
-        not plan.generation_required or plan.blocking_issues
-    ):
+    if normalized_action in {
+        ACTION_GENERATE_CONTENT_DRAFT,
+        ACTION_CONFIRM_OUTLINE_AND_GENERATE,
+    } and (not plan.generation_required or plan.blocking_issues):
         return "assistant_content_generation_not_available"
     if normalized_action == ACTION_REVISE_CONTENT_DRAFT:
         source = plan.production_input_artifact
@@ -439,6 +455,7 @@ def _is_final_output_request(compact: str) -> bool:
 
 __all__ = [
     "ACTION_APPROVE_EXECUTE",
+    "ACTION_CONFIRM_OUTLINE_AND_GENERATE",
     "ACTION_GENERATE_CONTENT_DRAFT",
     "ACTION_OPEN_ARTIFACT",
     "ACTION_OPEN_CONTENT_DRAFT",

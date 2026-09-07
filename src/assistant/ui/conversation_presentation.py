@@ -37,6 +37,7 @@ _RIGHT_FLOW_ACTION_IDS = frozenset(
         "approve_content_disclosure",
         "approve_execute",
         "approve_provider_disclosure",
+        "confirm_outline_then_generate",
         "focus_continuation_response",
         "preflight",
     }
@@ -331,6 +332,8 @@ def action_icon_name(
         if "下一步" in normalized_label or "继续" in normalized_label:
             return "chevron-right"
         return "send"
+    if normalized_id == "confirm_outline_then_generate":
+        return "check"
     if normalized_id == "generate_content_draft":
         return "refresh-ccw" if normalized_label.startswith("重新") else "sparkles"
     if normalized_id == "preflight":
@@ -481,6 +484,7 @@ def project_interaction(
     raw = dict(payload or {})
     labels = {
         "question": "需要补充",
+        "outline_confirm": "确认章节目录",
         "disclosure": "数据披露",
         "permission": "权限确认",
         "plan_candidate": "下一步",
@@ -845,6 +849,15 @@ def interaction_is_active(
             and str(plan.get("plan_id") or "") == str(payload.get("plan_id") or "")
             and int(plan.get("revision") or 0) == int(payload.get("revision") or 0)
             and status == "plan_ready"
+        )
+    if kind == "outline_confirm":
+        # The directory-confirm card stays actionable only while the plan is
+        # ready and no content generation attempt has started for it.
+        return bool(
+            plan
+            and str(plan.get("plan_id") or "") == str(payload.get("plan_id") or "")
+            and int(plan.get("revision") or 0) == int(payload.get("revision") or 0)
+            and status in {"plan_ready", "content_generation_ready"}
         )
     if kind == "approval":
         preflight = job.get("preflight")

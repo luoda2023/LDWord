@@ -15,6 +15,9 @@ from src.assistant.adapters.content_generation_adapter import (
     generated_draft_source_ref,
     is_generated_draft,
 )
+from src.assistant.application.active_document_continuation import (
+    ACTION_CONFIRM_OUTLINE_AND_GENERATE,
+)
 from src.assistant.application.capability_registry import (
     ENGINEERING_PROMPT_PROFILE_ID,
 )
@@ -890,6 +893,7 @@ class AssistantDocumentWorkflowMixin:
         revision_context_text: str = "",
         revision_context_ref: str = "",
         include_plan_materials: bool = True,
+        outline_confirmed: bool = False,
     ) -> None:
         if self._content_worker is not None and self._content_worker.is_running:
             return
@@ -900,6 +904,60 @@ class AssistantDocumentWorkflowMixin:
                 {"plan_id": plan.plan_id, "revision": plan.revision}
             )
             return
+        is_revision_run = bool(str(revision_context_text or "").strip())
+        # 材料披露只会在目录确认之后出现（此门更靠前并先返回），所以带
+        # approved_disclosure 的再入意味着目录已确认，跳过二次确认门。
+        if (
+            not outline_confirmed
+            and not approved_disclosure
+            and not is_revision_run
+        ):
+            # 多章节起草：先让用户核对解析出的章节目录，点“确认目录”后才真正
+            # 开始逐章写正文。目录在确认前只出现在这张确认卡片里，不提前写入
+            # 左侧章节目录列表（确认后由下方的 _prepare_chapter_board 写入）。
+            engineering_probe = _resolve_engineering_request_outline(
+                plan.generation_contract.prompt_profile_id,
+                plan.intent,
+                material_refs=tuple(dict(item) for item in plan.material_refs),
+            )
+            probe_titles = tuple(
+                str(item).strip()
+                for item in engineering_probe[2]
+                if str(item).strip()
+            )
+            if probe_titles:
+                numbered = "\n".join(
+                    f"{index}. {title}"
+                    for index, title in enumerate(probe_titles, start=1)
+                )
+                updated = self._coordinator.append_message(
+                    session,
+                    AssistantMessage.interaction(
+                        role=ROLE_ASSISTANT,
+                        interaction_type="outline_confirm",
+                        title="请确认章节目录",
+                        body=(
+                            f"按你的要求整理出 {len(probe_titles)} 章，请核对。"
+                            f"确认后目录会进入左侧章节目录列表，随后逐章写正文：\n\n{numbered}"
+                        ),
+                        payload={
+                            "plan_id": plan.plan_id,
+                            "revision": plan.revision,
+                            "actions": [
+                                {
+                                    "id": ACTION_CONFIRM_OUTLINE_AND_GENERATE,
+                                    "label": "确认目录，开始写正文",
+                                    "variant": "primary",
+                                }
+                            ],
+                        },
+                    ),
+                    turn_status=TURN_COMPLETED,
+                )
+                self._active_session = updated
+                self._render_active_session()
+                self._refresh_session_list(select_session_id=updated.session_id)
+                return
         if (
             not str(revision_context_text or "").strip()
             and str(plan.scene_ref.get("generation_mode") or "")
