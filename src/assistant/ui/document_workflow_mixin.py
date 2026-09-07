@@ -1342,9 +1342,7 @@ class AssistantDocumentWorkflowMixin:
         bench = getattr(self, "_chapter_workbench", None)
         if bench is not None and bench.isVisible():
             current = int(getattr(bench, "_current_index", 0) or 0)
-            if phase == "delta" and current == int(index) and str(text or ""):
-                bench.editor.append_raw(str(text))
-            elif phase == "done":
+            if phase == "done":
                 try:
                     entry = self._cache.update_state(
                         session_id, int(index), "done", rescan_score=True
@@ -1612,6 +1610,13 @@ class AssistantDocumentWorkflowMixin:
                     right.append_chapter_delta(int(index or 0), str(feed))
                 except (OSError, ValueError, RuntimeError):
                     pass
+            if not force:
+                bench_ed = self._workbench_editor_for(index)
+                if bench_ed is not None:
+                    try:
+                        bench_ed.append_raw(str(feed))
+                    except (OSError, ValueError, RuntimeError):
+                        pass
         if feed:
             # 逐章写作期间始终把对话区钉在最新正文：无论用户此前是否滚动
             # 离开底部，每一行新正文都会自动滚回让正在写的文字保持可见。
@@ -1653,6 +1658,24 @@ class AssistantDocumentWorkflowMixin:
         if active != int(index or 0):
             return None
         return marktext_view
+
+    def _workbench_editor_for(self, index: int):
+        """The left chapter workbench editor when it should receive this
+        chapter's stream: visible and parked on the chapter being written.
+
+        Returns the editor widget or ``None`` when the workbench is hidden
+        or showing a different chapter.
+        """
+        bench = getattr(self, "_chapter_workbench", None)
+        if bench is None or not bench.isVisible():
+            return None
+        try:
+            current = int(getattr(bench, "_current_index", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        if current != int(index or 0):
+            return None
+        return getattr(bench, "editor", None)
 
     def _flush_chapter_reveal(self) -> None:
         """Force-feed buffered reveal text before the chapter widget ends."""
