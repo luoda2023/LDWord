@@ -97,3 +97,17 @@ Desktop.ini
 /.agents/
 /.superpowers/
 _backup_stage_enhance_*
+
+# Excluded third-party source tree + bundled build products
+# (marktext-develop is a 346 MB upstream checkout; muya bundle is built lazily).
+marktext-develop/
+LDWord_Setup.exe
+
+# Temporary / scratch / session-run artifacts (kept out of version control)
+$null
+/.freebuff/
+/_*.txt
+/_smoke_*/
+/_test_*/
+/_smoke*.txt
+/_test*.txt
