@@ -181,7 +181,9 @@ class MainWindow(QMainWindow):
     WINDOW_TITLE = APP_DISPLAY_NAME_FULL
     MIN_WIDTH = 800
     MIN_HEIGHT = 540
-    SHADOW_MARGIN = 12
+    # 窗口四周不留外发光阴影边距：半透明阴影带在桌面上表现为一圈白边
+    # （用户明确要求去掉），内容直接铺满窗口。
+    SHADOW_MARGIN = 0
 
     def __init__(
         self,
@@ -233,6 +235,12 @@ class MainWindow(QMainWindow):
 
         self._shadow = QGraphicsDropShadowEffect(self._shadow_surface)
         self._shadow_surface.setGraphicsEffect(self._shadow)
+
+        # 阴影层常驻隐藏：外发光会在窗口四周形成半透明浅色带（用户视为
+        # 白边），保持隐藏让容器直接铺满窗口。_apply_normal_visuals 与
+        # _apply_theme 中的恢复路径同样保持隐藏。
+        self._shadow_surface.hide()
+        self._shadow.setEnabled(False)
 
         shell_layout.addWidget(self._container, 0, 0)
         self._shadow_surface.stackUnder(self._container)
@@ -1311,10 +1319,8 @@ class MainWindow(QMainWindow):
         if self.isMaximized():
             self._apply_maximized_visuals()
         else:
-            self._shadow_surface.configure_surface(
-                background=t.bg_window,
-                radius=t.shell_radius,
-            )
+            self._shadow_surface.hide()
+            self._shadow.setEnabled(False)
             self._container.configure_surface(
                 background=t.bg_window,
                 radius=t.shell_radius,
@@ -1324,9 +1330,8 @@ class MainWindow(QMainWindow):
             cl = self._container.layout()
             if cl is not None:
                 cl.setContentsMargins(1, 1, 1, 1)
-        self._shadow.setBlurRadius(16)
-        self._shadow.setColor(QColor(0, 0, 0, 35))
-        self._shadow.setOffset(0, 2)
+        # 注：旧版此处配置 16px 外发光阴影（blur/offset/color），因产生
+        # 四周半透明白边已整体移除，阴影层常驻禁用。
 
     def _apply_maximized_visuals(self):
         shell = self.centralWidget()
@@ -1348,12 +1353,10 @@ class MainWindow(QMainWindow):
             m = self.SHADOW_MARGIN
             shell.layout().setContentsMargins(m, m, m, m)
         theme = get_theme()
-        self._shadow_surface.show()
-        self._shadow_surface.configure_surface(
-            background=theme.bg_window,
-            radius=theme.shell_radius,
-        )
-        self._shadow.setEnabled(True)
+        # 外发光阴影层保持隐藏/禁用：半透明阴影带在窗口四周表现为一圈
+        # 白边（用户明确要求去掉），从最大化还原后同样不恢复。
+        self._shadow_surface.hide()
+        self._shadow.setEnabled(False)
         self._container.configure_surface(
             background=theme.bg_window,
             radius=theme.shell_radius,
