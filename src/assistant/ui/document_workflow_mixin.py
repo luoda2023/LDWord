@@ -1255,6 +1255,7 @@ class AssistantDocumentWorkflowMixin:
             reveal_timer.stop()
         self._chapter_reveal_pending = ""
         self._chapter_reveal_widget = None
+        self._chapter_reveal_index = 0
         board.set_outline(list(titles or ()))
         board.set_collapsed(False)
         board.show_board()
@@ -1322,21 +1323,12 @@ class AssistantDocumentWorkflowMixin:
                 self._cache.append_chapter(session_id, int(index), str(text))
             except (OSError, ValueError, RuntimeError):
                 pass
-            # Stream the raw delta into the embedded right-side MarkText view
-            # so the user watches the chapter being written live.
-            marktext_view = getattr(self, "_marktext_view", None)
-            if marktext_view is not None and marktext_view.isVisible():
-                marktext_view.append_chapter_delta(int(index), str(text))
-                # When the right-side view is parked on the streamed chapter,
-                # keep the left conversation pinned to the latest live text so
-                # both panes scroll together.
-                active_chapter = int(
-                    marktext_view.bridge.active_chapter() or 0
-                )
-                if active_chapter == int(index):
-                    scroll = getattr(self, "_schedule_stream_scroll_to_bottom", None)
-                    if scroll is not None:
-                        scroll()
+            # The right-side MarkText view receives this same stream through
+            # the line-by-line reveal queue (_pump_chapter_reveal mirrors each
+            # revealed line via _marktext_view_for) so its tables grow row by
+            # row in lock-step with the left message.  No direct whole-chunk
+            # append here — a large upstream chunk would jump the whole table
+            # in at once.
         # Materialise inline data-URL images as soon as the chapter finishes,
         # independent of which panes are visible, so the right-side editor (and
         # any later export) always sees relative image paths instead of raw
@@ -1543,24 +1535,27 @@ class AssistantDocumentWorkflowMixin:
         if buffers is not None:
             buffers[index] = buffers.get(index, "") + delta
         accumulated = int(self._chapter_chars.get(index, 0))
-        if message is None or not delta:
-            if message is None:
-                self._discard_chapter_reveal()
+        if not delta:
             return
-        if id(message) in getattr(self, "_chapter_done_ids", set()):
+        # The reveal queue serves both panes.  Each side is independent: the
+        # left live message (may not be laid out / visible on the very first
+        # frame) and the right-side rich-text view (only while it is visible
+        # and parked on this chapter).  If neither consumer is alive the whole
+        # delta is dropped from the UI queue — the body is already cached and
+        # buffered above, so nothing is ever lost.
+        left_done = (
+            message is None
+            or id(message) in getattr(self, "_chapter_done_ids", set())
+        )
+        right = self._marktext_view_for(index)
+        if left_done and right is None:
             self._discard_chapter_reveal()
             return
-        if not message.isVisible():
-            self._discard_chapter_reveal()
-            return
-        # Buffer the whole delta and reveal it line by line: the first
-        # completed line renders immediately, remaining lines follow on the
-        # reveal tick.  Content is still fully cached/buffered above, so this
-        # only paces the visible live widget.
+        self._chapter_reveal_index = int(index)
+        self._chapter_reveal_widget = message
         self._chapter_reveal_pending = (
             getattr(self, "_chapter_reveal_pending", "") + delta
         )
-        self._chapter_reveal_widget = message
         self._pump_chapter_reveal(
             index=index,
             accumulated=accumulated,
@@ -1574,25 +1569,26 @@ class AssistantDocumentWorkflowMixin:
         accumulated: int,
         force: bool,
     ) -> None:
-        """Feed at most one completed line of buffered delta to the live widget.
+        """Feed at most one completed line of buffered delta to each pane.
 
-        ``force`` feeds everything at once (used right before a chapter is
-        finalised so no text is left unplayed).  When buffered text remains,
-        the single-shot reveal timer continues the typewriter cadence.
+        ``force`` feeds everything to the left message at once (used right
+        before a chapter is finalised so no text is left unplayed); the right
+        view is never force-fed because ``done`` pushes the final body
+        wholesale.  When buffered text remains, the single-shot reveal timer
+        continues the typewriter cadence for both panes in lock-step.
         """
-        message = getattr(self, "_chapter_live_widget", None)
         pending = getattr(self, "_chapter_reveal_pending", "")
-        if (
-            message is None
-            or self._chapter_reveal_widget is not message
-            or not pending
-        ):
-            self._discard_chapter_reveal()
+        if not pending:
             return
-        if id(message) in getattr(self, "_chapter_done_ids", set()):
-            self._discard_chapter_reveal()
-            return
-        if not message.isVisible():
+        message = getattr(self, "_chapter_live_widget", None)
+        left_alive = bool(
+            message is not None
+            and self._chapter_reveal_widget is message
+            and id(message)
+            not in getattr(self, "_chapter_done_ids", set())
+        )
+        right = self._marktext_view_for(index) if not force else None
+        if not left_alive and right is None:
             self._discard_chapter_reveal()
             return
         if force:
@@ -1604,11 +1600,25 @@ class AssistantDocumentWorkflowMixin:
             else:
                 feed, rest = pending[: boundary + 1], pending[boundary + 1 :]
         self._chapter_reveal_pending = rest
-        message.append_live_delta(
-            delta=feed,
-            status_text=f"正在撰写第 {index} 章 · 已写约 {accumulated} 字",
-        )
-        if hasattr(self, "_is_near_latest") and self._is_near_latest():
+        if feed:
+            if left_alive:
+                message.append_live_delta(
+                    delta=feed,
+                    status_text=f"正在撰写第 {index} 章 · 已写约 {accumulated} 字",
+                )
+            if right is not None:
+                try:
+                    right.append_chapter_delta(int(index or 0), str(feed))
+                except (OSError, ValueError, RuntimeError):
+                    pass
+        if right is not None and feed:
+            # The right view is parked on the chapter being written: keep the
+            # left conversation pinned to the latest live text so both panes
+            # scroll together.
+            scroll = getattr(self, "_schedule_stream_scroll_to_bottom", None)
+            if scroll is not None:
+                scroll()
+        elif hasattr(self, "_is_near_latest") and self._is_near_latest():
             if hasattr(self, "_schedule_stream_scroll_to_bottom"):
                 self._schedule_stream_scroll_to_bottom()
         if rest:
@@ -1617,20 +1627,33 @@ class AssistantDocumentWorkflowMixin:
                 timer.start()
 
     def _on_chapter_reveal_tick(self) -> None:
-        """Reveal tick: feed the next buffered line to the live widget."""
-        message = self._chapter_reveal_widget
-        index = 0
-        if message is not None:
-            try:
-                index = int(getattr(message, "_chapter_index", 0) or 0)
-            except (TypeError, ValueError):
-                index = 0
+        """Reveal tick: feed the next buffered line to each live pane."""
+        index = int(getattr(self, "_chapter_reveal_index", 0) or 0)
         accumulated = int(getattr(self, "_chapter_chars", {}).get(index, 0))
         self._pump_chapter_reveal(
             index=index,
             accumulated=accumulated,
             force=False,
         )
+
+    def _marktext_view_for(self, index: int) -> object | None:
+        """The right-side rich-text view when it should receive this chapter's
+        stream: visible and parked on the chapter being written.
+
+        While hidden the view receives nothing (its chapter buffer starts
+        clean on the next visible run); the final body is pushed wholesale on
+        ``done`` by ``_finish_chapter_live_message``.
+        """
+        marktext_view = getattr(self, "_marktext_view", None)
+        if marktext_view is None or not marktext_view.isVisible():
+            return None
+        try:
+            active = int(marktext_view.bridge.active_chapter() or 0)
+        except (AttributeError, TypeError, ValueError):
+            return None
+        if active != int(index or 0):
+            return None
+        return marktext_view
 
     def _flush_chapter_reveal(self) -> None:
         """Force-feed buffered reveal text before the chapter widget ends."""
@@ -1662,6 +1685,7 @@ class AssistantDocumentWorkflowMixin:
             timer.stop()
         self._chapter_reveal_pending = ""
         self._chapter_reveal_widget = None
+        self._chapter_reveal_index = 0
 
     def _finish_chapter_live_message(self, index: int, chars: int) -> None:
         # Play any buffered-but-unrevealed lines before the widget is closed
@@ -1682,6 +1706,27 @@ class AssistantDocumentWorkflowMixin:
             self._append_chapter_message_to_history(index, text)
         if buffers is not None:
             buffers.pop(index, None)
+        # On 'done' push the chapter's final (image-materialised) body into the
+        # right-side rich-text view wholesale, so it ends complete whether the
+        # user had it open during the run or opened it mid-run (the stream only
+        # reaches it while visible).
+        marktext_view = getattr(self, "_marktext_view", None)
+        if marktext_view is not None and marktext_view.isVisible():
+            active = getattr(self, "_active_session", None)
+            session_id = (
+                getattr(self, "_workbench_session_id", "")
+                or (active.session_id if active is not None else "")
+            )
+            final_body = ""
+            try:
+                final_body = self._cache.read_chapter(session_id, int(index))
+            except (OSError, ValueError, RuntimeError):
+                final_body = ""
+            if str(final_body or "").strip():
+                try:
+                    marktext_view.refresh_chapter(int(index), str(final_body))
+                except (OSError, ValueError, RuntimeError):
+                    pass
         if hasattr(self, "_begin_follow_latest_layout_settle"):
             self._begin_follow_latest_layout_settle()
 
