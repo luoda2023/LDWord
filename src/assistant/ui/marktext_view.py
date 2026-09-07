@@ -619,6 +619,32 @@ window.onerror = function(msg, src, line, col, err) {
   let chapterMarkdown = {};    // index -> markdown body
   let muya = null;
   let suppressChange = false;
+  // Snapshots of recent programmatic setMarkdown payloads. Muya fires its
+  // 'change' event from a MutationObserver, and that observer callback can run
+  // hundreds of ms after the synchronous setMarkdown call. During one AI edit
+  // several programmatic sets happen (stream re-renders, then the rewrite
+  // result), so a LATE echo of an EARLIER set carries content that differs
+  // from the newest snapshot — a single-snapshot check would treat it as a
+  // real edit and clobber the buffer (observed: streamed-in paragraphs lost).
+  // Keep a short history: any change matching a recent programmatic payload
+  // within the window is an echo and gets dropped.
+  let programmaticSnapshots = [];
+  function suppressMuyaChange() {
+    suppressChange = true;
+    setTimeout(function() { suppressChange = false; }, 0);
+  }
+  function programmaticSetMarkdown(markdown) {
+    const md = markdown || '';
+    programmaticSnapshots.push({ md: md, at: Date.now() });
+    if (programmaticSnapshots.length > 8) programmaticSnapshots.shift();
+    suppressMuyaChange();
+    muya.setMarkdown(md);
+    // Expire the echo window: a genuine user edit reproducing an old
+    // snapshot verbatim should win once it lapses.
+    clearTimeout(echoClearTimer);
+    echoClearTimer = setTimeout(function() { programmaticSnapshots = []; }, 2000);
+  }
+  let echoClearTimer = null;
   let dirty = false;
   let saveTimer = null;
   let pendingChapter = 0;
@@ -691,9 +717,9 @@ window.onerror = function(msg, src, line, col, err) {
 
   function initMuya(markdown) {
     if (muya) {
-      suppressChange = true;
+      suppressMuyaChange();
+      programmaticSnapshots.push({ md: markdown || '', at: Date.now() });
       muya.setMarkdown(markdown || '');
-      suppressChange = false;
       // A fresh chapter starts with an empty undo/redo history so the buttons
       // grey out until the user actually edits this chapter.
       resetUndoHistory();
@@ -740,6 +766,21 @@ window.onerror = function(msg, src, line, col, err) {
       }
     });
     muya.on('change', function(data) {
+      // Programmatic-set echo (see programmaticSnapshots above): drop it
+      // before it can overwrite the buffer, but still sync undo state.
+      // Compare with trailing newlines normalized: Muya's serializer appends
+      // a final '\n' to buffer content that lacked one, so a verbatim-string
+      // comparison would miss the echo and let it clobber the buffer.
+      const norm = function(s) { return (s || '').replace(/\n+$/, ''); };
+      const now = Date.now();
+      const evMd = norm(data.markdown);
+      const isEcho = programmaticSnapshots.some(function(s) {
+        return norm(s.md) === evMd && now - s.at < 2000;
+      });
+      if (isEcho) {
+        updateUndoRedoState(data.history);
+        return;
+      }
       // Name the edit before overwriting the chapter buffer so the undo
       // tooltip can say what it will restore.
       if (!suppressChange && activeChapter !== 0) {
@@ -816,11 +857,11 @@ window.onerror = function(msg, src, line, col, err) {
     if (!dirty || pendingChapter === 0) return;
     clearTimeout(saveTimer);
     saveTimer = null;
+    // 权威内容是章缓冲：缓冲在每次真实编辑（change 事件）与 AI 回写时都
+    // 已同步，而 muya.getMarkdown() 在 setMarkdown 与 DOM 渲染异步完成
+    // 之间可能返回旧内容（如流式追加后、AI 文本替换后），从 DOM 读回会
+    // 把缓冲刚写入的内容丢掉。此处不再从 DOM 覆盖缓冲。
     let md = chapterMarkdown[pendingChapter] || '';
-    if (muya && activeChapter === pendingChapter) {
-      md = muya.getMarkdown() || '';
-      chapterMarkdown[pendingChapter] = md;
-    }
     if (bridge) bridge.requestSaveChapter(pendingChapter, md);
     dirty = false;
     setStatus('已保存第 ' + pendingChapter + ' 章', 'saved');
@@ -905,9 +946,7 @@ window.onerror = function(msg, src, line, col, err) {
       // Only re-render when the user is parked on the chapter being streamed;
       // otherwise the accumulated buffer is simply kept for later.
       if (activeChapter === 0 || !muya) return;
-      suppressChange = true;
-      muya.setMarkdown(chapterMarkdown[activeChapter] || '');
-      suppressChange = false;
+      programmaticSetMarkdown(chapterMarkdown[activeChapter] || '');
       // Newly arrived batch: keep the latest text visible, like a typewriter,
       // instead of letting content grow silently below the fold.
       followStreamTail();
@@ -1425,15 +1464,22 @@ window.onerror = function(msg, src, line, col, err) {
 
   // ---- editor AI context menu (rewrite / polish / continue) -------------
   const aiMenu = document.getElementById('ai-menu');
+  // 桥接就绪前的点击缓存：QWebChannel 回调建立 bridge 前用户可能已经
+  // 点了菜单（尤其页面重建后），丢失即静默失败，这里缓存后补发。
+  let pendingAiActions = [];
 
   aiMenu.addEventListener('mousedown', function(ev) { ev.preventDefault(); });
   aiMenu.addEventListener('click', function(ev) {
     const item = ev.target.closest('.mi[data-ai]');
-    if (!item || !bridge) return;
+    if (!item) return;
     const kind = item.getAttribute('data-ai');
     const context = (kind === 'continue') ? '' : (aiMenu._lastSelection || '');
     aiMenu.style.display = 'none';
-    bridge.requestEditorAiAction(kind, context);
+    if (bridge) {
+      bridge.requestEditorAiAction(kind, context);
+    } else {
+      pendingAiActions.push([kind, context]);
+    }
   });
 
   function showAiPhase(payload) {
@@ -1461,18 +1507,51 @@ window.onerror = function(msg, src, line, col, err) {
     }
   }
 
-  function replaceSelection(newText) {
-    // Replace the current selection by deleting it then inserting the AI text;
-    // Muya inserts plain text at the caret which keeps undo/redo intact.
+  function replaceSelection(newText, originalSelection) {
+    // 文本级替换：AI 运行期间用户可能已移动光标/编辑内容，且流式
+    // setMarkdown 会清掉 DOM 选区，因此不能依赖当前选区定位。改在
+    // 最新章缓冲中查找当初发起改写的原文进行替换；找不到（内容已被
+    // 用户改动）则不动编辑器，由状态提示说明。
     if (!muya || !newText) return;
-    muya.focus();
-    try { muya.insertText(newText); } catch (e) { /* ignore */ }
+    const target = originalSelection || '';
+    const buf = chapterMarkdown[activeChapter] || '';
+    let updated = null;
+    if (target && buf.indexOf(target) !== -1) {
+      updated = buf.replace(target, function() { return newText; });
+    } else if (!target) {
+      // 无原文锚点（不应发生，rewrite/polish 必带选区）：追加到末尾。
+      updated = buf ? buf + '\n\n' + newText : newText;
+    }
+    if (updated === null) {
+      setStatus('原文已被修改，AI 结果未应用', 'failed');
+      showAiPhase({ phase: 'failed', detail: '原文已被修改，结果未应用（可从对话区复制）', kind: 'rewrite' });
+      return;
+    }
+    chapterMarkdown[activeChapter] = updated;
+    if (activeChapter === 0) wholeMarkdown = updated;
+    dirty = true;
+    pendingChapter = activeChapter;
+    programmaticSetMarkdown(updated);
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function() { flush(); }, 800);
+    updateWordCount();
+    if (bridge) bridge.requestLiveEdit(activeChapter, updated);
   }
 
   function insertAtCaret(newText) {
+    // 续写：追加到当前章缓冲末尾（流式/编辑期间缓冲始终最新），
+    // 不依赖可能已漂移的光标位置。
     if (!muya || !newText) return;
-    muya.focus();
-    try { muya.insertText(newText); } catch (e) { /* ignore */ }
+    const buf = chapterMarkdown[activeChapter] || '';
+    const updated = buf ? (buf.endsWith('\n') ? buf + '\n' + newText : buf + '\n\n' + newText) : newText;
+    chapterMarkdown[activeChapter] = updated;
+    dirty = true;
+    pendingChapter = activeChapter;
+    programmaticSetMarkdown(updated);
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function() { flush(); }, 800);
+    updateWordCount();
+    if (bridge) bridge.requestLiveEdit(activeChapter, updated);
   }
 
   // ---- image context menu (edit caption / alt text) ---------------------
@@ -1556,6 +1635,10 @@ window.onerror = function(msg, src, line, col, err) {
 
   new QWebChannel(qt.webChannelTransport, function(channel) {
     bridge = channel.objects.ldword;
+    if (pendingAiActions.length) {
+      const queued = pendingAiActions.splice(0);
+      for (const action of queued) bridge.requestEditorAiAction(action[0], action[1]);
+    }
     bridge.outline_changed.connect(function(json) {
       outline = JSON.parse(json);
       rebuildOutline();
@@ -1617,11 +1700,11 @@ window.onerror = function(msg, src, line, col, err) {
     bridge.editor_ai_result.connect(function(json) {
       let payload = {};
       try { payload = JSON.parse(json); } catch (e) { return; }
+      // aiMenu._lastSelection 是发起动作时的原文：改写/润色按文本锚点
+      // 替换（不依赖已漂移的 DOM 选区）；续写追加到本章末尾。
       if (payload.replacement) {
-        // 选区改写/润色：选区文本已被 AI 结果替换（insertText 在选区存在时
-        // 会替换选区）。先删除选区再插入，保证替换而非追加。
-        try { document.execCommand('delete'); } catch (e) { /* ignore */ }
-        replaceSelection(payload.replacement);
+        replaceSelection(payload.replacement, aiMenu._lastSelection || '');
+        aiMenu._lastSelection = '';
       } else if (payload.insertion) {
         insertAtCaret(payload.insertion);
       }

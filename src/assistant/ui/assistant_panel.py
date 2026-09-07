@@ -928,13 +928,20 @@ class AssistantPanel(
         悬浮对话框是完整的 AI 会话入口：消息以 Markdown 富文本渲染
         （标题/表格/列表），输入后直接走主会话链路（_send_message），
         逐章流式、确认卡、一条龙生成全部可用——AI 随叫随到。
+
+        逐章写作等任务运行中 _send_message 会被提交门禁拒绝（返回
+        False）：必须把原文回填输入框并明示原因，不能无声吞掉用户输入。
         """
         from src.assistant.ui.ai_floating_chat import AiFloatingChat
 
         fab = AiFloatingChat(parent)
-        fab.message_submitted.connect(
-            lambda text: self._send_message(text)
-        )
+
+        def _submit_from_fab(text: str) -> None:
+            if self._send_message(text):
+                return
+            fab.restore_pending_input(text, "当前任务正在运行，请等待完成或停止后再发送")
+
+        fab.message_submitted.connect(_submit_from_fab)
         return fab
 
     def _on_marktext_export_docx(self, markdown: str) -> None:
@@ -3241,6 +3248,10 @@ class AssistantPanel(
             from src.assistant.ui.undo_policy import UndoEvent, apply_to_view
 
             apply_to_view(view, UndoEvent.CLOSE)
+        # 编辑器内 AI / 整章改写 worker 与面板同生命周期：退出前收尾，
+        # 防止守护线程在解释器关闭阶段访问已销毁的 Qt 对象。
+        self._editor_ai_worker_shutdown()
+        self._chapter_rewrite_worker_shutdown()
         self._restore_rails_to_layout()
         for drawer in (self._session_drawer, self._context_drawer):
             if drawer is not None:

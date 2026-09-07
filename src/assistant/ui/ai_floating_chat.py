@@ -190,6 +190,23 @@ class AiFloatingChat(QWidget):
             self._current_markdown() + f"\n\n**你：** {text}\n"
         )
 
+    def restore_pending_input(self, text: str, reason: str = "") -> None:
+        """Submission rejected by the shell gate: restore the draft + say why.
+
+        提交被拒（如逐章写作运行中）时回填输入框并浮出提示，用户输入
+        不丢失，也不需要重新打字。
+        """
+        if str(text or "").strip():
+            self._input.setPlainText(str(text or ""))
+            cursor = self._input.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self._input.setTextCursor(cursor)
+        if str(reason or "").strip():
+            self._transcript.set_markdown(
+                self._current_markdown() + f"\n> ⚠ {str(reason).strip()}\n"
+            )
+        self._show_bubble()
+
     def append_assistant_markdown(self, text: str) -> None:
         """Public hook: stream assistant replies into the floating bubble."""
         self._transcript.set_markdown(self._current_markdown() + f"\n{text}\n")

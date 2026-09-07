@@ -610,13 +610,19 @@ class AssistantChapterRewriteMixin:
         if view is None:
             return
         bridge = view.bridge
-        if getattr(self, "_editor_ai_worker", None) is not None and (
-            self._editor_ai_worker.is_running
+        # 并发防护：worker 存活或仍在收尾（finished/failed 回调排队中）都
+        # 算在途。_editor_ai_inflight 在发起处置 True，收尾回调里清零——
+        # 仅靠 thread.is_alive 有窗口：worker 线程已退出但引用未清时
+        # is_running 为 False，而旧结果还没应用到页面。
+        if getattr(self, "_editor_ai_inflight", False) or (
+            getattr(self, "_editor_ai_worker", None) is not None
+            and self._editor_ai_worker.is_running
         ):
             bridge.notify_editor_ai_phase(
                 {"phase": "failed", "detail": "上一项 AI 操作尚未结束", "kind": kind}
             )
             return
+        self._editor_ai_inflight = True
         # 定位当前章节与正文（章节缓存优先，退回整篇解析）。
         index = int(getattr(bridge, "_active_chapter", 0) or 0)
         session_id = getattr(self, "_workbench_session_id", "") or session.session_id
@@ -683,7 +689,17 @@ class AssistantChapterRewriteMixin:
         )
         worker.start()
 
+    def _release_editor_ai_inflight(self) -> None:
+        """清在途标志：finished/failed 收尾共用，保证下一次动作能发起。"""
+        self._editor_ai_inflight = False
+
     def _finish_editor_ai_action(self, payload: dict) -> None:
+        try:
+            self._finish_editor_ai_action_inner(payload)
+        finally:
+            self._release_editor_ai_inflight()
+
+    def _finish_editor_ai_action_inner(self, payload: dict) -> None:
         bridge = getattr(getattr(self, "_marktext_view", None), "bridge", None)
         if bridge is None:
             return
@@ -702,12 +718,15 @@ class AssistantChapterRewriteMixin:
         self._editor_ai_worker = None
 
     def _fail_editor_ai_action(self, kind: str, message: str) -> None:
-        bridge = getattr(getattr(self, "_marktext_view", None), "bridge", None)
-        if bridge is not None:
-            bridge.notify_editor_ai_phase(
-                {"phase": "failed", "detail": message, "kind": kind}
-            )
-        self._editor_ai_worker = None
+        try:
+            bridge = getattr(getattr(self, "_marktext_view", None), "bridge", None)
+            if bridge is not None:
+                bridge.notify_editor_ai_phase(
+                    {"phase": "failed", "detail": message, "kind": kind}
+                )
+        finally:
+            self._editor_ai_worker = None
+            self._release_editor_ai_inflight()
 
     def _handle_card_action(self, action_id: str, payload: object) -> None:
         """Route chapter-rewrite actions first, then the general card actions."""
@@ -1071,6 +1090,12 @@ class AssistantChapterRewriteMixin:
 
     def _chapter_rewrite_worker_shutdown(self, timeout_ms: int = 5000) -> bool:
         worker = getattr(self, "_chapter_rewrite_worker", None)
+        if worker is None:
+            return True
+        return worker.shutdown(timeout_ms)
+
+    def _editor_ai_worker_shutdown(self, timeout_ms: int = 5000) -> bool:
+        worker = getattr(self, "_editor_ai_worker", None)
         if worker is None:
             return True
         return worker.shutdown(timeout_ms)

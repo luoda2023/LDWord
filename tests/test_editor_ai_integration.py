@@ -181,3 +181,103 @@ def test_floating_chat_fab_and_bubble(qapp):
     chat._hide_bubble()
     assert not chat._bubble.isVisible()
     parent.deleteLater()
+
+
+def test_floating_chat_restore_pending_input(qapp):
+    """提交被门禁拒绝后：草稿回填输入框 + 提示原因 + 气泡弹回。"""
+    from src.qt_api import QWidget
+
+    from src.assistant.ui.ai_floating_chat import AiFloatingChat
+
+    parent = QWidget()
+    parent.resize(1000, 700)
+    parent.show()
+    chat = AiFloatingChat(parent)
+    chat._hide_bubble()
+    chat.restore_pending_input(
+        "把第2章润色一遍", "当前任务正在运行，请等待完成或停止后再发送"
+    )
+    assert chat._input.toPlainText() == "把第2章润色一遍"
+    assert chat._bubble.isVisible()
+    transcript = chat._current_markdown()
+    assert "当前任务正在运行" in transcript
+    parent.deleteLater()
+
+
+def test_editor_ai_inflight_blocks_second_action(qapp):
+    """在途标志挡住并发：收尾回调清零前再次发起应被拒。"""
+    from src.assistant.ui.chapter_rewrite_mixin import AssistantChapterRewriteMixin as ChapterRewriteMixin
+
+    class _Host(ChapterRewriteMixin):
+        """最小宿主：只实现 mixin 在途标志语义需要的属性。"""
+
+        def __init__(self):
+            self._editor_ai_inflight = True
+            self._editor_ai_worker = None
+            self._marktext_view = None
+
+    host = _Host.__new__(_Host)
+    host._editor_ai_inflight = True
+    host._editor_ai_worker = None
+    host._marktext_view = None
+    # 收尾释放后，下一次发起才能通过（锁定释放语义本身）。
+    ChapterRewriteMixin._release_editor_ai_inflight(host)
+    assert host._editor_ai_inflight is False
+
+
+def test_editor_ai_release_on_finish_and_fail(qapp):
+    """finished/failed 两条收尾路径都必须释放在途标志。"""
+    from src.assistant.ui.chapter_rewrite_mixin import (
+        AssistantChapterRewriteMixin as ChapterRewriteMixin,
+        _EditorAiWorker,
+    )
+
+    class _Bridge:
+        def __init__(self):
+            self.phases = []
+            self.results = []
+
+        def notify_editor_ai_phase(self, payload):
+            self.phases.append(payload["phase"])
+
+        def notify_editor_ai_result(self, payload):
+            self.results.append(payload)
+
+    class _View:
+        bridge = _Bridge()
+
+    class _Gateway:
+        model = "m"
+
+        class _Evt:
+            type = "text_delta"
+            text = "结果"
+
+        def stream(self, request):
+            yield self._Evt()
+
+    worker = _EditorAiWorker(
+        _Gateway(),
+        kind="continue",
+        selection="",
+        chapter_title="第一章",
+        chapter_body="正文",
+        memory_context="",
+    )
+
+    class _Panel(ChapterRewriteMixin):
+        def __init__(self):
+            self._marktext_view = _View()
+            self._editor_ai_worker = worker
+            self._editor_ai_inflight = True
+
+    panel = _Panel()
+    # 真实链路中信号 lambda 已把 JSON 文本 loads 成 dict 再调用。
+    panel._finish_editor_ai_action({"kind": "continue", "insertion": "结果"})
+    assert panel._editor_ai_inflight is False
+    assert panel._marktext_view.bridge.results
+
+    panel._editor_ai_inflight = True
+    panel._fail_editor_ai_action("continue", "boom")
+    assert panel._editor_ai_inflight is False
+    assert panel._marktext_view.bridge.phases[-1] == "failed"
