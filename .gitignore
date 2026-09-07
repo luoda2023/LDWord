@@ -18,6 +18,12 @@ build/
 .venv/
 venv/
 
+# Muya editor bundle (built by marktext-develop/packages/muyajs/build_muya.mjs;
+# regenerated lazily on first run — do not commit the ~5 MB artifacts).
+src/assistant/ui/web/muya.bundle.js
+src/assistant/ui/web/muya.bundle.css
+src/assistant/ui/web/muya.bundle.manifest.json
+
 # Test output (generated products)
 tests/output/
 /tests/TEST-1/*

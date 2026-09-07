@@ -5,6 +5,7 @@ lxml>=5.0.0
 latex2mathml>=3.77.0
 olefile>=0.47
 markdown-it-py>=4.2.0,<5.0
+Pygments>=2.14.0
 PyYAML>=6.0
 openpyxl>=3.1.0
 pypdfium2>=4.30.0
