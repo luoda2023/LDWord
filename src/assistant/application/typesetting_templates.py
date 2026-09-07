@@ -217,6 +217,42 @@ class TypesettingTemplate:
         return re.compile(rf"{prefix}[^{suffix}\n]*{suffix}")
 
 
+def _resolve_heading_level_styles(styles: dict, heading) -> list:
+    """Resolve heading1–6 styles with a derived fallback chain.
+
+    模板显式定义了 heading1..6 就逐级返回；某级缺失时从通用 ``heading``
+    样式派生：字号按「章→节→小节」每降一级递减 1pt（下限 12pt），
+    加粗与字体继承通用标题样式。返回值为空表示连通用样式都没有。
+    """
+    if not isinstance(styles, dict):
+        return []
+    explicit = [styles.get(f"heading{i}") for i in range(1, 7)]
+    if all(style is not None for style in explicit[:4]):
+        return [style for style in explicit if style is not None][:6]
+    if heading is None:
+        return [style for style in explicit if style is not None]
+    base_size = float(getattr(heading, "size_pt", 12) or 12)
+    resolved: list = []
+    for i in range(1, 7):
+        style = styles.get(f"heading{i}")
+        if style is not None:
+            resolved.append(style)
+            continue
+        # 仅当更高级别存在或首级缺失时才派生，避免在已配置 H1-3 的模板里
+        # 硬造出 AI 不需要的 H4-6 规矩。
+        if i <= 4 and (i == 1 or resolved):
+            from copy import copy
+
+            derived = copy(heading)
+            derived.size_pt = max(12.0, base_size - (i - 1))
+            if i > 1:
+                derived.bold = False
+            resolved.append(derived)
+        else:
+            break
+    return resolved
+
+
 def _builtin_default() -> TypesettingTemplate:
     payload = dict(_DEFAULT_TEMPLATE)
     payload["template_id"] = "engineering_standard"
@@ -382,7 +418,8 @@ def typesetting_directives_from_library_template(
             f"右{getattr(margin, 'right_cm', '')}cm。"
         )
 
-    # Base fonts for body and headings.
+    # Base fonts for body and headings — 逐级展开标题字号，把模板里每一级
+    # 标题的字体/字高/加粗都报给 AI（预设规矩：AI 边写就按这套样式排版）。
     styles = getattr(template, "styles", None) or {}
     body = styles.get("body")
     heading = styles.get("heading")
@@ -392,7 +429,22 @@ def typesetting_directives_from_library_template(
             f"{getattr(body, 'font_en', '')} {getattr(body, 'size_pt', '')}pt"
             f"{getattr(body, 'size_display', '') and '（' + getattr(body, 'size_display', '') + '）' or ''}；"
         )
-    if heading is not None:
+    # 逐级标题样式：heading1–heading6 显式配置优先；缺失级别从通用 heading
+    # 样式派生字号递减链（章→节→小节 逐级 -1pt，下限 12pt），保证任何模板
+    # 都能给 AI 一套完整的各级规矩。
+    level_styles = _resolve_heading_level_styles(styles, heading)
+    if level_styles:
+        parts: list[str] = []
+        for idx, style in enumerate(level_styles, start=1):
+            display = getattr(style, "size_display", "") or ""
+            suffix = f"（{display}）" if display else ""
+            bold = "加粗" if getattr(style, "bold", False) else ""
+            parts.append(
+                f"{idx}级 {getattr(style, 'font_cn', '')} "
+                f"{getattr(style, 'size_pt', '')}pt{suffix}{bold}"
+            )
+        lines.append("  各级标题：" + "；".join(parts) + "。")
+    elif heading is not None:
         lines.append(
             f"  章标题 {getattr(heading, 'font_cn', '')} "
             f"{getattr(heading, 'size_pt', '')}pt"

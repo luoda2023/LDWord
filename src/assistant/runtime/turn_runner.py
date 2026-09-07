@@ -737,6 +737,16 @@ class AssistantTurnRunner:
             "当用户要求最终 Word/DOCX 时，应说明将由本地预检、确认和生产链完成，"
             "不要伪造文件或下载链接。"
         )
+        # AI 操作接口目录：软件全部功能的声明式 API 清单注入对话提示词，
+        # 让 AI 清楚自己能驱动什么、怎么调用、哪些动作需用户确认。
+        try:
+            from src.assistant.application.ai_operations_api import (
+                ai_operations_directive,
+            )
+
+            self.system_prompt = self.system_prompt + "\n" + ai_operations_directive()
+        except Exception:  # pragma: no cover - 目录缺失不应阻断对话
+            pass
 
     def run(
         self,
