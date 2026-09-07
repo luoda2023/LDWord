@@ -1369,6 +1369,13 @@ class AssistantTurnFlowMixin(
             document_job=job,
             turn_status=TURN_COMPLETED,
         )
+        # Fresh multi-chapter authoring: instead of showing a separate
+        # “文档处理计划” plan card for the user to read and click, proceed
+        # directly into the chapter-directory confirmation card.  The user
+        # only reviews the 章节目录 and confirms once; exam/official authoring
+        # still presents the classic plan card so its dedicated editors run.
+        if self._attempt_auto_outline(session, plan):
+            return self._active_session
         return self._coordinator.append_message(
             session,
             self._plan_message(plan),

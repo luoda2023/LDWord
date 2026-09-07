@@ -891,6 +891,56 @@ class AssistantDocumentWorkflowMixin:
             approved_disclosure=True,
         )
 
+    def _attempt_auto_outline(
+        self,
+        session: AssistantSession,
+        plan: DocumentPlan,
+    ) -> bool:
+        """Skip the intermediate plan card for fresh authoring requests.
+
+        When a new multi-chapter document request lands on a deterministic Form
+        plan (engineering / custom / generic), we want the assistant to look
+        intelligent: it should go straight to the chapter-directory card instead
+        of making the user first read and click a “文档处理计划” plan card.  Exam
+        and official documents keep their own dedicated intake editors, so they
+        are excluded here and continue to present the plan card as before.
+        """
+        if not plan.generation_required or plan.blocking_issues:
+            return False
+        if str(plan.work_mode_id or "").strip() in {"exam", "official"}:
+            return False
+        if str(
+            getattr(plan.scene_ref or {}, "get", lambda *_: "")(
+                "generation_mode"
+            )
+            or ""
+        ) == "revision_pending":
+            return False
+        # Pre-flight the provider so an unconfigured model falls back to the
+        # classic plan card (which still carries the “generate” action) rather
+        # than leaving the user with nothing to press.
+        try:
+            if self._fixed_turn_runner is not None:
+                gateway = self._fixed_turn_runner.gateway
+            else:
+                gateway = self._provider_router.resolve(
+                    session.provider_profile_id
+                )
+        except (ProviderResolutionError, RuntimeError, ValueError, TypeError):
+            return False
+        if gateway is None:
+            return False
+        self._active_session = session
+        try:
+            self._start_content_generation(
+                session,
+                plan,
+                outline_confirmed=False,
+            )
+        except Exception:  # noqa: BLE001 - never let auto-continue wedge the turn
+            return False
+        return True
+
     def _start_content_generation(
         self,
         session: AssistantSession,
