@@ -247,7 +247,8 @@ def _parse_blocks(
             cursor += 1
             continue
         if token.type in {"fence", "code_block"}:
-            blocks.append(_normalized_code_block(token.content))
+            info = getattr(token, "info", "") or ""
+            blocks.append(_normalized_code_block(token.content, info))
             state.events["markdown_code_block_normalized"] += 1
             cursor += 1
             continue
@@ -324,8 +325,7 @@ def _parse_exclusive_image(
             state,
         )
     image = images[0]
-    if image.attrGet("title"):
-        state.events["markdown_image_title_ignored"] += 1
+    caption = (image.attrGet("title") or "").strip()
     relative_path = _canonical_local_image_path(image.attrGet("src") or "", state, image)
     if relative_path not in state.resource_id_by_path:
         _raise_token(
@@ -343,6 +343,7 @@ def _parse_exclusive_image(
     return ImageBlock(
         resource_id=state.resource_id_by_path[relative_path],
         alt_text=_image_alt_text(image),
+        caption=caption,
         generated_anchor_id="content-image-"
         + hashlib.sha256(anchor_identity.encode("utf-8")).hexdigest()[:16],
     )
@@ -748,15 +749,132 @@ def _validate_external_link(href: str, token: Token, state: _ParseState) -> str:
     return href
 
 
-def _normalized_code_block(content: str) -> ParagraphBlock:
-    lines = str(content or "").removesuffix("\n").split("\n")
+# Fixed dark-theme token colors for code-block syntax highlighting. Keyed by
+# Pygments token type; the docx renderer maps the hex value onto the run color.
+_CODE_BLOCK_BG = "1f2226"
+_DEFAULT_CODE_COLOR = "d4d4d4"
+_TOKEN_COLORS: dict[object, str] = {}
+
+
+def _token_color_map() -> dict[object, str]:
+    """Return the token -> color mapping, built lazily to keep Pygments an
+    optional import at module load time."""
+
+    if _TOKEN_COLORS:
+        return _TOKEN_COLORS
+    from pygments.token import (  # local import: Pygments is optional elsewhere
+        Comment,
+        Error,
+        Keyword,
+        Literal,
+        Name,
+        Number,
+        Operator,
+        Punctuation,
+        String,
+        Token,
+    )
+
+    _TOKEN_COLORS.update({
+        Token: _DEFAULT_CODE_COLOR,
+        Comment: "7a848e",
+        Comment.Single: "7a848e",
+        Comment.Multiline: "7a848e",
+        Keyword: "79b8ff",
+        Keyword.Constant: "f78c6c",
+        Keyword.Declaration: "79b8ff",
+        Keyword.Namespace: "79b8ff",
+        Keyword.Pseudo: "79b8ff",
+        Keyword.Reserved: "79b8ff",
+        Keyword.Type: "e5a07b",
+        Name: _DEFAULT_CODE_COLOR,
+        Name.Attribute: "e5a07b",
+        Name.Builtin: "e5a07b",
+        Name.Class: "e5a07b",
+        Name.Constant: "f78c6c",
+        Name.Decorator: "e5a07b",
+        Name.Exception: "e5a07b",
+        Name.Function: "e5a07b",
+        Name.Tag: "f78c6c",
+        Name.Variable: _DEFAULT_CODE_COLOR,
+        Literal: "f78c6c",
+        String: "7ec699",
+        String.Affix: "7ec699",
+        String.Doc: "7ec699",
+        String.Escape: "d19a66",
+        String.Interpol: "d19a66",
+        String.Other: "7ec699",
+        String.Regex: "d19a66",
+        String.Symbol: "7ec699",
+        Number: "f78c6c",
+        Operator: "d19a66",
+        Operator.Word: "79b8ff",
+        Punctuation: "9aa0a6",
+        Error: "ff7b72",
+    })
+    return _TOKEN_COLORS
+
+
+def _color_for_token(token_type: object) -> str:
+    """Pick the nearest defined color for a Pygments token type."""
+
+    colors = _token_color_map()
+    current: object = token_type
+    while current is not None:
+        color = colors.get(current)
+        if color:
+            return color
+        current = getattr(current, "parent", None)
+    return _DEFAULT_CODE_COLOR
+
+
+def _normalized_code_block(content: str, info: str = "") -> ParagraphBlock:
+    """Render a fenced code block with optional syntax highlighting.
+
+    ``info`` is the fence language identifier (e.g. ``python``, ``cpp``). When
+    Pygments recognises it, each token is split into its own inline carrying a
+    ``text_color`` so the DOCX renderer can colour the runs. Unrecognised or
+    missing languages fall back to plain, single-colour lines.
+    """
+
+    text = str(content or "").removesuffix("\n")
     inlines: list[InlineContent] = []
-    for index, line in enumerate(lines or [""]):
-        if index:
-            inlines.append(InlineContent(kind=InlineKind.HARD_BREAK))
-        if line:
-            inlines.append(InlineContent(text=line))
-    return ParagraphBlock(tuple(inlines))
+
+    tokens = None
+    lang = (info or "").strip().split()
+    lang = lang[0] if lang else ""
+    if lang:
+        try:
+            from pygments import lex  # local import: Pygments is optional
+            from pygments.lexers import get_lexer_by_name
+
+            lexer = get_lexer_by_name(lang, stripnl=False, ensurenl=False)
+            tokens = lex(text, lexer)
+        except Exception:  # noqa: BLE001 - unknown language / Pygments missing
+            tokens = None
+
+    if tokens is None:
+        lines = text.split("\n") if text else [""]
+        for index, line in enumerate(lines):
+            if index:
+                inlines.append(InlineContent(kind=InlineKind.HARD_BREAK))
+            if line:
+                inlines.append(
+                    InlineContent(text=line, text_color=_DEFAULT_CODE_COLOR)
+                )
+    else:
+        for token_type, value in tokens:
+            if value == "\n":
+                inlines.append(InlineContent(kind=InlineKind.HARD_BREAK))
+                continue
+            inlines.append(
+                InlineContent(
+                    text=value,
+                    text_color=_color_for_token(token_type),
+                )
+            )
+
+    return ParagraphBlock(tuple(inlines), shading=_CODE_BLOCK_BG)
 
 
 def _normalize_quote_blocks(blocks: Sequence[object]) -> tuple[object, ...]:
@@ -764,7 +882,9 @@ def _normalize_quote_blocks(blocks: Sequence[object]) -> tuple[object, ...]:
     prefix = InlineContent(text="│ ")
     for block in blocks:
         if isinstance(block, ParagraphBlock):
-            output.append(ParagraphBlock((prefix, *block.inlines)))
+            output.append(
+                ParagraphBlock((prefix, *block.inlines), shading=block.shading)
+            )
         elif isinstance(block, HeadingBlock):
             output.append(ParagraphBlock((prefix, *block.inlines)))
         elif isinstance(block, ListBlock):

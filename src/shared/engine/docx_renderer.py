@@ -79,6 +79,7 @@ class ContentImageJobDraft:
     sequence: int
     reserved_docpr_id: int
     alt_text: str = ""
+    caption: str = ""
     width_px: int | None = None
     height_px: int | None = None
 
@@ -318,7 +319,22 @@ def _build_render_plan(document, fragment, rule):
     direct_ids = {id(item) for item in direct_paragraphs}
     candidates: list[tuple[object, int]] = []
 
-    for paragraph in body.iter(qn("w:p")):
+    # Fast path: callers that render fragments one after another (e.g. chapter
+    # export) append the anchor paragraph to the very end of the body right
+    # before rendering.  A whole-body scan per fragment would turn that
+    # sequential export into O(n^2), so check the last direct paragraph first;
+    # only fall back to the full scan when the tail does not hold the anchor.
+    _tail = direct_paragraphs[-1] if direct_paragraphs else None
+    if _tail is not None and rule.anchor_token in _paragraph_text(_tail):
+        _tail_index = body_children.index(_tail)
+        _ppr = _tail.find(qn("w:pPr"))
+        _has_sect = (
+            _ppr is not None and _ppr.find(qn("w:sectPr")) is not None
+        )
+        if not _has_sect and is_strict_material_token_paragraph(_tail, rule.anchor_token):
+            candidates = [(_tail, _tail_index)]
+
+    for paragraph in (_ for _ in ()) if candidates else body.iter(qn("w:p")):
         text = _paragraph_text(paragraph)
         if rule.anchor_token not in text:
             continue
@@ -670,6 +686,7 @@ def _commit_render_plan(document, fragment, rule, plan):
                 sequence=image_sequence,
                 reserved_docpr_id=next_docpr_id,
                 alt_text=block.alt_text,
+                caption=block.caption,
                 width_px=block.width_px,
                 height_px=block.height_px,
             )
@@ -695,7 +712,12 @@ def _commit_render_plan(document, fragment, rule, plan):
                 )
             elif isinstance(block, ParagraphBlock):
                 nodes.append(
-                    _paragraph_element(document, plan.normal_style_id, block.inlines)
+                    _paragraph_element(
+                        document,
+                        plan.normal_style_id,
+                        block.inlines,
+                        shading=block.shading,
+                    )
                 )
             elif isinstance(block, ListBlock):
                 num_id = _add_numbering_definition(
@@ -768,9 +790,19 @@ def _commit_render_plan(document, fragment, rule, plan):
     )
 
 
-def _paragraph_element(document, style_id, inlines):
+def _paragraph_element(document, style_id, inlines, shading=""):
     paragraph = OxmlElement("w:p")
     _set_paragraph_style(paragraph, style_id)
+    if shading:
+        ppr = paragraph.find(qn("w:pPr"))
+        if ppr is None:
+            ppr = OxmlElement("w:pPr")
+            paragraph.insert(0, ppr)
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), shading)
+        ppr.append(shd)
     for inline in inlines:
         if inline.kind is InlineKind.SOFT_BREAK:
             paragraph.append(_run_element(" ", inline))
@@ -807,6 +839,7 @@ def _run_element(text, inline, *, hyperlink=False):
         or inline.underline
         or inline.strikethrough
         or inline.vertical_alignment.value != "baseline"
+        or inline.text_color
         or hyperlink
     ):
         rpr = OxmlElement("w:rPr")
@@ -828,6 +861,10 @@ def _run_element(text, inline, *, hyperlink=False):
             vertical = OxmlElement("w:vertAlign")
             vertical.set(qn("w:val"), inline.vertical_alignment.value)
             rpr.append(vertical)
+        if inline.text_color:
+            color = OxmlElement("w:color")
+            color.set(qn("w:val"), inline.text_color)
+            rpr.append(color)
         run.append(rpr)
     if text:
         text_element = OxmlElement("w:t")
@@ -1219,8 +1256,15 @@ def _allowed_external_href(href):
 
 
 def _available_width_twips(document, body_index):
+    # Count section-boundary paragraphs before ``body_index`` to find which
+    # section a block belongs to.  Iterate lazily instead of materialising a
+    # ``list(body)[:body_index]`` slice each call — that slice grows with the
+    # document and, called once per rendered block, would turn sequential
+    # chapter export into an O(n^2) copy+scan.
     section_index = 0
-    for element in list(document.element.body)[:body_index]:
+    for position, element in enumerate(document.element.body):
+        if position >= body_index:
+            break
         if element.tag != qn("w:p"):
             continue
         ppr = element.find(qn("w:pPr"))

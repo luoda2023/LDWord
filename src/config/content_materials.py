@@ -232,6 +232,7 @@ class InlineContent:
     vertical_alignment: InlineVerticalAlignment = InlineVerticalAlignment.BASELINE
     href: str = ""
     field_key: str = ""
+    text_color: str = ""
 
     def __post_init__(self) -> None:
         _coerce_enum_field(self, "kind", InlineKind)
@@ -263,6 +264,7 @@ class InlineContent:
             "vertical_alignment": self.vertical_alignment.value,
             "href": self.href,
             "field_key": self.field_key,
+            "text_color": self.text_color,
         }
 
     @classmethod
@@ -279,6 +281,7 @@ class InlineContent:
             ),
             href=str(payload.get("href", "") or ""),
             field_key=str(payload.get("field_key", "") or ""),
+            text_color=str(payload.get("text_color", "") or ""),
         )
 
 
@@ -301,12 +304,14 @@ class HeadingBlock:
 class ParagraphBlock:
     inlines: tuple[InlineContent, ...]
     kind: ContentBlockKind = ContentBlockKind.PARAGRAPH
+    shading: str = ""
 
     def __post_init__(self) -> None:
         _coerce_enum_field(self, "kind", ContentBlockKind)
         if self.kind is not ContentBlockKind.PARAGRAPH:
             raise ValueError("ParagraphBlock.kind must be paragraph")
         _normalize_inlines(self, "inlines")
+        object.__setattr__(self, "shading", self.shading or "")
 
 
 @dataclass(frozen=True, slots=True)
@@ -404,6 +409,7 @@ class TableBlock:
 class ImageBlock:
     resource_id: str
     alt_text: str = ""
+    caption: str = ""
     width_px: int | None = None
     height_px: int | None = None
     generated_anchor_id: str = ""
@@ -543,6 +549,7 @@ def _block_to_dict(block: ContentBlock) -> dict[str, object]:
         payload.update(
             resource_id=block.resource_id,
             alt_text=block.alt_text,
+            caption=block.caption,
             width_px=block.width_px,
             height_px=block.height_px,
             generated_anchor_id=block.generated_anchor_id,
@@ -617,6 +624,7 @@ def _block_from_dict(payload: object) -> ContentBlock:
         return ImageBlock(
             resource_id=str(payload.get("resource_id", "") or ""),
             alt_text=str(payload.get("alt_text", "") or ""),
+            caption=str(payload.get("caption", "") or ""),
             width_px=_as_optional_int(payload.get("width_px"), "width_px"),
             height_px=_as_optional_int(payload.get("height_px"), "height_px"),
             generated_anchor_id=str(payload.get("generated_anchor_id", "") or ""),
