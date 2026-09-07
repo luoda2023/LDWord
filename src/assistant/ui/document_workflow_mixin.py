@@ -904,10 +904,15 @@ class AssistantDocumentWorkflowMixin:
             self._render_active_session()
             self._refresh_session_list(select_session_id=session.session_id)
             return
+        # 披露同意后的再入：一条龙意图已记入任务状态（确认卡点下时置位），
+        # 继续携带，保证写作完成后仍自动预检并落盘。
         self._start_content_generation(
             session,
             plan,
             approved_disclosure=True,
+            auto_generate_word=bool(
+                dict(session.document_job or {}).get("auto_generate_word")
+            ),
         )
 
     def _attempt_auto_outline(
@@ -970,6 +975,7 @@ class AssistantDocumentWorkflowMixin:
         revision_context_ref: str = "",
         include_plan_materials: bool = True,
         outline_confirmed: bool = False,
+        auto_generate_word: bool = False,
     ) -> None:
         if self._content_worker is not None and self._content_worker.is_running:
             return
@@ -1250,6 +1256,11 @@ class AssistantDocumentWorkflowMixin:
                 "revision" if normalized_revision_text else "authoring"
             ),
         }
+        # 一条龙模式：用户在章节目录确认卡上确认后，写作完成即自动
+        # 预检并落盘成 Word，不再要求第二次“生成 Word”点按。意图记入
+        # 任务状态，草稿完成钩子据此自动接管后续链路。
+        if auto_generate_word:
+            job["auto_generate_word"] = True
         session = self._coordinator.update_state(session, document_job=job)
         session = self._coordinator.append_message(
             session,
@@ -2244,6 +2255,25 @@ class AssistantDocumentWorkflowMixin:
                 session.session_id,
                 str(exc),
             )
+            return
+        # 一条龙：确认目录时已表明“直接出 Word”，草稿完成后自动接管
+        # 预检→落盘链路（仍保留覆盖文件等必要闸门），并保留打开草稿
+        # 等次级动作，用户无需第二次点按。
+        auto_generate_word = bool(
+            dict(session.document_job or {}).get("auto_generate_word")
+        )
+        if auto_generate_word:
+            session = self._coordinator.update_state(
+                session,
+                active_plan=updated_plan.to_dict(),
+                document_job={
+                    **dict(session.document_job),
+                    "auto_generate_word": False,
+                },
+                turn_status=TURN_COMPLETED,
+            )
+            self._active_session = session
+            self._run_preflight(session, updated_plan)
             return
         source_ref = generated_draft_source_ref(draft)
         preview_path = str(draft.preview_path)

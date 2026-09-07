@@ -345,10 +345,13 @@ class AssistantCardActionMixin:
                         },
                     )
                     self._active_session = session
+            # 一条龙：确认目录后写作→校准→预检→落盘 Word 全自动衔接，
+            # 不再要求第二次“生成 Word”点按（覆盖文件等闸门仍保留）。
             self._start_content_generation(
                 session,
                 plan,
                 outline_confirmed=True,
+                auto_generate_word=True,
             )
         elif action_id == ACTION_REVISE_CONTENT_DRAFT:
             self._revise_content_draft(

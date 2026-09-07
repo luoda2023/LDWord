@@ -129,6 +129,9 @@ _JOB_TRANSITIONS = {
     JOB_CONTENT_GENERATION_RUNNING: {
         JOB_NEEDS_OFFICIAL_FIELD_COMPLETION,
         JOB_CONTENT_DRAFT_READY,
+        # 一条龙：确认目录后写作完成自动接管预检，允许直接进入
+        # preflight_running（草稿卡仍会补发，用户无感）。
+        JOB_PREFLIGHT_RUNNING,
         JOB_FAILED,
         JOB_CANCELLED,
     },
