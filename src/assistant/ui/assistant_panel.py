@@ -590,6 +590,12 @@ class AssistantPanel(
         self._marktext_view.bridge.request_live_edit.connect(
             self._on_marktext_live_edit
         )
+        # 编辑器内 AI：右键动作 → 两阶段（了解→起草）处理器；
+        # 页面通过 WebChannel 调 requestEditorAiAction 触发。
+        self._marktext_view.bridge.editor_ai_action.connect(
+            self._on_editor_ai_action
+        )
+        self._marktext_view._editor_ai_fab = self._build_ai_fab(self._marktext_view)
         body_layout.addWidget(self._marktext_view, 0)
         layout.addWidget(body, 1)
 
@@ -907,6 +913,29 @@ class AssistantPanel(
             bench.editor.set_outline_document(blocks)
         else:
             bench.editor.clear_document()
+
+    # ---- 编辑器内 AI（右键）+ 右下角悬浮 AI --------------------------------
+    def _on_editor_ai_action(self, kind: str, context: str) -> None:
+        """WebChannel → chapter_rewrite_mixin 的编辑器 AI 入口。"""
+        self._handle_chapter_rewrite_action(
+            "editor_ai",
+            {"kind": str(kind or ""), "selection": str(context or "")},
+        )
+
+    def _build_ai_fab(self, parent) -> QWidget:
+        """右下角 AI 悬浮图标：点击弹出富文本悬浮对话框。
+
+        悬浮对话框是完整的 AI 会话入口：消息以 Markdown 富文本渲染
+        （标题/表格/列表），输入后直接走主会话链路（_send_message），
+        逐章流式、确认卡、一条龙生成全部可用——AI 随叫随到。
+        """
+        from src.assistant.ui.ai_floating_chat import AiFloatingChat
+
+        fab = AiFloatingChat(parent)
+        fab.message_submitted.connect(
+            lambda text: self._send_message(text)
+        )
+        return fab
 
     def _on_marktext_export_docx(self, markdown: str) -> None:
         from PySide6.QtWidgets import QFileDialog, QMessageBox

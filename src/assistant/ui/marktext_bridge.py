@@ -43,6 +43,17 @@ class MarkTextBridge(QObject):
     # paste/pick.
     images_dropped = Signal(list)
 
+    # ---- 编辑器内 AI 通道 ---------------------------------------------
+    # Page → Qt: 右键菜单里的 AI 动作（选区改写/润色/光标处续写）。
+    # kind: "rewrite" | "polish" | "continue"；context 为选中文本或空。
+    editor_ai_action = Signal(str, str)
+    # Qt → Page: AI 操作的阶段状态（了解章节→起草→应用），驱动等待浮层。
+    # payload 为 JSON：{"phase": ..., "detail": ..., "kind": ...}
+    editor_ai_phase = Signal(str)
+    # Qt → Page: AI 完成，payload 为 JSON：
+    # {"kind":..., "replacement": 选区替换文本, "insertion": 光标插入文本}
+    editor_ai_result = Signal(str)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._outline_json = "[]"
@@ -92,6 +103,32 @@ class MarkTextBridge(QObject):
     @Slot(int, str)
     def requestLiveEdit(self, index: int, markdown: str) -> None:  # noqa: N802
         self.request_live_edit.emit(int(index or 0), str(markdown or ""))
+
+    # ---- 编辑器内 AI 通道 ---------------------------------------------
+    @Slot(str, str)
+    def requestEditorAiAction(self, kind: str, context: str) -> None:  # noqa: N802
+        """Page 右键发起的 AI 动作（rewrite/polish/continue）。"""
+        self.editor_ai_action.emit(str(kind or ""), str(context or ""))
+
+    def notify_editor_ai_phase(self, payload: dict) -> None:  # noqa: N802
+        """Push an AI phase update into the page's waiting overlay."""
+        import json
+
+        try:
+            text = json.dumps(payload, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return
+        self.editor_ai_phase.emit(text)
+
+    def notify_editor_ai_result(self, payload: dict) -> None:  # noqa: N802
+        """Push the finished AI result (replacement/insertion) into the page."""
+        import json
+
+        try:
+            text = json.dumps(payload, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return
+        self.editor_ai_result.emit(text)
 
     @Slot(result=str)
     def requestPickImage(self) -> str:  # noqa: N802

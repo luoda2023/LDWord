@@ -20,6 +20,8 @@ so the UI stays responsive and the conversation keeps streaming text.
 """
 from __future__ import annotations
 
+import json
+
 from collections.abc import Mapping
 from pathlib import Path
 from uuid import uuid4
@@ -41,6 +43,189 @@ from src.qt_api import QObject, Qt, QTimer, Signal
 CHAPTER_REWRITE_ACTION = "rewrite_document_chapter"
 CHAPTER_OUTLINE_ACTION = "show_document_chapter_outline"
 CHAPTER_WORKBENCH_ACTION = "open_document_workbench"
+
+# 编辑器内 AI 动作（右键菜单）：kind → 动作说明
+EDITOR_AI_ACTIONS = {
+    "rewrite": "重新改写所选内容",
+    "polish": "润色优化所选内容",
+    "continue": "在光标处补充内容",
+}
+
+
+class _EditorAiWorker(QObject):
+    """编辑器内 AI 操作的两阶段后台 worker。
+
+    阶段 1（understanding）：把本章正文 + 全局记忆摘要交给模型，产出一份
+    「本章理解」短摘要——这就是用户看到的"AI 先了解这一章写什么"。
+    阶段 2（drafting）：带着第 1 阶段的理解 + 用户指令（选区文本或空）
+    产出改写/润色/续写结果。
+
+    每个阶段开始时发 phase 信号，结束发 finished（成功）或 failed。
+    """
+
+    phase = Signal(str)          # JSON payload → 右下角状态浮层
+    finished = Signal(str)       # JSON：{replacement | insertion}
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        gateway,
+        *,
+        kind: str,
+        selection: str,
+        chapter_title: str,
+        chapter_body: str,
+        memory_context: str,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._gateway = gateway
+        self._kind = str(kind or "")
+        self._selection = str(selection or "")
+        self._chapter_title = str(chapter_title or "")
+        self._chapter_body = str(chapter_body or "")
+        self._memory_context = str(memory_context or "")
+        self._cancellation = AssistantCancellationToken()
+        self._thread = None
+
+    @property
+    def is_running(self) -> bool:
+        return bool(self._thread is not None and self._thread.is_alive())
+
+    def start(self) -> None:
+        from threading import Thread
+
+        if self.is_running:
+            raise RuntimeError("editor AI worker already running")
+        self._thread = Thread(target=self._run, name="editor-ai", daemon=True)
+        self._thread.start()
+
+    def cancel(self) -> None:
+        self._cancellation.cancel()
+
+    def shutdown(self, timeout_ms: int = 5000) -> bool:
+        self.cancel()
+        thread = self._thread
+        if thread is None:
+            return True
+        thread.join(max(0, timeout_ms) / 1000)
+        return not thread.is_alive()
+
+    # ---- prompt builders ------------------------------------------------
+    def _base_context(self) -> str:
+        parts = [f"所在章节：{self._chapter_title}"]
+        if self._memory_context:
+            parts.append(self._memory_context)
+        parts.append(f"【本章全文】\n{self._chapter_body}")
+        return "\n\n".join(parts)
+
+    def _understand_request(self):
+        from src.assistant.runtime.provider_contract import ProviderRequest
+
+        prompt = (
+            self._base_context()
+            + "\n\n【任务】请用 3-4 句话概括：这一章讲了什么、面向什么读者、"
+            "行文风格与结构特点、与相邻章节如何衔接。只输出这份理解摘要，"
+            "不要输出正文。"
+        )
+        return ProviderRequest(
+            request_id=uuid4().hex,
+            model=getattr(self._gateway, "model", "") or "assistant",
+            system_prompt=(
+                "你是 LDWord 文档写作助手。用户即将让你改写/润色/续写一段"
+                "章节内容。先阅读给定的章节全文与项目背景，输出简短的理解"
+                "摘要（3-4 句），帮助后续改写保持全文一致。"
+            ),
+            messages=({"role": "user", "content": prompt},),
+            metadata={"purpose": "editor_ai_understand"},
+        )
+
+    def _draft_request(self, understanding: str):
+        from src.assistant.runtime.provider_contract import ProviderRequest
+
+        kind_text = EDITOR_AI_ACTIONS.get(self._kind, "优化内容")
+        if self._kind in {"rewrite", "polish"}:
+            task = (
+                f"【待处理选段】\n{self._selection}\n\n"
+                f"【要求】{kind_text}。保持与本章其余部分及相邻章节的衔接，"
+                "保留原有编号与 Markdown 格式（标题/表格/列表）。"
+                "只输出处理后的这段文本，不要解释。"
+            )
+        else:  # continue
+            task = (
+                "【要求】从光标所在位置继续补充内容，自然承接上文，"
+                "符合本章主题与行文风格，输出 1-3 段内容。"
+                "只输出新增内容，不要重复已有文本，不要解释。"
+            )
+        prompt = (
+            self._base_context()
+            + (f"\n\n【对本章的理解】\n{understanding}" if understanding else "")
+            + "\n\n" + task
+        )
+        return ProviderRequest(
+            request_id=uuid4().hex,
+            model=getattr(self._gateway, "model", "") or "assistant",
+            system_prompt=(
+                "你是 LDWord 文档写作助手。基于对章节的理解执行改写/润色/"
+                "续写，输出 UTF-8 Markdown 正文，不要解释、不要代码围栏。"
+            ),
+            messages=({"role": "user", "content": prompt},),
+            metadata={"purpose": "editor_ai_draft"},
+        )
+
+    # ---- two-phase run ----------------------------------------------------
+    def _emit_phase(self, phase: str, detail: str = "") -> None:
+        self.phase.emit(
+            json.dumps(
+                {"phase": phase, "detail": detail, "kind": self._kind},
+                ensure_ascii=False,
+            )
+        )
+
+    def _stream_text(self, request) -> str:
+        parts: list[str] = []
+        for event in self._gateway.stream(request):
+            if self._cancellation.cancelled():
+                raise RuntimeError("editor_ai_cancelled")
+            if event.type == "text_delta":
+                parts.append(event.text)
+            elif event.type == "error":
+                raise RuntimeError(event.text or "editor_ai_provider_failed")
+        return "".join(parts).strip()
+
+    def _run(self) -> None:
+        try:
+            # 阶段 1：了解章节
+            self._emit_phase("understanding", f"正在阅读《{self._chapter_title}》全文")
+            understanding = ""
+            try:
+                understanding = self._stream_text(self._understand_request())
+            except RuntimeError as exc:
+                if "cancelled" in str(exc):
+                    raise
+                # 了解阶段失败不阻断主任务，直接进入起草。
+                understanding = ""
+            # 阶段 2：起草
+            detail = understanding[:80] + ("…" if len(understanding) > 80 else "")
+            self._emit_phase("drafting", detail)
+            result_text = self._stream_text(self._draft_request(understanding))
+            if not result_text:
+                raise RuntimeError("editor_ai_empty_result")
+            # 阶段 3：应用
+            self._emit_phase("applying", "正在写入编辑器")
+            payload = (
+                {"kind": self._kind, "replacement": result_text}
+                if self._kind in {"rewrite", "polish"}
+                else {"kind": self._kind, "insertion": result_text}
+            )
+            self.finished.emit(json.dumps(payload, ensure_ascii=False))
+        except RuntimeError as exc:
+            message = str(exc)
+            if "cancelled" in message:
+                return
+            self.failed.emit(message)
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
 
 
 class _ChapterRewriteWorker(QObject):
@@ -401,7 +586,128 @@ class AssistantChapterRewriteMixin:
                 payload["chapter_index"] = index_text
             self._start_chapter_rewrite(payload)
             return True
+        if action_id == "editor_ai":
+            self._start_editor_ai_action(payload)
+            return True
         return False
+
+    # ---- 编辑器内 AI（右键）：两阶段状态反馈 -------------------------------
+    def _start_editor_ai_action(self, payload: Mapping) -> None:
+        """编辑器右键 AI 动作入口：先了解章节，再改写/润色/续写。
+
+        全程通过 bridge.editor_ai_phase 推送阶段状态到右下角等待浮层，
+        让用户随时知道 AI 在做什么、做到哪一步（不再是无声进度条）。
+        """
+        payload = dict(payload or {})
+        kind = str(payload.get("kind") or "rewrite").strip()
+        if kind not in EDITOR_AI_ACTIONS:
+            kind = "rewrite"
+        selection = str(payload.get("selection") or "")
+        session = self._active_session
+        if session is None:
+            return
+        view = getattr(self, "_marktext_view", None)
+        if view is None:
+            return
+        bridge = view.bridge
+        if getattr(self, "_editor_ai_worker", None) is not None and (
+            self._editor_ai_worker.is_running
+        ):
+            bridge.notify_editor_ai_phase(
+                {"phase": "failed", "detail": "上一项 AI 操作尚未结束", "kind": kind}
+            )
+            return
+        # 定位当前章节与正文（章节缓存优先，退回整篇解析）。
+        index = int(getattr(bridge, "_active_chapter", 0) or 0)
+        session_id = getattr(self, "_workbench_session_id", "") or session.session_id
+        cache = self._cache
+        title = ""
+        body = ""
+        outline_title = ""
+        if index > 0:
+            try:
+                entries = cache.load_outline(session_id)
+                outline_title = next(
+                    (e.title for e in entries if e.index == index), ""
+                )
+            except (OSError, ValueError):
+                outline_title = ""
+            try:
+                body = cache.read_chapter(session_id, index)
+            except OSError:
+                body = ""
+        if not body.strip():
+            # 缓存没有正文（例如打开的本地文档未入缓存）时退回整篇。
+            body = str(getattr(bridge, "_content_markdown", "") or "")
+            title = "当前文档"
+        if kind in {"rewrite", "polish"} and not selection.strip():
+            bridge.notify_editor_ai_phase(
+                {"phase": "failed", "detail": "请先选中要处理的文字", "kind": kind}
+            )
+            return
+        # 全局记忆（项目背景/相邻章节摘要），与整章改写共用。
+        memory_context = self._rewrite_memory_context(
+            session_id, index, source_path=""
+        )
+        title = title or outline_title or (f"第 {index} 章" if index else "当前文档")
+        try:
+            runner = getattr(self, "_fixed_turn_runner", None)
+            gateway = (
+                runner.gateway
+                if runner is not None and getattr(runner, "gateway", None) is not None
+                else self._provider_router.resolve(session.provider_profile_id)
+            )
+        except Exception as exc:  # noqa: BLE001
+            bridge.notify_editor_ai_phase(
+                {"phase": "failed", "detail": f"模型不可用：{exc}", "kind": kind}
+            )
+            return
+        worker = _EditorAiWorker(
+            gateway,
+            kind=kind,
+            selection=selection,
+            chapter_title=title,
+            chapter_body=body,
+            memory_context=memory_context,
+            parent=self,
+        )
+        self._editor_ai_worker = worker
+        worker.phase.connect(
+            lambda text: bridge.notify_editor_ai_phase(json.loads(text))
+        )
+        worker.finished.connect(
+            lambda text: self._finish_editor_ai_action(json.loads(text))
+        )
+        worker.failed.connect(
+            lambda message: self._fail_editor_ai_action(kind, message)
+        )
+        worker.start()
+
+    def _finish_editor_ai_action(self, payload: dict) -> None:
+        bridge = getattr(getattr(self, "_marktext_view", None), "bridge", None)
+        if bridge is None:
+            return
+        bridge.notify_editor_ai_result(payload)
+        kind = str(payload.get("kind") or "")
+        done_text = (
+            "改写已替换进编辑器（Ctrl+Z 可撤销）"
+            if kind in {"rewrite", "polish"}
+            else "内容已插入光标处（Ctrl+Z 可撤销）"
+        )
+        bridge.notify_editor_ai_phase(
+            {"phase": "done", "detail": done_text, "kind": kind}
+        )
+        # 结果落进章节缓存，使保存/导出链拿到的是最新内容。
+        # 编辑器 change 事件会触发 request_live_edit → 缓存同步，这里不重复写。
+        self._editor_ai_worker = None
+
+    def _fail_editor_ai_action(self, kind: str, message: str) -> None:
+        bridge = getattr(getattr(self, "_marktext_view", None), "bridge", None)
+        if bridge is not None:
+            bridge.notify_editor_ai_phase(
+                {"phase": "failed", "detail": message, "kind": kind}
+            )
+        self._editor_ai_worker = None
 
     def _handle_card_action(self, action_id: str, payload: object) -> None:
         """Route chapter-rewrite actions first, then the general card actions."""

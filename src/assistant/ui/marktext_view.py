@@ -399,6 +399,22 @@ window.onerror = function(msg, src, line, col, err) {
     box-shadow:0 6px 18px rgba(0,0,0,0.45); }
   #table-menu .mi, #image-menu .mi { padding:6px 14px; cursor:pointer; color:#e6e6e6; font-size:13px; }
   #table-menu .mi:hover, #image-menu .mi:hover { background:#3a3f46; }
+  #ai-menu { position:fixed; z-index:1000; display:none; background:#2e3237;
+    border:1px solid #3a3f46; border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,.4);
+    padding:4px 0; min-width:180px; }
+  #ai-menu .mi { padding:6px 14px; cursor:pointer; color:#e6e6e6; font-size:13px; }
+  #ai-menu .mi:hover { background:#3a3f46; }
+  #ai-menu .divider { height:1px; background:#3a3f46; margin:3px 0; }
+  #ai-phase-overlay { position:fixed; z-index:1100; display:none; right:18px; bottom:18px;
+    background:#2e3237; border:1px solid #3a3f46; border-radius:10px;
+    box-shadow:0 8px 28px rgba(0,0,0,.45); padding:14px 18px; min-width:230px; max-width:300px; }
+  #ai-phase-overlay .spinner { width:16px; height:16px; border:2px solid #3a3f46;
+    border-top-color:var(--ldword-brand, #409eff); border-radius:50%;
+    animation:ai-spin 0.9s linear infinite; display:inline-block; vertical-align:-3px; margin-right:8px; }
+  @keyframes ai-spin { to { transform:rotate(360deg); } }
+  #ai-phase-overlay .phase-title { display:inline; color:#e6e6e6; font-size:13px; font-weight:600; }
+  #ai-phase-overlay .phase-detail { color:#9aa0a8; font-size:12px; margin-top:6px; line-height:1.5;
+    word-break:break-all; }
   #table-menu .mi.danger { color:#ff7b72; }
   #table-menu .divider { height:1px; background:#3a3f46; margin:3px 0; }
   /* table size picker (drag to select N×M) */
@@ -572,6 +588,17 @@ window.onerror = function(msg, src, line, col, err) {
   <div id="image-menu">
     <div class="mi" data-field="title">编辑图注…</div>
     <div class="mi" data-field="alt">编辑替代文字…</div>
+  </div>
+  <div id="ai-menu">
+    <div class="mi" data-ai="rewrite">AI 重新改写所选</div>
+    <div class="mi" data-ai="polish">AI 润色优化</div>
+    <div class="divider"></div>
+    <div class="mi" data-ai="continue">AI 在光标处补充内容</div>
+  </div>
+  <div id="ai-phase-overlay">
+    <div class="spinner"></div>
+    <div class="phase-title">AI 正在了解本章内容…</div>
+    <div class="phase-detail"></div>
   </div>
   <div id="table-picker" tabindex="0">
     <div class="grid"></div>
@@ -1339,7 +1366,25 @@ window.onerror = function(msg, src, line, col, err) {
       showImageMenu(ev.clientX, ev.clientY);
       return;
     }
-    if (!isInTable(ev.target)) { hideTableMenu(); hideImageMenu(); return; }
+    if (!isInTable(ev.target)) {
+      hideTableMenu(); hideImageMenu();
+      // 编辑器 AI 右键菜单：选区改写/润色、光标处续写。空选区时改写/润色
+      // 菜单项置灰（不可点），续写始终可用。
+      const sel = window.getSelection ? String(window.getSelection()) : '';
+      const hasSel = sel.trim().length > 0;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const aiMenu = document.getElementById('ai-menu');
+      aiMenu.querySelectorAll('.mi[data-ai="rewrite"], .mi[data-ai="polish"]').forEach(function(mi) {
+        mi.style.opacity = hasSel ? '1' : '0.4';
+        mi.style.pointerEvents = hasSel ? 'auto' : 'none';
+      });
+      aiMenu.style.display = 'block';
+      aiMenu.style.left = Math.min(ev.clientX, window.innerWidth - 200) + 'px';
+      aiMenu.style.top = Math.min(ev.clientY, window.innerHeight - 130) + 'px';
+      aiMenu._lastSelection = sel;
+      return;
+    }
     ev.preventDefault();
     ev.stopPropagation();
     tableCellKey = cellContentKey(ev.target);
@@ -1370,9 +1415,65 @@ window.onerror = function(msg, src, line, col, err) {
     if (imageMenu.style.display !== 'none' && !imageMenu.contains(ev.target)) {
       hideImageMenu();
     }
+    const aiMenuEl = document.getElementById('ai-menu');
+    if (aiMenuEl && aiMenuEl.style.display !== 'none' && !aiMenuEl.contains(ev.target)) {
+      aiMenuEl.style.display = 'none';
+    }
   });
   window.addEventListener('scroll', hideTableMenu, true);
   window.addEventListener('scroll', hideImageMenu, true);
+
+  // ---- editor AI context menu (rewrite / polish / continue) -------------
+  const aiMenu = document.getElementById('ai-menu');
+
+  aiMenu.addEventListener('mousedown', function(ev) { ev.preventDefault(); });
+  aiMenu.addEventListener('click', function(ev) {
+    const item = ev.target.closest('.mi[data-ai]');
+    if (!item || !bridge) return;
+    const kind = item.getAttribute('data-ai');
+    const context = (kind === 'continue') ? '' : (aiMenu._lastSelection || '');
+    aiMenu.style.display = 'none';
+    bridge.requestEditorAiAction(kind, context);
+  });
+
+  function showAiPhase(payload) {
+    const overlay = document.getElementById('ai-phase-overlay');
+    if (!overlay) return;
+    const titles = {
+      understanding: 'AI 正在了解本章内容…',
+      drafting: 'AI 正在撰写内容…',
+      applying: 'AI 正在应用到编辑器…',
+      done: 'AI 已完成',
+      failed: 'AI 操作失败'
+    };
+    const title = titles[payload.phase] || payload.phase || '';
+    overlay.querySelector('.phase-title').textContent = title;
+    overlay.querySelector('.phase-detail').textContent = payload.detail || '';
+    const spin = overlay.querySelector('.spinner');
+    spin.style.display = (payload.phase === 'done' || payload.phase === 'failed') ? 'none' : 'inline-block';
+    overlay.style.borderColor = payload.phase === 'failed' ? '#ff7b72' : (payload.phase === 'done' ? '#7ee787' : '#3a3f46');
+    overlay.style.display = 'block';
+    if (payload.phase === 'done' || payload.phase === 'failed') {
+      clearTimeout(showAiPhase._hideTimer);
+      showAiPhase._hideTimer = setTimeout(function() {
+        overlay.style.display = 'none';
+      }, 2600);
+    }
+  }
+
+  function replaceSelection(newText) {
+    // Replace the current selection by deleting it then inserting the AI text;
+    // Muya inserts plain text at the caret which keeps undo/redo intact.
+    if (!muya || !newText) return;
+    muya.focus();
+    try { muya.insertText(newText); } catch (e) { /* ignore */ }
+  }
+
+  function insertAtCaret(newText) {
+    if (!muya || !newText) return;
+    muya.focus();
+    try { muya.insertText(newText); } catch (e) { /* ignore */ }
+  }
 
   // ---- image context menu (edit caption / alt text) ---------------------
   const imageMenu = document.getElementById('image-menu');
@@ -1509,6 +1610,21 @@ window.onerror = function(msg, src, line, col, err) {
       chapterMarkdown[index] = md || '';
       updateWordCount();
       if (activeChapter === index) render();
+    });
+    bridge.editor_ai_phase.connect(function(json) {
+      try { showAiPhase(JSON.parse(json)); } catch (e) { /* ignore */ }
+    });
+    bridge.editor_ai_result.connect(function(json) {
+      let payload = {};
+      try { payload = JSON.parse(json); } catch (e) { return; }
+      if (payload.replacement) {
+        // 选区改写/润色：选区文本已被 AI 结果替换（insertText 在选区存在时
+        // 会替换选区）。先删除选区再插入，保证替换而非追加。
+        try { document.execCommand('delete'); } catch (e) { /* ignore */ }
+        replaceSelection(payload.replacement);
+      } else if (payload.insertion) {
+        insertAtCaret(payload.insertion);
+      }
     });
     bridge.getOutline().then(function(json) {
       outline = JSON.parse(json);
@@ -1665,6 +1781,9 @@ class EmbeddedMarkTextView(QWidget):
         hint = getattr(self, "_drop_hint", None)
         if hint is not None and hint.isVisible():
             self._reposition_drop_hint()
+        fab = getattr(self, "_editor_ai_fab", None)
+        if fab is not None:
+            fab.reposition()
 
     def _reposition_drop_hint(self) -> None:
         """Keep the drag hint centered over the editor viewport."""
