@@ -1,0 +1,56 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  chapter-recognition-suite:
+    name: Chapter recognition + related suite (py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # The whole headless-safe chapter suite runs with only PySide6_Essentials
+      # (runtime dep) + the offscreen Qt platform, so it works cross-platform on
+      # ordinary GitHub Actions runners with no display.  Qt widget tests
+      # instantiate QApplication offscreen; the pure-logic chapter/heading and
+      # units-directive tests need no GUI at all.
+      #
+      # NOTE: test_marktext_drag_policy.py is intentionally NOT run here — it
+      # exercises the embedded Muya editor which requires PySide6_Addons
+      # (QtWebEngine), an extra dependency not installed by `.[dev]`. It stays a
+      # local/desktop test so CI never breaks on a missing WebEngine build.
+      - name: Run chapter-recognition suite (headless)
+        env:
+          QT_QPA_PLATFORM: "offscreen"
+          QTWEBENGINE_DISABLE_SANDBOX: "1"
+        run: |
+          python -m pytest tests/test_chapter_heading_recognition.py \
+            tests/test_chapter_units_directive.py \
+            tests/test_chapter_workbench_toast.py \
+            tests/test_chapter_dock_part_groups.py \
+            tests/test_part_polish.py \
+            tests/test_export_undo_preference.py \
+            tests/test_export_cover_preview.py \
+            tests/test_cover_field_mapping.py \
+            tests/test_markdown_docx_part_export.py \
+            tests/test_memory_location_preference.py \
+            tests/test_undo_policy.py -ra
