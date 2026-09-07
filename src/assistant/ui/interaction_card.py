@@ -147,6 +147,17 @@ class AssistantInteractionCard(QFrame):
         self._body.setVisible(bool(self.presentation.body) and not self.presentation.facts)
         layout.addWidget(self._body)
 
+        # 章节目录确认卡内嵌编辑器：改标题、增删章、上下移排序都在卡上
+        # 直接完成，确认时随 payload 回传编辑后的目录。
+        self._outline_editor_host: QWidget | None = None
+        self._outline_editors: list[QLineEdit] = []
+        self._outline_rows_host: QVBoxLayout | None = None
+        if (
+            self.interaction_type == "outline_confirm"
+            and isinstance(self.payload.get("editable_outline"), (list, tuple))
+        ):
+            self._build_outline_editor(layout)
+
         self._fact_host: QWidget | None = None
         if self.presentation.facts:
             self._fact_host = QWidget(self)
@@ -266,6 +277,124 @@ class AssistantInteractionCard(QFrame):
 
         bind_theme(self, self._apply_theme)
         self._apply_theme()
+
+    # ---- 章节目录内嵌编辑器 -------------------------------------------
+    def _build_outline_editor(self, layout: QVBoxLayout) -> None:
+        titles = [
+            str(item or "").strip()
+            for item in (self.payload.get("editable_outline") or ())
+            if str(item or "").strip()
+        ]
+        if not titles:
+            return
+        host = QWidget(self)
+        host.setObjectName("assistant_outline_editor")
+        rows = QVBoxLayout(host)
+        rows.setContentsMargins(0, 2, 0, 0)
+        rows.setSpacing(6)
+        self._outline_rows_host = rows
+        self._outline_editor_host = host
+        layout.addWidget(host)
+        for title in titles:
+            self._add_outline_row(title)
+        add_btn = QToolButton(host)
+        add_btn.setObjectName("assistant_outline_add")
+        add_btn.setText("＋ 添加章节")
+        add_btn.setCursor(Qt.PointingHandCursor)
+        add_btn.setEnabled(self.presentation.active)
+        add_btn.clicked.connect(self._on_outline_add)
+        rows.addWidget(add_btn, 0, Qt.AlignLeft)
+        self._sync_outline_payload()
+
+    def _add_outline_row(self, title: str) -> None:
+        rows = self._outline_rows_host
+        if rows is None:
+            return
+        index = len(self._outline_editors)
+        row = QWidget(self._outline_editor_host)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(4)
+        num = QLabel(f"{index + 1}.", row)
+        num.setObjectName("assistant_outline_num")
+        editor = QLineEdit(str(title or ""), row)
+        editor.setObjectName("assistant_outline_edit")
+        editor.setPlaceholderText("章节标题")
+        editor.setEnabled(self.presentation.active)
+        editor.textChanged.connect(self._sync_outline_payload)
+        row_layout.addWidget(num, 0)
+        row_layout.addWidget(editor, 1)
+        for symbol, offset, tooltip in (
+            ("↑", -1, "上移"),
+            ("↓", 1, "下移"),
+            ("✕", 0, "删除本章"),
+        ):
+            btn = QToolButton(row)
+            btn.setText(symbol)
+            btn.setToolTip(tooltip)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setEnabled(self.presentation.active)
+            if offset:
+                btn.clicked.connect(
+                    lambda _c=False, i=index, off=offset: self._move_outline_row(i, off)
+                )
+            else:
+                btn.clicked.connect(
+                    lambda _c=False, i=index: self._remove_outline_row(i)
+                )
+            row_layout.addWidget(btn, 0)
+        rows.insertWidget(rows.count() - 1, row)  # above the add button
+        self._outline_editors.append(editor)
+
+    def _rebuild_outline_rows(self, titles: list[str]) -> None:
+        rows = self._outline_rows_host
+        if rows is None:
+            return
+        for editor in self._outline_editors:
+            parent = editor.parentWidget()
+            if parent is not None:
+                parent.deleteLater()
+        self._outline_editors = []
+        for title in titles:
+            self._add_outline_row(str(title))
+        self._sync_outline_payload()
+
+    def _outline_titles(self) -> list[str]:
+        return [
+            editor.text().strip()
+            for editor in self._outline_editors
+            if editor.text().strip()
+        ]
+
+    def _raw_outline_titles(self) -> list[str]:
+        """All row titles including empty ones, so row indexes stay aligned."""
+        return [editor.text() for editor in self._outline_editors]
+
+    def _sync_outline_payload(self) -> None:
+        self.payload["editable_outline"] = self._outline_titles()
+
+    def _on_outline_add(self) -> None:
+        self._add_outline_row("")
+        if self._outline_editors:
+            self._outline_editors[-1].setFocus()
+        self._sync_outline_payload()
+
+    def _move_outline_row(self, index: int, offset: int) -> None:
+        titles = self._raw_outline_titles()
+        target = index + int(offset)
+        if index < 0 or index >= len(titles) or not 0 <= target < len(titles):
+            return
+        titles[index], titles[target] = titles[target], titles[index]
+        self._rebuild_outline_rows(titles)
+
+    def _remove_outline_row(self, index: int) -> None:
+        titles = self._raw_outline_titles()
+        if not 0 <= index < len(titles):
+            return
+        del titles[index]
+        if not any(str(item).strip() for item in titles):
+            return  # never collapse to a card with zero rows
+        self._rebuild_outline_rows(titles)
 
     def _build_question_choices(self, layout: QVBoxLayout) -> None:
         self._choice_group = QButtonGroup(self)

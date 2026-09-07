@@ -1001,6 +1001,20 @@ class AssistantDocumentWorkflowMixin:
                 for item in engineering_probe[2]
                 if str(item).strip()
             )
+            # 用户在确认卡上编辑过的目录优先于重新解析的结果，二次打开
+            # 卡片时仍显示已编辑的版本。
+            try:
+                edited_titles = tuple(
+                    str(item).strip()
+                    for item in (
+                        session.document_job.get("outline_edited_titles") or ()
+                    )
+                    if str(item).strip()
+                )
+            except (AttributeError, TypeError, ValueError):
+                edited_titles = ()
+            if edited_titles:
+                probe_titles = edited_titles
             if probe_titles:
                 numbered = "\n".join(
                     f"{index}. {title}"
@@ -1019,6 +1033,7 @@ class AssistantDocumentWorkflowMixin:
                         payload={
                             "plan_id": plan.plan_id,
                             "revision": plan.revision,
+                            "editable_outline": list(probe_titles),
                             "actions": [
                                 {
                                     "id": ACTION_CONFIRM_OUTLINE_AND_GENERATE,
@@ -1140,6 +1155,33 @@ class AssistantDocumentWorkflowMixin:
             plan.intent,
             material_refs=tuple(dict(item) for item in plan.material_refs),
         )
+        # 用户在章节目录确认卡上编辑过的目录优先于附件解析与内置指南：
+        # 确认时已写入任务状态，这里用编辑结果覆盖生成的标题清单。
+        if not normalized_revision_text:
+            try:
+                override_titles = tuple(
+                    str(item).strip()
+                    for item in (
+                        session.document_job.get("outline_edited_titles") or ()
+                    )
+                    if str(item).strip()
+                )
+            except (AttributeError, TypeError, ValueError):
+                override_titles = ()
+            if override_titles and engineering_outline[2]:
+                # 仅当章数一致（用户只改名/排序）时保留逐章注释；
+                # 增删章后注释与章节错位，整体丢弃以免误导写作。
+                outline_notes = (
+                    engineering_outline[3]
+                    if len(engineering_outline[3]) == len(override_titles)
+                    else ()
+                )
+                engineering_outline = (
+                    engineering_outline[0],
+                    engineering_outline[1],
+                    override_titles,
+                    outline_notes,
+                )
         directory_payload = _directory_authoring_payload_from_plan(plan, engineering_outline)
         typesetting_template_id = self._active_typesetting_template_id()
         layout_template_id = str(plan.template_ref.get("id") or "").strip()

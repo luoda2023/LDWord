@@ -216,7 +216,7 @@ class AssistantCardActionMixin:
             if isinstance(payload, Mapping) and self._card_action_scope_is_current(
                 payload
             ):
-                self._dispatch_document_action(action_id)
+                self._dispatch_document_action(action_id, payload=payload)
             return
 
     def _source_refs_for_retry(
@@ -259,6 +259,7 @@ class AssistantCardActionMixin:
         *,
         user_text: str = "",
         source_refs: tuple[dict[str, object], ...] = (),
+        payload: Mapping[str, object] | None = None,
     ) -> bool:
         """Run a bounded host action from either a card or typed follow-up."""
 
@@ -326,6 +327,24 @@ class AssistantCardActionMixin:
         elif action_id == ACTION_GENERATE_CONTENT_DRAFT:
             self._start_content_generation(session, plan)
         elif action_id == ACTION_CONFIRM_OUTLINE_AND_GENERATE:
+            # 章节目录确认卡上内嵌的编辑结果（改标题/增删章/排序）优先于
+            # AI 初次生成的目录：确认时把编辑后的标题写进任务状态，
+            # 后续逐章写作严格按这份目录执行。
+            if payload is not None:
+                edited_titles = tuple(
+                    str(item).strip()
+                    for item in (payload.get("editable_outline") or ())
+                    if str(item).strip()
+                )
+                if edited_titles:
+                    session = self._coordinator.update_state(
+                        session,
+                        document_job={
+                            **dict(session.document_job),
+                            "outline_edited_titles": list(edited_titles),
+                        },
+                    )
+                    self._active_session = session
             self._start_content_generation(
                 session,
                 plan,
