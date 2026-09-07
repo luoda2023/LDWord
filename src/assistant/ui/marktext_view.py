@@ -850,17 +850,40 @@ window.onerror = function(msg, src, line, col, err) {
   }
 
   // ---- streaming frame merge (rAF throttle) ---------------------------
+  // Tracks whether the reader is parked near the bottom of the editor so the
+  // incoming batches auto-scroll into view (typewriter feel). Any deliberate
+  // scroll-up pauses the follow; scrolling back near the bottom resumes it.
+  var streamFollowBottom = true;
+  function bindStreamFollow() {
+    const host = document.getElementById('editor-host');
+    if (!host || host.dataset.followBound) return;
+    host.dataset.followBound = '1';
+    host.addEventListener('scroll', function() {
+      const near = host.scrollHeight - host.scrollTop - host.clientHeight;
+      streamFollowBottom = near < 80;
+    });
+  }
+  function followStreamTail() {
+    if (!streamFollowBottom) return;
+    const host = document.getElementById('editor-host');
+    if (!host) return;
+    host.scrollTop = host.scrollHeight;
+  }
   function scheduleStreamRender() {
     if (streamRenderScheduled) return;
     streamRenderScheduled = true;
     requestAnimationFrame(function() {
       streamRenderScheduled = false;
+      bindStreamFollow();
       // Only re-render when the user is parked on the chapter being streamed;
       // otherwise the accumulated buffer is simply kept for later.
       if (activeChapter === 0 || !muya) return;
       suppressChange = true;
       muya.setMarkdown(chapterMarkdown[activeChapter] || '');
       suppressChange = false;
+      // Newly arrived batch: keep the latest text visible, like a typewriter,
+      // instead of letting content grow silently below the fold.
+      followStreamTail();
     });
   }
 
@@ -896,6 +919,7 @@ window.onerror = function(msg, src, line, col, err) {
     );
     rebuildOutline();
     updateWordCount();
+    bindStreamFollow();
   }
 
   function selectChapter(index) {
