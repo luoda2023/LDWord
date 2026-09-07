@@ -10,6 +10,8 @@ formats explicitly after parsing.
 from __future__ import annotations
 
 import math
+import re
+import time
 
 from src.qt_api import (
     QColor,
@@ -54,6 +56,105 @@ _IMAGE_MAX_WIDTH = 420
 _BLOCK_QUOTE_LEVEL_PROPERTY = 4224
 _IMAGE_RESOURCE_TYPE = 2
 
+# Live streaming is rendered as a sequence of markdown snapshots: raw deltas
+# never enter the visible document (that would flash `|`, `#` and `**` symbols
+# between re-parses).  A completed line (ends with ``\n``) forces an immediate
+# re-typeset so tables grow row by row — as soon as the header + delimiter
+# rows exist Qt parses them into a real QTextTable and every finished data row
+# after that adds a visible row.  Small intra-line fragments are coalesced by
+# the debounce timer so token-by-token output stays cheap.
+_LIVE_DEBOUNCE_MS = 90
+_LIVE_LINE_DEBOUNCE_S = 0.06
+
+# While a markdown table is streaming in, Qt only recognises it as a real
+# ``QTextTable`` once BOTH the header row and the ``|---|`` delimiter row are
+# present.  Between those two rows the accumulated text would otherwise render
+# as raw ``| a | b |`` symbols.  ``_with_synthetic_table_delimiter`` appends a
+# synthetic delimiter (render-time only, never persisted) so a table whose
+# header has arrived but whose delimiter is still streaming typesets as a real
+# header row instead of flashing raw pipes.
+_TABLE_DELIMITER_CELL_RE = re.compile(r"^\s*:?-{2,}:?\s*$")
+
+
+def _cell_count(row: str) -> int:
+    """Number of ``|``-separated cells in a markdown table row (best-effort)."""
+    stripped = str(row or "").strip()
+    if not stripped.startswith("|") and not stripped.endswith("|"):
+        stripped = f"|{stripped}|"
+    inner = stripped.strip("|")
+    parts = [part for part in inner.split("|") if part.strip()]
+    return max(1, len(parts))
+
+
+def _is_delimiter_row(row: str) -> bool:
+    """True when ``row`` looks like a GFM table delimiter row (``|---|``)."""
+    stripped = str(row or "").strip()
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        return False
+    cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+    return bool(cells) and all(
+        _TABLE_DELIMITER_CELL_RE.fullmatch(cell) for cell in cells
+    )
+
+
+_DELIMITER_PREFIX_CHARS = frozenset("|-: ")
+
+
+def _is_delimiter_prefix(line: str) -> bool:
+    """True when ``line`` looks like a *partially streamed* delimiter row:
+    it only contains ``|``, ``-``, ``:`` and spaces, and has at least one dash
+    or is a lone ``|`` that is clearly starting the delimiter row.
+    """
+    stripped = str(line or "").strip()
+    if not stripped:
+        return False
+    if not stripped.startswith("|"):
+        return False
+    if all(ch in _DELIMITER_PREFIX_CHARS for ch in stripped):
+        return "-" in stripped or stripped in {"|", "| "}
+    return False
+
+
+def _with_synthetic_table_delimiter(markdown: str) -> str:
+    """Return a render-only copy of a *streaming* markdown body whose trailing
+    table has not finished opening yet (header streamed in, delimiter row not
+    yet complete) so Qt typesets it as a real table instead of raw pipes.
+
+    The persisted source is never touched.  Strategy, applied only to the
+    trailing contiguous ``|``-line run:
+
+    * a run that already contains a complete ``|---|`` row is left alone (Qt
+      already parses it, and any half-typed *data* row after the delimiter is
+      handled natively);
+    * otherwise the run is an *opening* table: any partially streamed
+      delimiter-prefix fragments (``|``, ``| ---``, ...) are dropped and a
+      synthetic full ``|---|`` row is appended after the header rows, so the
+      header displays as a real table row from the moment it appears.
+    """
+    text = str(markdown or "")
+    if not text.strip() or "|" not in text:
+        return text
+    lines = text.splitlines()
+    # Locate the trailing contiguous run of ``|``-prefixed lines.
+    run_end = len(lines)
+    while run_end > 0 and lines[run_end - 1].lstrip().startswith("|"):
+        run_end -= 1
+    tail = lines[run_end:]
+    if not tail:
+        return text
+    if any(_is_delimiter_row(line) for line in tail):
+        return text
+    # Drop partially-streamed delimiter fragments (dash/pipe-only pieces) so
+    # only genuine header text remains above the synthetic delimiter.
+    header_lines = [line for line in tail if not _is_delimiter_prefix(line)]
+    if not header_lines:
+        return text
+    header_width = max((_cell_count(row) for row in header_lines), default=2)
+    delimiter = "|" + "|".join(" --- " for _ in range(header_width)) + "|"
+    kept = lines[:run_end] + header_lines
+    joined = "\n".join(kept)
+    return joined + "\n" + delimiter
+
 
 def _message_font(size_px: int, *, weight: int = 400) -> QFont:
     font = QFont(_MESSAGE_FONT_FAMILY)
@@ -89,16 +190,16 @@ class AssistantMessageBodyRenderer(QTextEdit):
         self.document().documentLayout().documentSizeChanged.connect(
             lambda _size: self._sync_height()
         )
-        # While the assistant is streaming, plain-text appends keep the view
-        # responsive; a throttled markdown re-parse turns the accumulated text
-        # into real formatted content (headings, lists, emphasis) so the user
-        # sees the document being typeset, not raw Markdown symbols.  The timer
-        # fires only when new deltas keep arriving and is stopped once the
-        # message is finalised.
+        # See the module comment above `_LIVE_DEBOUNCE_MS`: live text is shown
+        # as fast markdown snapshots (never raw symbols).  A completed line
+        # flushes immediately so tables form row by row; intra-line deltas are
+        # coalesced by the debounce timer.  The timer is a single-shot and only
+        # fires while new deltas keep arriving; finalise stops it.
         self._live_format_timer = QTimer(self)
         self._live_format_timer.setSingleShot(True)
-        self._live_format_timer.setInterval(180)
+        self._live_format_timer.setInterval(_LIVE_DEBOUNCE_MS)
         self._live_format_timer.timeout.connect(self._reformat_live_as_markdown)
+        self._last_live_render_at = 0.0
         self.apply_semantic_theme()
 
     def set_markdown(self, text: str) -> None:
@@ -111,10 +212,7 @@ class AssistantMessageBodyRenderer(QTextEdit):
     def set_live_text(self, text: str) -> None:
         self._source_text = str(text or "")
         self._live = True
-        self._prepare_document()
-        self.setPlainText(self._source_text)
-        self._apply_document_geometry()
-        self._arm_live_reformat()
+        self._render_live_snapshot()
 
     def append_live_text(self, text: str) -> None:
         delta = str(text or "")
@@ -122,11 +220,24 @@ class AssistantMessageBodyRenderer(QTextEdit):
             return
         self._source_text += delta
         self._live = True
-        cursor = self.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        cursor.insertText(delta)
-        self.setTextCursor(cursor)
-        self._arm_live_reformat()
+        # A completed line means a markdown row/block boundary just arrived
+        # (e.g. one more table row).  Re-typeset right away (debounced) so the
+        # table visibly gains rows while streaming instead of popping only once
+        # the whole chapter is done.  Partial intra-line deltas fall through to
+        # the debounce timer below.
+        line_completed = delta.endswith("\n") or self._source_text.endswith("\n")
+        self._arm_live_reformat(immediate=line_completed)
+
+    def _render_live_snapshot(self) -> None:
+        """Typeset the accumulated source as markdown (live mode)."""
+        self._last_live_render_at = time.monotonic()
+        self._prepare_document()
+        # The streamed source may end right after a table header whose ``|---|``
+        # delimiter row has not streamed in yet.  Qt would render that as raw
+        # ``| a | b |`` symbols; the render-only synthetic delimiter lets the
+        # header show as a real table row while the model is still typing.
+        self.setMarkdown(_with_synthetic_table_delimiter(self._source_text))
+        self._apply_document_geometry()
 
     def finalize_live_body(self) -> None:
         """Stop live throttling and render the final body as Markdown."""
@@ -137,24 +248,31 @@ class AssistantMessageBodyRenderer(QTextEdit):
             self._live = False
             self._render_source_markdown()
 
-    def _arm_live_reformat(self) -> None:
-        """(Re)arm the throttled markdown re-parse during streaming."""
+    def _arm_live_reformat(self, *, immediate: bool = False) -> None:
+        """Schedule the next live snapshot re-typeset.
+
+        ``immediate=True`` (a full line just arrived) re-renders right away as
+        long as the previous snapshot is at least ``_LIVE_LINE_DEBOUNCE_S`` old;
+        otherwise the single-shot debounce timer coalesces the pending text.
+        """
+        if not self._live:
+            return
         timer = getattr(self, "_live_format_timer", None)
+        if immediate and not self._source_text.strip():
+            return
+        if immediate:
+            elapsed = time.monotonic() - self._last_live_render_at
+            if elapsed >= _LIVE_LINE_DEBOUNCE_S:
+                self._render_live_snapshot()
+                return
         if timer is not None and not timer.isActive():
             timer.start()
 
     def _reformat_live_as_markdown(self) -> None:
-        """Re-parse the streamed text into formatted content (throttled)."""
+        """Debounce-timer entry: typeset the accumulated text as markdown."""
         if not self._live or not self._source_text.strip():
             return
-        was_at_end = self.verticalScrollBar().value() >= (
-            self.verticalScrollBar().maximum() - 8
-        ) if self.verticalScrollBar().maximum() > 0 else True
-        self._prepare_document()
-        self.setMarkdown(self._source_text)
-        self._apply_document_geometry()
-        if was_at_end:
-            self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+        self._render_live_snapshot()
 
     def _render_source_markdown(self) -> None:
         self._prepare_document()
