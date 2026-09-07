@@ -156,33 +156,25 @@ def evaluate_request_policy(
         )
 
     if not override and routed.status == "ambiguous" and deterministic_route is None:
-        top_score = routed.matches[0].score if routed.matches else 0
-        candidates = tuple(
-            match for match in routed.matches if top_score - match.score <= 14
-        )[:4]
-        choices = tuple(
-            RequestPolicyChoice(
-                route_id=match.route.route_id,
-                label=route_display_label(match.route),
-                description=_choice_description(match.route),
+        # 一句话直出目录：不再让用户在相似场景之间挑选。AI 自动采用得分
+        # 最高的场景继续起草（matches 已按分数降序），生成章节目录后用户
+        # 仍可在目录卡里修改要求，选错场景的代价被降到最低。
+        top_match = routed.matches[0] if routed.matches else None
+        if top_match is not None and selected_route is None:
+            selected_route = top_match.route
+            capability = resolve_assistant_capability(
+                route=selected_route,
+                workspace_mode_id=workspace_mode_id,
+                operation=operation,
+                query=normalized_query,
             )
-            for match in candidates
-        )
-        return RequestPolicyDecision(
-            kind=POLICY_NEEDS_ROUTE_CLARIFICATION,
-            query=normalized_query,
-            operation=operation,
-            route=None,
-            route_status=routed.status,
-            capability=capability,
-            clarification_prompt=(
-                routed.disambiguation_prompt or "请选择更符合本次目标的文档任务。"
-            ),
-            choices=choices,
-        )
 
     route_status = (
-        "matched" if override or deterministic_route is not None else routed.status
+        "matched"
+        if override
+        or deterministic_route is not None
+        or (routed.status == "ambiguous" and selected_route is not None)
+        else routed.status
     )
     if is_format_requirements_request(normalized_query):
         return RequestPolicyDecision(
