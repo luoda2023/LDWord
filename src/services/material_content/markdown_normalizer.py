@@ -149,7 +149,7 @@ def normalize_markdown_content(
 
 _WARNING_EVENTS = frozenset({"markdown_relative_link_normalized"})
 _IGNORED_EVENTS = frozenset(
-    {"markdown_image_title_ignored", "markdown_link_title_ignored"}
+    {"markdown_link_title_ignored"}
 )
 _EVENT_MESSAGES = {
     "markdown_blockquote_normalized": "引用已转换为目标文档中的引用段落。",
@@ -158,7 +158,6 @@ _EVENT_MESSAGES = {
     "markdown_task_list_normalized": "任务列表已转换为稳定的勾选符号。",
     "markdown_horizontal_rule_normalized": "分隔线已转换为目标文档分隔段落。",
     "markdown_relative_link_normalized": "相对文档链接已保留显示文字，链接目标未带入。",
-    "markdown_image_title_ignored": "图片标题元数据未带入，图片和替代文字已保留。",
     "markdown_link_title_ignored": "链接标题元数据未带入，链接正文已保留。",
 }
 
