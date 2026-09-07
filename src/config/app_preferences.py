@@ -12,6 +12,7 @@ from __future__ import annotations
 _EXPORT_KEEP_UNDO_KEY = "export/keep_undo_history"
 _SAVE_KEEP_UNDO_KEY = "save/keep_undo_history"
 _MEMORY_LOCATION_KEY = "assistant/system_memory_location"
+_STREAMING_SPEED_KEY = "assistant/streaming_reveal_speed"
 
 # Valid values for the system-memory storage location.
 MEMORY_LOCATION_INTERNAL = "internal"
@@ -148,3 +149,50 @@ def _set_bool_pref(key: str, value: bool) -> None:
         settings.sync()
     except Exception:  # noqa: BLE001 - preference persistence must never crash
         pass
+
+
+# --- Streaming reveal speed -------------------------------------------------
+# Three presets control how fast each revealed line appears during AI
+# chapter writing.  "standard" (42 ms) is the balanced default.
+
+STREAMING_SPEED_FAST = "fast"       # 25 ms per line (~40 fps)
+STREAMING_SPEED_STANDARD = "standard"  # 42 ms per line (~24 fps)
+STREAMING_SPEED_SLOW = "slow"       # 120 ms per line (~8 fps)
+
+STREAMING_SPEED_LABELS: dict[str, str] = {
+    STREAMING_SPEED_FAST: "快",
+    STREAMING_SPEED_STANDARD: "标准",
+    STREAMING_SPEED_SLOW: "慢",
+}
+
+STREAMING_SPEED_MS: dict[str, int] = {
+    STREAMING_SPEED_FAST: 25,
+    STREAMING_SPEED_STANDARD: 42,
+    STREAMING_SPEED_SLOW: 120,
+}
+
+
+def streaming_reveal_speed(default: str = STREAMING_SPEED_STANDARD) -> str:
+    """Return the current streaming reveal speed preset (fast/standard/slow).
+
+    The raw value is validated against the known presets; unknown values
+    silently fall back to ``default``.
+    """
+    raw = _string_pref(_STREAMING_SPEED_KEY, default)
+    normalized = str(raw or "").strip().casefold()
+    if normalized in STREAMING_SPEED_MS:
+        return normalized
+    return default
+
+
+def set_streaming_reveal_speed(value: str) -> None:
+    """Persist the streaming reveal speed preference."""
+    normalized = str(value or "").strip().casefold()
+    if normalized not in STREAMING_SPEED_MS:
+        normalized = STREAMING_SPEED_STANDARD
+    _set_string_pref(_STREAMING_SPEED_KEY, normalized)
+
+
+def streaming_reveal_interval_ms(default: int = 42) -> int:
+    """Convenience: return the millisecond interval for the current speed."""
+    return STREAMING_SPEED_MS.get(streaming_reveal_speed(), default)

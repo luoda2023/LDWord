@@ -48,12 +48,18 @@ from src.shared.ui.button_style import apply_button_variant, build_button_styles
 from src.config.app_preferences import (
     MEMORY_LOCATION_INTERNAL,
     MEMORY_LOCATION_PROJECT,
+    STREAMING_SPEED_FAST,
+    STREAMING_SPEED_LABELS,
+    STREAMING_SPEED_SLOW,
+    STREAMING_SPEED_STANDARD,
     export_keep_undo_history,
     memory_storage_location,
     save_keep_undo_history,
     set_export_keep_undo_history,
     set_memory_storage_location,
     set_save_keep_undo_history,
+    set_streaming_reveal_speed,
+    streaming_reveal_speed,
 )
 from src.shared.ui.selection_control_style import build_checkbox_stylesheet
 from src.shared.ui.design_system_card import DesignSystemCard
@@ -323,6 +329,9 @@ class PreferencesPanel(BasePanel):
         self._keep_save_undo_check.toggled.connect(self._on_keep_save_undo_toggled)
         self._memory_location_combo.currentIndexChanged.connect(
             self._on_memory_location_changed
+        )
+        self._streaming_speed_combo.currentIndexChanged.connect(
+            self._on_streaming_speed_changed
         )
         self.bridge.preferences_page_requested.connect(self.show_preferences_page)
 
@@ -779,6 +788,36 @@ class PreferencesPanel(BasePanel):
         apply_text_role(self._ai_status, TextRole.CAPTION)
         card.add_widget(self._form_aligned_caption_around(self._ai_status, card))
         layout.addWidget(card)
+
+        # --- Streaming reveal speed ---------------------------------------
+        speed_card = DesignSystemCard("流式显示速度", parent=content)
+        speed_card.set_header("流式显示速度", icon_name="sparkles")
+        speed_row = QWidget(speed_card)
+        speed_row.setObjectName("preferences_ai_speed_row")
+        speed_combo = StyledComboBox(speed_row)
+        speed_combo.setObjectName("preferences_ai_speed_combo")
+        speed_combo.set_full_width_mode(True)
+        speed_combo.setAccessibleName("AI 写作正文流式显示速度")
+        speed_combo.addItem(STREAMING_SPEED_LABELS[STREAMING_SPEED_FAST], STREAMING_SPEED_FAST)
+        speed_combo.addItem(STREAMING_SPEED_LABELS[STREAMING_SPEED_STANDARD], STREAMING_SPEED_STANDARD)
+        speed_combo.addItem(STREAMING_SPEED_LABELS[STREAMING_SPEED_SLOW], STREAMING_SPEED_SLOW)
+        current_speed = streaming_reveal_speed()
+        for idx in range(speed_combo.count()):
+            if str(speed_combo.itemData(idx) or "") == current_speed:
+                speed_combo.setCurrentIndex(idx)
+                break
+        self._streaming_speed_combo = speed_combo
+        speed_card.add_widget(FormRow("AI 写作时正文显示速度", speed_combo, parent=speed_card))
+        speed_hint = QLabel(
+            "控制 AI 逐章写作时，左侧对话区和右侧富文本预览中每一行正文出现的节奏。",
+            speed_card,
+        )
+        speed_hint.setObjectName("preferences_ai_speed_hint")
+        speed_hint.setWordWrap(True)
+        apply_text_role(speed_hint, TextRole.CAPTION)
+        speed_card.add_widget(speed_hint)
+        layout.addWidget(speed_card)
+
         layout.addStretch(1)
         self._reload_ai_profiles()
         return content
@@ -971,6 +1010,11 @@ class PreferencesPanel(BasePanel):
         selected = str(self._memory_location_combo.itemData(index) or "")
         if selected:
             set_memory_storage_location(selected)
+
+    def _on_streaming_speed_changed(self, index: int) -> None:
+        selected = str(self._streaming_speed_combo.itemData(index) or "")
+        if selected:
+            set_streaming_reveal_speed(selected)
 
     def show_preferences_page(self, page_id: str) -> None:
         raw = str(page_id or "").strip()

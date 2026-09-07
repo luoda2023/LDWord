@@ -119,6 +119,7 @@ from src.assistant.ui.workers import (
     PreflightWorker,
 )
 from src.application.materials import ExecutionMaterialSnapshot
+from src.config.app_preferences import streaming_reveal_interval_ms
 from src.config.engineering_stage_library import resolve_engineering_guide
 from src.config.library import load_scene_from_library
 from src.qt_api import (
@@ -1248,11 +1249,11 @@ class AssistantDocumentWorkflowMixin:
         if reveal_timer is None:
             reveal_timer = QTimer(self)
             reveal_timer.setSingleShot(True)
-            reveal_timer.setInterval(_CHAPTER_REVEAL_INTERVAL_MS)
             reveal_timer.timeout.connect(self._on_chapter_reveal_tick)
             self._chapter_reveal_timer = reveal_timer
         else:
             reveal_timer.stop()
+        reveal_timer.setInterval(streaming_reveal_interval_ms(_CHAPTER_REVEAL_INTERVAL_MS))
         self._chapter_reveal_pending = ""
         self._chapter_reveal_widget = None
         self._chapter_reveal_index = 0
