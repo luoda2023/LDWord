@@ -150,6 +150,36 @@ def test_no_raw_pipe_leak_while_header_is_still_streaming():
     assert "|" not in renderer.toPlainText()
 
 
+def test_bare_pipe_while_header_just_starts_never_leaks():
+    """Regression: while the model has only typed the opening ``|`` of a table
+    header row (no header text yet), Qt must not show a lone raw ``|``.
+
+    The render-only helper used to fall through to the raw source for that
+    window; now it strips the fragment from the render snapshot (the persisted
+    ``_source_text`` is untouched) until real header text arrives.
+    """
+    app = _app()
+    renderer = _renderer()
+    _reset(renderer)
+
+    # Feed the header row one character at a time; every intermediate state
+    # must stay free of raw pipes (the source keeps the full fragment).
+    header = "| 设备名称 | 数量 | 备注 |\n"
+    prefix = "# 设备清单表\n\n本章列出主要施工机械设备。\n\n"
+    for char in prefix:
+        renderer.append_live_text(char)
+    for index in range(len(header)):
+        renderer.append_live_text(header[index])
+        assert "|" not in renderer.toPlainText(), (
+            f"bare pipe leaked at header char {index}: "
+            f"{renderer.toPlainText()!r}"
+        )
+        QTest.qWait(20)
+    QTest.qWait(60)
+    # The whole header is still held verbatim in the live source.
+    assert renderer._source_text == prefix + header
+
+
 def test_finalise_preserves_complete_table():
     app = _app()
     renderer = _renderer()

@@ -148,7 +148,15 @@ def _with_synthetic_table_delimiter(markdown: str) -> str:
     # only genuine header text remains above the synthetic delimiter.
     header_lines = [line for line in tail if not _is_delimiter_prefix(line)]
     if not header_lines:
-        return text
+        # The trailing run is nothing but half-typed delimiter fragments or a
+        # bare ``|`` (the model just started typing the header row).  Qt would
+        # show that lone ``|`` as raw text, so strip the fragments for this
+        # render snapshot; the real source is untouched and the header text
+        # replaces them within a frame or two.
+        kept = lines[:run_end]
+        if not kept:
+            return ""
+        return "\n".join(kept).rstrip() + "\n"
     header_width = max((_cell_count(row) for row in header_lines), default=2)
     delimiter = "|" + "|".join(" --- " for _ in range(header_width)) + "|"
     kept = lines[:run_end] + header_lines

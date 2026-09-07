@@ -155,6 +155,12 @@ from src.ui.adapters.config_selector_models import (
 from src.ui.base_panel import BasePanel
 
 
+# Cadence (ms) for feeding buffered stream text to the live chapter widget one
+# line at a time.  Keeps large upstream SSE chunks readable as typewriter
+# growth (tables gain rows row by row) instead of popping in all at once.
+_CHAPTER_REVEAL_INTERVAL_MS = 42
+
+
 _CONTENT_VALIDATION_ERROR_LABELS = {
     "duplicate_answer_number": "答案编号重复",
     "duplicate_question_stem": "存在内容完全相同的重复题目",
@@ -1234,6 +1240,21 @@ class AssistantDocumentWorkflowMixin:
         self._chapter_chars = {}
         self._chapter_live_widget = None
         self._chapter_buffers: dict[int, str] = {}
+        # Line-by-line reveal queue: upstream SSE chunks can carry several
+        # markdown rows at once (a whole table / paragraph).  Feeding them to
+        # the live widget one line at a time keeps the typewriter feel even
+        # for large chunks, so tables grow row by row instead of popping.
+        reveal_timer = getattr(self, "_chapter_reveal_timer", None)
+        if reveal_timer is None:
+            reveal_timer = QTimer(self)
+            reveal_timer.setSingleShot(True)
+            reveal_timer.setInterval(_CHAPTER_REVEAL_INTERVAL_MS)
+            reveal_timer.timeout.connect(self._on_chapter_reveal_tick)
+            self._chapter_reveal_timer = reveal_timer
+        else:
+            reveal_timer.stop()
+        self._chapter_reveal_pending = ""
+        self._chapter_reveal_widget = None
         board.set_outline(list(titles or ()))
         board.set_collapsed(False)
         board.show_board()
@@ -1246,6 +1267,7 @@ class AssistantDocumentWorkflowMixin:
         board = getattr(self, "_chapter_board", None)
         if board is not None:
             board.close_board()
+        self._discard_chapter_reveal()
         self._chapter_live_widget = None
         self._chapter_run_session_id = ""
 
@@ -1522,20 +1544,129 @@ class AssistantDocumentWorkflowMixin:
             buffers[index] = buffers.get(index, "") + delta
         accumulated = int(self._chapter_chars.get(index, 0))
         if message is None or not delta:
+            if message is None:
+                self._discard_chapter_reveal()
             return
         if id(message) in getattr(self, "_chapter_done_ids", set()):
+            self._discard_chapter_reveal()
             return
         if not message.isVisible():
+            self._discard_chapter_reveal()
             return
+        # Buffer the whole delta and reveal it line by line: the first
+        # completed line renders immediately, remaining lines follow on the
+        # reveal tick.  Content is still fully cached/buffered above, so this
+        # only paces the visible live widget.
+        self._chapter_reveal_pending = (
+            getattr(self, "_chapter_reveal_pending", "") + delta
+        )
+        self._chapter_reveal_widget = message
+        self._pump_chapter_reveal(
+            index=index,
+            accumulated=accumulated,
+            force=False,
+        )
+
+    def _pump_chapter_reveal(
+        self,
+        *,
+        index: int,
+        accumulated: int,
+        force: bool,
+    ) -> None:
+        """Feed at most one completed line of buffered delta to the live widget.
+
+        ``force`` feeds everything at once (used right before a chapter is
+        finalised so no text is left unplayed).  When buffered text remains,
+        the single-shot reveal timer continues the typewriter cadence.
+        """
+        message = getattr(self, "_chapter_live_widget", None)
+        pending = getattr(self, "_chapter_reveal_pending", "")
+        if (
+            message is None
+            or self._chapter_reveal_widget is not message
+            or not pending
+        ):
+            self._discard_chapter_reveal()
+            return
+        if id(message) in getattr(self, "_chapter_done_ids", set()):
+            self._discard_chapter_reveal()
+            return
+        if not message.isVisible():
+            self._discard_chapter_reveal()
+            return
+        if force:
+            feed, rest = pending, ""
+        else:
+            boundary = pending.find("\n")
+            if boundary < 0:
+                feed, rest = pending, ""
+            else:
+                feed, rest = pending[: boundary + 1], pending[boundary + 1 :]
+        self._chapter_reveal_pending = rest
         message.append_live_delta(
-            delta=delta,
+            delta=feed,
             status_text=f"正在撰写第 {index} 章 · 已写约 {accumulated} 字",
         )
         if hasattr(self, "_is_near_latest") and self._is_near_latest():
             if hasattr(self, "_schedule_stream_scroll_to_bottom"):
                 self._schedule_stream_scroll_to_bottom()
+        if rest:
+            timer = getattr(self, "_chapter_reveal_timer", None)
+            if timer is not None and not timer.isActive():
+                timer.start()
+
+    def _on_chapter_reveal_tick(self) -> None:
+        """Reveal tick: feed the next buffered line to the live widget."""
+        message = self._chapter_reveal_widget
+        index = 0
+        if message is not None:
+            try:
+                index = int(getattr(message, "_chapter_index", 0) or 0)
+            except (TypeError, ValueError):
+                index = 0
+        accumulated = int(getattr(self, "_chapter_chars", {}).get(index, 0))
+        self._pump_chapter_reveal(
+            index=index,
+            accumulated=accumulated,
+            force=False,
+        )
+
+    def _flush_chapter_reveal(self) -> None:
+        """Force-feed buffered reveal text before the chapter widget ends."""
+        message = getattr(self, "_chapter_live_widget", None)
+        if message is None:
+            self._discard_chapter_reveal()
+            return
+        index = 0
+        try:
+            index = int(getattr(message, "_chapter_index", 0) or 0)
+        except (TypeError, ValueError):
+            index = 0
+        accumulated = int(getattr(self, "_chapter_chars", {}).get(index, 0))
+        self._pump_chapter_reveal(
+            index=index,
+            accumulated=accumulated,
+            force=True,
+        )
+        self._discard_chapter_reveal()
+
+    def _discard_chapter_reveal(self) -> None:
+        """Stop the reveal timer and drop buffered-but-unplayed UI text.
+
+        The full body is already persisted to the chapter cache / side buffers
+        before reaching this queue, so discarding never loses content.
+        """
+        timer = getattr(self, "_chapter_reveal_timer", None)
+        if timer is not None:
+            timer.stop()
+        self._chapter_reveal_pending = ""
+        self._chapter_reveal_widget = None
 
     def _finish_chapter_live_message(self, index: int, chars: int) -> None:
+        # Play any buffered-but-unrevealed lines before the widget is closed
+        # so the finished chapter shows every streamed character.
+        self._flush_chapter_reveal()
         message = getattr(self, "_chapter_live_widget", None)
         self._chapter_live_widget = None
         if message is None or id(message) in getattr(self, "_chapter_done_ids", set()):
@@ -1579,6 +1710,9 @@ class AssistantDocumentWorkflowMixin:
         persist: bool = False,
     ) -> None:
         message = getattr(self, "_chapter_live_widget", None)
+        # Play buffered-but-unrevealed lines before the widget is closed so
+        # interrupted/stopped chapters still show their full streamed body.
+        self._flush_chapter_reveal()
         self._chapter_live_widget = None
         if message is None:
             return
@@ -2253,6 +2387,7 @@ class AssistantDocumentWorkflowMixin:
         if worker is not None:
             worker.deleteLater()
         self._content_worker = None
+        self._discard_chapter_reveal()
         self._sync_composer_busy_state()
         if self._execution_worker is None or not self._execution_worker.is_running:
             self._stop_button.setVisible(False)
