@@ -8,6 +8,7 @@ and exposes no product-specific behavior.
 from __future__ import annotations
 
 import json
+import select
 import socket
 import threading
 import time
@@ -125,9 +126,10 @@ class OpenAICompatibleModelGateway:
                 _raise_for_stream_status(response)
                 saw_done = False
                 done_metadata = {**metadata, "attempt": attempt}
-                for payload in _iter_sse_payloads(response):
-                    if self._cancel_event.is_set():
-                        raise _Cancelled("Provider request was cancelled")
+                for payload in _iter_sse_payloads_cancellable(
+                    response,
+                    self._cancel_event.is_set,
+                ):
                     if payload is _SSE_DONE:
                         saw_done = True
                         break
@@ -299,6 +301,137 @@ def _iter_sse_payloads(response: Iterable[str | bytes]) -> Iterator[Mapping[str,
         raise OpenAICompatibleProtocolError(f"Malformed SSE field: {line[:80]}")
     if data_lines:
         yield _parse_sse_data("\n".join(data_lines))
+
+
+def _iter_sse_payloads_cancellable(
+    response: Any,
+    cancel: Callable[[], bool],
+) -> Iterator[Mapping[str, Any] | object]:
+    """Yield SSE payloads from a urllib response with prompt cancellation.
+
+    A blocking ``read()`` on an http.client socket cannot be interrupted from
+    another thread on Windows, which is why clicking stop could hang until the
+    whole 60s socket timeout fired.  This reader drives the raw socket with a
+    short ``select`` poll and checks ``cancel`` between polls, so a cancel is
+    observed within ~0.2s.  It re-implements only the body framing urllib
+    normally hides (chunked de-chunking when needed); HTTP handshake, headers
+    and redirects stay urllib's job.
+    """
+
+    sock = _response_raw_socket(response)
+    if sock is None:
+        # No usable raw socket (some transports).  Fall back to the blocking
+        # iterator; cancellation degrades to the socket timeout only.
+        for payload in _iter_sse_payloads(response):
+            yield payload
+        return
+    chunked = _response_is_chunked(response)
+    framing = _ChunkedFraming() if chunked else _RawFraming()
+    data_lines: list[str] = []
+
+    for raw_line in framing.iter_lines(sock, cancel):
+        if cancel():
+            raise _Cancelled("Provider request was cancelled")
+        line = raw_line.decode("utf-8", errors="replace").removesuffix("\r")
+        if line == "":
+            if data_lines:
+                yield _parse_sse_data("\n".join(data_lines))
+                data_lines.clear()
+            continue
+        if line.startswith(":") or line.startswith(("event:", "id:", "retry:")):
+            continue
+        if line.startswith("data:"):
+            value = line[5:]
+            data_lines.append(value.removeprefix(" "))
+            continue
+        raise OpenAICompatibleProtocolError(f"Malformed SSE field: {line[:80]}")
+    if data_lines:
+        yield _parse_sse_data("\n".join(data_lines))
+
+
+def _response_raw_socket(response: Any) -> Any | None:
+    try:
+        return response.fp.raw._sock  # type: ignore[attr-defined]
+    except Exception:
+        return None
+
+
+def _response_is_chunked(response: Any) -> bool:
+    try:
+        transfer = str(
+            response.headers.get("Transfer-Encoding") or ""  # type: ignore[attr-defined]
+        ).casefold()
+    except Exception:
+        return False
+    return "chunked" in transfer
+
+
+class _RawFraming:
+    """Yield body lines from a non-chunked byte stream."""
+
+    def iter_lines(self, sock: Any, cancel: Callable[[], bool]):
+        buf = b""
+        while True:
+            r, _, _ = select.select([sock], [], [], 0.2)
+            if not r:
+                if cancel():
+                    return
+                continue
+            try:
+                chunk = sock.recv(65536)
+            except OSError:
+                return
+            if not chunk:
+                return
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                yield line
+
+
+class _ChunkedFraming:
+    """Yield body lines from an HTTP chunked byte stream."""
+
+    def iter_lines(self, sock: Any, cancel: Callable[[], bool]):
+        buf = b""
+        size_remaining = 0
+        while True:
+            r, _, _ = select.select([sock], [], [], 0.2)
+            if not r:
+                if cancel():
+                    return
+                continue
+            try:
+                chunk = sock.recv(65536)
+            except OSError:
+                return
+            if not chunk:
+                return
+            buf += chunk
+            while True:
+                if size_remaining == 0:
+                    if b"\n" not in buf:
+                        break
+                    sizeline, buf = buf.split(b"\n", 1)
+                    sizeline = sizeline.strip()
+                    if not sizeline:
+                        continue
+                    try:
+                        size_remaining = int(sizeline.split(b";")[0].strip(), 16)
+                    except ValueError:
+                        return
+                    if size_remaining == 0:
+                        return  # last-chunk
+                else:
+                    if len(buf) < size_remaining + 2:
+                        break
+                    body = buf[:size_remaining]
+                    buf = buf[size_remaining + 2:]  # drop body + CRLF
+                    size_remaining = 0
+                    acc = body
+                    while b"\n" in acc:
+                        line, acc = acc.split(b"\n", 1)
+                        yield line
 
 
 def _decoded_sse_lines(chunks: Iterable[str | bytes]) -> Iterator[str]:
