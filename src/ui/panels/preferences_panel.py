@@ -15,6 +15,7 @@ from src.app_meta import (
     LUODA_OFFICIAL_DEFAULT_KEY,
 )
 from src.qt_api import (
+    QCheckBox,
     QDesktopServices,
     QFileDialog,
     QFrame,
@@ -44,6 +45,17 @@ from src.services.license_catalog import (
 )
 from src.shared.ui.badge import Badge
 from src.shared.ui.button_style import apply_button_variant, build_button_stylesheet
+from src.config.app_preferences import (
+    MEMORY_LOCATION_INTERNAL,
+    MEMORY_LOCATION_PROJECT,
+    export_keep_undo_history,
+    memory_storage_location,
+    save_keep_undo_history,
+    set_export_keep_undo_history,
+    set_memory_storage_location,
+    set_save_keep_undo_history,
+)
+from src.shared.ui.selection_control_style import build_checkbox_stylesheet
 from src.shared.ui.design_system_card import DesignSystemCard
 from src.shared.ui.dialogs import confirm
 from src.shared.ui.form_row import FormRow
@@ -227,6 +239,14 @@ class PreferencesPanel(BasePanel):
         )
         self._ai_nav.set_subtitle("Provider、模型和密钥")
         self._nav_rail.add_card("ai", self._ai_nav)
+        self._general_nav = NavigationCard(
+            "general",
+            "通用偏好",
+            icon_name="sliders-horizontal",
+            parent=self._nav_rail,
+        )
+        self._general_nav.set_subtitle("撤销历史与导出行为")
+        self._nav_rail.add_card("general", self._general_nav)
         self._nav_rail.select_card("about")
 
         self._content = QWidget(self._shell.detail_container)
@@ -260,14 +280,20 @@ class PreferencesPanel(BasePanel):
         content_layout.addStretch(1)
         self._ai_content = self._build_ai_content()
         self._ai_content.hide()
+        self._general_content = self._build_general_content()
+        self._general_content.hide()
         self._detail_layout.addWidget(self._content, 0, Qt.AlignTop)
         self._detail_layout.addWidget(self._ai_content, 0, Qt.AlignTop)
+        self._detail_layout.addWidget(self._general_content, 0, Qt.AlignTop)
         self._detail_layout.addStretch(1)
 
         preferred_page = getattr(self.bridge, "preferred_preferences_page", lambda: "about")()
         if preferred_page == "ai":
             self._nav_rail.select_card("ai")
             self._select_settings_page("ai")
+        elif preferred_page == "general":
+            self._nav_rail.select_card("general")
+            self._select_settings_page("general")
 
         self._apply_theme()
         bind_theme(self, self._apply_theme)
@@ -293,6 +319,11 @@ class PreferencesPanel(BasePanel):
         self._ai_delete_button.clicked.connect(self._delete_ai_profile)
         self._ai_check_button.clicked.connect(self._check_ai_profile)
         self._ai_new_button.clicked.connect(self._start_new_ai_profile)
+        self._keep_undo_check.toggled.connect(self._on_keep_undo_toggled)
+        self._keep_save_undo_check.toggled.connect(self._on_keep_save_undo_toggled)
+        self._memory_location_combo.currentIndexChanged.connect(
+            self._on_memory_location_changed
+        )
         self.bridge.preferences_page_requested.connect(self.show_preferences_page)
 
     def _build_usage_guide_card(self) -> DesignSystemCard:
@@ -752,13 +783,198 @@ class PreferencesPanel(BasePanel):
         self._reload_ai_profiles()
         return content
 
+    def _build_general_content(self) -> QWidget:
+        """General preferences page: undo/export behavior shared with the AI
+        assistant's export-confirm checkbox (single source in
+        ``src/config/app_preferences``)."""
+        content = QWidget(self._shell.detail_container)
+        content.setObjectName("preferences_general_content")
+        content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 8, 0, 8)
+        layout.setSpacing(16)
+
+        self._general_page_title = QLabel("通用偏好", content)
+        self._general_page_title.setObjectName("preferences_general_page_title")
+        apply_text_role(self._general_page_title, TextRole.PAGE_TITLE)
+        layout.addWidget(self._general_page_title)
+
+        card = DesignSystemCard("撤销历史基线", parent=content)
+        card.set_header("撤销历史基线", icon_name="undo-2")
+
+        export_toggle = QWidget(card)
+        export_toggle.setObjectName("preferences_general_export_undo_row")
+        export_layout = QHBoxLayout(export_toggle)
+        export_layout.setContentsMargins(0, 0, 0, 0)
+        export_layout.setSpacing(8)
+        self._keep_undo_check = QCheckBox(
+            "导出 DOCX 后在编辑器保留撤销历史",
+            export_toggle,
+        )
+        self._keep_undo_check.setObjectName("preferences_general_keep_undo_check")
+        self._keep_undo_check.setChecked(export_keep_undo_history())
+        self._keep_undo_check.setToolTip(
+            "开启后，导出成功不会清空可撤销/重做历史，你仍可撤销到导出前；"
+            "关闭后，导出会以当前文档作为新的撤销基线。"
+        )
+        export_layout.addWidget(self._keep_undo_check)
+        export_layout.addStretch(1)
+        card.add_widget(export_toggle)
+
+        export_hint = QLabel(
+            "开启（默认）：导出后仍可撤销到导出前的编辑内容。关闭：导出成功即"
+            "把当前内容设为新的撤销起点，后续 Ctrl+Z 不会越过导出动作。此设置与"
+            "导出确认框里的复选项同步生效。",
+            card,
+        )
+        export_hint.setObjectName("preferences_general_export_undo_hint")
+        export_hint.setWordWrap(True)
+        apply_text_role(export_hint, TextRole.CAPTION)
+        card.add_widget(self._form_aligned_caption_around(export_hint, card))
+
+        divider = QFrame(card)
+        divider.setObjectName("preferences_general_undo_divider")
+        divider.setFrameShape(QFrame.HLine)
+        divider.setFrameShadow(QFrame.Plain)
+        divider.setFixedHeight(1)
+        card.add_widget(divider)
+
+        save_toggle = QWidget(card)
+        save_toggle.setObjectName("preferences_general_save_undo_row")
+        save_layout = QHBoxLayout(save_toggle)
+        save_layout.setContentsMargins(0, 0, 0, 0)
+        save_layout.setSpacing(8)
+        self._keep_save_undo_check = QCheckBox(
+            "保存 Markdown（非导出）后在编辑器保留撤销历史",
+            save_toggle,
+        )
+        self._keep_save_undo_check.setObjectName(
+            "preferences_general_keep_save_undo_check"
+        )
+        self._keep_save_undo_check.setChecked(save_keep_undo_history())
+        self._keep_save_undo_check.setToolTip(
+            "开启后，点「保存」把文档存为 .md 时不会清空可撤销/重做历史，你仍可"
+            "撤销到保存前；关闭后，保存成功会以当前文档作为新的撤销基线。"
+        )
+        save_layout.addWidget(self._keep_save_undo_check)
+        save_layout.addStretch(1)
+        card.add_widget(save_toggle)
+
+        save_hint = QLabel(
+            "开启（默认）：保存到 .md 后仍可撤销到保存前的编辑内容。关闭：保存"
+            "成功即以当前内容作为新的撤销起点，后续 Ctrl+Z 不会越过这次保存。"
+            "与上面的 DOCX 导出撤销偏好相互独立，可分别设置。",
+            card,
+        )
+        save_hint.setObjectName("preferences_general_save_undo_hint")
+        save_hint.setWordWrap(True)
+        apply_text_role(save_hint, TextRole.CAPTION)
+        card.add_widget(self._form_aligned_caption_around(save_hint, card))
+        layout.addWidget(card)
+
+        memory_card = DesignSystemCard("AI 系统记忆位置", parent=content)
+        memory_card.set_header("AI 系统记忆位置", icon_name="database")
+
+        memory_row = QWidget(memory_card)
+        memory_row.setObjectName("preferences_general_memory_location_row")
+        self._memory_location_combo = StyledComboBox(memory_row)
+        self._memory_location_combo.setObjectName(
+            "preferences_general_memory_location_combo"
+        )
+        self._memory_location_combo.set_full_width_mode(True)
+        self._memory_location_combo.setAccessibleName("AI 系统记忆存储位置")
+        self._memory_location_combo.addItem(
+            "内部缓存目录（默认，与章节缓存同目录）", MEMORY_LOCATION_INTERNAL
+        )
+        self._memory_location_combo.addItem(
+            "项目 / 源文档所在目录", MEMORY_LOCATION_PROJECT
+        )
+        current = memory_storage_location()
+        for index in range(self._memory_location_combo.count()):
+            if str(self._memory_location_combo.itemData(index) or "") == current:
+                self._memory_location_combo.setCurrentIndex(index)
+                break
+        memory_row_layout = QHBoxLayout(memory_row)
+        memory_row_layout.setContentsMargins(0, 0, 0, 0)
+        memory_row_layout.setSpacing(8)
+        memory_row_layout.addWidget(self._memory_location_combo, 1)
+        memory_card.add_widget(
+            FormRow("记忆文件存放", memory_row, parent=memory_card)
+        )
+
+        memory_hint = QLabel(
+            "AI 逐章写作时会生成一个“系统记忆文件”（项目背景、关键口径、各章已覆盖"
+            "摘要），让后续章节与修改不丢记忆。默认存在软件内部的缓存目录、与章节缓存"
+            "同目录；若希望记忆随你的源文档文件一起移动、便于换机/归档时保留，可选择"
+            "“项目 / 源文档所在目录”（在有绑定文档时写入该文件旁，否则仍退回内部）。",
+            memory_card,
+        )
+        memory_hint.setObjectName("preferences_general_memory_location_hint")
+        memory_hint.setWordWrap(True)
+        apply_text_role(memory_hint, TextRole.CAPTION)
+        memory_card.add_widget(
+            self._form_aligned_caption_around(memory_hint, memory_card)
+        )
+        layout.addWidget(memory_card)
+        layout.addStretch(1)
+        return content
+
     def _select_settings_page(self, card_id: str) -> None:
-        ai_selected = card_id == "ai"
-        self._content.setVisible(not ai_selected)
-        self._ai_content.setVisible(ai_selected)
+        selected = str(card_id or "")
+        self._content.setVisible(selected == "about")
+        self._ai_content.setVisible(selected == "ai")
+        self._general_content.setVisible(selected == "general")
+        if selected == "general":
+            self._sync_general_preferences()
+
+    def _sync_general_preferences(self) -> None:
+        """Refresh the general page's controls from the shared QSettings values,
+        so changes made elsewhere (e.g. the export-confirm dialog or save action)
+        show up here."""
+        if hasattr(self, "_keep_undo_check"):
+            self._keep_undo_check.blockSignals(True)
+            try:
+                self._keep_undo_check.setChecked(export_keep_undo_history())
+            finally:
+                self._keep_undo_check.blockSignals(False)
+        if hasattr(self, "_keep_save_undo_check"):
+            self._keep_save_undo_check.blockSignals(True)
+            try:
+                self._keep_save_undo_check.setChecked(save_keep_undo_history())
+            finally:
+                self._keep_save_undo_check.blockSignals(False)
+        self._sync_memory_location_combo()
+
+    def _sync_memory_location_combo(self) -> None:
+        """Refresh the memory-location combo from the shared preference (kept
+        in sync with any other entry point that writes the same key)."""
+        combo = getattr(self, "_memory_location_combo", None)
+        if combo is None:
+            return
+        current = memory_storage_location()
+        combo.blockSignals(True)
+        try:
+            for index in range(combo.count()):
+                if str(combo.itemData(index) or "") == current:
+                    combo.setCurrentIndex(index)
+                    break
+        finally:
+            combo.blockSignals(False)
+
+    def _on_keep_undo_toggled(self, checked: bool) -> None:
+        set_export_keep_undo_history(bool(checked))
+
+    def _on_keep_save_undo_toggled(self, checked: bool) -> None:
+        set_save_keep_undo_history(bool(checked))
+
+    def _on_memory_location_changed(self, index: int) -> None:
+        selected = str(self._memory_location_combo.itemData(index) or "")
+        if selected:
+            set_memory_storage_location(selected)
 
     def show_preferences_page(self, page_id: str) -> None:
-        target = "ai" if str(page_id or "").strip() == "ai" else "about"
+        raw = str(page_id or "").strip()
+        target = raw if raw in {"about", "ai", "general"} else "about"
         self._nav_rail.select_card(target)
         self._select_settings_page(target)
 
@@ -1461,6 +1677,16 @@ class PreferencesPanel(BasePanel):
             )
             button.setIcon(get_icon(icon_name, 16, icon_color))
             button.setIconSize(QSize(16, 16))
+        self._general_page_title.setStyleSheet(
+            f"color: {theme.text_primary}; background: transparent;"
+        )
+        self._keep_undo_check.setStyleSheet(build_checkbox_stylesheet(theme))
+        self._keep_save_undo_check.setStyleSheet(build_checkbox_stylesheet(theme))
+        general_divider = self.findChild(QFrame, "preferences_general_undo_divider")
+        if general_divider is not None:
+            general_divider.setStyleSheet(
+                f"background: {theme.divider}; border: none;"
+            )
         divider = self.findChild(QFrame, "license_navigation_divider")
         if divider is not None:
             divider.setStyleSheet(
