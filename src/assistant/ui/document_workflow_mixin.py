@@ -2629,6 +2629,16 @@ class AssistantDocumentWorkflowMixin:
             "preflight": preflight.to_dict(),
         }
         session = self._coordinator.update_state(session, document_job=job)
+        # 智能精简：当本地检查干净通过、且没有需要用户亲眼确认的情形（覆盖
+        # 已有文件、或试卷需要复核的候选版）时，不再额外弹一张“确认生成”卡，
+        # 直接从用户那一次“生成 Word”点按继续执行到落盘。
+        if (
+            preflight.ready
+            and not self._preflight_needs_confirmation(current_plan, preflight)
+        ):
+            self._start_execution(session, current_plan)
+            self._finish_preflight_ui()
+            return
         presentation = present_preflight_card(current_plan, preflight)
         approval_facts = [
             {"label": label, "value": value}
@@ -2666,6 +2676,27 @@ class AssistantDocumentWorkflowMixin:
             self._render_active_session()
         self._refresh_session_list()
         self._finish_preflight_ui()
+
+    def _preflight_needs_confirmation(
+        self,
+        plan: DocumentPlan,
+        preflight: object,
+    ) -> bool:
+        """Whether a ready preflight still needs the user to confirm execution.
+
+        We auto-continue after a clean preflight so the “生成 Word” click flows
+        straight through to the finished document.  A confirmation gate is kept
+        only when the user's eyes are genuinely needed: replacing an existing
+        output file, or an exam candidate version that is offered for review.
+        """
+        warnings = tuple(str(item or "") for item in preflight.warnings)
+        if bool(getattr(plan.output_policy, "overwrite", False)):
+            return True
+        if any("output_replacement_requested" in item for item in warnings):
+            return True
+        if any("exam_source_warning" in item for item in warnings):
+            return True
+        return False
 
     def _on_preflight_failed(self, session_id: str, error: str) -> None:
         try:
