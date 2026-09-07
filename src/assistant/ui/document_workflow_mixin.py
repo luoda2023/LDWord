@@ -97,6 +97,11 @@ from src.assistant.ui.conversation_view import (
 )
 from src.assistant.ui.chapter_outline_panel import ChapterOutlinePanel
 from src.assistant.ui.creative_home import AssistantCreativeHome, AssistantHeroComposer
+from src.config.app_preferences import (
+    material_disclosure_approved,
+    material_disclosure_remember,
+    set_material_disclosure_approved,
+)
 from src.assistant.ui.design_tokens import TOKENS
 from src.assistant.ui.exam_plan_editor import ExamPlanEditor
 from src.assistant.ui.official_plan_editor import OfficialPlanEditor
@@ -797,6 +802,18 @@ class AssistantDocumentWorkflowMixin:
             str(item.get("name") or item.get("title") or "DOCX 材料")
             for item in context_documents
         )
+        # 可记住的一次性授权：偏好里开启“记住材料授权”且已同意过一次，
+        # 后续逐章写作的材料确认卡不再重复弹出，直接按已授权继续。
+        if (
+            material_disclosure_remember()
+            and material_disclosure_approved()
+        ):
+            self._active_session = session
+            self._resolve_content_disclosure(
+                {"disclosure_id": disclosure_id},
+                approved=True,
+            )
+            return
         session = self._coordinator.append_message(
             session,
             AssistantMessage.interaction(
@@ -848,6 +865,8 @@ class AssistantDocumentWorkflowMixin:
         submitted_id = str(payload.get("disclosure_id") or "")
         if not expected_id or submitted_id != expected_id:
             return
+        if approved and material_disclosure_remember():
+            set_material_disclosure_approved(True)
         try:
             plan = DocumentPlan.from_dict(session.active_plan)
         except (TypeError, ValueError):

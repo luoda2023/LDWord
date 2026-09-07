@@ -73,6 +73,11 @@ from src.assistant.ui.turn_preview_mixin import AssistantTurnPreviewMixin
 from src.assistant.ui.workers import (
     AssistantTurnWorker,
 )
+from src.config.app_preferences import (
+    material_disclosure_approved,
+    material_disclosure_remember,
+    set_material_disclosure_approved,
+)
 from src.config.material_package_library import material_package_repository
 from src.assistant.application.directory_authoring_parser import (
     is_directory_authoring_trigger,
@@ -848,6 +853,18 @@ class AssistantTurnFlowMixin(
                         ),
                     }
                 )
+        # 可记住的一次性授权：用户在偏好设置里开启“记住材料授权”并同意过
+        # 一次后，后续附件不再重复弹这张确认卡，直接按已授权继续。
+        if (
+            material_disclosure_remember()
+            and material_disclosure_approved()
+        ):
+            self._active_session = session
+            self._resolve_provider_disclosure(
+                {"disclosure_id": disclosure_id},
+                approved=True,
+            )
+            return
         session = self._coordinator.append_message(
             session,
             AssistantMessage.interaction(
@@ -905,6 +922,10 @@ class AssistantTurnFlowMixin(
         submitted_id = str(payload.get("disclosure_id") or "")
         if not expected_id or submitted_id != expected_id:
             return
+        if approved and material_disclosure_remember():
+            # The user just approved manually with remember enabled: persist
+            # it so future attachments skip this card.
+            set_material_disclosure_approved(True)
         turn_id = str(continuation.get("turn_id") or "")
         if not approved:
             self._turn_material_snapshots.pop(turn_id, None)

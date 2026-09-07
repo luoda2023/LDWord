@@ -196,3 +196,38 @@ def set_streaming_reveal_speed(value: str) -> None:
 def streaming_reveal_interval_ms(default: int = 42) -> int:
     """Convenience: return the millisecond interval for the current speed."""
     return STREAMING_SPEED_MS.get(streaming_reveal_speed(), default)
+
+
+# --- Material disclosure one-time authorization ----------------------------
+# When enabled, the user's approval of a one-time material disclosure card is
+# remembered, so later attachments skip the repeated "同意发送材料" card.
+# Only *approval* is remembered; a denial always re-asks next time so a single
+# refusal can never permanently silence the privacy boundary.
+
+_MATERIAL_REMEMBER_KEY = "assistant/material_disclosure_remember"
+_MATERIAL_APPROVED_KEY = "assistant/material_disclosure_approved"
+
+
+def material_disclosure_remember(default: bool = False) -> bool:
+    """Whether approval of the material disclosure card is remembered."""
+    return _bool_pref(_MATERIAL_REMEMBER_KEY, default)
+
+
+def set_material_disclosure_remember(value: bool) -> None:
+    """Persist the remember-authorization toggle."""
+    _set_bool_pref(_MATERIAL_REMEMBER_KEY, bool(value))
+
+
+def material_disclosure_approved() -> bool:
+    """The remembered approval decision (only meaningful when remember=True)."""
+    return _bool_pref(_MATERIAL_APPROVED_KEY, False)
+
+
+def set_material_disclosure_approved(value: bool) -> None:
+    """Persist the remembered approval decision."""
+    _set_bool_pref(_MATERIAL_APPROVED_KEY, bool(value))
+
+
+def reset_material_disclosure_remember() -> None:
+    """Forget the remembered decision (the toggle itself stays as-is)."""
+    _set_bool_pref(_MATERIAL_APPROVED_KEY, False)

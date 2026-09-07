@@ -53,9 +53,13 @@ from src.config.app_preferences import (
     STREAMING_SPEED_SLOW,
     STREAMING_SPEED_STANDARD,
     export_keep_undo_history,
+    material_disclosure_approved,
+    material_disclosure_remember,
     memory_storage_location,
+    reset_material_disclosure_remember,
     save_keep_undo_history,
     set_export_keep_undo_history,
+    set_material_disclosure_remember,
     set_memory_storage_location,
     set_save_keep_undo_history,
     set_streaming_reveal_speed,
@@ -818,6 +822,58 @@ class PreferencesPanel(BasePanel):
         speed_card.add_widget(speed_hint)
         layout.addWidget(speed_card)
 
+        # 材料发送一次性授权：开启后用户同意一次“同意发送材料”，后续附件
+        # 不再重复弹卡；重置按钮立即清除已记住的授权。
+        disclosure_card = DesignSystemCard("材料发送授权", parent=content)
+        disclosure_card.set_header("材料发送授权", icon_name="shield-check")
+        self._disclosure_remember_check = QCheckBox(
+            "记住材料授权：同意一次后，后续附件不再重复确认",
+            disclosure_card,
+        )
+        self._disclosure_remember_check.setObjectName(
+            "preferences_disclosure_remember_check"
+        )
+        self._disclosure_remember_check.setAccessibleName("记住材料发送授权")
+        self._disclosure_remember_check.setChecked(
+            material_disclosure_remember()
+        )
+        self._disclosure_remember_check.toggled.connect(
+            self._on_disclosure_remember_toggled
+        )
+        disclosure_card.add_widget(
+            FormRow(
+                "附件材料确认",
+                self._disclosure_remember_check,
+                parent=disclosure_card,
+            )
+        )
+        disclosure_row = QWidget(disclosure_card)
+        disclosure_row_layout = QHBoxLayout(disclosure_row)
+        disclosure_row_layout.setContentsMargins(0, 0, 0, 0)
+        self._disclosure_state_label = QLabel("", disclosure_row)
+        self._disclosure_state_label.setObjectName(
+            "preferences_disclosure_state"
+        )
+        apply_text_role(self._disclosure_state_label, TextRole.CAPTION)
+        disclosure_row_layout.addWidget(self._disclosure_state_label, 1)
+        reset_btn = QPushButton("重置已记住的授权", disclosure_row)
+        reset_btn.setObjectName("preferences_disclosure_reset")
+        reset_btn.setAccessibleName("重置已记住的材料授权")
+        reset_btn.setToolTip("清除已记住的“同意发送材料”授权，下次附件将重新确认")
+        reset_btn.clicked.connect(self._on_disclosure_reset_clicked)
+        disclosure_row_layout.addWidget(reset_btn)
+        disclosure_card.add_widget(disclosure_row)
+        disclosure_hint = QLabel(
+            "仅记住“同意”；点过“不发送”的请求下次仍会确认，避免误授权长期生效。",
+            disclosure_card,
+        )
+        disclosure_hint.setObjectName("preferences_disclosure_hint")
+        disclosure_hint.setWordWrap(True)
+        apply_text_role(disclosure_hint, TextRole.CAPTION)
+        disclosure_card.add_widget(disclosure_hint)
+        self._refresh_disclosure_state_label()
+        layout.addWidget(disclosure_card)
+
         layout.addStretch(1)
         self._reload_ai_profiles()
         return content
@@ -1015,6 +1071,30 @@ class PreferencesPanel(BasePanel):
         selected = str(self._streaming_speed_combo.itemData(index) or "")
         if selected:
             set_streaming_reveal_speed(selected)
+
+    def _on_disclosure_remember_toggled(self, checked: bool) -> None:
+        set_material_disclosure_remember(bool(checked))
+        if not checked:
+            # Turning the toggle off also forgets the stored approval so a
+            # later re-enable starts clean instead of silently trusting an
+            # old decision the user can no longer see.
+            reset_material_disclosure_remember()
+        self._refresh_disclosure_state_label()
+
+    def _on_disclosure_reset_clicked(self) -> None:
+        reset_material_disclosure_remember()
+        self._refresh_disclosure_state_label()
+
+    def _refresh_disclosure_state_label(self) -> None:
+        label = getattr(self, "_disclosure_state_label", None)
+        if label is None:
+            return
+        if not material_disclosure_remember():
+            label.setText("当前：每次附件都弹确认卡")
+        elif material_disclosure_approved():
+            label.setText("当前：已记住同意，附件不再重复确认")
+        else:
+            label.setText("当前：已开启记住，但还没有同意过")
 
     def show_preferences_page(self, page_id: str) -> None:
         raw = str(page_id or "").strip()
