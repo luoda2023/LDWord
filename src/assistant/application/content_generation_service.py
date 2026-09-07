@@ -16,6 +16,9 @@ from src.assistant.application.capability_registry import (
     NARRATIVE_PROMPT_PROFILE_ID,
     system_prompt_for_profile,
 )
+from src.assistant.application.typesetting_templates import (
+    TypesettingTemplateStore,
+)
 from src.assistant.domain.exam_authoring_contract import (
     ExamBlueprint,
     ExamSectionBlueprint,
@@ -100,6 +103,21 @@ class ContentGenerationRequest:
     directory_outline_text: str = ""
     directory_doc_hint: str = ""
     directory_root_title: str = ""
+    # Typesetting template plugin id (visual, persisted; see typesetting_templates).
+    typesetting_template_id: str = ""
+    # Canonical config_library layout template + work mode: the single source of
+    # truth for the final document's typography.  When present, authoring
+    # directives are derived from this template rather than the lightweight
+    # typesetting plugin (see _typesetting_directives).
+    template_id: str = ""
+    mode_id: str = ""
+    # Knowledge-base learning: sample excerpts injected per chapter.
+    knowledge_samples: tuple[dict[str, object], ...] = ()
+    # Folder of the current project / source document, present when the user's
+    # storage-location preference keeps the durable system memory next to their
+    # documents.  When set, memory for this run is written as
+    # ``<folder>/system_memory.json`` instead of the app-internal cache.
+    memory_dir: str = ""
 
     def __post_init__(self) -> None:
         if not self.session_id or not self.turn_id or not self.prompt.strip():
@@ -113,6 +131,11 @@ class ContentGenerationRequest:
             self,
             "outline_notes",
             tuple(str(item) for item in self.outline_notes),
+        )
+        object.__setattr__(
+            self,
+            "knowledge_samples",
+            tuple(dict(item) for item in self.knowledge_samples),
         )
         object.__setattr__(
             self,
@@ -144,6 +167,7 @@ class AssistantContentGenerationService:
         *,
         cancellation: AssistantCancellationToken | None = None,
         delta_callback=None,
+        chapter_callback=None,
     ) -> GeneratedDraft:
         unregister = (
             cancellation.register_cancel_callback(gateway.cancel)
@@ -188,6 +212,7 @@ class AssistantContentGenerationService:
                     user_content=user_content,
                     cancellation=cancellation,
                     delta_callback=delta_callback,
+                    chapter_callback=chapter_callback,
                 )
                 return draft
 
@@ -406,6 +431,7 @@ class AssistantContentGenerationService:
         user_content: str,
         cancellation: AssistantCancellationToken | None,
         delta_callback=None,
+        chapter_callback=None,
     ) -> GeneratedDraft:
         """按工程文档大纲逐章调用模型，顺序拼接成一份完整 Markdown 草稿。
 
@@ -438,8 +464,35 @@ class AssistantContentGenerationService:
         )
         chapter_markdowns: list[str] = []
         notes = request.outline_notes
+        # Seed the in-run memory from any persisted system memory so a re-run
+        # or a revision pass still recalls what earlier chapters covered.
+        from src.assistant.application.system_memory import SystemMemoryStore
+
+        _memory_dir = str(request.memory_dir or "").strip()
+        _memory_store = (
+            SystemMemoryStore(base_dir=_memory_dir)
+            if _memory_dir
+            else SystemMemoryStore()
+        )
+        _memory = _memory_store.load(request.session_id)
+        _memory_store.set_outline(request.session_id, titles)
         written_summary: list[str] = []
+        for _entry in _memory.chapters:
+            if _entry.summary:
+                written_summary.append(
+                    f"第 {_entry.index} 章《{_entry.title}》已覆盖：{_entry.summary}"
+                )
+        total_chapters = len(titles)
         for index, title in enumerate(titles, start=1):
+            if chapter_callback is not None:
+                chapter_callback(
+                    phase="start",
+                    index=index,
+                    total=total_chapters,
+                    title=title,
+                    chars=0,
+                    text="",
+                )
             note = str(notes[index - 1]).strip() if index - 1 < len(notes) else ""
             note_text = (
                 "\n该章必须覆盖的要点与行业惯例：" + note + "\n"
@@ -458,16 +511,43 @@ class AssistantContentGenerationService:
                     "参见对应章节。各章标题必须与给定目录一致，不得改名或漏章。\n"
                     + "\n".join(written_summary)
                 )
+            template_directives = self._typesetting_directives(
+                request.typesetting_template_id,
+                library_template_id=request.template_id,
+                mode_id=request.mode_id,
+            )
+            knowledge_text = self._knowledge_samples_text(
+                request.knowledge_samples, max_chars=4000
+            )
             chapter_prompt = (
                 base_prompt
                 + "\n\n【分阶段生成：单个章节】\n"
                 + doc_context
                 + memory_text
+                + template_directives
+                + knowledge_text
                 + f"\n\n当前只撰写第 {index} 章，标题必须为：{title}\n"
                 "只输出该章正文，不得输出全文标题、前言、目录、其他章节或结语汇总；"
-                "按该章内容需要组织二级/三级标题、段落与简单表格。"
+                "按该章内容需要组织二级/三级标题、段落与表格；"
+                "该章需要插图的位置：有真实示意图/流程图/图表时，用 Markdown 图片语法内联 base64 数据"
+                "（形如 ![说明](data:image/png;base64,...)），系统会自动落地为文件并嵌入 DOCX；"
+                "图注用独立语法 ^^说明^^ 紧跟在图片标记之后，不要写入图片的 title 属性；"
+                "无法用 base64 表达的位置原样保留【图：说明】占位符，不要省略。"
                 + note_text
             )
+            def _chapter_delta(part: str) -> None:
+                if delta_callback is not None:
+                    delta_callback(part)
+                if chapter_callback is not None and part:
+                    chapter_callback(
+                        phase="delta",
+                        index=index,
+                        total=total_chapters,
+                        title=title,
+                        chars=0,
+                        text=part,
+                    )
+
             chapter_text = self._collect_provider_text(
                 gateway,
                 self._provider_request(
@@ -477,13 +557,73 @@ class AssistantContentGenerationService:
                     generation_phase=f"engineering_chapter_{index}",
                 ),
                 cancellation=cancellation,
-                delta_callback=delta_callback,
+                delta_callback=_chapter_delta,
             )
             cleaned = chapter_text.strip()
             if cleaned:
                 chapter_markdowns.append(cleaned)
-                written_summary.append(_chapter_memory_summary(index, title, cleaned))
+                summary = _chapter_memory_summary(index, title, cleaned)
+                written_summary.append(summary)
+                # Persist this chapter's compact memory so later chapters (and
+                # later revision passes) recall it without re-reading the body.
+                try:
+                    _memory_store.update_chapter(
+                        request.session_id,
+                        index=index,
+                        title=title,
+                        summary=summary,
+                    )
+                except (OSError, ValueError, RuntimeError):
+                    pass
+                if chapter_callback is not None:
+                    chapter_callback(
+                        phase="done",
+                        index=index,
+                        total=total_chapters,
+                        title=title,
+                        chars=len(cleaned),
+                        text="",
+                    )
         full_markdown = "\n\n".join(chapter_markdowns) + "\n"
+
+        # 排版复核校准：整篇完成后、组装 DOCX 前，对照规范模板检测偏差并
+        # 做安全的机械修正。结果非阻塞（不会拒绝草稿），仅回传报告供 UI 展示。
+        reconcile_report = None
+        if str(request.template_id or "").strip():
+            from src.assistant.application.typesetting_reconcile import (
+                reconcile_generated_markdown,
+            )
+
+            reconcile_report = reconcile_generated_markdown(
+                full_markdown,
+                template_id=request.template_id,
+                mode_id=request.mode_id or None,
+            )
+            if reconcile_report.changed and reconcile_report.corrected_markdown:
+                full_markdown = reconcile_report.corrected_markdown
+        if chapter_callback is not None and reconcile_report is not None:
+            chapter_callback(
+                phase="reconcile",
+                index=0,
+                total=total_chapters,
+                title="排版复核校准",
+                chars=0,
+                text="",
+            )
+            # 报告正文通过额外通道无法承载，追加到回调的 text 字段（JSON 安全）。
+            import json as _json
+
+            chapter_callback(
+                phase="reconcile_report",
+                index=0,
+                total=total_chapters,
+                title="排版复核校准",
+                chars=0,
+                text=_json.dumps(
+                    reconcile_report.to_dict(), ensure_ascii=False
+                ),
+            )
+
         return self.adapter.compile_generated(
             session_id=request.session_id,
             markdown=full_markdown,
@@ -662,6 +802,71 @@ class AssistantContentGenerationService:
             elif event.type == PROVIDER_DONE and not parts and event.text:
                 parts.append(event.text)
         return "".join(parts)
+
+
+
+    @staticmethod
+    def _typesetting_directives(
+        template_id: str,
+        *,
+        library_template_id: str = "",
+        mode_id: str = "",
+    ) -> str:
+        """Render the active layout rules for the per-chapter prompt.
+
+        The canonical ``config_library`` DOCX template is the single source of
+        truth for the final document's typography.  When it is available, its
+        fields are projected into the prompt (page geometry, base fonts, heading
+        numbering, table style, captions), so the AI typesets *while writing*
+        rather than only at export time.  The lightweight typesetting plugin is
+        kept as a fallback for legacy/edge paths that have no library template.
+        """
+        if str(library_template_id or "").strip():
+            from src.assistant.application.typesetting_templates import (
+                typesetting_directives_from_library_template,
+            )
+
+            directives = typesetting_directives_from_library_template(
+                library_template_id,
+                mode_id=mode_id or None,
+            )
+            if directives:
+                return "\n\n" + directives
+        try:
+            template = TypesettingTemplateStore().get(template_id)
+            return "\n\n" + template.authoring_instruction()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _knowledge_samples_text(
+        samples: tuple[dict[str, object], ...], *, max_chars: int
+    ) -> str:
+        """Attach knowledge-base sample excerpts as【参考范本】, budget-capped."""
+        budget = int(max_chars)
+        blocks: list[str] = []
+        used = 0
+        for sample in samples or ():
+            source = str(sample.get("source") or "").strip()
+            content = str(sample.get("content") or "").strip()
+            if not content:
+                continue
+            header = (
+                f"\n【参考范本：{source}】\n"
+                if source
+                else "\n【参考范本】\n"
+            )
+            remaining = budget - used - len(header)
+            if remaining <= 0:
+                break
+            piece = content[:remaining]
+            blocks.append(header + piece)
+            used += len(header) + len(piece)
+        if not blocks:
+            return ""
+        return "\n\n以下是知识库中与本章主题相近的范本摘录，供参考其行业表述与结构，不得大段照抄：\n" + "".join(blocks)
+
+
 
 
 def _strip_exam_answer_block(markdown: str) -> str:
