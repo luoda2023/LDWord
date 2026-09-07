@@ -23,6 +23,9 @@ from src.assistant.application.content_generation_service import (
     ContentGenerationRequest,
 )
 from src.assistant.application.document_job_controller import DocumentJobController
+from src.assistant.application.knowledge_sample_loader import (
+    extract_knowledge_samples,
+)
 from src.assistant.application.exam_plan_editing import (
     ExamPlanEditValues,
     compose_exam_plan_intent,
@@ -89,6 +92,7 @@ from src.assistant.ui.conversation_view import (
     AssistantConversationMessage,
     AssistantConversationSurface,
 )
+from src.assistant.ui.chapter_outline_panel import ChapterOutlinePanel
 from src.assistant.ui.creative_home import AssistantCreativeHome, AssistantHeroComposer
 from src.assistant.ui.design_tokens import TOKENS
 from src.assistant.ui.exam_plan_editor import ExamPlanEditor
@@ -117,6 +121,7 @@ from src.config.library import load_scene_from_library
 from src.qt_api import (
     QComboBox,
     QDesktopServices,
+    QEvent,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -1002,6 +1007,13 @@ class AssistantDocumentWorkflowMixin:
             material_refs=tuple(dict(item) for item in plan.material_refs),
         )
         directory_payload = _directory_authoring_payload_from_plan(plan, engineering_outline)
+        typesetting_template_id = self._active_typesetting_template_id()
+        layout_template_id = str(plan.template_ref.get("id") or "").strip()
+        knowledge_samples = (
+            self._engineering_knowledge_samples(plan)
+            if engineering_outline[2]
+            else ()
+        )
         request = ContentGenerationRequest(
             session_id=session.session_id,
             turn_id=plan.created_by_turn_id,
@@ -1034,11 +1046,25 @@ class AssistantDocumentWorkflowMixin:
             directory_outline_text=directory_payload["outline_text"],
             directory_doc_hint=directory_payload["doc_hint"],
             directory_root_title=directory_payload["root_title"],
+            typesetting_template_id=typesetting_template_id,
+            template_id=layout_template_id,
+            mode_id=plan.work_mode_id,
+            knowledge_samples=knowledge_samples,
+            memory_dir=str(self._resolve_memory_dir() or ""),
         )
         adapter = AssistantContentGenerationAdapter(self._coordinator.store.root)
         service = AssistantContentGenerationService(adapter)
         worker = ContentGenerationWorker(service, request, gateway, parent=self)
         self._content_worker = worker
+        # 多章节写作：右上角章节总览浮板显示已确认大纲，并逐章流式显示
+        # AI 正在书写的正文；单章(无大纲)与整篇续写不进浮板。
+        outline_titles = tuple(request.outline_titles or ())
+        if outline_titles and not normalized_revision_text:
+            self._prepare_chapter_board(
+                list(outline_titles),
+                session_id=session.session_id,
+            )
+            worker.chapter_event.connect(self._on_chapter_event)
         job = {
             **dict(session.document_job),
             "status": "content_generation_running",
@@ -1077,6 +1103,448 @@ class AssistantDocumentWorkflowMixin:
         )
         worker.start()
         self._sync_composer_busy_state()
+
+    def _active_typesetting_template_id(self) -> str:
+        """Return the currently active visual typesetting template id.
+
+        Reads the persisted active id from the template store (set from the
+        visual template dialog).  Falls back to the built-in default when no
+        override is stored, so authoring is never blocked.
+        """
+        try:
+            from src.assistant.application.typesetting_templates import (
+                TypesettingTemplateStore,
+            )
+
+            return TypesettingTemplateStore().active_template_id()
+        except Exception:
+            return ""
+
+    def _engineering_knowledge_samples(self, plan: DocumentPlan) -> tuple:
+        """Slice attached engineering sample docs into per-chapter excerpts.
+
+        Only used for the chapter-by-chapter engineering authoring flow;
+        reads each existing material reference (docx/doc/wps/md) and keeps
+        a bounded amount of real prose so the AI learns the trade style.
+        """
+        samples: list = []
+        for raw in tuple(getattr(plan, "material_refs", ()) or ()):
+            if not isinstance(raw, dict):
+                continue
+            path_text = str(
+                raw.get("path") or raw.get("file_path") or raw.get("local_path") or ""
+            ).strip()
+            if not path_text:
+                continue
+            path = Path(path_text).expanduser()
+            if not path.is_file():
+                continue
+            suffix = path.suffix.casefold()
+            if suffix not in {".docx", ".doc", ".wps", ".md", ".markdown", ".txt"}:
+                continue
+            try:
+                from src.assistant.application.knowledge_sample_loader import (
+                    extract_knowledge_samples,
+                )
+
+                samples.extend(extract_knowledge_samples(path))
+            except Exception:
+                continue
+        return tuple(samples)
+
+    # ---- 章节写作总览：右上角浮板 + 对话内流式正文 -------------------
+    def _prepare_chapter_board(
+        self,
+        titles: list[str],
+        *,
+        session_id: str,
+    ) -> None:
+        """Open (or refresh) the top-right chapter overview board."""
+        message_scroll = getattr(self, "_message_scroll", None)
+        if message_scroll is None or not hasattr(message_scroll, "viewport"):
+            return
+        viewport = message_scroll.viewport()
+        board = getattr(self, "_chapter_board", None)
+        if board is None or board.parentWidget() is not viewport:
+            if board is not None:
+                board.deleteLater()
+            board = ChapterOutlinePanel(viewport)
+            board.closed.connect(self._on_chapter_board_hidden)
+            self._chapter_board = board
+        self._chapter_run_session_id = str(session_id or "")
+        self._chapter_done_ids = set()
+        self._chapter_chars = {}
+        self._chapter_live_widget = None
+        self._chapter_buffers: dict[int, str] = {}
+        board.set_outline(list(titles or ()))
+        board.set_collapsed(False)
+        board.show_board()
+        # Mirror the outline into the persistent left dock too.
+        dock_present = getattr(self, "_dock_outline_present", None)
+        if dock_present is not None:
+            dock_present(list(titles or ()))
+
+    def _hide_chapter_board(self) -> None:
+        board = getattr(self, "_chapter_board", None)
+        if board is not None:
+            board.close_board()
+        self._chapter_live_widget = None
+        self._chapter_run_session_id = ""
+
+    def _on_chapter_board_hidden(self) -> None:
+        # 用户手动隐藏浮板；流式正文不受影响，下一次写作会重新打开。
+        pass
+
+    def _reposition_chapter_board(self) -> None:
+        board = getattr(self, "_chapter_board", None)
+        if board is not None:
+            board._reposition_in_parent()
+
+    def _finish_chapter_run(self, *, mark_failed: bool = False) -> None:
+        self._finalize_any_live_chapter_message(
+            status_text="该章生成中断，已保留已写部分" if mark_failed else "已完成",
+            persist=mark_failed,
+        )
+        board = getattr(self, "_chapter_board", None)
+        if board is not None and mark_failed:
+            board.fail()
+
+    def _on_chapter_event(
+        self,
+        phase: str,
+        index: int,
+        total: int,
+        title: str,
+        chars: int,
+        text: str,
+    ) -> None:
+        """UI-thread handler for worker chapter events."""
+        active = getattr(self, "_active_session", None)
+        if (
+            active is None
+            or active.session_id != getattr(self, "_chapter_run_session_id", "")
+        ):
+            return
+        # Word-workbench live view: mirror the stream when visible and
+        # parked on the chapter being written; refresh score at 'done'.
+        session_id = (
+            getattr(self, "_workbench_session_id", "")
+            or active.session_id
+        )
+        # Keep a sidecar copy so scoring + reload work even when the
+        # workbench was opened mid-run (no begin_run outline).
+        try:
+            self._cache.ensure_chapter(session_id, int(index), str(title))
+        except (OSError, ValueError, RuntimeError):
+            pass
+        if phase == "delta" and str(text or ""):
+            try:
+                self._cache.append_chapter(session_id, int(index), str(text))
+            except (OSError, ValueError, RuntimeError):
+                pass
+            # Stream the raw delta into the embedded right-side MarkText view
+            # so the user watches the chapter being written live.
+            marktext_view = getattr(self, "_marktext_view", None)
+            if marktext_view is not None and marktext_view.isVisible():
+                marktext_view.append_chapter_delta(int(index), str(text))
+                # When the right-side view is parked on the streamed chapter,
+                # keep the left conversation pinned to the latest live text so
+                # both panes scroll together.
+                active_chapter = int(
+                    marktext_view.bridge.active_chapter() or 0
+                )
+                if active_chapter == int(index):
+                    scroll = getattr(self, "_schedule_stream_scroll_to_bottom", None)
+                    if scroll is not None:
+                        scroll()
+        # Materialise inline data-URL images as soon as the chapter finishes,
+        # independent of which panes are visible, so the right-side editor (and
+        # any later export) always sees relative image paths instead of raw
+        # base64.  This also pushes the final body back into the live editor.
+        if phase == "done":
+            try:
+                self._materialize_chapter_images(session_id, int(index))
+            except (OSError, ValueError, RuntimeError):
+                pass
+        bench = getattr(self, "_chapter_workbench", None)
+        if bench is not None and bench.isVisible():
+            current = int(getattr(bench, "_current_index", 0) or 0)
+            if phase == "delta" and current == int(index) and str(text or ""):
+                bench.editor.append_raw(str(text))
+            elif phase == "done":
+                try:
+                    entry = self._cache.update_state(
+                        session_id, int(index), "done", rescan_score=True
+                    )
+                except (OSError, ValueError, RuntimeError):  # noqa: BLE001
+                    entry = None
+                if entry is not None:
+                    bench.navigator.set_state(int(index), entry.state)
+                    bench.navigator.set_stats(
+                        int(index),
+                        chars=entry.chars,
+                        score=entry.score,
+                        grade=entry.grade,
+                    )
+                    if current == int(index):
+                        body = self._cache.read_chapter(session_id, int(index))
+                        if str(body or "").strip():
+                            self._render_workbench_chapter(int(index))
+        board = getattr(self, "_chapter_board", None)
+        if board is not None:
+            if phase == "start":
+                board.begin(index=index, total=total, title=title)
+            elif phase == "delta":
+                accumulated = int(self._chapter_chars.get(index, 0)) + len(
+                    str(text or "")
+                )
+                self._chapter_chars[index] = accumulated
+                board.delta(index=index, chars=accumulated)
+            elif phase == "done":
+                board.done(index=index, chars=max(0, int(chars)))
+        if phase == "start":
+            self._begin_chapter_live_message(index, str(title or f"第 {index} 章"))
+            # Reset the embedded MarkText buffer and park it on the chapter
+            # being written so the live stream is visible immediately.
+            marktext_view = getattr(self, "_marktext_view", None)
+            if marktext_view is not None and marktext_view.isVisible():
+                marktext_view.start_chapter(int(index))
+                marktext_view.set_active_chapter(int(index))
+        elif phase == "delta":
+            self._stream_chapter_delta(index, str(text or ""))
+        elif phase == "done":
+            self._finish_chapter_live_message(index, max(0, int(chars)))
+
+        # Keep the persistent left outline dock in sync.
+        dock_sync_state = getattr(self, "_dock_sync_state", None)
+        if dock_sync_state is not None:
+            if phase == "start":
+                dock_sync_state(index, "running")
+            elif phase == "done":
+                dock_sync_state(index, "done")
+                dock_sync_stats = getattr(self, "_dock_sync_stats", None)
+                if dock_sync_stats is not None:
+                    entry = None
+                    try:
+                        entry = self._cache.update_state(
+                            session_id, int(index), "done", rescan_score=True
+                        )
+                    except (OSError, ValueError, RuntimeError):
+                        entry = None
+                    if entry is not None:
+                        dock_sync_stats(
+                            int(index),
+                            chars=entry.chars,
+                            score=entry.score,
+                            grade=entry.grade,
+                        )
+        if phase == "reconcile_report" and str(text or ""):
+            self._show_typesetting_reconcile_report(str(text))
+
+    def _show_typesetting_reconcile_report(self, raw_json: str) -> None:
+        """Surface the post-generation typesetting reconcile report as a chat
+        message: a non-blocking quality note telling the user which layout rules
+        were checked and any deviations found."""
+        try:
+            import json as _json
+
+            payload = _json.loads(raw_json)
+        except (ValueError, TypeError):
+            return
+        deviations = payload.get("deviations") or []
+        warn_count = int(payload.get("warn_count") or 0)
+        fix_count = int(payload.get("fix_count") or 0)
+        checked = payload.get("checked") or []
+        lines: list[str] = []
+        lines.append("排版复核校准已完成。")
+        if checked:
+            lines.append("已核对：" + "、".join(str(item) for item in checked) + "。")
+        if deviations:
+            for item in deviations:
+                severity = str(item.get("severity") or "info")
+                message_text = str(item.get("message") or "")
+                auto_fixed = bool(item.get("auto_fixed"))
+                prefix = "已自动修正" if auto_fixed else ("提示" if severity == "warn" else "")
+                if prefix:
+                    lines.append(f"- {prefix}：{message_text}")
+                else:
+                    lines.append(f"- {message_text}")
+        else:
+            lines.append("未发现需要修正的排版偏差。")
+        if fix_count:
+            lines.append(f"（本次自动修正 {fix_count} 处。）")
+        elif warn_count:
+            lines.append(f"（存在 {warn_count} 处建议关注项。）")
+        session = getattr(self, "_active_session", None)
+        if session is None:
+            return
+        try:
+            updated = self._coordinator.append_message(
+                session,
+                AssistantMessage.interaction(
+                    role=ROLE_ASSISTANT,
+                    interaction_type="progress",
+                    title="排版复核校准",
+                    body="\n".join(lines),
+                    payload={
+                        "actions": [],
+                        "ephemeral": False,
+                        "progress_kind": "typesetting_reconcile",
+                        "reconcile_report": payload,
+                    },
+                ),
+            )
+        except (OSError, ValueError, RuntimeError):
+            return
+        if getattr(self, "_active_session", None) is not None and \
+                getattr(self, "_active_session", None).session_id == session.session_id:
+            self._active_session = updated
+            self._render_active_session()
+
+    def _begin_chapter_live_message(self, index: int, title: str) -> None:
+        """Open a live AI message in the conversation for this chapter."""
+        if (
+            getattr(self, "_conversation_stack", None) is None
+            or self._conversation_stack.currentWidget() is not self._active_page
+        ):
+            self._chapter_live_widget = None
+            return
+        self._finalize_any_live_chapter_message()
+        message_host = getattr(self, "_message_host", None)
+        if message_host is None or not hasattr(self, "_message_layout"):
+            self._chapter_live_widget = None
+            return
+        message = AssistantConversationMessage(
+            text="",
+            role=ROLE_ASSISTANT,
+            live=True,
+            status_text=f"正在撰写第 {index} 章 · {title}",
+            parent=message_host,
+        )
+        message._chapter_index = int(index)
+        if hasattr(self, "_wire_message_widget"):
+            self._wire_message_widget(message)
+        self._message_layout.insertWidget(
+            self._message_layout.count() - 1,
+            message,
+        )
+        self._chapter_live_widget = message
+        if hasattr(self, "_begin_follow_latest_layout_settle"):
+            self._begin_follow_latest_layout_settle()
+
+    def _materialize_chapter_images(self, session_id: str, index: int) -> None:
+        """Decode inline data-URL images in a finished chapter, rewrite the
+        cached body to relative paths, and accumulate the resource mapping."""
+
+        body = self._cache.read_chapter(session_id, int(index))
+        if not body:
+            return
+        rewritten, mapping = self._cache.extract_images(session_id, body)
+        if mapping:
+            try:
+                self._cache.replace_chapter(session_id, int(index), rewritten)
+            except (OSError, ValueError, RuntimeError):
+                return
+            accumulated = getattr(self, "_session_resource_paths", None)
+            if accumulated is None:
+                accumulated = {}
+                self._session_resource_paths = accumulated
+            accumulated.update(mapping)
+            # The right-side editor streamed the raw base64 delta; push the
+            # materialised relative-path body so its images render immediately
+            # instead of staying as un-decoded data URLs.
+            marktext_view = getattr(self, "_marktext_view", None)
+            if marktext_view is not None and marktext_view.isVisible():
+                marktext_view.refresh_chapter(int(index), rewritten)
+
+    def _stream_chapter_delta(self, index: int, delta: str) -> None:
+        message = getattr(self, "_chapter_live_widget", None)
+        buffers = getattr(self, "_chapter_buffers", None)
+        if buffers is not None:
+            buffers[index] = buffers.get(index, "") + delta
+        accumulated = int(self._chapter_chars.get(index, 0))
+        if message is None or not delta:
+            return
+        if id(message) in getattr(self, "_chapter_done_ids", set()):
+            return
+        if not message.isVisible():
+            return
+        message.append_live_delta(
+            delta=delta,
+            status_text=f"正在撰写第 {index} 章 · 已写约 {accumulated} 字",
+        )
+        if hasattr(self, "_is_near_latest") and self._is_near_latest():
+            if hasattr(self, "_schedule_stream_scroll_to_bottom"):
+                self._schedule_stream_scroll_to_bottom()
+
+    def _finish_chapter_live_message(self, index: int, chars: int) -> None:
+        message = getattr(self, "_chapter_live_widget", None)
+        self._chapter_live_widget = None
+        if message is None or id(message) in getattr(self, "_chapter_done_ids", set()):
+            return
+        message.finalize_live(status_text=f"第 {index} 章已完成 · 共 {chars:,} 字")
+        self._chapter_done_ids.add(id(message))
+        self._chapter_chars.pop(index, None)
+        buffers = getattr(self, "_chapter_buffers", None)
+        text = str(getattr(message, "_text", "") or "")
+        if not text and buffers is not None:
+            text = str(buffers.get(index, "") or "")
+        if text:
+            self._append_chapter_message_to_history(index, text)
+        if buffers is not None:
+            buffers.pop(index, None)
+        if hasattr(self, "_begin_follow_latest_layout_settle"):
+            self._begin_follow_latest_layout_settle()
+
+    def _append_chapter_message_to_history(self, index: int, text: str) -> None:
+        """Persist one finished chapter as a normal assistant chat message."""
+        session = getattr(self, "_active_session", None)
+        if session is None:
+            return
+        try:
+            updated = self._coordinator.append_message(
+                session,
+                AssistantMessage.text(
+                    role=ROLE_ASSISTANT,
+                    text=str(text or ""),
+                ),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return
+        if updated is not None:
+            self._active_session = updated
+
+    def _finalize_any_live_chapter_message(
+        self,
+        *,
+        status_text: str = "本章已完成",
+        persist: bool = False,
+    ) -> None:
+        message = getattr(self, "_chapter_live_widget", None)
+        self._chapter_live_widget = None
+        if message is None:
+            return
+        index = 0
+        try:
+            index = int(getattr(message, "_chapter_index", 0) or 0)
+        except (TypeError, ValueError):
+            index = 0
+        if index and persist:
+            text = str(getattr(message, "_text", "") or "")
+            buffers = getattr(self, "_chapter_buffers", None)
+            if not text and buffers is not None:
+                text = str(buffers.get(index, "") or "")
+            if text:
+                self._append_chapter_message_to_history(index, text)
+            if buffers is not None:
+                buffers.pop(index, None)
+            # Flag the chapter as failed in the right-side embedded view so the
+            # user sees the interruption while the partial body stays visible.
+            marktext_view = getattr(self, "_marktext_view", None)
+            if marktext_view is not None and marktext_view.isVisible():
+                marktext_view.fail_chapter(index)
+        message.finalize_live(status_text=status_text)
+        self._chapter_done_ids.add(id(message))
 
     def _revise_content_draft(
         self,
@@ -1675,6 +2143,11 @@ class AssistantDocumentWorkflowMixin:
             return
         cancelled = "cancel" in str(error or "").casefold()
         failure_title, failure_body = _content_generation_failure_presentation(error)
+        # 分章写作失败/取消：浮板当前章节标记为中断，正文消息收尾。
+        if not cancelled and getattr(self, "_chapter_run_session_id", "") == session_id:
+            self._finish_chapter_run(mark_failed=True)
+        else:
+            self._chapter_live_widget = None
         job = {
             **dict(session.document_job),
             "status": "cancelled" if cancelled else "failed",
@@ -1725,6 +2198,10 @@ class AssistantDocumentWorkflowMixin:
         self._sync_composer_busy_state()
         if self._execution_worker is None or not self._execution_worker.is_running:
             self._stop_button.setVisible(False)
+        if not hasattr(self, "_chapter_live_widget"):
+            self._chapter_live_widget = None
+        if not hasattr(self, "_chapter_run_session_id"):
+            self._chapter_run_session_id = ""
 
     @staticmethod
     def _material_snapshot_for_plan(

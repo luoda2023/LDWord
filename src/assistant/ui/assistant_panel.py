@@ -36,9 +36,24 @@ from src.assistant.runtime.turn_runner import (
 from src.assistant.storage.execution_journal import ExecutionJournalStore
 from src.assistant.storage.models import AssistantSession
 from src.assistant.ui.card_action_mixin import AssistantCardActionMixin
+from src.assistant.ui.chapter_rewrite_mixin import (
+    AssistantChapterRewriteMixin,
+    CHAPTER_OUTLINE_ACTION,
+    CHAPTER_REWRITE_ACTION,
+)
+from src.assistant.ui.chapter_workbench_mixin import AssistantChapterWorkbenchMixin
+from src.assistant.ui.chapter_outline_dock import ChapterOutlineDock
+from src.assistant.ui.marktext_view import EmbeddedMarkTextView
 from src.assistant.ui.conversation_presentation import (
     build_interaction_action_scope,
     interaction_is_active,
+)
+from src.assistant.ui.cover_field_mapping import (
+    resolve_sources as _resolve_cover_sources,
+    scene_key_for as _cover_scene_key_for,
+    SRC_DOCUMENT_CONTEXT as _SRC_DOCUMENT_CONTEXT,
+    SRC_DOCUMENT_FIRST_H1 as _SRC_DOCUMENT_FIRST_H1,
+    SRC_NONE as _SRC_NONE,
 )
 from src.assistant.ui.conversation_view import (
     AssistantConversationMessage,
@@ -101,8 +116,124 @@ from src.shared.ui.icons.catalog import get_icon
 from src.shared.ui.theme import bind_theme
 from src.ui.base_panel import BasePanel
 
+_COVER_DATE_FORMAT_KEY = "export/cover_date_format"
+
+# Ordered (id, label) list of cover date formats.  The id is what we persist;
+# the label carries a live example and is shown in the dialog's combo box.
+_COVER_DATE_FORMATS = (
+    ("cn_full", "中文年月日（如 2026 年 9 月 7 日）"),
+    ("cn_compact", "中文紧凑（如 2026年9月7日）"),
+    ("cn_han", "汉字日期（如 二〇二六年九月七日）"),
+    ("cn_han_month", "汉字年月（如 二〇二六年九月）"),
+    ("iso_dash", "数字短横（如 2026-09-07）"),
+    ("iso_dot", "数字点分（如 2026.09.07）"),
+)
+_DEFAULT_COVER_DATE_FORMAT = "cn_full"
+
+_CN_DIGITS = "〇一二三四五六七八九"
+
+
+def _load_cover_date_format() -> str:
+    """Return the last cover-date format the user picked (id string)."""
+    try:
+        from src.qt_api import QSettings
+
+        settings = QSettings("LDWord", "LDWord")
+        value = str(settings.value(_COVER_DATE_FORMAT_KEY, "") or "").strip()
+        if value and any(fmt_id == value for fmt_id, _ in _COVER_DATE_FORMATS):
+            return value
+    except Exception:  # noqa: BLE001 - never block export on settings errors
+        pass
+    return _DEFAULT_COVER_DATE_FORMAT
+
+
+def _save_cover_date_format(fmt_id: str) -> None:
+    try:
+        from src.qt_api import QSettings
+
+        settings = QSettings("LDWord", "LDWord")
+        settings.setValue(_COVER_DATE_FORMAT_KEY, str(fmt_id or ""))
+        settings.sync()
+    except Exception:  # noqa: BLE001 - preference persistence must never crash
+        pass
+
+
+def _cn_number(value: int) -> str:
+    """Return the Chinese-numeral spelling of 0..99 (十/二十… style)."""
+    if value < 0:
+        return str(value)
+    if value < 10:
+        return _CN_DIGITS[value]
+    tens, unit = divmod(value, 10)
+    head = "十" if tens == 1 else _CN_DIGITS[tens] + "十"
+    return head + (_CN_DIGITS[unit] if unit else "")
+
+
+def _cn_year(value: int) -> str:
+    """Render a Gregorian year as Chinese numerals (2026 -> 二〇二六)."""
+    return "".join(_CN_DIGITS[int(ch)] for ch in str(int(value or 0)))
+
+
+def _format_cover_date(d, fmt_id: str) -> str:
+    """Render a date d (datetime.date-like) using one of the cover formats."""
+    year = getattr(d, "year", 0) or 0
+    month = getattr(d, "month", 0) or 0
+    day = getattr(d, "day", 0) or 0
+    fmt = str(fmt_id or "").strip()
+    if fmt == "cn_compact":
+        return f"{year}年{month}月{day}日"
+    if fmt == "cn_han":
+        return f"{_cn_year(year)}年{_cn_number(month)}月{_cn_number(day)}日"
+    if fmt == "cn_han_month":
+        return f"{_cn_year(year)}年{_cn_number(month)}月"
+    if fmt == "iso_dash":
+        return f"{year:04d}-{month:02d}-{day:02d}"
+    if fmt == "iso_dot":
+        return f"{year:04d}.{month:02d}.{day:02d}"
+    # default: 中文年月日
+    return f"{year} 年 {month} 月 {day} 日"
+
+def _load_export_undo_keep() -> bool:
+    """Return whether the user wants undo history kept after a successful
+    export (True, default) instead of cleared.
+
+    Thin forwarder to :mod:`src.config.app_preferences` so the export dialog
+    and the global preferences page share one source of truth.
+    """
+    from src.config.app_preferences import export_keep_undo_history
+
+    return export_keep_undo_history()
+
+
+def _save_export_undo_keep(keep: bool) -> None:
+    """Persist the export undo-history preference (shared key with preferences)."""
+    from src.config.app_preferences import set_export_keep_undo_history
+
+    set_export_keep_undo_history(keep)
+
+
+def _load_save_undo_keep() -> bool:
+    """Return whether the user wants undo history kept after a successful
+    save-to-file (non-export), True by default.
+
+    Thin forwarder to :mod:`src.config.app_preferences` so the save action
+    and the global preferences page share one source of truth.
+    """
+    from src.config.app_preferences import save_keep_undo_history
+
+    return save_keep_undo_history()
+
+
+def _save_save_undo_keep(keep: bool) -> None:
+    """Persist the save undo-history preference (shared key with preferences)."""
+    from src.config.app_preferences import set_save_keep_undo_history
+
+    set_save_keep_undo_history(keep)
+
 
 class AssistantPanel(
+    AssistantChapterWorkbenchMixin,
+    AssistantChapterRewriteMixin,
     AssistantDocumentWorkflowMixin,
     AssistantCardActionMixin,
     AssistantTurnFlowMixin,
@@ -265,6 +396,12 @@ class AssistantPanel(
         self._empty_input.text_changed.connect(self._save_active_draft)
         self._composer.text_changed.connect(self._save_active_draft)
         self._creative_home.provider_changed.connect(self._on_home_provider_selected)
+        self._creative_home.open_document_requested.connect(
+            self._on_open_document_for_chapter_edit
+        )
+        self._creative_home.typesetting_requested.connect(
+            self._open_typesetting_template_dialog
+        )
         self._empty_input.document_paths_changed.connect(
             self._on_composer_documents_selected
         )
@@ -406,7 +543,41 @@ class AssistantPanel(
         self._message_scroll.verticalScrollBar().rangeChanged.connect(
             self._on_message_scroll_range_changed
         )
-        layout.addWidget(self._message_scroll, 1)
+        # Left dock (目录大纲) + chat share this page.  The dock stays hidden
+        # until a multi-chapter engineering outline is present.
+        body = QWidget(page)
+        body.setObjectName("assistant_chat_body")
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(0)
+        self._outline_dock = ChapterOutlineDock(body)
+        self._outline_dock.hide()
+        self._outline_dock.chapter_activated.connect(self._on_outline_dock_activate)
+        self._outline_dock.polish_part_requested.connect(self._request_part_polish)
+        self._outline_dock.collapse_changed.connect(self._dock_collapse_changed)
+        body_layout.addWidget(self._outline_dock, 0)
+        body_layout.addWidget(self._message_scroll, 1)
+        self._marktext_view = EmbeddedMarkTextView(body)
+        self._marktext_view.setObjectName("assistant_marktext_view")
+        self._marktext_view.setFixedWidth(560)
+        self._marktext_view.hide()
+        self._marktext_view.bridge.request_export_docx.connect(
+            self._on_marktext_export_docx
+        )
+        self._marktext_view.bridge.request_save_markdown.connect(
+            self._on_marktext_save_markdown
+        )
+        self._marktext_view.bridge.request_chapter.connect(
+            self._on_marktext_chapter_requested
+        )
+        self._marktext_view.bridge.request_save_chapter.connect(
+            self._on_marktext_save_chapter
+        )
+        self._marktext_view.bridge.request_live_edit.connect(
+            self._on_marktext_live_edit
+        )
+        body_layout.addWidget(self._marktext_view, 0)
+        layout.addWidget(body, 1)
 
         # This control overlays the viewport instead of occupying a layout row.
         # Showing it must not shrink the message viewport and change the range
@@ -443,6 +614,1199 @@ class AssistantPanel(
         apply_button_variant(self._stop_button, "secondary")
         layout.addWidget(composer_host)
         return page
+
+    # ---- visual typesetting template plugin ------------------------------
+    def _open_typesetting_template_dialog(self) -> None:
+        from src.assistant.ui.typesetting_template_dialog import (
+            TypesettingTemplateDialog,
+        )
+
+        dialog = TypesettingTemplateDialog(self)
+        dialog.exec()
+
+    # ---- outline dock bridge -------------------------------------------
+    def _dock_outline_present(self, titles):
+        dock = getattr(self, "_outline_dock", None)
+        if dock is None:
+            return
+        dock.set_outline(list(titles or ()))
+        dock.show()
+        dock.raise_()
+        self._dock_fuse_bench(dock)
+
+    def _dock_clear(self):
+        dock = getattr(self, "_outline_dock", None)
+        if dock is None:
+            return
+        dock.clear()
+        dock.hide()
+
+    def _dock_sync_state(self, index, state):
+        dock = getattr(self, "_outline_dock", None)
+        if dock is None or not dock.isVisible():
+            return
+        dock.set_state(int(index), str(state))
+
+    def _dock_sync_stats(self, index, *, chars=None, score=None, grade=None):
+        dock = getattr(self, "_outline_dock", None)
+        if dock is None or not dock.isVisible():
+            return
+        dock.set_stats(int(index), chars=chars, score=score, grade=grade)
+
+    def _dock_sync_entry(
+        self, index, *, state=None, chars=None, score=None, grade=None
+    ) -> None:
+        dock = getattr(self, "_outline_dock", None)
+        if dock is None or not dock.isVisible():
+            return
+        if state is not None:
+            dock.set_state(int(index), str(state))
+        if chars is not None or score is not None or grade is not None:
+            dock.set_stats(
+                int(index),
+                chars=chars,
+                score=score,
+                grade=grade,
+            )
+
+    def _dock_restore_from_cache(self, session_id: str) -> bool:
+        """Populate the dock from the workbench cache (resumed / saved runs).
+
+        Returns True when an outline existed and the dock is now shown; the
+        workbench's duplicate navigator is hidden so the dock stays the single
+        left chapter index.
+        """
+        dock = getattr(self, "_outline_dock", None)
+        cache = getattr(self, "_cache", None)
+        if dock is None or cache is None:
+            return False
+        try:
+            entries = cache.load_outline(str(session_id or ""))
+        except (OSError, ValueError, RuntimeError):
+            entries = ()
+        if not entries:
+            if (
+                dock.isVisible()
+                and getattr(self, "_dock_session_id", "") != str(session_id or "")
+            ):
+                self._dock_clear()
+            return False
+        titles = [e.title for e in entries]
+        parts = [getattr(e, "part_title", "") or "" for e in entries]
+        dock.set_outline(titles, parts=parts)
+        for entry in entries:
+            if entry.state and entry.state != "pending":
+                dock.set_state(entry.index, entry.state)
+            if entry.state == "done" and (
+                entry.chars or entry.score or entry.grade != "待写"
+            ):
+                dock.set_stats(
+                    entry.index,
+                    chars=entry.chars,
+                    score=entry.score,
+                    grade=entry.grade,
+                )
+        self._dock_session_id = str(session_id or "")
+        dock.show()
+        dock.raise_()
+        self._dock_fuse_bench(dock)
+        return True
+
+    def _dock_fuse_bench(self, dock) -> None:
+        """When the workbench overlay is open next to the dock, drop its own
+        navigator (the dock already lists the chapters) and re-lay it out so the
+        editor sits immediately to the right of the dock."""
+        bench = getattr(self, "_chapter_workbench", None)
+        if bench is None or not bench.isVisible():
+            return
+        try:
+            if bench.navigator_visible():
+                bench.set_navigator_visible(False)
+        except (AttributeError, RuntimeError):
+            return
+        self._reposition_workbench()
+        index = max(0, int(getattr(bench, "current_index", 0) or 0))
+        if index:
+            dock.set_current(index)
+
+    def _dock_collapse_changed(self) -> None:
+        """The dock was collapsed/expanded; re-lay any open workbench beside it."""
+        self._reposition_workbench()
+
+    def _dock_set_current(self, index: int) -> None:
+        dock = getattr(self, "_outline_dock", None)
+        if dock is None or not dock.isVisible():
+            return
+        dock.set_current(int(index or 0))
+
+    def _on_outline_dock_activate(self, index):
+        session = getattr(self, "_active_session", None)
+        if session is None:
+            return
+        cache = getattr(self, "_cache", None)
+        if cache is None:
+            return
+        session_id = (
+            getattr(self, "_workbench_session_id", "") or session.session_id
+        )
+        entries = cache.load_outline(session_id)
+        titles = [e.title for e in entries]
+        if not titles:
+            return
+        bench = getattr(self, "_chapter_workbench", None)
+        if bench is not None and bench.isVisible():
+            bench.navigate_chapter(int(index))
+        else:
+            self._open_workbench_document(
+                source_path=getattr(self, "_workbench_source_path", "") or "",
+                titles=titles,
+            )
+            bench = getattr(self, "_chapter_workbench", None)
+            if bench is not None:
+                bench.navigate_chapter(int(index))
+        dock = getattr(self, "_outline_dock", None)
+        if dock is not None:
+            dock.set_current(int(index))
+        self._show_marktext_view()
+
+    # ---- embedded MarkText (right-side) view sync ------------------------
+    def _show_marktext_view(self) -> None:
+        view = getattr(self, "_marktext_view", None)
+        if view is None:
+            return
+        view.show()
+        view.raise_()
+        self._refresh_marktext_view()
+
+    def _hide_marktext_view(self) -> None:
+        view = getattr(self, "_marktext_view", None)
+        if view is not None:
+            view.flush_now()
+            view.hide()
+
+    def _flush_marktext_edits(self) -> None:
+        """Persist any pending right-side editor changes before a session switch."""
+        view = getattr(self, "_marktext_view", None)
+        if view is not None and view.isVisible():
+            view.flush_now()
+
+    def _toggle_marktext_view(self) -> None:
+        view = getattr(self, "_marktext_view", None)
+        if view is None:
+            return
+        if view.isVisible():
+            self._hide_marktext_view()
+        else:
+            self._show_marktext_view()
+
+    def _marktext_session_id(self) -> str:
+        session = getattr(self, "_active_session", None)
+        return (
+            getattr(self, "_workbench_session_id", "")
+            or (session.session_id if session else "")
+        )
+
+    def _refresh_marktext_view(self) -> None:
+        """Rebuild the right-side view from the cached chapter bodies."""
+        view = getattr(self, "_marktext_view", None)
+        session = getattr(self, "_active_session", None)
+        if view is None or session is None:
+            return
+        session_id = self._marktext_session_id()
+        entries = self._cache.load_outline(session_id)
+        if not entries:
+            return
+        titles = [e.title for e in entries]
+        view.set_outline(titles)
+        parts: list[str] = []
+        chapters: dict[int, str] = {}
+        for entry in entries:
+            body = self._cache.read_chapter(session_id, entry.index)
+            if body.strip():
+                chapters[entry.index] = body.strip()
+                parts.append(f"## {entry.title}\n\n{body.strip()}")
+        view.bridge.set_chapters(chapters)
+        view.set_content("\n\n".join(parts))
+
+    def _on_marktext_chapter_requested(self, index: int) -> None:
+        index = int(index or 0)
+        view = getattr(self, "_marktext_view", None)
+        if view is not None:
+            view.set_active_chapter(index)
+        if index == 0:
+            # Whole-document preview: no need to activate a single chapter.
+            return
+        self._on_outline_dock_activate(index)
+
+    def _on_marktext_save_chapter(self, index: int, markdown: str) -> None:
+        """Persist an edited chapter back into the cache and workbench."""
+        session = getattr(self, "_active_session", None)
+        if session is None or int(index or 0) <= 0:
+            return
+        index = int(index)
+        session_id = self._marktext_session_id()
+        try:
+            self._cache.replace_chapter(session_id, index, str(markdown or ""))
+        except OSError:
+            return
+        # Update the bridge chapter map so a later full-document preview
+        # reflects the edit without re-pushing content over the live editor.
+        view = getattr(self, "_marktext_view", None)
+        if view is not None:
+            view.bridge.set_chapter_content(index, str(markdown or ""))
+            # Recompute the whole-document concatenation silently so the next
+            # preview shows the edit without disturbing the live editor.
+            entries = self._cache.load_outline(session_id)
+            parts = []
+            for entry in entries:
+                body = self._cache.read_chapter(session_id, entry.index)
+                if body.strip():
+                    parts.append(f"## {entry.title}\n\n{body.strip()}")
+            view.bridge.set_content_silently("\n\n".join(parts))
+        # Refresh the workbench editor only (does not touch the web view).
+        bench = getattr(self, "_chapter_workbench", None)
+        if bench is not None and bench.isVisible():
+            self._render_workbench_chapter(index)
+
+    def _on_marktext_live_edit(self, index: int, markdown: str) -> None:
+        """Real-time mirror of a right-side edit into the left workbench editor.
+
+        Fired on every Muya change (no debounce).  Updates only the visible
+        workbench editor for the matching chapter; it does not touch the cache,
+        which the debounced save path still owns.
+        """
+        bench = getattr(self, "_chapter_workbench", None)
+        if bench is None or not bench.isVisible():
+            return
+        current = int(getattr(bench, "_current_index", 0) or 0)
+        if current != int(index or 0):
+            return
+        # Live image insertion changed the markdown: re-point the editor's
+        # image base dir at the current workbench source and drop stale cached
+        # image resources so an image replaced at the same relative path shows
+        # the fresh file rather than the old one.
+        prepare = getattr(bench, "prepare_for_render", None)
+        if prepare is not None:
+            prepare()
+        from src.assistant.ui.chapter_workbench_mixin import _parse_outline_blocks
+
+        blocks = _parse_outline_blocks(str(markdown or ""))
+        blocks = self._resolve_workbench_image_blocks(blocks)
+        if blocks:
+            bench.editor.set_outline_document(blocks)
+        else:
+            bench.editor.clear_document()
+
+    def _on_marktext_export_docx(self, markdown: str) -> None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        from src.services.markdown_docx_export import (
+            PageConfig,
+            export_markdown_to_docx,
+        )
+        from src.shared.engine.markdown_importer import (
+            discover_markdown_resource_paths,
+        )
+
+        default = str(Path.home() / "文档.docx")
+        output_path, _ = QFileDialog.getSaveFileName(
+            self, "导出 DOCX", default, "Word 文档 (*.docx)"
+        )
+        if not output_path:
+            return
+        page_config = self._ask_page_config(
+            markdown=str(markdown or ""), output_path=str(output_path or "")
+        )
+        if page_config is None:
+            return
+        resource_paths = self._resolve_marktext_image_paths(markdown)
+        # Prefer images materialised from AI inline data-URLs during chapter
+        # runs; the workbench-directory resolution fills any remaining gaps.
+        accumulated = getattr(self, "_session_resource_paths", None) or {}
+        resource_paths = {**resource_paths, **accumulated}
+        try:
+            path = export_markdown_to_docx(
+                str(markdown or ""),
+                output_path,
+                resource_paths=resource_paths,
+                page_config=page_config,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface to user
+            QMessageBox.warning(self, "导出失败", f"无法导出 DOCX：\n{exc}")
+            return
+        # Export succeeded — apply the single undo-history strategy (keep by
+        # default, clear when the user opted out) through undo_policy so the
+        # export decision lives in the same place as save / chapter-switch.
+        from src.assistant.ui.undo_policy import UndoEvent, apply_to_view
+
+        apply_to_view(getattr(self, "_marktext_view", None), UndoEvent.EXPORT)
+        QMessageBox.information(self, "导出完成", f"已导出：\n{path}")
+
+    def _cover_context_prefill(
+        self, markdown: str = ""
+    ) -> tuple[str, str, str]:
+        """Derive cover (title, subtitle, date) defaults from current context.
+
+        The main title prefers the first level-1 heading of the document being
+        exported; when the body has no level-1 heading it prefers a real
+        project / document-type name from the bound material run over the raw
+        file/session name.  The subtitle prefers a real project / company name
+        from the bound material run and falls back to the document-type
+        context.  Fields stay editable in the dialog; empty results are left for
+        the user to fill.
+        """
+        import datetime
+
+        # The per-scene field mapping decides what feeds each cover role.
+        # (cover_title_source, cover_subtitle_source) each hold either a special
+        # sentinel (document first H1 / document context / none) or a material
+        # role (“project” / “company”) to pull from the bound material run.
+        title_src, subtitle_src = self._scene_cover_sources()
+        project_name, company_name = self._cover_entity_identity()
+
+        # --- 主标题：按场景映射选择来源 ---------------------------
+        title = ""
+        if title_src in ("project",):
+            title = project_name
+        elif title_src in ("company",):
+            title = company_name
+        elif title_src == _SRC_NONE:
+            title = ""
+        else:
+            # 默认：整篇文档第一行一级标题优先 -------------------
+            title = self._cover_first_h1(markdown=markdown)
+            if not title:
+                # 无一级标题时，优先取资料包里真实项目名作为主标题（把工程文书
+                # 的 project_name 拼进封面主标题），而不是只退回文档文件名。
+                if project_name:
+                    title = project_name
+            if not title:
+                doc_path = str(
+                    getattr(self, "_workbench_source_path", "") or ""
+                ).strip()
+                if not doc_path:
+                    doc_path = str(
+                        self.bridge.current_document_path() or ""
+                    ).strip()
+                if doc_path and Path(doc_path).suffix.casefold() in {
+                    ".md",
+                    ".markdown",
+                    ".docx",
+                    ".doc",
+                    ".wps",
+                }:
+                    title = Path(doc_path).stem.strip()
+                if not title:
+                    session = getattr(self, "_active_session", None)
+                    session_title = str(getattr(session, "title", "") or "").strip()
+                    if session_title and session_title not in {
+                        "新对话",
+                        "AI 文档助手",
+                    }:
+                        title = session_title
+
+        # --- 副标题：按场景映射选择源 ---------------------------
+        parts: list[str] = []
+        if subtitle_src == "project":
+            # 显式映射到“项目/工程名”：只取项目名，不带公司名。
+            if project_name:
+                parts.append(project_name)
+        elif subtitle_src == "company":
+            # 显式映射到“单位/公司名”：只取公司名。
+            if company_name:
+                parts.append(company_name)
+        elif subtitle_src == _SRC_NONE:
+            parts = []
+        else:
+            # 默认：真实项目名优先，找不到再退回文档类型 -----------
+            # 若主标题已取用了项目名（无一级标题时），副标题不再重复它，只保留
+            # 单位名与文档类型上下文，避免封面标题与副标题堆叠同一项目名。
+            project_in_title = bool(project_name) and title == project_name
+            if project_name and not project_in_title:
+                parts.append(project_name)
+                if company_name and company_name != project_name:
+                    parts.append(company_name)
+            elif company_name:
+                parts.append(company_name)
+            if not parts:
+                parts = self._cover_context_fallback_labels()
+        subtitle = " · ".join(part for part in parts if part)
+
+        # --- 日期：默认今天，按记住的模板格式输出，用户可改 ---------------
+        today = datetime.date.today()
+        date_text = _format_cover_date(today, _load_cover_date_format())
+
+        return title, subtitle, date_text
+
+    def _scene_cover_sources(self) -> tuple[str, str]:
+        """Return ``(cover_title_source, cover_subtitle_source)`` for the active
+        document scene, honoring the user's per-scene field mapping."""
+        try:
+            scene_key = _cover_scene_key_for(
+                self.bridge.current_work_mode_id(),
+                self.bridge.current_scene_id(),
+            )
+            return _resolve_cover_sources(scene_key)
+        except Exception:  # noqa: BLE001 - mapping must never block the dialog
+            return (_SRC_DOCUMENT_FIRST_H1, _SRC_DOCUMENT_CONTEXT)
+
+    def _edit_cover_field_mapping(self) -> bool:
+        """Let the user configure, for the current document scene, which material
+        field feeds the cover title and which feeds the cover subtitle.
+
+        Opens a small modal dialog and persists the choice per scene.  Returns
+        ``True`` when the user accepted a mapping change so the caller can
+        re-run the cover prefill.
+        """
+        from src.assistant.ui import cover_field_mapping as _cfm
+        from src.qt_api import (
+            QComboBox,
+            QDialog,
+            QLabel,
+            QPushButton,
+            QVBoxLayout,
+            QHBoxLayout,
+        )
+
+        try:
+            mode_id = self.bridge.current_work_mode_id()
+            scene_id = self.bridge.current_scene_id()
+        except Exception:  # noqa: BLE001 - scene must never block the dialog
+            mode_id, scene_id = "", ""
+        scene_key = _cover_scene_key_for(mode_id, scene_id)
+        title_src, subtitle_src = _resolve_cover_sources(scene_key)
+
+        scene_display = str(scene_id or mode_id or "默认").strip() or "默认"
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("封面字段映射 · 按文档场景保存")
+        dialog.setMinimumWidth(440)
+        layout = QVBoxLayout(dialog)
+
+        scene_label = QLabel(
+            f"当前场景：{scene_display}\n选择资料包里哪个字段填入封面，各场景可不同。"
+        )
+        scene_label.setWordWrap(True)
+        layout.addWidget(scene_label)
+
+        def _add_source_row(label_text, current_src, options):
+            combo = QComboBox()
+            current_index = 0
+            for i, (src_id, label) in enumerate(options):
+                combo.addItem(label, src_id)
+                if src_id == current_src:
+                    current_index = i
+            combo.setCurrentIndex(current_index)
+            row = QHBoxLayout()
+            row_label = QLabel(label_text)
+            row_label.setMinimumWidth(86)
+            row.addWidget(row_label)
+            row.addWidget(combo, 1)
+            layout.addLayout(row)
+            return combo
+
+        title_combo = _add_source_row(
+            "封面标题", title_src, _cfm.TITLE_SOURCE_OPTIONS
+        )
+        subtitle_combo = _add_source_row(
+            "封面副标题", subtitle_src, _cfm.SUBTITLE_SOURCE_OPTIONS
+        )
+
+        reset_btn = QPushButton("恢复该场景默认")
+        reset_btn.setToolTip("清除当前场景的映射，恢复 主标题=文档一级标题、副标题=文档类型上下文")
+
+        def _apply_choice():
+            _cfm.save_role_source(
+                scene_key, "cover_title", str(title_combo.currentData() or "")
+            )
+            _cfm.save_role_source(
+                scene_key, "cover_subtitle", str(subtitle_combo.currentData() or "")
+            )
+
+        buttons = QHBoxLayout()
+        ok_btn = QPushButton("确定")
+        cancel_btn = QPushButton("取消")
+        buttons.addWidget(reset_btn)
+        buttons.addStretch(1)
+        buttons.addWidget(cancel_btn)
+        buttons.addWidget(ok_btn)
+        layout.addLayout(buttons)
+
+        ok_btn.clicked.connect(dialog.accept)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        # “恢复该场景默认”：清空并立即关闭（不回填旧选项）。
+        def _reset_and_close():
+            _cfm.clear_scene_mapping(scene_key)
+            dialog.accept()
+
+        reset_btn.clicked.connect(lambda *_a: _reset_and_close())
+
+        if dialog.exec() != QDialog.Accepted:
+            return False
+        _apply_choice()
+        return True
+
+    def _cover_context_fallback_labels(self) -> list[str]:
+        """Mode / scene labels used as a last-resort cover subtitle."""
+        parts: list[str] = []
+        try:
+            mode = self.bridge.current_work_mode()
+            mode_label = str(getattr(mode, "label", "") or "").strip()
+        except Exception:  # noqa: BLE001 - context must never block the dialog
+            mode_label = ""
+        if mode_label:
+            parts.append(mode_label)
+        scene = self.bridge.current_scene()
+        scene_label = ""
+        if scene is not None:
+            scene_label = str(
+                getattr(scene, "category_label", "")
+                or getattr(scene, "name", "")
+                or ""
+            ).strip()
+            if not scene_label or scene_label == "通用文档":
+                scene_label = str(getattr(scene, "name", "") or "").strip()
+        if scene_label and scene_label != mode_label:
+            parts.append(scene_label)
+        return parts
+
+    def _cover_first_h1(self, markdown: str = "") -> str:
+        """Return the first level-1 heading of the document being authored. Looks first at the exported Markdown body (a '# ' heading line), then at the active source file (md first heading line, or a docx Heading-1 paragraph). Returns empty when no level-1 heading is found."""
+        for source in (markdown,):
+            if not str(source or "").strip():
+                continue
+            for raw in str(source).splitlines():
+                line = raw.rstrip()
+                stripped = line.strip()
+                if stripped.startswith("# ") and not stripped.startswith("## "):
+                    return stripped[2:].strip()
+        doc_path = str(getattr(self, "_workbench_source_path", "") or "").strip()
+        if not doc_path:
+            doc_path = str(self.bridge.current_document_path() or "").strip()
+        if doc_path and Path(doc_path).is_file():
+            suffix = Path(doc_path).suffix.casefold()
+            if suffix in {".md", ".markdown"}:
+                try:
+                    for raw in Path(doc_path).read_text(
+                        encoding="utf-8", errors="ignore"
+                    ).splitlines():
+                        stripped = raw.strip()
+                        if stripped.startswith("# ") and not stripped.startswith("## "):
+                            return stripped[2:].strip()
+                except OSError:
+                    return ""
+            if suffix in {".docx", ".doc", ".wps"}:
+                return self._docx_first_h1(doc_path)
+        return ""
+
+    def _docx_first_h1(self, doc_path: str) -> str:
+        """Return the text of the first Heading-1 paragraph in a Word document."""
+        try:
+            from docx import Document
+
+            document = Document(str(doc_path))
+        except Exception:  # noqa: BLE001 - never block the cover prefill
+            return ""
+        for para in document.paragraphs:
+            text = str(para.text or "").strip()
+            if not text:
+                continue
+            style = getattr(para, "style", None)
+            style_name = str(getattr(style, "name", style) or "").strip()
+            lowered = style_name.casefold().replace(" ", "")
+            if lowered in {"heading1", "标题1", "heading1章标题", "标题1章标题"}:
+                return text
+        return ""
+
+    def _cover_entity_identity(self) -> tuple[str, str]:
+        """Read the real project / company name from the bound material run. Values may live at package scope or on the material records; the first non-empty, non-placeholder hit wins. Returns a tuple (project_name, company_name)."""
+        project_keys = ("project_name", "项目名称", "entity_name", "项目名")
+        company_keys = ("company_name", "公司名称", "公司名", "企业名称")
+        token_marker = "{{@text:"
+
+        def _scan(values: Mapping[str, object]) -> tuple[str, str]:
+            project = ""
+            company = ""
+            for key, raw in values.items():
+                text = str(raw or "").strip()
+                if not text or token_marker in text or ("{{" in text and "}}" in text):
+                    continue
+                if not project and str(key) in project_keys:
+                    project = text
+                elif not company and str(key) in company_keys:
+                    company = text
+            return project, company
+
+        project_name = ""
+        company_name = ""
+        snapshot = self._best_cover_material_snapshot()
+        if snapshot is not None:
+            project_name, company_name = _scan(
+                dict(getattr(snapshot, "package_field_values", {}) or {})
+            )
+            if not project_name and not company_name:
+                for record in getattr(snapshot, "records", ()) or ():
+                    record_values = dict(
+                        getattr(record, "field_values", {}) or {}
+                    )
+                    p, c = _scan(record_values)
+                    if p or c:
+                        project_name, company_name = p, c
+                        break
+        return project_name, company_name
+
+    def _best_cover_material_snapshot(self):
+        """Best-effort, side-effect-free material snapshot for cover prefill. Prefers an already-resolved snapshot cached from the last generation turn; falls back to re-binding the current material run without publishing issues to the UI."""
+        try:
+            cached = getattr(self, "_turn_material_snapshots", {}) or {}
+            for snapshot in cached.values():
+                if snapshot is not None:
+                    return snapshot
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            selection = self.bridge.current_material_run_selection()
+            if selection is None:
+                return None
+            from src.application.materials import bind_repository_material_run
+            from src.config.material_package_library import (
+                material_package_repository,
+            )
+
+            mode_id = self.bridge.current_work_mode_id()
+            result = bind_repository_material_run(
+                material_package_repository(),
+                selection,
+                work_mode_id=mode_id,
+                recipe_id="document_batch",
+                scene_id=self.bridge.current_scene_id(),
+                document_type=(
+                    self.bridge.current_official_document_type_id()
+                    if mode_id == "official"
+                    else ""
+                ),
+            )
+            return result.snapshot if result.ok else None
+        except Exception:  # noqa: BLE001 - never block the export dialog
+            return None
+
+    def _ask_page_config(self, markdown: str = "", output_path: str = ""):
+        """Prompt for page geometry; returns ``None`` when the user cancels.
+
+        ``markdown`` (when provided) enables a live page-count estimate shown
+        in the dialog.  ``output_path`` is the target file that will be
+        written; it is shown in the dialog so the user confirms where and how
+        many pages the export will produce before proceeding.
+        """
+
+        from src.qt_api import (
+            QCheckBox,
+            QComboBox,
+            QDialog,
+            QDoubleSpinBox,
+            QHBoxLayout,
+            QLabel,
+            QLineEdit,
+            QPushButton,
+            QVBoxLayout,
+        )
+        from src.services.markdown_docx_export import PageConfig, estimate_page_count
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("导出确认 · 页面设置")
+        dialog.setMinimumWidth(420)
+        layout = QVBoxLayout(dialog)
+
+        if str(output_path or "").strip():
+            path_label = QLabel(f"目标文件：{Path(output_path).expanduser()}")
+            path_label.setWordWrap(True)
+            layout.addWidget(path_label)
+
+        def add_row(label_text, widget):
+            row = QHBoxLayout()
+            label = QLabel(label_text)
+            label.setMinimumWidth(72)
+            row.addWidget(label)
+            row.addWidget(widget, 1)
+            layout.addLayout(row)
+
+        def make_spin(default, maximum=100.0):
+            spin = QDoubleSpinBox()
+            spin.setDecimals(1)
+            spin.setRange(0.0, maximum)
+            spin.setSuffix(" mm")
+            spin.setValue(default)
+            return spin
+
+        paper_combo = QComboBox()
+        paper_combo.addItems(["A4", "A3"])
+        paper_combo.setCurrentText("A4")
+        add_row("纸张大小", paper_combo)
+
+        orientation_combo = QComboBox()
+        orientation_combo.addItem("竖版", False)
+        orientation_combo.addItem("横版", True)
+        add_row("方向", orientation_combo)
+
+        columns_combo = QComboBox()
+        columns_combo.addItem("1 栏（单栏）", 1)
+        columns_combo.addItem("2 栏", 2)
+        add_row("分栏", columns_combo)
+
+        # Optional advanced geometry: margins, column gutter, header/footer.
+        custom_margin = QCheckBox("自定义页边距")
+        layout.addWidget(custom_margin)
+
+        margin_top = make_spin(25.4)
+        margin_bottom = make_spin(25.4)
+        margin_left = make_spin(31.7)
+        margin_right = make_spin(31.7)
+        add_row("上边距", margin_top)
+        add_row("下边距", margin_bottom)
+        add_row("左边距", margin_left)
+        add_row("右边距", margin_right)
+
+        def _sync_margins(enabled):
+            for spin in (margin_top, margin_bottom, margin_left, margin_right):
+                spin.setEnabled(enabled)
+
+        custom_margin.toggled.connect(_sync_margins)
+        _sync_margins(False)
+
+        column_spacing = make_spin(12.7)
+        add_row("栏间距", column_spacing)
+
+        image_quality_combo = QComboBox()
+        image_quality_combo.addItem("压缩（推荐，适度降采样）", "compressed")
+        image_quality_combo.addItem("原图（不压缩，文件最大）", "original")
+        image_quality_combo.addItem("强压缩（更小体积，牺牲画质）", "high")
+        image_quality_combo.setCurrentIndex(0)
+        add_row("图片质量", image_quality_combo)
+
+        header_edit = QLineEdit()
+        header_edit.setPlaceholderText("留空则不显示页眉")
+        add_row("页眉", header_edit)
+
+        footer_edit = QLineEdit()
+        footer_edit.setPlaceholderText("留空则不显示页脚")
+        add_row("页脚", footer_edit)
+
+        footer_page_number = QCheckBox("显示页码（第 X 页 共 Y 页）")
+        footer_page_number.setChecked(False)
+        layout.addWidget(footer_page_number)
+
+        footer_page_restart = QCheckBox("每节重新从第 1 页编号")
+        footer_page_restart.setChecked(False)
+        layout.addWidget(footer_page_restart)
+
+        def _sync_page_number(enabled):
+            footer_page_restart.setEnabled(enabled)
+
+        footer_page_number.toggled.connect(_sync_page_number)
+        _sync_page_number(False)
+
+        include_cover = QCheckBox("生成封面页")
+        include_cover.setChecked(False)
+        layout.addWidget(include_cover)
+
+        # 封面标题/副标题/日期从当前文档上下文自动带出（仍可手动修改）。
+        # 主标题优先取整篇文档第一行一级标题，需要把全文传进去。
+        pre_title, pre_subtitle, pre_date = self._cover_context_prefill(
+            markdown=str(markdown or "")
+        )
+
+        cover_title = QLineEdit()
+        cover_title.setText(pre_title)
+        cover_title.setPlaceholderText("已自动带出当前文档名；留空则不显示")
+        add_row("封面标题", cover_title)
+
+        cover_subtitle = QLineEdit()
+        cover_subtitle.setText(pre_subtitle)
+        cover_subtitle.setPlaceholderText("已自动带出文档类型/项目上下文；可修改")
+        add_row("封面副标题", cover_subtitle)
+
+        cover_date = QLineEdit()
+        cover_date.setText(pre_date)
+        cover_date.setPlaceholderText("封面日期（可留空）")
+        add_row("封面日期", cover_date)
+
+        import datetime as _datetime
+
+        date_format_combo = QComboBox()
+        date_format_combo.addItems([label for _, label in _COVER_DATE_FORMATS])
+        date_format_combo.setCurrentIndex(
+            next(
+                (
+                    i
+                    for i, (fmt_id, _) in enumerate(_COVER_DATE_FORMATS)
+                    if fmt_id == _load_cover_date_format()
+                ),
+                0,
+            )
+        )
+        date_format_combo.setToolTip(
+            "封面日期模板格式；选择后即用今天的日期按该格式重填"
+        )
+        add_row("日期格式", date_format_combo)
+
+        def _apply_date_format():
+            fmt_id = _COVER_DATE_FORMATS[date_format_combo.currentIndex()][0]
+            _save_cover_date_format(fmt_id)
+            cover_date.setText(
+                _format_cover_date(_datetime.date.today(), fmt_id)
+            )
+
+        date_format_combo.currentIndexChanged.connect(
+            lambda *_: _apply_date_format()
+        )
+
+        def _sync_cover(enabled):
+            for edit in (cover_title, cover_subtitle, cover_date):
+                edit.setEnabled(enabled)
+
+        include_cover.toggled.connect(_sync_cover)
+        _sync_cover(False)
+
+        # 封面预览：未导出前就把将生成的封面标题/副标题（含取自资料包的项目名
+        # 与公司名）清晰展示，供用户核对。随 include_cover 与字段编辑实时刷新。
+        cover_preview_box = QFrame()
+        cover_preview_box.setObjectName("cover_preview_box")
+        cover_preview_box.setFrameShape(QFrame.Shape.StyledPanel)
+        cover_preview_box.setStyleSheet(
+            "QFrame#cover_preview_box {"
+            "  background: transparent; border: 1px dashed #9aa0a6;"
+            "  border-radius: 6px; padding: 4px 8px;"
+            "}"
+        )
+        cover_preview_layout = QVBoxLayout(cover_preview_box)
+        cover_preview_layout.setContentsMargins(8, 6, 8, 6)
+        cover_preview_layout.setSpacing(3)
+        cover_preview_caption = QLabel("封面预览（导出后将生成以下封面文字）：")
+        cover_preview_caption.setWordWrap(True)
+        cover_preview_layout.addWidget(cover_preview_caption)
+        cover_preview_title_label = QLabel("")
+        cover_preview_title_label.setWordWrap(True)
+        cover_preview_layout.addWidget(cover_preview_title_label)
+        cover_preview_subtitle_label = QLabel("")
+        cover_preview_subtitle_label.setWordWrap(True)
+        cover_preview_layout.addWidget(cover_preview_subtitle_label)
+        cover_preview_date_label = QLabel("")
+        cover_preview_date_label.setWordWrap(True)
+        cover_preview_layout.addWidget(cover_preview_date_label)
+        # 明确标注封面副标题里取自资料包的项目/单位名称（若有）。
+        cover_preview_source_label = QLabel("")
+        cover_preview_source_label.setWordWrap(True)
+        cover_preview_source_label.setStyleSheet(
+            "color: #5f6368; font-size: 11px;"
+        )
+        cover_preview_layout.addWidget(cover_preview_source_label)
+        layout.addWidget(cover_preview_box)
+
+        # 解析当前资料包里实际用到的项目名/公司名，作为来源标注（仅展示，不改字段）。
+        try:
+            project_name, company_name = self._cover_entity_identity()
+        except Exception:  # noqa: BLE001 - preview must never block the dialog
+            project_name, company_name = "", ""
+
+        def _cover_source_labels():
+            """Human label describing the per-scene field mapping in use."""
+            from src.assistant.ui import cover_field_mapping as _cfm
+
+            try:
+                title_src, subtitle_src = self._scene_cover_sources()
+            except Exception:  # noqa: BLE001 - never block the preview
+                title_src, subtitle_src = "", ""
+
+            def _name(role_src: str, default: str) -> str:
+                for fid, label in {
+                    "project": "项目/工程名",
+                    "company": "单位/公司名",
+                    _cfm.SRC_DOCUMENT_FIRST_H1: "文档一级标题",
+                    _cfm.SRC_DOCUMENT_CONTEXT: "文档类型/项目上下文",
+                    _cfm.SRC_NONE: "留空",
+                }.items():
+                    if role_src == fid:
+                        return label
+                return default
+
+            return _name(title_src, "文档一级标题"), _name(
+                subtitle_src, "文档类型/项目上下文"
+            )
+
+        def _refresh_cover_preview():
+            shown = bool(include_cover.isChecked())
+            cover_preview_box.setVisible(shown)
+            if not shown:
+                return
+            title_text = str(cover_title.text() or "").strip()
+            subtitle_text = str(cover_subtitle.text() or "").strip()
+            date_text = str(cover_date.text() or "").strip()
+            title_display = title_text or "（未填写，将不显示主标题）"
+            cover_preview_title_label.setText(f"主标题：{title_display}")
+            cover_preview_subtitle_label.setText(
+                f"副标题：{subtitle_text or '（未填写，将不显示副标题）'}"
+            )
+            cover_preview_date_label.setText(
+                f"日期：{date_text or '（未填写，将不显示日期）'}"
+            )
+            title_src_label, subtitle_src_label = _cover_source_labels()
+            source_parts: list[str] = []
+            if project_name:
+                source_parts.append(f"项目名：{project_name}")
+            if company_name:
+                source_parts.append(f"单位/公司：{company_name}")
+            mapping_note = (
+                f"字段映射：主标题←{title_src_label} · 副标题←{subtitle_src_label}"
+            )
+            if source_parts:
+                source_line = (
+                    f"取自资料包 · " + "　".join(source_parts) + "　" + mapping_note
+                )
+            else:
+                source_line = mapping_note
+            cover_preview_source_label.setText(source_line)
+            cover_preview_source_label.setVisible(True)
+
+        include_cover.toggled.connect(lambda *_a: _refresh_cover_preview())
+        cover_title.textChanged.connect(lambda *_a: _refresh_cover_preview())
+        cover_subtitle.textChanged.connect(lambda *_a: _refresh_cover_preview())
+        cover_date.textChanged.connect(lambda *_a: _refresh_cover_preview())
+        cover_preview_box.setVisible(False)
+
+        # 「字段映射…」入口：让当前文档场景可配置 项目名→主标题、公司名→副标题。
+        def _open_field_mapping():
+            if self._edit_cover_field_mapping():
+                # 映射变化后重算预填值并回填可编辑字段与预览。
+                try:
+                    new_title, new_subtitle, new_date = (
+                        self._cover_context_prefill(markdown=str(markdown or ""))
+                    )
+                except Exception:  # noqa: BLE001 - never block the dialog
+                    return
+                cover_title.setText(new_title)
+                cover_subtitle.setText(new_subtitle)
+                cover_date.setText(new_date)
+                _refresh_cover_preview()
+
+        mapping_btn = QPushButton("字段映射…")
+        mapping_btn.setToolTip(
+            "配置当前文档场景下：项目名→封面标题、公司名→封面副标题的映射（按场景保存）"
+        )
+        mapping_btn.setFlat(True)
+        mapping_btn.clicked.connect(lambda *_a: _open_field_mapping())
+        layout.addWidget(mapping_btn, alignment=Qt.AlignmentFlag.AlignRight)
+
+        chapter_split = QCheckBox("按章节拆分（每章一个分节符、独立分页）")
+        chapter_split.setChecked(True)
+        layout.addWidget(chapter_split)
+
+        per_chapter_header = QCheckBox("每章独立页眉（页眉显示章节标题）")
+        per_chapter_header.setChecked(True)
+        layout.addWidget(per_chapter_header)
+
+        estimate_label = QLabel()
+        estimate_label.setWordWrap(True)
+        layout.addWidget(estimate_label)
+
+        def _current_config():
+            return PageConfig(
+                paper=paper_combo.currentText(),
+                landscape=orientation_combo.currentData(),
+                columns=columns_combo.currentData(),
+                margin_top_mm=margin_top.value() if custom_margin.isChecked() else None,
+                margin_bottom_mm=margin_bottom.value() if custom_margin.isChecked() else None,
+                margin_left_mm=margin_left.value() if custom_margin.isChecked() else None,
+                margin_right_mm=margin_right.value() if custom_margin.isChecked() else None,
+                image_quality=image_quality_combo.currentData(),
+                include_cover=include_cover.isChecked(),
+                cover_title=cover_title.text().strip() or None,
+                cover_subtitle=cover_subtitle.text().strip() or None,
+                cover_date=cover_date.text().strip() or None,
+                footer_page_number=footer_page_number.isChecked(),
+                footer_page_restart=footer_page_restart.isChecked(),
+            )
+
+        def _update_estimate():
+            if not markdown:
+                estimate_label.setText("")
+                return
+            try:
+                pages = estimate_page_count(markdown, _current_config())
+            except Exception:  # noqa: BLE001 - estimate must never block the dialog
+                estimate_label.setText("")
+                return
+            estimate_label.setText(f"预估总页数：约 {pages} 页（按字数粗略估算，仅供参考）")
+
+        paper_combo.currentIndexChanged.connect(lambda *_: _update_estimate())
+        orientation_combo.currentIndexChanged.connect(lambda *_: _update_estimate())
+        columns_combo.currentIndexChanged.connect(lambda *_: _update_estimate())
+        custom_margin.toggled.connect(lambda *_: _update_estimate())
+        for spin in (margin_top, margin_bottom, margin_left, margin_right):
+            spin.valueChanged.connect(lambda *_: _update_estimate())
+        _update_estimate()
+
+        hint = QLabel("提示：A3 横版分 2 栏适合超大版面阅读。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        keep_undo = QCheckBox("导出成功后保留撤销历史（可撤销到导出前）")
+        keep_undo.setChecked(_load_export_undo_keep())
+        layout.addWidget(keep_undo)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        ok_btn = QPushButton("确定")
+        cancel_btn = QPushButton("取消")
+        buttons.addWidget(cancel_btn)
+        buttons.addWidget(ok_btn)
+        layout.addLayout(buttons)
+
+        ok_btn.clicked.connect(dialog.accept)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        # Remember the user's undo-history preference and cover-date format for
+        # the next export.
+        _save_export_undo_keep(keep_undo.isChecked())
+        _save_cover_date_format(
+            _COVER_DATE_FORMATS[date_format_combo.currentIndex()][0]
+        )
+        return PageConfig(
+            paper=paper_combo.currentText(),
+            landscape=orientation_combo.currentData(),
+            columns=columns_combo.currentData(),
+            margin_top_mm=margin_top.value() if custom_margin.isChecked() else None,
+            margin_bottom_mm=margin_bottom.value() if custom_margin.isChecked() else None,
+            margin_left_mm=margin_left.value() if custom_margin.isChecked() else None,
+            margin_right_mm=margin_right.value() if custom_margin.isChecked() else None,
+            column_spacing_mm=column_spacing.value(),
+            header_text=header_edit.text().strip() or None,
+            footer_text=footer_edit.text().strip() or None,
+            chapter_split=chapter_split.isChecked(),
+            per_chapter_header=per_chapter_header.isChecked(),
+            image_quality=image_quality_combo.currentData(),
+            include_cover=include_cover.isChecked(),
+            cover_title=cover_title.text().strip() or None if include_cover.isChecked() else None,
+            cover_subtitle=cover_subtitle.text().strip() or None if include_cover.isChecked() else None,
+            cover_date=cover_date.text().strip() or None if include_cover.isChecked() else None,
+            footer_page_number=footer_page_number.isChecked(),
+            footer_page_restart=footer_page_restart.isChecked(),
+        )
+
+    def _resolve_workbench_image_blocks(
+        self, blocks: list[tuple[int, str]]
+    ) -> list[tuple[int, str]]:
+        """Resolve image-block src paths (kind 4) to absolute paths so the
+        workbench editor can render them as pictures."""
+        from src.assistant.ui.chapter_workbench_mixin import _IMAGE
+
+        base = Path(getattr(self, "_workbench_source_path", "") or "").parent
+        if not base or str(base) == ".":
+            base = Path.cwd()
+        resolved: list[tuple[int, str]] = []
+        for kind, text in blocks:
+            if kind != _IMAGE:
+                resolved.append((kind, text))
+                continue
+            src = str(text or "").strip()
+            candidate = (base / src).resolve()
+            if candidate.is_file():
+                resolved.append((kind, str(candidate)))
+            else:
+                # Keep the raw src so a missing image still shows its markdown
+                # reference rather than disappearing silently.
+                resolved.append((kind, src))
+        return resolved
+
+    def _resolve_marktext_image_paths(self, markdown: str) -> dict[str, str]:
+        """Map markdown image paths to real files, relative to the workbench
+        source directory (falling back to the current working directory)."""
+
+        from src.shared.engine.markdown_importer import (
+            discover_markdown_resource_paths,
+        )
+
+        try:
+            referenced = discover_markdown_resource_paths(str(markdown or ""))
+        except (TypeError, ValueError):
+            return {}
+        base = Path(getattr(self, "_workbench_source_path", "") or "").parent
+        if not base or str(base) == ".":
+            base = Path.cwd()
+        resolved: dict[str, str] = {}
+        for image_path in referenced:
+            candidate = (base / image_path).resolve()
+            if candidate.is_file():
+                resolved[image_path] = str(candidate)
+        return resolved
+
+    def _resolve_memory_dir(self, *, source_path: str = "") -> str | None:
+        """Return the folder where ``system_memory.json`` should live for the
+        current authoring / editing context, honouring the user's storage
+        location preference.
+
+        When the preference is ``project`` and a real project / source document
+        is bound (the workbench source, the document being rewritten, or the
+        bridge's current document), the memory is stored in that document's own
+        folder.  Returns ``None`` when the preference is ``internal`` (default)
+        or when no bound file exists, in which case callers fall back to the
+        app-internal per-session cache.
+        """
+        from src.config.app_preferences import resolve_memory_project_dir
+
+        candidates: list[str] = []
+        explicit = str(source_path or "").strip()
+        if explicit:
+            candidates.append(explicit)
+        bound = str(getattr(self, "_workbench_source_path", "") or "").strip()
+        if bound:
+            candidates.append(bound)
+        try:
+            bridge_doc = str(self.bridge.current_document_path() or "").strip()
+        except Exception:  # noqa: BLE001 - bridge may be unavailable in tests
+            bridge_doc = ""
+        if bridge_doc:
+            candidates.append(bridge_doc)
+        return resolve_memory_project_dir(tuple(candidates))
+
+    def _migrate_session_memory_to_document(self, session_id: str) -> None:
+        """When the user has chosen to keep memory next to their documents,
+        copy any app-internal session memory to the newly bound source document
+        folder so editing passes reading the document-folder file still recall
+        what authoring wrote.  Best-effort; never blocks the open.
+        """
+        folder = self._resolve_memory_dir()
+        if not folder:
+            return
+        from src.assistant.application.system_memory import SystemMemoryStore
+
+        try:
+            SystemMemoryStore().migrate_to_dir(session_id, folder)
+        except Exception:  # noqa: BLE001 - best-effort copy must not block
+            return
+
+    def _on_marktext_save_markdown(self, markdown: str) -> None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        default = str(Path.home() / "文档.md")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存 Markdown", default, "Markdown 文件 (*.md)"
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(str(markdown or ""), encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, "保存失败", f"无法保存：\n{exc}")
+            return
+        # Save succeeded — apply the single undo-history strategy for non-export
+        # saves (mirrors the DOCX export flow and the chapter-switch policy) via
+        # undo_policy so the decision is centralised, not inlined here.
+        from src.assistant.ui.undo_policy import UndoEvent, apply_to_view
+
+        apply_to_view(getattr(self, "_marktext_view", None), UndoEvent.SAVE_MARKDOWN)
 
     def _build_context_rail(self) -> QFrame:
         rail = QFrame(self)
@@ -589,6 +1953,7 @@ class AssistantPanel(
                 exc,
             )
             return
+        self._flush_marktext_edits()
         self._active_session = self._mark_session_read(loaded_session)
         self._clear_session_navigation_error()
         self._refresh_session_list(select_session_id=session_id)
@@ -1245,6 +2610,7 @@ class AssistantPanel(
                 widget.hide()
                 widget.deleteLater()
         self._turn_preview_widget = None
+        self._chapter_live_widget = None
         latest_recovery_message_id = ""
         for candidate_message in session.messages:
             for candidate_block in candidate_message.blocks:
@@ -1372,6 +2738,8 @@ class AssistantPanel(
                 preview,
             )
         self._rendered_session_id = session.session_id
+        if hasattr(self, "_dock_restore_from_cache"):
+            self._dock_restore_from_cache(session.session_id)
         if follow_latest:
             self._begin_follow_latest_layout_settle()
         else:
@@ -1541,6 +2909,14 @@ class AssistantPanel(
         self._on_provider_selected(self._provider_combo.currentIndex())
 
     def _show_empty_state(self) -> None:
+        bench = getattr(self, "_chapter_workbench", None)
+        if bench is not None and bench.isVisible():
+            bench.hide()
+        self._workbench_session_id = ""
+        dock = getattr(self, "_outline_dock", None)
+        if dock is not None:
+            dock.clear()
+            dock.hide()
         self._conversation_stack.setCurrentWidget(self._empty_page)
         self._header_widget.setVisible(not self._embedded and not self._first_level)
         self._conversation_title.setText(
@@ -1798,6 +3174,10 @@ class AssistantPanel(
         self._session_rail.setVisible(session_visible)
         self._context_rail.setVisible(context_visible)
 
+        bench = getattr(self, "_chapter_workbench", None)
+        if bench is not None and bench.isVisible():
+            self._reposition_workbench()
+
     def minimumSizeHint(self) -> QSize:
         """Keep hidden rails from imposing a wide native-window minimum."""
 
@@ -1810,6 +3190,17 @@ class AssistantPanel(
         if not self._flush_active_draft():
             event.ignore()
             return
+        # Closing routes through the single undo strategy: flush any pending
+        # right-editor edit, then apply the CLOSE baseline (a non-destructive
+        # keep/snapshot — never a history reset on exit).  This keeps close in
+        # line with export/save/chapter-switch instead of being an unguarded
+        # teardown.
+        view = getattr(self, "_marktext_view", None)
+        if view is not None:
+            view.flush_now()
+            from src.assistant.ui.undo_policy import UndoEvent, apply_to_view
+
+            apply_to_view(view, UndoEvent.CLOSE)
         self._restore_rails_to_layout()
         for drawer in (self._session_drawer, self._context_drawer):
             if drawer is not None:
@@ -1817,6 +3208,11 @@ class AssistantPanel(
                 drawer.deleteLater()
         self._session_drawer = None
         self._context_drawer = None
+        bench = getattr(self, "_chapter_workbench", None)
+        if bench is not None:
+            bench.hide()
+            bench.deleteLater()
+            self._chapter_workbench = None
         super().closeEvent(event)
 
 __all__ = ["AssistantPanel"]

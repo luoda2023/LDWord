@@ -114,7 +114,7 @@ class _NavButton(QPushButton):
         bg = t.bg_sidebar_active if active else "transparent"
         radius = t.radius_sm if expanded else t.radius_sm
         align = "left" if expanded else "center"
-        padding = "0 0 0 10px" if expanded else "0"
+        padding = "0 0 0 22px" if expanded else "0"
         self.setStyleSheet(
             f"""
             QPushButton {{
@@ -146,7 +146,11 @@ _MAIN_PURPOSE_HINTS = {
     "assets": "整理公司名/项目名/Logo 等事实素材",
 }
 _AI_PURPOSE_HINTS = {
-    "assistant": "与 AI 对话，按大纲起草/生成长文档",
+    "assistant": "共创写作：描述任务→确认目录→AI 逐章起草并实时排版",
+}
+_MARKDOWN_PURPOSE_HINTS = {
+    "marktext": "打开、编辑独立的 Markdown 文件并导出 DOCX",
+    "engineering_library": "按工程阶段浏览真实范本并作为 AI 写作参考",
 }
 _BOTTOM_PURPOSE_HINTS = {
     "theme": "切换与定制界面配色",
@@ -185,7 +189,9 @@ class Sidebar(QWidget):
         self._apply_width()
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 8, 4, 8)
+        layout.setContentsMargins(
+            6 if self._expanded else 4, 8, 6 if self._expanded else 4, 8
+        )
         layout.setSpacing(4)
 
         # ── 顶部：展开 / 收起切换按钮 ──
@@ -199,8 +205,9 @@ class Sidebar(QWidget):
         self._group.setExclusive(True)
 
         self._section_groups = (
-            ("main", "① 排版装配", _MAIN_PURPOSE_HINTS),
-            ("ai", "② AI 创作", _AI_PURPOSE_HINTS),
+            ("ai", "① 共创写作", _AI_PURPOSE_HINTS),
+            ("main", "② 排版装配", _MAIN_PURPOSE_HINTS),
+            ("markdown", "③ 导入与参考", _MARKDOWN_PURPOSE_HINTS),
         )
         self._section_labels: dict[str, QLabel] = {}
         for group_index, (group_id, group_title, hints) in enumerate(self._section_groups):
@@ -209,7 +216,8 @@ class Sidebar(QWidget):
             self._section_labels[group_id] = label
             if group_index:
                 layout.addSpacing(10)
-            layout.addWidget(label, 0, Qt.AlignHCenter)
+            # 展开态分区标题与下方按钮共用同一左对齐基线（布局项默认拉伸即可）
+            layout.addWidget(label)
             for i, spec in enumerate(self._panel_specs):
                 if spec.group != group_id:
                     continue
@@ -217,14 +225,14 @@ class Sidebar(QWidget):
                 btn.purpose = hints.get(spec.id, "")
                 self._group.addButton(btn, i)
                 self._buttons[i] = btn
-                layout.addWidget(btn, 0, Qt.AlignHCenter)
+                layout.addWidget(btn)
 
         layout.addStretch()
 
         bottom_label = self._make_section_label("个性化")
         bottom_label.setProperty("sidebarSection", "bottom")
         self._section_labels["bottom"] = bottom_label
-        layout.addWidget(bottom_label, 0, Qt.AlignHCenter)
+        layout.addWidget(bottom_label)
         for idx, spec in enumerate(self._panel_specs):
             if spec.group != "bottom":
                 continue
@@ -232,7 +240,7 @@ class Sidebar(QWidget):
             btn.purpose = _BOTTOM_PURPOSE_HINTS.get(spec.id, "")
             self._group.addButton(btn, idx)
             self._buttons[idx] = btn
-            layout.addWidget(btn, 0, Qt.AlignHCenter)
+            layout.addWidget(btn)
 
         self._group.idClicked.connect(self._on_clicked)
 
@@ -255,7 +263,7 @@ class Sidebar(QWidget):
         label = QLabel(title, self)
         label.setObjectName("sidebar_section_label")
         label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        label.setContentsMargins(8, 6, 0, 2)
+        label.setContentsMargins(20, 6, 0, 2)
         label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         label.setVisible(self._expanded)
         return label
@@ -333,9 +341,10 @@ class Sidebar(QWidget):
             w = item.widget()
             if isinstance(w, _NavButton):
                 if expanded:
-                    # 铺满整行：清掉水平对齐，允许拉伸
-                    layout.setAlignment(w, Qt.AlignVCenter)
+                    # 展开态：按钮横向铺满整行、图标+文字左对齐（与分区标题同一基线）
+                    layout.setAlignment(w, Qt.AlignLeft | Qt.AlignVCenter)
                 else:
+                    # 收起态：40x40 纯图标正方形水平居中
                     layout.setAlignment(w, Qt.AlignHCenter | Qt.AlignVCenter)
 
     def _on_clicked(self, idx: int) -> None:

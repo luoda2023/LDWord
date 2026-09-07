@@ -49,6 +49,14 @@ PANEL_FACTORIES: dict[str, PanelFactorySpec] = {
         "AssistantPanel",
         (("first_level", True),),
     ),
+    "marktext": PanelFactorySpec(
+        "src.ui.panels.marktext_panel",
+        "MarkTextPanel",
+    ),
+    "engineering_library": PanelFactorySpec(
+        "src.ui.panels.engineering_library_panel",
+        "EngineeringLibraryPanel",
+    ),
     "theme": PanelFactorySpec(
         "src.ui.panels.theme_panel",
         "ThemePanel",
