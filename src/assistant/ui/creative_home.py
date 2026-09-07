@@ -1060,6 +1060,13 @@ class AssistantCreativeHome(QWidget):
     message_sent = Signal(str)
     text_changed = Signal(str)
     provider_changed = Signal(str)
+    # Emitted when the user asks to open an already-formatted document and edit
+    # it chapter by chapter (list outline -> pick a chapter -> AI rewrite).
+    open_document_requested = Signal()
+    # Emitted when the user wants to manage the visual typesetting templates.
+    typesetting_requested = Signal()
+    # Emitted when the user wants to manage the visual typesetting templates.
+    typesetting_requested = Signal()
 
     def __init__(self, bridge, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1119,6 +1126,23 @@ class AssistantCreativeHome(QWidget):
         )
         self._library_button.clicked.connect(self._open_reference_library)
         title_row.addWidget(self._library_button, 0, Qt.AlignVCenter)
+        self._chapter_edit_button = QPushButton("✏️ 打开文档改章节", self._center)
+        self._chapter_edit_button.setObjectName("assistant_home_chapter_edit_button")
+        self._chapter_edit_button.setCursor(Qt.PointingHandCursor)
+        self._chapter_edit_button.setToolTip(
+            "打开已排版好的 Word 文档，自动识别章节目录，选中某章让 AI 优化或重写并保留排版"
+        )
+        self._chapter_edit_button.clicked.connect(self.open_document_requested.emit)
+        title_row.addWidget(self._chapter_edit_button, 0, Qt.AlignVCenter)
+        self._template_button = QPushButton("🎨 排版模板", self._center)
+        self._template_button.setObjectName("assistant_home_chapter_edit_button")
+        self._template_button.setCursor(Qt.PointingHandCursor)
+        self._template_button.setToolTip(
+            "排版模板是可视化的格式插件：可新建/调整字体、表格样式、插图占位规则，"
+            "并应用为当前模板，AI 逐章生成与 Word 排版都按它执行"
+        )
+        self._template_button.clicked.connect(self.typesetting_requested.emit)
+        title_row.addWidget(self._template_button, 0, Qt.AlignVCenter)
         center_layout.addLayout(title_row)
         center_layout.addSpacing(_HERO_TITLE_GAP)
 
@@ -1600,6 +1624,18 @@ class AssistantCreativeHome(QWidget):
                 color: {theme.text_on_primary};
                 background: {theme.primary};
                 border-style: solid;
+            }}
+            QPushButton#assistant_home_chapter_edit_button {{
+                color: {theme.primary};
+                background: {theme.bg_card};
+                border: 1px solid {theme.primary};
+                border-radius: {theme.radius_md}px;
+                padding: 5px 12px;
+                font-size: {theme.font_size_sm}px;
+            }}
+            QPushButton#assistant_home_chapter_edit_button:hover {{
+                color: {theme.text_on_primary};
+                background: {theme.primary};
             }}
             QScrollBar:vertical {{
                 background: transparent;

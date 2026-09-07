@@ -105,6 +105,9 @@ class AssistantViewportMixin:
             ):
                 card.setFixedWidth(target_width)
         self._position_jump_latest_button()
+        board = getattr(self, "_chapter_board", None)
+        if board is not None and board.isVisible():
+            board._reposition_in_parent()
 
 
 __all__ = ["AssistantViewportMixin"]

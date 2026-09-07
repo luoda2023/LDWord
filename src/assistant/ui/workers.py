@@ -229,6 +229,10 @@ class DocumentExecutionWorker(QObject):
 
 class ContentGenerationWorker(QObject):
     delta = Signal(str)
+    # chapter event: (phase, index, total, title, chars, text)
+    # phase in {"start", "delta", "done"} — drives the chapter outline panel
+    # and the live per-chapter message in the conversation.
+    chapter_event = Signal(str, int, int, str, int, str)
     finished = Signal(object)
     failed = Signal(str)
 
@@ -272,12 +276,22 @@ class ContentGenerationWorker(QObject):
         return not thread.is_alive()
 
     def _run(self) -> None:
+        def _forward_chapter_event(
+            phase: str, index: int, total: int, title: str, chars: int, text: str
+        ) -> None:
+            # PySide signal emit() only accepts positional arguments; the
+            # service invokes the callback with keyword arguments.
+            self.chapter_event.emit(
+                str(phase), int(index), int(total), str(title), int(chars), str(text)
+            )
+
         try:
             draft = self.service.generate(
                 self.request,
                 self.gateway,
                 cancellation=self.cancellation,
                 delta_callback=self.delta.emit,
+                chapter_callback=_forward_chapter_event,
             )
         except Exception as exc:
             self.failed.emit(str(exc) or type(exc).__name__)

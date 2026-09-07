@@ -438,6 +438,21 @@ class AssistantConversationMessage(QWidget):
         self._markdown.setVisible(bool(self._text))
         self._footer.hide()
 
+    def finalize_live(self, *, status_text: str = "") -> None:
+        """Turn a live streaming message into a settled readable one.
+
+        Keeps the streamed body selectable, reveals the copy/quote/retry
+        footer, and updates the status caption (used when one chapter of a
+        long authoring run finishes and the next chapter starts streaming).
+        """
+        if self._role == "user":
+            return
+        self._live = False
+        if status_text:
+            self._status_label.setText(str(status_text))
+            self._status_row.show()
+        self._footer.setVisible(bool(self._text))
+
     def _copy_text(self) -> None:
         QApplication.clipboard().setText(self._text)
         self._copy_button.setText("已复制")
