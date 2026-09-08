@@ -2614,6 +2614,21 @@ def _normalize_scene_templates(scene, *, mode_id: str | None = None):
         mode_id=mode,
     )
     normalized_scene.compatible_template_ids = compatible_ids
+    # Older user-copied engineering scenes were seeded with the legacy
+    # ``default`` delivery target while their primary template is
+    # ``eng_document``. That combination is rejected at final DOCX delivery;
+    # normalize the stale copy in memory so existing projects remain runnable
+    # without rewriting user files.
+    if mode == "engineering":
+        primary_template_id = str(
+            getattr(normalized_scene, "template_id", "") or ""
+        ).strip()
+        for preset in getattr(normalized_scene, "delivery_presets", ()) or ():
+            target_template_id = str(
+                getattr(preset, "target_template_id", "") or ""
+            ).strip()
+            if target_template_id == "default" and primary_template_id:
+                preset.target_template_id = primary_template_id
     _set_scene_mode(normalized_scene, mode)
     _validate_scene_master_id(normalized_scene, mode_id=mode)
     return normalized_scene

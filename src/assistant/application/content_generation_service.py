@@ -42,6 +42,9 @@ from src.assistant.runtime.cancellation import AssistantCancellationToken, is_ca
 
 # 一章最多自动续写的次数：单次续写取 last ~600 字符作上下文锚点，
 # 足以覆盖单次输出上限 4–8 倍的章节体量；超过即认为模型侧异常，落回原文。
+# 上限=8 轮续写：每轮按模型典型 max output（4k~16k tokens）能补几千字，
+# 8 轮足以覆盖单章 1.2 万字上限（见 allocate_chapter_targets），同时防止
+# 异常 provider 永远报 length 造成无限循环烧钱。
 MAX_CONTINUATION_ATTEMPTS = 8
 _CONTINUATION_TAIL_CHARS = 600
 
@@ -136,6 +139,10 @@ class ContentGenerationRequest:
     # typesetting plugin (see _typesetting_directives).
     template_id: str = ""
     mode_id: str = ""
+    # 超长文档卷大小（页）；仅在总篇幅超过该值时启用卷级检查点。
+    volume_pages: int = 100
+    # 超长文档检查点根目录；未指定时使用应用 workbench 存储根。
+    checkpoint_dir: str = ""
     # Knowledge-base learning: sample excerpts injected per chapter.
     knowledge_samples: tuple[dict[str, object], ...] = ()
     # Folder of the current project / source document, present when the user's
@@ -521,7 +528,64 @@ class AssistantContentGenerationService:
             if length_target is not None
             else []
         )
+        # 超长任务采用卷级检查点：每章完成即写入独立 volume 子目录，
+        # 进程中断后同一 session/需求/目录可从已完成章节继续。
+        volume_checkpoint = None
+        chapter_volume: dict[int, int] = {}
+        if length_target is not None:
+            from src.assistant.application.long_document_volumes import (
+                LongDocumentCheckpointStore,
+                plan_volumes,
+            )
+
+            volume_size = max(1, int(request.volume_pages or 100))
+            if length_target[0] > volume_size * 700:
+                volume_checkpoint = LongDocumentCheckpointStore(
+                    request.session_id,
+                    root=(Path(request.checkpoint_dir) if request.checkpoint_dir else None),
+                )
+                manifest = volume_checkpoint.initialize(
+                    session_id=request.session_id,
+                    prompt=request.prompt,
+                    outline_titles=titles,
+                    total_chars=length_target[0],
+                    volume_pages=volume_size,
+                )
+                for volume in manifest.get("volumes") or ():
+                    for chapter_index in volume.get("chapter_indices") or ():
+                        chapter_volume[int(chapter_index)] = int(volume.get("index", 0))
+                volume_checkpoint.set_status("running")
         for index, title in enumerate(titles, start=1):
+            current_volume = chapter_volume.get(index)
+            cached_chapter = (
+                volume_checkpoint.chapter_markdown(index)
+                if volume_checkpoint is not None and current_volume is not None
+                else None
+            )
+            if cached_chapter is not None and cached_chapter.strip():
+                # 断点恢复：缓存章节直接回放到当前产物与 UI，不再次消耗模型调用。
+                cached_cleaned = cached_chapter.strip()
+                chapter_markdowns.append(cached_cleaned)
+                if not any(f"第 {index} 章《{title}" in item for item in written_summary):
+                    written_summary.append(_chapter_memory_summary(index, title, cached_cleaned))
+                if chapter_callback is not None:
+                    chapter_callback(
+                        phase="resumed",
+                        index=index,
+                        total=total_chapters,
+                        title=title,
+                        chars=len(cached_cleaned),
+                        text="",
+                    )
+                    chapter_callback(
+                        phase="done",
+                        index=index,
+                        total=total_chapters,
+                        title=title,
+                        chars=len(cached_cleaned),
+                        text="",
+                    )
+                continue
             if chapter_callback is not None:
                 chapter_callback(
                     phase="start",
@@ -562,10 +626,17 @@ class AssistantContentGenerationService:
             knowledge_text = self._knowledge_samples_text(
                 request.knowledge_samples, max_chars=4000
             )
+            volume_context = ""
+            if current_volume is not None:
+                volume_context = (
+                    f"\n\n【当前分卷：第 {current_volume} 卷】\n"
+                    "本卷按连续章节独立保存；只写当前章节，不要输出其他卷内容。"
+                )
             chapter_prompt = (
                 base_prompt
                 + "\n\n【分阶段生成：单个章节】\n"
                 + doc_context
+                + volume_context
                 + memory_text
                 + template_directives
                 + length_directive
@@ -606,6 +677,13 @@ class AssistantContentGenerationService:
             cleaned = chapter_text.strip()
             if cleaned:
                 chapter_markdowns.append(cleaned)
+                if volume_checkpoint is not None and current_volume is not None:
+                    volume_checkpoint.save_chapter(
+                        volume_index=current_volume,
+                        chapter_index=index,
+                        title=title,
+                        markdown=cleaned,
+                    )
                 summary = _chapter_memory_summary(index, title, cleaned)
                 written_summary.append(summary)
                 # Persist this chapter's compact memory so later chapters (and
@@ -629,6 +707,8 @@ class AssistantContentGenerationService:
                         text="",
                     )
         full_markdown = "\n\n".join(chapter_markdowns) + "\n"
+        if volume_checkpoint is not None:
+            volume_checkpoint.finalize()
 
         # 排版复核校准：整篇完成后、组装 DOCX 前，对照规范模板检测偏差并
         # 做安全的机械修正。结果非阻塞（不会拒绝草稿），仅回传报告供 UI 展示。
@@ -823,7 +903,9 @@ class AssistantContentGenerationService:
                 "scale_profile_id": request.scale_profile_id,
                 "generation_phase": generation_phase,
             },
-        )    @staticmethod
+        )
+
+    @staticmethod
     def _collect_provider_text(
         gateway: ModelGateway,
         provider_request: ProviderRequest,

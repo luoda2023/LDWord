@@ -143,7 +143,12 @@ def _with_synthetic_table_delimiter(markdown: str) -> str:
     if not tail:
         return text
     if any(_is_delimiter_row(line) for line in tail):
-        return text
+        # Qt's Markdown parser does not materialize the final table row while
+        # the table is still the document's last block unless a following
+        # blank block exists.  Add a render-only newline so the newest streamed
+        # row becomes visible immediately; ``_source_text`` remains unchanged.
+        return text.rstrip(chr(10)) + chr(10) + chr(10)
+
     # Drop partially-streamed delimiter fragments (dash/pipe-only pieces) so
     # only genuine header text remains above the synthetic delimiter.
     header_lines = [line for line in tail if not _is_delimiter_prefix(line)]
@@ -156,12 +161,12 @@ def _with_synthetic_table_delimiter(markdown: str) -> str:
         kept = lines[:run_end]
         if not kept:
             return ""
-        return "\n".join(kept).rstrip() + "\n"
+        return chr(10).join(kept).rstrip() + chr(10)
     header_width = max((_cell_count(row) for row in header_lines), default=2)
     delimiter = "|" + "|".join(" --- " for _ in range(header_width)) + "|"
     kept = lines[:run_end] + header_lines
-    joined = "\n".join(kept)
-    return joined + "\n" + delimiter
+    joined = chr(10).join(kept)
+    return joined + chr(10) + delimiter
 
 
 def _message_font(size_px: int, *, weight: int = 400) -> QFont:
