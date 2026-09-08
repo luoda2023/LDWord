@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import re
 from uuid import uuid4
@@ -15,6 +15,12 @@ from src.assistant.adapters.content_generation_adapter import (
 from src.assistant.application.capability_registry import (
     NARRATIVE_PROMPT_PROFILE_ID,
     system_prompt_for_profile,
+)
+from src.assistant.application.length_targeting import (
+    allocate_chapter_targets,
+    chapter_length_directive,
+    parse_length_target,
+    total_length_directive,
 )
 from src.assistant.application.typesetting_templates import (
     TypesettingTemplateStore,
@@ -33,6 +39,25 @@ from src.assistant.contracts.task_plan import (
 )
 from src.assistant.contracts.permissions import DisclosureGrant
 from src.assistant.runtime.cancellation import AssistantCancellationToken, is_cancelled
+
+# 一章最多自动续写的次数：单次续写取 last ~600 字符作上下文锚点，
+# 足以覆盖单次输出上限 4–8 倍的章节体量；超过即认为模型侧异常，落回原文。
+MAX_CONTINUATION_ATTEMPTS = 8
+_CONTINUATION_TAIL_CHARS = 600
+
+
+def _continuation_tail(text: str) -> str:
+    """Last complete line of ``text`` used as the continuation anchor."""
+    stripped = text.rstrip()
+    if not stripped:
+        return ""
+    tail = stripped[-_CONTINUATION_TAIL_CHARS:]
+    head, sep, _ = tail.partition("\n")
+    if sep and len(head) < _CONTINUATION_TAIL_CHARS:
+        # Keep from the first line break inside the window so the anchor starts
+        # on a clean line boundary.
+        tail = tail[len(head) + 1 :]
+    return tail.strip() or stripped[-200:]
 from src.assistant.runtime.provider_contract import (
     PROVIDER_DONE,
     PROVIDER_ERROR,
@@ -223,6 +248,11 @@ class AssistantContentGenerationService:
                     scene_id=request.scene_id,
                     scale_profile_id=request.scale_profile_id,
                 )
+            else:
+                # 无分章的单次整篇生成：需求里给了页数/字数时注入总篇幅指令。
+                _single_length = parse_length_target(request.prompt)
+                if _single_length is not None:
+                    system_prompt += total_length_directive(*_single_length)
             provider_request = self._provider_request(
                 request,
                 system_prompt=system_prompt,
@@ -483,6 +513,14 @@ class AssistantContentGenerationService:
                     f"第 {_entry.index} 章《{_entry.title}》已覆盖：{_entry.summary}"
                 )
         total_chapters = len(titles)
+        # 篇幅目标：用户在需求里给了页数/字数时，按章分摊并逐章注入指令，
+        # 让“写一篇1000页的文档”真正驱动每章的体量。
+        length_target = parse_length_target(request.prompt)
+        chapter_targets = (
+            allocate_chapter_targets(length_target[0], total_chapters)
+            if length_target is not None
+            else []
+        )
         for index, title in enumerate(titles, start=1):
             if chapter_callback is not None:
                 chapter_callback(
@@ -516,6 +554,11 @@ class AssistantContentGenerationService:
                 library_template_id=request.template_id,
                 mode_id=request.mode_id,
             )
+            length_directive = chapter_length_directive(
+                chapter_targets[index - 1] if index - 1 < len(chapter_targets) else None,
+                chapter_number=index,
+                total_chapters=total_chapters,
+            )
             knowledge_text = self._knowledge_samples_text(
                 request.knowledge_samples, max_chars=4000
             )
@@ -525,6 +568,7 @@ class AssistantContentGenerationService:
                 + doc_context
                 + memory_text
                 + template_directives
+                + length_directive
                 + knowledge_text
                 + f"\n\n当前只撰写第 {index} 章，标题必须为：{title}\n"
                 "只输出该章正文，不得输出全文标题、前言、目录、其他章节或结语汇总；"
@@ -779,9 +823,7 @@ class AssistantContentGenerationService:
                 "scale_profile_id": request.scale_profile_id,
                 "generation_phase": generation_phase,
             },
-        )
-
-    @staticmethod
+        )    @staticmethod
     def _collect_provider_text(
         gateway: ModelGateway,
         provider_request: ProviderRequest,
@@ -789,21 +831,66 @@ class AssistantContentGenerationService:
         cancellation: AssistantCancellationToken | None,
         delta_callback=None,
     ) -> str:
+        """Stream one request to completion, auto-continuing when truncated.
+
+        Models cap a single completion's output length; a long chapter can hit
+        that cap (``finish_reason == "length"``) and come back silently half
+        written.  When the provider reports truncation we continue from the
+        last complete line with an explicit continuation instruction and
+        concatenate, so 1000-page-scale chapters stay whole.
+        """
         parts: list[str] = []
-        for event in gateway.stream(provider_request):
-            if is_cancelled(cancellation):
-                raise RuntimeError("content_generation_cancelled")
-            if event.type == PROVIDER_TEXT_DELTA:
-                parts.append(event.text)
-                if delta_callback is not None:
-                    delta_callback(event.text)
-            elif event.type == PROVIDER_ERROR:
-                raise RuntimeError(event.text or "content_generation_provider_failed")
-            elif event.type == PROVIDER_DONE and not parts and event.text:
-                parts.append(event.text)
+        request = provider_request
+        for _continuation in range(MAX_CONTINUATION_ATTEMPTS + 1):
+            chunk_parts: list[str] = []
+            finish_reason = ""
+            for event in gateway.stream(request):
+                if is_cancelled(cancellation):
+                    raise RuntimeError("content_generation_cancelled")
+                if event.type == PROVIDER_TEXT_DELTA:
+                    chunk_parts.append(event.text)
+                    if delta_callback is not None:
+                        delta_callback(event.text)
+                elif event.type == PROVIDER_ERROR:
+                    raise RuntimeError(event.text or "content_generation_provider_failed")
+                elif event.type == PROVIDER_DONE:
+                    if not chunk_parts and event.text:
+                        chunk_parts.append(event.text)
+                    finish_reason = str(event.metadata.get("finish_reason") or "")
+            chunk_text = "".join(chunk_parts)
+            parts.append(chunk_text)
+            if finish_reason != "length" or not chunk_text:
+                break
+            if _continuation >= MAX_CONTINUATION_ATTEMPTS:
+                break
+            tail = _continuation_tail(chunk_text)
+            if not tail:
+                break
+            messages = tuple(request.messages) + (
+                {"role": "assistant", "content": chunk_text},
+                {
+                    "role": "user",
+                    "content": (
+                        "你上一段输出在句子中途被输出长度上限截断了。从下面原文的"
+                        "最后一句直接接着写，不要重复已有内容，不要加前言、说明"
+                        "或道歉，直接续写正文直到本章自然结束：\n\n"
+                        f"…{tail}"
+                    ),
+                },
+            )
+            request = replace(
+                request,
+                messages=messages,
+                request_id=uuid4().hex,
+                metadata={
+                    **request.metadata,
+                    "generation_phase": (
+                        str(request.metadata.get("generation_phase") or "single")
+                        + f"_cont{_continuation + 1}"
+                    ),
+                },
+            )
         return "".join(parts)
-
-
 
     @staticmethod
     def _typesetting_directives(

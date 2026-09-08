@@ -135,6 +135,7 @@ class OpenAICompatibleModelGateway:
                         break
                     _raise_for_provider_error(payload)
                     done_metadata.update(_usage_metadata(payload))
+                    done_metadata.update(_finish_reason_metadata(payload))
                     text = _extract_delta_text(payload)
                     if text:
                         emitted_delta = True
@@ -481,6 +482,16 @@ def _extract_delta_text(payload: Mapping[str, Any]) -> str:
         if isinstance(content, str):
             return content
     return ""
+
+
+def _finish_reason_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Surface ``choices[0].finish_reason`` so callers can detect truncation."""
+    choices = payload.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0]
+        if isinstance(first, Mapping) and first.get("finish_reason"):
+            return {"finish_reason": str(first["finish_reason"])}
+    return {}
 
 
 def _usage_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
