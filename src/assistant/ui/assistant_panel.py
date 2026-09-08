@@ -342,8 +342,9 @@ class AssistantPanel(
     def _ai_access_dispatch(self, action_id: str, payload: dict) -> dict:
         """AI 接入层的控制动作分发：沿既有 document-action 闸门执行。
 
-        chat 直接走主会话发送链路；文档类动作走 _handle_card_action
-        （状态机 + 确认卡校验）。返回 plain-data 结果供外部 API 投影。
+        chat 直接走主会话发送链路；文档类动作带当前状态快照走
+        _handle_card_action（动作范围校验 + 状态机 + 确认卡）。返回
+        plain-data 结果供外部 API 投影。
         """
         session = self._active_session
         if session is None:
@@ -358,11 +359,46 @@ class AssistantPanel(
                 "accepted": accepted,
                 "reason": "" if accepted else "submission_gate_rejected",
             }
+        # 构造与交互卡完全一致的动作范围快照：控制动作因此与用户点卡片
+        # 走同一条 fail-closed 路径（状态过期/范围不符一律拒绝）。
+        from src.assistant.ui.conversation_presentation import (
+            build_interaction_action_scope,
+        )
+
+        scoped_payload = {
+            **dict(payload or {}),
+            "action_scope": build_interaction_action_scope(
+                pending_continuation=session.pending_continuation,
+                active_plan=session.active_plan,
+                document_job=session.document_job,
+                turn_status=session.turn_status,
+            ),
+        }
+        # 只有已登记的处理器（交互卡分支或文档动作白名单）才视为接受；
+        # 未知动作与未处理的动作同样 fail-closed，供外部 AI 识别改道。
+        known_handlers = {
+            "approve_provider_disclosure",
+            "deny_provider_disclosure",
+            "approve_content_disclosure",
+            "deny_content_disclosure",
+            "submit_question_answer",
+            "open_context_material",
+            "edit_exam_plan_requirements",
+            "edit_official_plan_requirements",
+            "open_workbench",
+        }
+        from src.assistant.application.active_document_continuation import (
+            DOCUMENT_ACTION_IDS,
+        )
+
+        is_known = action_id in known_handlers or action_id in DOCUMENT_ACTION_IDS
+        if not is_known:
+            return {"accepted": False, "reason": "unknown_action"}
         try:
-            handled = self._handle_card_action(action_id, payload)
+            self._handle_card_action(action_id, scoped_payload)
         except Exception as exc:  # noqa: BLE001 - 把失败转成结构化结果
             return {"accepted": False, "reason": f"{type(exc).__name__}:{exc}"}
-        return {"accepted": bool(handled), "reason": "" if handled else "not_handled"}
+        return {"accepted": True}
 
     def _setup_ui(self) -> None:
         self.setObjectName("AssistantPanel")

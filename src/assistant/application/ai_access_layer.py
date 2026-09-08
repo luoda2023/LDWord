@@ -23,7 +23,10 @@
 """
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable
+
+from src.qt_api import QApplication, QObject, QThread, Signal, Slot
 
 from src.assistant.application.ai_operations_api import (
     AI_OPERATIONS,
@@ -67,6 +70,20 @@ def register_app_meta(meta: dict[str, str]) -> None:
     _APP_META.update({str(k): str(v) for k, v in dict(meta).items()})
 
 
+class _ControlRelay(QObject):
+    """跨线程控制投递中继。
+
+    HTTP server 线程不能直接触碰 UI（Qt 控件只允许主线程访问），
+    控制动作经此中继的信号以 QueuedConnection 投递到主线程执行，
+    结果通过 ``threading.Event`` 回传等待方。
+    """
+
+    controlRequested = Signal(str, dict, object, object)
+
+    def dispatch(self, action_id: str, payload: dict, box: dict, done: threading.Event) -> None:
+        self.controlRequested.emit(action_id, payload, box, done)
+
+
 class AiAccessLayer:
     """软件全部功能的 AI 查询 + 控制统一门面。
 
@@ -80,11 +97,24 @@ class AiAccessLayer:
         self._session_coordinator = None
         # 外部 API 需要把"控制意图"转成 UI 动作的回调（由接线方注册）。
         self._action_dispatcher: Callable[[str, dict], dict] | None = None
+        # 跨线程控制投递中继：单例总在主线程首次创建（main_window 接
+        # 线时），因此信号槽落在主线程。防线程亲和性漂移，挂载时强制
+        # 回主线程（见 attach_bridge）。
+        self._relay = _ControlRelay()
+        self._relay.controlRequested.connect(self._dispatch_on_main)
+        self._relay_thread_checked = False
 
     # ---- 接线（UI 侧注册，可选；缺省查询自动降级） ------------------
 
     def attach_bridge(self, bridge: Any) -> None:
         self._bridge = bridge
+        # 防线程亲和性漂移：单例若在非主线程被首次创建，这里（主线程
+        # 接线时）把中继拉回主线程，保证信号槽落在 UI 线程。
+        if not self._relay_thread_checked:
+            self._relay_thread_checked = True
+            app = QApplication.instance()
+            if app is not None and self._relay.thread() is not app.thread():
+                self._relay.moveToThread(app.thread())
 
     def attach_panel(self, panel_provider: Callable[[], Any]) -> None:
         """注册返回当前 AssistantPanel（可为 None）的提供者。"""
@@ -302,6 +332,10 @@ class AiAccessLayer:
         控制动作不在此执行：交给注册的分发器（UI document-action 通
         道），沿用状态机校验与用户确认闸门。未注册分发器或未挂面板
         时返回 ``accepted: False`` 并说明原因，外部 AI 可据此改道。
+
+        线程安全：允许任意线程调用。非主线程调用时（外部 HTTP API），
+        动作经信号投递到主线程执行并等待结果——Qt UI 只能在主线程
+        触碰，跨线程直调是未定义行为。
         """
 
         action = str(action_id or "").strip()
@@ -313,7 +347,30 @@ class AiAccessLayer:
                 "error": "dispatcher_not_ready",
                 "hint": "软件界面尚未完成初始化，请稍后重试",
             }
-        result = self._action_dispatcher(action, dict(payload or {}))
+        payload_dict = dict(payload or {})
+        app = QApplication.instance()
+        on_main = app is None or QThread.currentThread() is app.thread()
+        if on_main:
+            return self._run_action(action, payload_dict)
+        # 跨线程：投递到主线程，等待执行完成（限时防 UI 死锁拖垮调用方）。
+        box: dict = {}
+        done = threading.Event()
+        self._relay.dispatch(action, payload_dict, box, done)
+        if not done.wait(timeout=60.0):
+            return {
+                "accepted": False,
+                "error": "ui_thread_unresponsive",
+                "hint": "主线程 60s 未处理该控制动作，请稍后重试",
+            }
+        result = box.get("result")
+        if not isinstance(result, dict):
+            return {"accepted": False, "error": "dispatch_failed"}
+        return result
+
+    def _run_action(self, action: str, payload_dict: dict) -> dict:
+        """在主线程执行控制分发（仅供 request_action 内部调用）。"""
+
+        result = self._action_dispatcher(action, payload_dict)  # type: ignore[misc]
         return {
             "accepted": bool(result.get("accepted", False)),
             "action_id": action,
@@ -324,6 +381,19 @@ class AiAccessLayer:
         """查询某动作需要的用户确认等级（外部 AI 发起前自查）。"""
 
         return _ACTION_CONSENT.get(str(action_id or "").strip(), CONTROL_SUGGEST)
+
+    @Slot(str, dict, object, object)
+    def _dispatch_on_main(
+        self, action: str, payload: dict, box: dict, done: threading.Event
+    ) -> None:
+        """中继信号槽（主线程）：执行控制分发并回传结果。"""
+
+        try:
+            result = self._run_action(action, payload)
+        except Exception as exc:  # noqa: BLE001 - 主线程崩溃回传而非炸掉事件循环
+            result = {"accepted": False, "error": f"dispatch_crashed: {exc}"}
+        box["result"] = result
+        done.set()
 
 
 # 应用级单例：main_window 创建后由 bridge 引用共享。

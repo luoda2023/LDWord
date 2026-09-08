@@ -166,6 +166,14 @@ class ExternalApiServer:
             # -- GET --
 
             def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler 约定
+                try:
+                    self._do_get_guarded()
+                except Exception:
+                    import traceback, sys as _sys
+                    traceback.print_exc(file=_sys.stderr)
+                    raise
+
+            def _do_get_guarded(self) -> None:
                 if not self._check():
                     return
                 parsed = urlparse(self.path)

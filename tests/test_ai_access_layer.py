@@ -157,3 +157,48 @@ def test_external_api_server_loopback_auth_and_dispatch():
     finally:
         server.stop()
     assert server.is_running is False
+
+
+def test_cross_thread_action_dispatches_on_main_thread():
+    """控制动作从非主线程提交时，必须经信号投递到主线程执行。
+
+    锁定 2026-09-08 修复的真实缺陷：HTTP server 线程此前直接调用
+    dispatcher（内部触碰 Qt UI 控件与 session 状态），属未定义行为；
+    修复后跨线程请求经 _ControlRelay 信号排队到主线程槽执行，并
+    通过 threading.Event 回传结果。
+    """
+
+    import threading
+
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    access = AiAccessLayer()
+    seen = {"thread_ids": []}
+
+    def dispatcher(action_id, payload):
+        seen["thread_ids"].append(threading.get_ident())
+        return {"accepted": True}
+
+    access.register_action_dispatcher(dispatcher)
+
+    box = {}
+    done = threading.Event()
+
+    def call_from_worker():
+        box["result"] = access.request_action("preflight", {})
+        done.set()
+
+    worker = threading.Thread(target=call_from_worker, daemon=True)
+    worker.start()
+    deadline = __import__("time").time() + 15
+    while not done.is_set() and __import__("time").time() < deadline:
+        app.processEvents()
+    worker.join(timeout=5)
+
+    assert done.is_set(), "cross-thread action never completed"
+    assert box["result"]["accepted"] is True
+    # dispatcher 必须只在主线程执行过
+    main_tid = threading.get_ident()
+    assert seen["thread_ids"], "dispatcher was never invoked"
+    assert all(tid == main_tid for tid in seen["thread_ids"])

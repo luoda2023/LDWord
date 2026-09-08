@@ -29,6 +29,7 @@ from PySide6.QtCore import (
     QUrl,
     Property,
     Signal,
+    Slot,
 )
 from PySide6.QtGui import (
     QAction,
