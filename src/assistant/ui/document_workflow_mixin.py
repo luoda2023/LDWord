@@ -2666,10 +2666,21 @@ class AssistantDocumentWorkflowMixin:
                 self._active_session = session
         try:
             material_snapshot = self._material_snapshot_for_plan(session, plan)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            # 一条龙自动衔接时任务还停在 content_generation_running，
+            # 状态机没有该状态 → preflight_failed 的转移；若先把状态
+            # 推到 preflight_running 再报失败，用户看到的是一次多余的
+            # “预检中→失败”闪跳。因此先把可从当前状态合法到达的
+            # preflight_running 落库，再走统一的失败处理。
+            job = {
+                **dict(session.document_job),
+                "status": "preflight_running",
+                "preflight_run_id": uuid4().hex,
+            }
+            session = self._coordinator.update_state(session, document_job=job)
             self._on_preflight_failed(
                 session.session_id,
-                "assistant_material_snapshot_unavailable",
+                str(exc) or "assistant_material_snapshot_unavailable",
             )
             return
         preflight_run_id = uuid4().hex

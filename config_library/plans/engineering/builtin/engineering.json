@@ -116,7 +116,7 @@
     {
       "preset_id": "final",
       "label": "Final DOCX",
-      "target_template_id": "default",
+      "target_template_id": "eng_document",
       "output_dir_template": "{document_dir}/output",
       "filename_template": "{stem}_{preset_id}",
       "artifacts": {
