@@ -28,6 +28,7 @@ from src.qt_api import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QPoint,
     QPushButton,
     QStackedWidget,
     QTimer,
@@ -91,6 +92,15 @@ if sys.platform == "win32":
     WS_CAPTION = 0x00C00000
     WM_NCCALCSIZE = 0x0083
     WM_NCHITTEST = 0x0084
+    # 命中测试返回码：窗口边缘 resize 热区（Win32 HT*）
+    HTLEFT = 10
+    HTRIGHT = 11
+    HTTOP = 12
+    HTTOPLEFT = 13
+    HTTOPRIGHT = 14
+    HTBOTTOM = 15
+    HTBOTTOMLEFT = 16
+    HTBOTTOMRIGHT = 17
     SWP_FRAMECHANGED = 0x0020
     SWP_NOMOVE = 0x0002
     SWP_NOSIZE = 0x0001
@@ -184,6 +194,9 @@ class MainWindow(QMainWindow):
     # 窗口四周不留外发光阴影边距：半透明阴影带在桌面上表现为一圈白边
     # （用户明确要求去掉），内容直接铺满窗口。
     SHADOW_MARGIN = 0
+    # 边缘拖拽 resize 热区宽度（px）：无边框窗口在 WM_NCHITTEST 中把
+    # 边缘 6px 映射为系统 resize 命中码，获得原生拖拽手感。
+    RESIZE_HOTSPOT = 6
 
     def __init__(
         self,
@@ -375,7 +388,7 @@ class MainWindow(QMainWindow):
             pass  # Win10 不支持此属性
 
     def nativeEvent(self, event_type, message):
-        """处理 WM_NCCALCSIZE：让客户区覆盖整个窗口。"""
+        """处理 WM_NCCALCSIZE / WM_NCHITTEST：无边框 + 边缘 resize 热区。"""
         if sys.platform != "win32":
             return super().nativeEvent(event_type, message)
 
@@ -385,7 +398,58 @@ class MainWindow(QMainWindow):
             # 返回 0 + 不修改 RECT = 客户区 == 窗口区（无标题栏/边框）
             return True, 0
 
+        if msg.message == WM_NCHITTEST:
+            hit = self._resize_hotspot_hit(msg.lParam)
+            if hit is not None:
+                return True, hit
+
         return super().nativeEvent(event_type, message)
+
+    def _resize_hotspot_hit(self, lParam: int) -> int | None:
+        """把窗口边缘 RESIZE_HOTSPOT 像素映射为系统 resize 命中码。
+
+        返回 HT* 命中码时由 Windows 接管拖拽：原生 resize 光标、DWM
+        平滑跟手、贴边吸附全部免费获得。最大化/全屏时不启用（系统
+        本身禁止最大化窗口 resize，误返回命中码会破坏双击还原）。
+        """
+        if sys.platform != "win32":
+            return None
+        if self.isMaximized() or self.isFullScreen():
+            return None
+
+        # lParam 打包屏幕坐标：低 16 位 x、高 16 位 y，多显示器下可为
+        # 负数，必须按 16 位有符号数还原。
+        x = ctypes.c_short(lParam & 0xFFFF).value
+        y = ctypes.c_short((lParam >> 16) & 0xFFFF).value
+        pos = self.mapFromGlobal(QPoint(x, y))
+
+        w, h = self.width(), self.height()
+        if pos.x() < 0 or pos.y() < 0 or pos.x() > w or pos.y() > h:
+            return None
+
+        m = self.RESIZE_HOTSPOT
+        left = pos.x() <= m
+        right = pos.x() >= w - m
+        top = pos.y() <= m
+        bottom = pos.y() >= h - m
+
+        if top and left:
+            return HTTOPLEFT
+        if top and right:
+            return HTTOPRIGHT
+        if bottom and left:
+            return HTBOTTOMLEFT
+        if bottom and right:
+            return HTBOTTOMRIGHT
+        if left:
+            return HTLEFT
+        if right:
+            return HTRIGHT
+        if top:
+            return HTTOP
+        if bottom:
+            return HTBOTTOM
+        return None
 
     def changeEvent(self, event):
         """窗口状态变化时刷新视觉样式。"""
