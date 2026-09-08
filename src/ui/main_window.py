@@ -52,7 +52,7 @@ from src.config.work_mode import get_work_mode
 from src.ui.bridge import PanelBridge, navigation_intent_value
 from src.ui.panel_loading import PanelLoadState
 from src.ui.panel_registry import create_panel
-from src.ui.panel_specs import PANEL_SPECS
+from src.ui.panel_specs import PANEL_SPECS, panel_index
 from src.ui.sidebar import Sidebar
 from src.ui.template_import_coordinator import TemplateImportCoordinator
 from src.ui.title_bar import TitleBar
@@ -268,6 +268,29 @@ class MainWindow(QMainWindow):
             self,
             workspace_preference_store=self._workspace_preferences,
         )
+        # AI 统一接入层：软件全部功能向 AI 的查询/控制入口。内嵌对话、
+        # 悬浮窗与外部 API（偏好设置可开启）都汇到这一层。
+        from src.assistant.application.ai_access_layer import (
+            get_ai_access_layer,
+            register_app_meta,
+        )
+        from src.app_meta import (
+            APP_DISPLAY_NAME,
+            APP_DISPLAY_NAME_FULL,
+            APP_VERSION,
+        )
+
+        register_app_meta(
+            {
+                "name": APP_DISPLAY_NAME,
+                "display_name": APP_DISPLAY_NAME_FULL,
+                "version": APP_VERSION,
+            }
+        )
+        self.ai_access = get_ai_access_layer()
+        self.ai_access.attach_bridge(self.bridge)
+        self.ai_access.attach_panel(self._assistant_panel_for_ai)
+        self.bridge.ai_access = self.ai_access
         self._restore_persisted_workspace()
         self._background_services_enabled = bool(enable_background_services)
         self._template_import_coordinator = TemplateImportCoordinator(parent=self)
@@ -487,6 +510,35 @@ class MainWindow(QMainWindow):
         self._show_panel(index)
         if self.panel_stack.currentIndex() == index:
             self.sidebar.select(index)
+
+    def _assistant_panel_for_ai(self):
+        """AI 接入层取当前 AssistantPanel 的弱引用（未加载返回 None）。"""
+        index = panel_index("assistant")
+        panel = self.panel_stack.widget(index)
+        return panel if panel is not None and self._loaded_panel_indexes else None
+
+    def _start_external_api_if_enabled(self) -> None:
+        """偏好开启时启动外部 AI API 服务（仅回环、token 认证）。"""
+        try:
+            from src.assistant.application.ai_access_layer import (
+                get_ai_access_layer,
+            )
+            from src.assistant.application.external_api import ExternalApiServer
+            from src.config.app_preferences import (
+                external_api_enabled,
+                external_api_port,
+            )
+
+            if not external_api_enabled():
+                return
+            self._external_api_server = ExternalApiServer(
+                get_ai_access_layer(),
+                port=external_api_port(),
+            )
+            if not self._external_api_server.start():
+                self._external_api_server = None
+        except Exception:  # noqa: BLE001 - 外部 API 缺席绝不影响主程序
+            self._external_api_server = None
 
     def _restore_persisted_workspace(self) -> None:
         """Restore durable identities before the first panel is constructed."""
@@ -1337,6 +1389,9 @@ class MainWindow(QMainWindow):
             self._template_import_coordinator.start(
                 self.bridge.current_work_mode_id()
             )
+            # 启动完成后按偏好拉起外部 AI API（面板可能尚未加载，
+            # 查询端自动降级，控制端待面板就绪后生效）。
+            self._start_external_api_if_enabled()
         self.startup_ready.emit()
 
     def _on_template_import_batch_processed(self, mode_id: str, batch) -> None:
@@ -1663,6 +1718,14 @@ class MainWindow(QMainWindow):
         event.ignore()
 
     def closeEvent(self, event) -> None:
+        # 外部 AI API 服务随窗口退出停止（守护线程不阻塞解释器关闭）。
+        server = getattr(self, "_external_api_server", None)
+        if server is not None:
+            try:
+                server.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._external_api_server = None
         coordinator_was_running = bool(self._template_import_coordinator.is_running)
         panels = self._panel_widgets_for_close()
         allowed, prepared_panels = self._prepare_panels_for_close(panels)

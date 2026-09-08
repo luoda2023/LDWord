@@ -325,6 +325,44 @@ class AssistantPanel(
             self._finish_follow_latest_layout_settle
         )
         self._scroll_update_pending = False
+        # AI 统一接入层：本面板是「软件所有功能的 AI 查询+控制」的执行
+        # 端 —— 注册会话协调器与控制动作分发器，外部 AI / 悬浮窗 / 内嵌
+        # 对话因此共享同一套目录、状态机与确认闸门。
+        try:
+            from src.assistant.application.ai_access_layer import (
+                get_ai_access_layer,
+            )
+
+            access = get_ai_access_layer()
+            access.attach_session_coordinator(self._coordinator)
+            access.register_action_dispatcher(self._ai_access_dispatch)
+        except Exception:  # noqa: BLE001 - 接入层缺席不阻断面板构造
+            pass
+
+    def _ai_access_dispatch(self, action_id: str, payload: dict) -> dict:
+        """AI 接入层的控制动作分发：沿既有 document-action 闸门执行。
+
+        chat 直接走主会话发送链路；文档类动作走 _handle_card_action
+        （状态机 + 确认卡校验）。返回 plain-data 结果供外部 API 投影。
+        """
+        session = self._active_session
+        if session is None:
+            return {"accepted": False, "reason": "no_active_session"}
+        if str(action_id or "").strip() == "chat":
+            accepted = bool(
+                self._send_message(
+                    str(payload.get("message") or ""),
+                )
+            )
+            return {
+                "accepted": accepted,
+                "reason": "" if accepted else "submission_gate_rejected",
+            }
+        try:
+            handled = self._handle_card_action(action_id, payload)
+        except Exception as exc:  # noqa: BLE001 - 把失败转成结构化结果
+            return {"accepted": False, "reason": f"{type(exc).__name__}:{exc}"}
+        return {"accepted": bool(handled), "reason": "" if handled else "not_handled"}
 
     def _setup_ui(self) -> None:
         self.setObjectName("AssistantPanel")

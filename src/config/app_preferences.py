@@ -231,3 +231,44 @@ def set_material_disclosure_approved(value: bool) -> None:
 def reset_material_disclosure_remember() -> None:
     """Forget the remembered decision (the toggle itself stays as-is)."""
     _set_bool_pref(_MATERIAL_APPROVED_KEY, False)
+
+
+# --- External AI API server -------------------------------------------------
+# Off by default.  When enabled, a loopback-only HTTP server exposes the AI
+# access layer (query + gated control) so one external AI can drive the app.
+
+_EXTERNAL_API_ENABLED_KEY = "assistant/external_api_enabled"
+_EXTERNAL_API_PORT_KEY = "assistant/external_api_port"
+
+
+def external_api_enabled(default: bool = False) -> bool:
+    """Whether the external AI API server should be listening."""
+    return _bool_pref(_EXTERNAL_API_ENABLED_KEY, default)
+
+
+def set_external_api_enabled(value: bool) -> None:
+    """Persist the external API server toggle."""
+    _set_bool_pref(_EXTERNAL_API_ENABLED_KEY, bool(value))
+
+
+def external_api_port(default: int = 8765) -> int:
+    """Preferred loopback port for the external API server."""
+    try:
+        from src.qt_api import QSettings
+
+        settings = QSettings("LDWord", "LDWord")
+        return int(settings.value(_EXTERNAL_API_PORT_KEY, int(default), type=int))
+    except Exception:  # noqa: BLE001
+        return int(default)
+
+
+def set_external_api_port(value: int) -> None:
+    """Persist the preferred external API port."""
+    try:
+        from src.qt_api import QSettings
+
+        settings = QSettings("LDWord", "LDWord")
+        settings.setValue(_EXTERNAL_API_PORT_KEY, int(value))
+        settings.sync()
+    except Exception:  # noqa: BLE001
+        pass

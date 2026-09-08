@@ -58,6 +58,10 @@ from src.config.app_preferences import (
     memory_storage_location,
     reset_material_disclosure_remember,
     save_keep_undo_history,
+    external_api_enabled,
+    external_api_port,
+    set_external_api_enabled,
+    set_external_api_port,
     set_export_keep_undo_history,
     set_material_disclosure_remember,
     set_memory_storage_location,
@@ -874,6 +878,39 @@ class PreferencesPanel(BasePanel):
         self._refresh_disclosure_state_label()
         layout.addWidget(disclosure_card)
 
+        # 外部 AI 接口：默认关闭。开启后本机回环地址上开放统一 API，
+        # 让一个外部 AI 查询软件状态并提交控制动作（沿内部确认闸门）。
+        ext_card = DesignSystemCard("外部 AI 接口", parent=content)
+        ext_card.set_header("外部 AI 接口", icon_name="plug-zap")
+        self._external_api_check = QCheckBox(
+            "允许外部 AI 通过本机接口查询和控制本软件",
+            ext_card,
+        )
+        self._external_api_check.setObjectName("preferences_external_api_check")
+        self._external_api_check.setAccessibleName("允许外部 AI 接口")
+        self._external_api_check.setChecked(external_api_enabled())
+        self._external_api_check.toggled.connect(self._on_external_api_toggled)
+        ext_card.add_widget(
+            FormRow("外部接入", self._external_api_check, parent=ext_card)
+        )
+        self._external_api_state_label = QLabel("", ext_card)
+        self._external_api_state_label.setObjectName("preferences_external_api_state")
+        apply_text_role(self._external_api_state_label, TextRole.CAPTION)
+        self._refresh_external_api_state_label()
+        ext_card.add_widget(self._external_api_state_label)
+        ext_hint = QLabel(
+            "开启后 LDWord 仅在本机回环地址（127.0.0.1）监听，凭据保存在用户"
+            "数据目录，不会暴露到局域网。外部 AI 与内嵌 AI 共享同一套能力目录："
+            "查询软件状态无需确认；落盘 Word、覆盖文件等破坏性动作仍由你在"
+            "界面里确认后才会执行。",
+            ext_card,
+        )
+        ext_hint.setObjectName("preferences_external_api_hint")
+        ext_hint.setWordWrap(True)
+        apply_text_role(ext_hint, TextRole.CAPTION)
+        ext_card.add_widget(ext_hint)
+        layout.addWidget(ext_card)
+
         layout.addStretch(1)
         self._reload_ai_profiles()
         return content
@@ -1084,6 +1121,51 @@ class PreferencesPanel(BasePanel):
     def _on_disclosure_reset_clicked(self) -> None:
         reset_material_disclosure_remember()
         self._refresh_disclosure_state_label()
+
+    # ---- 外部 AI 接口 -------------------------------------------------
+
+    def _on_external_api_toggled(self, checked: bool) -> None:
+        """开关外部 AI API 服务：写偏好并热启动/停止（无需重启应用）。"""
+        set_external_api_enabled(bool(checked))
+        if checked:
+            try:
+                from src.assistant.application.ai_access_layer import (
+                    get_ai_access_layer,
+                )
+                from src.assistant.application.external_api import (
+                    ExternalApiServer,
+                )
+
+                server = ExternalApiServer(
+                    get_ai_access_layer(), port=external_api_port()
+                )
+                if server.start():
+                    self._external_api_server = server
+            except Exception:  # noqa: BLE001
+                self._external_api_server = None
+        else:
+            server = getattr(self, "_external_api_server", None)
+            if server is not None:
+                try:
+                    server.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._external_api_server = None
+        self._refresh_external_api_state_label()
+
+    def _refresh_external_api_state_label(self) -> None:
+        label = getattr(self, "_external_api_state_label", None)
+        if label is None:
+            return
+        server = getattr(self, "_external_api_server", None)
+        if server is not None and server.is_running:
+            label.setText(
+                f"当前：已开启，监听 http://127.0.0.1:{server.port}（凭据见用户数据目录 external-api-token.json）"
+            )
+        elif external_api_enabled():
+            label.setText("当前：已勾选，但服务未运行（将在重启应用后自动开启）")
+        else:
+            label.setText("当前：已关闭，仅本软件内的 AI 可操作")
 
     def _refresh_disclosure_state_label(self) -> None:
         label = getattr(self, "_disclosure_state_label", None)
