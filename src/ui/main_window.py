@@ -92,6 +92,8 @@ if sys.platform == "win32":
     WS_CAPTION = 0x00C00000
     WM_NCCALCSIZE = 0x0083
     WM_NCHITTEST = 0x0084
+    SM_CXSIZEFRAME = 32
+    SM_CXPADDEDBORDER = 92
     # 命中测试返回码：窗口边缘 resize 热区（Win32 HT*）
     HTLEFT = 10
     HTRIGHT = 11
@@ -395,7 +397,21 @@ class MainWindow(QMainWindow):
         msg = wt.MSG.from_address(int(message))
 
         if msg.message == WM_NCCALCSIZE:
-            # 返回 0 + 不修改 RECT = 客户区 == 窗口区（无标题栏/边框）
+            # 返回 0 = 客户区覆盖整个窗口（无标题栏/边框）。
+            # 最大化时 Windows 会把窗口外扩一个边框厚度（实测每边
+            # 7px），客户区=窗口区会把外扩部分留在屏幕外，四周内容
+            # 被裁掉。此处把客户区内缩一个边框宽度，让内容回到屏内。
+            if msg.wParam and self.isMaximized():
+                rect = wt.RECT.from_address(int(msg.lParam))
+                pad = (
+                    user32.GetSystemMetrics(SM_CXSIZEFRAME)
+                    + user32.GetSystemMetrics(SM_CXPADDEDBORDER)
+                )
+                if pad > 0:
+                    rect.left += pad
+                    rect.top += pad
+                    rect.right -= pad
+                    rect.bottom -= pad
             return True, 0
 
         if msg.message == WM_NCHITTEST:
